@@ -1,7 +1,10 @@
 import React, {useEffect, useState} from 'react';
 import {Box, render, Text, useApp, useStdout} from 'ink';
-import {streamText} from 'ai';
+import Spinner from 'ink-spinner';
+import {stepCountIs, streamText} from 'ai';
 import {model} from '../../llm/client.js';
+import {hazeTools} from '../../llm/hazeTools.js';
+import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
@@ -19,12 +22,18 @@ function ChatScreen() {
     {role: 'system', text: 'Welcome to Haze. Use /login for OpenRouter, /model to choose a model, /help for commands.'}
   ]);
   const [settings, setSettings] = useState<HazeSettings>({});
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     readSettings().then(setSettings).catch(() => undefined);
+    readInputHistory().then(setInputHistory).catch(() => undefined);
   }, []);
+
+  function persistInputHistory(value: string) {
+    addInputHistoryItem(value).then(setInputHistory).catch(() => undefined);
+  }
 
   async function submit(value: string) {
     if (busy) return;
@@ -93,8 +102,10 @@ function ChatScreen() {
       setMessages(current => [...current, {role: 'assistant', text: '', streaming: true}]);
       const result = streamText({
         model: m,
-        system: 'You are Haze, a pragmatic AI agent CLI for helping users build apps. Be concise, technical, and practical. Prefer clear next steps and ask before destructive actions.',
-        prompt: history
+        system: 'You are Haze, a pragmatic AI agent CLI for helping users build apps. Be concise, technical, and practical. You can inspect and modify files with tools. Prefer readFile/editFile for targeted changes, writeFile for new or complete file rewrites, and bash for tests/builds/inspection. Ask before destructive actions.',
+        prompt: history,
+        tools: hazeTools,
+        stopWhen: stepCountIs(10)
       });
       for await (const delta of result.textStream) {
         setMessages(current => current.map((message, index) => index === current.length - 1 ? {...message, text: message.text + delta} : message));
@@ -112,8 +123,10 @@ function ChatScreen() {
   const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'openai/gpt-4o-mini' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
 
   return <Box flexDirection="column" height={height}>
-    <Header subtitle="AI agent CLI for building apps" />
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexShrink={0}>
+      <Header subtitle="AI agent CLI for building apps" />
+    </Box>
+    <Box flexDirection="column" flexGrow={1} minHeight={0}>
       {visible.map((message, index) => <Box key={index} flexDirection="column" marginBottom={1}>
         <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : theme.muted} bold>
           {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Haze' : 'Info'}
@@ -121,8 +134,21 @@ function ChatScreen() {
         {message.role === 'assistant' && !message.streaming ? <MarkdownText content={message.text} /> : <Text>{message.text}</Text>}
       </Box>)}
     </Box>
-    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1}>
-      <TextInput placeholder={placeholder} disabled={busy} mask={mode === 'apiKey'} onSubmit={submit} />
+    {busy && <Box flexShrink={0} marginBottom={1}>
+      <Text color={theme.muted}><Spinner type="dots" /> Haze is thinking...</Text>
+    </Box>}
+    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} height={3} flexShrink={0}>
+      <Box flexGrow={1} minWidth={0}>
+        <TextInput
+          placeholder={placeholder}
+          disabled={busy}
+          mask={mode === 'apiKey'}
+          historyItems={inputHistory}
+          recordHistory={mode === 'chat'}
+          onHistoryAdd={persistInputHistory}
+          onSubmit={submit}
+        />
+      </Box>
     </Box>
   </Box>;
 }
