@@ -15,14 +15,6 @@ export async function readSettings(): Promise<HazeSettings> {
   return fs.readJson(SETTINGS_FILE).catch(() => ({}));
 }
 
-export function readSettingsSync(): HazeSettings {
-  try {
-    return fs.readJsonSync(SETTINGS_FILE);
-  } catch {
-    return {};
-  }
-}
-
 export async function writeSettings(settings: HazeSettings): Promise<void> {
   await fs.ensureDir(HAZE_DIR);
   await fs.writeJson(SETTINGS_FILE, settings, {spaces: 2});

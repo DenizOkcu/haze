@@ -22,8 +22,4 @@ export const skillManifestSchema = z.object({
   }).optional(),
   tools: z.array(z.object({name: z.string().min(1), description: z.string().min(1), path: z.string().min(1), input: jsonSchema.optional()})).optional(),
   prompts: z.array(z.object({name: z.string().min(1), description: z.string().optional(), path: z.string().min(1)})).optional(),
-  config: z.object({
-    required: z.array(z.object({name: z.string(), description: z.string().optional(), secret: z.boolean().optional()})).optional(),
-    optional: z.array(z.object({name: z.string(), description: z.string().optional(), secret: z.boolean().optional()})).optional()
-  }).optional()
 });

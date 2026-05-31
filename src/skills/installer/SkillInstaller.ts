@@ -4,7 +4,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {confirm} from '@inquirer/prompts';
 import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
-import {SkillLoader} from '../SkillLoader.js';
+import {loadSkill} from '../SkillLoader.js';
 import {listFilesRecursive} from '../../utils/fs.js';
 
 function repoUrl(spec: string) {
@@ -19,7 +19,7 @@ export async function installSkill(spec: string) {
   const url = repoUrl(spec);
   const clone = spawnSync('git', ['clone', '--depth=1', url, tmp], {stdio: 'inherit'});
   if (clone.status !== 0) throw new Error('git clone failed');
-  const skill = await new SkillLoader().loadSkill(tmp, 'global');
+  const skill = await loadSkill(tmp, 'global');
   if (!skill) throw new Error('Repository does not contain a root skill.yaml');
   console.log(`\nSkill: ${skill.manifest.name} ${skill.manifest.version}`);
   console.log(skill.manifest.description);

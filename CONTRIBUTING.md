@@ -1,0 +1,68 @@
+# Contributing to Haze
+
+## Setup
+
+```bash
+git clone https://github.com/DenizOkcu/haze.git
+cd haze
+npm install
+```
+
+## Development
+
+```bash
+npm run dev          # Run CLI in development mode (tsx)
+npm run typecheck    # Type-check without building
+npm run build        # Clean + compile to dist/
+npm test             # Run unit tests
+npm run lint         # Check code style
+```
+
+## Project Structure
+
+```
+src/
+  cli/          CLI entrypoint and command handlers
+  llm/          AI model client, tools, and prompts
+  skills/       Skill loading, registry, and management
+  tools/        Tool execution
+  config/       Settings, paths, context files
+  ui/           React/Ink terminal UI components
+  utils/        Shared utilities
+```
+
+## Conventions
+
+- **TypeScript strict mode** — all code must pass `tsc --noEmit`
+- **ESM only** — use `import`/`export`, no `require()`. File imports need `.js` extensions
+- **No classes unless stateful** — prefer plain functions
+- **No comments unless non-obvious** — code should be self-documenting
+- **Zod for runtime validation** — skill manifests use Zod schemas
+- **Ink/React for terminal UI** — only `src/ui/` should have JSX
+
+## Adding a Slash Command
+
+1. Add handler in `src/cli/commands/commands.ts`
+2. Add command description to `/help` output
+3. Add test for the command
+
+## Adding a Tool
+
+1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function
+2. Add tool description to system prompt in `src/llm/systemPrompt.ts`
+3. Add display formatting in `src/cli/commands/formatters.ts`
+4. Add tests
+
+## Pull Requests
+
+- Run `npm run typecheck && npm test && npm run lint` before pushing
+- One concern per PR — don't bundle unrelated changes
+- Write tests for new logic
+- Keep PRs small and focused
+
+## Reporting Issues
+
+- Include Node.js version (`node --version`)
+- Include Haze version (`haze --version`)
+- Include steps to reproduce
+- Include relevant output or error messages

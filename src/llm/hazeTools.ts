@@ -4,27 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {tool} from 'ai';
 import {z} from 'zod';
+import {walkDir} from '../utils/fs.js';
+import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
 const execFile = promisify(execFileCallback);
-
-function workspaceRoot() {
-  return process.cwd();
-}
-
-function resolveWorkspacePath(inputPath: string) {
-  const root = workspaceRoot();
-  const resolved = path.resolve(root, inputPath);
-  const relative = path.relative(root, resolved);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Path is outside the workspace: ${inputPath}`);
-  }
-  return resolved;
-}
-
-function workspaceRelativePath(absolutePath: string) {
-  return path.relative(workspaceRoot(), absolutePath) || '.';
-}
 
 async function isGitIgnored(absolutePath: string) {
   const relative = workspaceRelativePath(absolutePath);
@@ -73,27 +57,20 @@ export const hazeTools = {
       const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
       let ignoredSkipped = 0;
 
-      async function walk(directory: string) {
-        for (const entry of await fs.readdir(directory, {withFileTypes: true})) {
-          if (entries.length >= maxEntries) return;
-          if (entry.name === 'node_modules' || entry.name === '.git') continue;
-          const fullPath = path.join(directory, entry.name);
-          if (!includeIgnored && await isGitIgnored(fullPath)) {
-            ignoredSkipped++;
-            continue;
-          }
-          const relativePath = workspaceRelativePath(fullPath);
-          if (entry.isDirectory()) {
-            entries.push({path: relativePath, type: 'directory'});
-            if (recursive) await walk(fullPath);
-          } else if (entry.isFile()) {
-            const stat = await fs.stat(fullPath);
-            entries.push({path: relativePath, type: 'file', size: stat.size});
-          }
+      const walked = await walkDir(absolutePath, {recursive, maxEntries, filter: async entry => {
+        if (!includeIgnored && await isGitIgnored(entry.absolutePath)) { ignoredSkipped++; return false; }
+        return true;
+      }});
+
+      for (const entry of walked) {
+        if (entry.isDirectory) {
+          entries.push({path: entry.path, type: 'directory'});
+        } else if (entry.isFile) {
+          const stat = await fs.stat(entry.absolutePath);
+          entries.push({path: entry.path, type: 'file', size: stat.size});
         }
       }
 
-      await walk(absolutePath);
       return {path: dirPath, recursive, includeIgnored, ignoredSkipped, entries, truncated: entries.length >= maxEntries};
     },
   }),

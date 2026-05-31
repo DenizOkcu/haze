@@ -20,10 +20,6 @@ export interface SkillManifest {
   };
   tools?: SkillToolManifest[];
   prompts?: SkillPromptManifest[];
-  config?: {
-    required?: {name: string; description?: string; secret?: boolean}[];
-    optional?: {name: string; description?: string; secret?: boolean}[];
-  };
 }
 
 export interface SkillToolManifest {

@@ -1,15 +1,21 @@
 #!/usr/bin/env node
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
 import {Command} from 'commander';
 import {listSkills, infoSkill, removeSkill, validateSkill} from './commands/skills.js';
-import {buildSkill} from './commands/build-skill.js';
-import {installSkill} from './commands/install-skill.js';
+import {buildSkill} from '../skills/builder/SkillBuilder.js';
+import {installSkill} from '../skills/installer/SkillInstaller.js';
 import {chatCommand} from './commands/chat.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
 
 const program = new Command();
 program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
-  .version('0.1.0')
+  .version(pkg.version)
   .option('--debug', 'show simple model/tool debug logs in the chat UI');
 
 program.action(async () => {

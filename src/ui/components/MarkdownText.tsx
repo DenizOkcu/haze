@@ -18,7 +18,7 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
   switch (token.type) {
     case 'heading': {
       const heading = token as Tokens.Heading;
-      return <Box marginTop={heading.depth <= 2 ? 1 : 0}><Text color={theme.purple} bold>{'#'.repeat(heading.depth)} {plain(heading.text)}</Text></Box>;
+      return <Box marginTop={heading.depth <= 2 ? 1 : 0}><Text color={theme.purple} bold>{'#'.repeat(heading.depth)} <InlineMarkdown text={heading.text} /></Text></Box>;
     }
     case 'paragraph': {
       const paragraph = token as Tokens.Paragraph;
@@ -54,9 +54,9 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     case 'table': {
       const table = token as Tokens.Table;
       return <Box flexDirection="column" marginBottom={1}>
-        <Text color={theme.violet}>{table.header.map(cell => plain(cell.text)).join(' | ')}</Text>
+        <Text color={theme.violet}>{table.header.map(cell => stripInline(cell.text)).join(' | ')}</Text>
         <Text color={theme.deepPurple}>{table.header.map(() => '---').join(' | ')}</Text>
-        {table.rows.map((row, index) => <Text key={index}>{row.map(cell => plain(cell.text)).join(' | ')}</Text>)}
+        {table.rows.map((row, index) => <Text key={index}>{row.map(cell => stripInline(cell.text)).join(' | ')}</Text>)}
       </Box>;
     }
     default:
@@ -65,7 +65,7 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
 }
 
 function CodeBlock({code, language, width}: {code: string; language?: string; width: number}) {
-  let rendered = code;
+  let rendered: string;
   try {
     rendered = highlight(code, {language: language || undefined, ignoreIllegals: true});
   } catch {
@@ -108,8 +108,13 @@ function tokenizeInline(text: string): {kind: 'text' | 'code' | 'strong' | 'em' 
   return out;
 }
 
-function plain(text: string): string {
-  return text.replace(/<[^>]+>/g, '').replace(/`([^`]+)`/g, '$1').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1');
+function stripInline(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/~~([^~]+)~~/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 }
 
 function padAnsi(value: string, width: number): string {
