@@ -1,0 +1,37 @@
+{
+  "name": "haze",
+  "version": "0.1.0",
+  "description": "A pragmatic, intentionally limited agentic CLI with file-based skills.",
+  "type": "module",
+  "bin": {
+    "haze": "./bin/haze.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/index.ts",
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "typecheck": "tsc --noEmit",
+    "haze": "tsx src/cli/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "latest",
+    "@inquirer/prompts": "latest",
+    "ai": "latest",
+    "chalk": "latest",
+    "chokidar": "latest",
+    "commander": "latest",
+    "fs-extra": "latest",
+    "ink": "latest",
+    "ink-spinner": "latest",
+    "react": "latest",
+    "tsx": "latest",
+    "yaml": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "typescript": "latest"
+  }
+}
