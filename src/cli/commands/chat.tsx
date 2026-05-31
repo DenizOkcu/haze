@@ -4,6 +4,7 @@ import Spinner from 'ink-spinner';
 import {stepCountIs, streamText, type ModelMessage} from 'ai';
 import {model} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
+import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
 import {Header} from '../../ui/components/Header.js';
@@ -43,6 +44,7 @@ function toolCallSummary(toolName: string, input: unknown) {
     const edits = Array.isArray(data.edits) ? ` (${data.edits.length} edit${data.edits.length === 1 ? '' : 's'})` : '';
     return `${toolName} ${data.path}${edits}`;
   }
+  if (toolName === 'replaceLines' && typeof data?.path === 'string') return `replaceLines ${data.path}:${data.startLine}-${data.endLine}`;
   return `${toolName} ${compact(input)}`;
 }
 
@@ -68,6 +70,7 @@ function ChatScreen({debug = false}: ChatOptions) {
   const [settings, setSettings] = useState<HazeSettings>({});
   const [conversation, setConversation] = useState<ModelMessage[]>([]);
   const conversationRef = useRef<ModelMessage[]>([]);
+  const lastAssistantTextRef = useRef('');
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
@@ -113,6 +116,7 @@ function ChatScreen({debug = false}: ChatOptions) {
     }
     if (value === '/clear') {
       conversationRef.current = [];
+      lastAssistantTextRef.current = '';
       setConversation([]);
       setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
       return;
@@ -153,18 +157,31 @@ function ChatScreen({debug = false}: ChatOptions) {
         setMessages(current => [...current, {role: 'assistant', text: 'No model configured. Run /login, then /model <model-name>. Haze cannot hallucinate without credentials. Progress.'}]);
         return;
       }
-      const requestMessages: ModelMessage[] = [...conversationRef.current, {role: 'user', content: value}];
+      const refersToPrevious = /\b(this|that|previous|above|it)\b/i.test(value) && lastAssistantTextRef.current.trim().length > 0;
+      const userContent = refersToPrevious
+        ? `${value}\n\nReferenced previous Haze response to preserve exactly:\n${lastAssistantTextRef.current}`
+        : value;
+      const requestMessages: ModelMessage[] = [...conversationRef.current, {role: 'user', content: userContent}];
       conversationRef.current = requestMessages;
       setConversation(requestMessages);
       const assistantId = `assistant-${Date.now()}`;
       let assistantStarted = false;
-      debugLog(`request started with ${requestMessages.length} conversation messages`);
+      let assistantText = '';
+      let editFileFailed = false;
+      let mutatingToolSucceeded = false;
+      const toolSummaries: string[] = [];
+      debugLog(`request started with ${requestMessages.length} conversation messages${refersToPrevious ? ' and previous-response reference' : ''}`);
       const result = streamText({
         model: m,
-        system: 'You are Haze, a pragmatic AI agent CLI for helping users build apps. Be concise, technical, and practical. You can inspect and modify files with tools. Workflow: use listFiles for project discovery instead of bash ls/find; file tools follow .gitignore by default; only set includeIgnored/allowIgnored when the user explicitly asks or the task truly requires ignored files, and say why; read only directly relevant files, usually once; do not read README/package files unless needed for the task; prefer editFile for existing files with one small unique replacement; if editFile fails twice for the same file, read the current file once and use writeFile with the complete corrected content; use bash mainly for tests/builds/commands. After tool use, always respond with a concise summary of what changed or what failed. Ask before destructive actions.',
+        system: buildSystemPrompt(),
         messages: requestMessages,
         tools: hazeTools,
         stopWhen: stepCountIs(15),
+        prepareStep() {
+          if (mutatingToolSucceeded) return {toolChoice: 'none'};
+          if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof hazeTools>};
+          return undefined;
+        },
         onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {
           debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
         },
@@ -180,7 +197,11 @@ function ChatScreen({debug = false}: ChatOptions) {
           debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
         },
         experimental_onToolCallFinish(event) {
-          const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${toolResultSummary(event)} in ${formatSeconds(event.durationMs)}`;
+          const summary = toolResultSummary(event);
+          const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}`;
+          if (!event.success && event.toolCall.toolName === 'editFile') editFileFailed = true;
+          if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) mutatingToolSucceeded = true;
+          toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
           setMessages(current => current.map(message => message.id === `tool-${event.toolCall.toolCallId}` ? {...message, text, streaming: false} : message));
           debugLog(event.success
             ? `tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
@@ -188,6 +209,7 @@ function ChatScreen({debug = false}: ChatOptions) {
         }
       });
       for await (const delta of result.textStream) {
+        assistantText += delta;
         if (!assistantStarted) {
           assistantStarted = true;
           setMessages(current => [...current, {id: assistantId, role: 'assistant', text: delta, streaming: true}]);
@@ -197,9 +219,13 @@ function ChatScreen({debug = false}: ChatOptions) {
       }
       debugLog(`response stream finished; session has ${conversationRef.current.length || conversation.length} model messages`);
       if (assistantStarted) {
+        lastAssistantTextRef.current = assistantText.trim();
         setMessages(current => current.map(message => message.id === assistantId ? {...message, streaming: false} : message));
       } else {
-        setMessages(current => [...current, {id: assistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false}]);
+        const fallback = toolSummaries.length > 0
+          ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`
+          : 'Finished without a text response.';
+        setMessages(current => [...current, {id: assistantId, role: 'assistant', text: fallback, streaming: false}]);
       }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);

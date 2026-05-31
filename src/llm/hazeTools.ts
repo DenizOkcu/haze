@@ -54,6 +54,10 @@ function truncate(text: string, maxChars = MAX_OUTPUT_CHARS) {
   };
 }
 
+function numberLines(lines: string[], startLine: number) {
+  return lines.map((line, index) => `${String(startLine + index).padStart(4, ' ')} | ${line}`).join('\n');
+}
+
 export const hazeTools = {
   listFiles: tool({
     description: 'List files and directories in the current workspace. Prefer this over bash ls/find for discovering project structure.',
@@ -109,19 +113,48 @@ export const hazeTools = {
       const lines = content.split(/\r?\n/);
       const start = offset == null ? 0 : offset - 1;
       const end = limit == null ? lines.length : start + limit;
-      const selected = lines.slice(start, end).join('\n');
+      const selectedLines = lines.slice(start, end);
+      const selected = selectedLines.join('\n');
       return {
         path: filePath,
         startLine: start + 1,
         endLine: Math.min(end, lines.length),
         totalLines: lines.length,
+        lineNumberedText: numberLines(selectedLines, start + 1),
         ...truncate(selected),
       };
     },
   }),
 
+  replaceLines: tool({
+    description: 'Replace a 1-based inclusive line range in an existing UTF-8 text file. Prefer this after reading a file when exact editFile replacements are ambiguous or fail.',
+    inputSchema: z.object({
+      path: z.string().describe('File path relative to the current workspace'),
+      startLine: z.number().int().positive().describe('First 1-based line number to replace'),
+      endLine: z.number().int().positive().describe('Last 1-based line number to replace, inclusive'),
+      content: z.string().describe('Replacement content for the line range'),
+      allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
+    }),
+    execute: async ({path: filePath, startLine, endLine, content, allowIgnored}) => {
+      if (endLine < startLine) throw new Error('endLine must be greater than or equal to startLine');
+      const absolutePath = resolveWorkspacePath(filePath);
+      await assertNotIgnored(absolutePath, filePath, allowIgnored);
+      const original = await fs.readFile(absolutePath, 'utf8');
+      const hasTrailingNewline = original.endsWith('\n');
+      const lines = original.split(/\r?\n/);
+      if (hasTrailingNewline) lines.pop();
+      if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
+      if (endLine > lines.length) throw new Error(`endLine ${endLine} is beyond end of file (${lines.length} lines)`);
+      const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
+      lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
+      const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
+      await fs.writeFile(absolutePath, updated, 'utf8');
+      return {ok: true, path: filePath, startLine, endLine, replacementLines: replacementLines.length};
+    },
+  }),
+
   writeFile: tool({
-    description: 'Create or overwrite a UTF-8 text file in the current workspace. Creates parent directories as needed.',
+    description: 'Create or overwrite a UTF-8 text file in the current workspace. Creates parent directories as needed. Use for new files or after smaller edit tools are not suitable.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       content: z.string().describe('Complete file contents to write'),
@@ -137,7 +170,7 @@ export const hazeTools = {
   }),
 
   editFile: tool({
-    description: 'Edit a text file using exact replacements. Each oldText must match exactly once in the original file and edits must not overlap.',
+    description: 'Edit a text file using exact replacements. Each oldText must match exactly once in the original file and edits must not overlap. If this fails because text is missing or not unique, do not retry; use replaceLines instead.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       edits: z.array(z.object({
