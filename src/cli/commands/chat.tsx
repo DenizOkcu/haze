@@ -4,7 +4,9 @@ import Spinner from 'ink-spinner';
 import {stepCountIs, streamText, type ModelMessage} from 'ai';
 import {model} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
+import {buildInitPrompt} from '../../llm/initPrompt.js';
 import {buildSystemPrompt} from '../../llm/systemPrompt.js';
+import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
 import {Header} from '../../ui/components/Header.js';
@@ -73,12 +75,14 @@ function ChatScreen({debug = false}: ChatOptions) {
   const lastAssistantTextRef = useRef('');
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     readSettings().then(setSettings).catch(() => undefined);
     readInputHistory().then(setInputHistory).catch(() => undefined);
+    readContextFiles().then(setContextFiles).catch(() => undefined);
   }, []);
 
   function persistInputHistory(value: string) {
@@ -111,7 +115,7 @@ function ChatScreen({debug = false}: ChatOptions) {
 
     if (value === '/exit' || value === '/quit') return exit();
     if (value === '/help') {
-      setMessages(m => [...m, {role: 'system', text: 'Commands: /login, /model <name>, /model, /settings, /clear, /exit'}]);
+      setMessages(m => [...m, {role: 'system', text: 'Commands: /login, /model <name>, /model, /settings, /init, /clear, /exit'}]);
       return;
     }
     if (value === '/clear') {
@@ -122,7 +126,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       return;
     }
     if (value === '/settings') {
-      setMessages(m => [...m, {role: 'system', text: `Provider: ${settings.provider ?? 'not configured'} | Model: ${settings.model ?? 'not set'} | API key: ${settings.apiKey ? 'saved' : 'missing'}`}]);
+      setMessages(m => [...m, {role: 'system', text: `Provider: ${settings.provider ?? 'not configured'} | Model: ${settings.model ?? 'not set'} | API key: ${settings.apiKey ? 'saved' : 'missing'} | Context files: ${contextFiles.length ? contextFiles.map(file => file.path).join(', ') : 'none'}`}]);
       return;
     }
     if (value === '/login') {
@@ -142,12 +146,22 @@ function ChatScreen({debug = false}: ChatOptions) {
       setMessages(m => [...m, {role: 'system', text: `Model set to ${modelName}.`}]);
       return;
     }
+    if (value === '/init') {
+      await runAgentTurn(buildInitPrompt(), '/init');
+      const nextContextFiles = await readContextFiles().catch(() => contextFiles);
+      setContextFiles(nextContextFiles);
+      return;
+    }
     if (value.startsWith('/')) {
       setMessages(m => [...m, {role: 'system', text: `Unknown command: ${value}. Bold start.`}]);
       return;
     }
 
-    const userMessage: Message = {role: 'user', text: value};
+    await runAgentTurn(value);
+  }
+
+  async function runAgentTurn(value: string, displayValue = value) {
+    const userMessage: Message = {role: 'user', text: displayValue};
     setDebugLogs([]);
     setMessages(m => [...m, userMessage]);
     setBusy(true);
@@ -173,7 +187,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       debugLog(`request started with ${requestMessages.length} conversation messages${refersToPrevious ? ' and previous-response reference' : ''}`);
       const result = streamText({
         model: m,
-        system: buildSystemPrompt(),
+        system: buildSystemPrompt(contextFiles),
         messages: requestMessages,
         tools: hazeTools,
         stopWhen: stepCountIs(15),

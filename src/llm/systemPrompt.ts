@@ -1,6 +1,9 @@
-export function buildSystemPrompt() {
+import type {ContextFile} from '../config/contextFiles.js';
+
+export function buildSystemPrompt(contextFiles: ContextFile[] = []) {
   const date = new Date().toISOString().slice(0, 10);
   const cwd = process.cwd().replace(/\\/g, '/');
+  const projectContext = contextFiles.length > 0 ? `\n\n<project_context>\nProject-specific instructions and guidelines:\n\n${contextFiles.map(file => `<project_instructions path="${file.path}">\n${file.content}\n</project_instructions>`).join('\n\n')}\n</project_context>` : '';
 
   return `You are Haze, an expert coding assistant operating inside a terminal-based agent CLI. You help users build apps by understanding the current conversation, inspecting projects, running commands, and editing files.
 
@@ -26,7 +29,7 @@ Guidelines:
 - After making changes, validate with the project's relevant test/typecheck/build command when practical.
 - After tool use, always respond with a concise summary of what changed or what failed.
 - Ask before destructive actions.
-- Show file paths clearly when working with files.
+- Show file paths clearly when working with files.${projectContext}
 
 Current date: ${date}
 Current working directory: ${cwd}`;

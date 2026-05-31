@@ -69,9 +69,12 @@ Chat commands:
 /model <name>
 /model
 /settings
+/init
 /clear
 /exit
 ```
+
+`/init` explores the current workspace using `.gitignore`-aware tools and creates or updates an `AGENTS.md` file with project instructions for future Haze sessions.
 
 Input conveniences:
 
@@ -94,6 +97,17 @@ Haze exposes a small toolset to the model:
 - `bash` — run shell commands for tests, builds, and inspection.
 
 Tool calls are shown inline in the chat transcript so you can see what Haze is doing.
+
+## Context files
+
+Haze loads project instructions from context files and includes them in the system prompt:
+
+- `~/.haze/AGENTS.md`
+- `~/.haze/CLAUDE.md`
+- `AGENTS.md` files found while walking from the filesystem root to the current workspace
+- `CLAUDE.md` files found while walking from the filesystem root to the current workspace
+
+Use `AGENTS.md` for shared project instructions. `CLAUDE.md` is supported for compatibility with existing projects.
 
 ## Safety model
 
