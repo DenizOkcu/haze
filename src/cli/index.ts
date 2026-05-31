@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 import {Command} from 'commander';
-import {runCommand} from './commands/run.js';
 import {listSkills, infoSkill, removeSkill, validateSkill} from './commands/skills.js';
 import {buildSkill} from './commands/build-skill.js';
 import {installSkill} from './commands/install-skill.js';
+import {chatCommand} from './commands/chat.js';
 
 const program = new Command();
 program.name('haze').description('A pragmatic, intentionally limited agentic CLI.').version('0.1.0');
 
-program.argument('[request...]', 'natural language request').action(async (parts: string[]) => {
-  if (!parts?.length) { program.help(); return; }
-  await runCommand(parts.join(' '));
+program.action(async () => {
+  await chatCommand();
 });
 
 program.command('build-skill <description...>').description('Deliberately design and create a new file-based skill').action(async (d: string[]) => buildSkill(d.join(' ')));

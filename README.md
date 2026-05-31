@@ -6,19 +6,44 @@ Haze is a pragmatic, intentionally limited agentic CLI: simple core, file-based 
 
 ```bash
 npm install
-npm run dev -- skills list
-npm run dev -- "list the files in this project"
+npm run dev
 ```
 
-LLM calls use the Vercel AI SDK with OpenAI-compatible config:
+Opening Haze starts a full-terminal chat UI. The input field sits at the bottom, model responses stream into the conversation as they arrive, and completed assistant messages render basic Markdown with highlighted code blocks.
+
+First-time setup:
+
+```txt
+/login
+/model openai/gpt-4o-mini
+```
+
+For the MVP, `/login` stores OpenRouter settings in `~/.haze/settings.json`:
+
+```json
+{
+  "provider": "openrouter",
+  "apiKey": "...",
+  "baseURL": "https://openrouter.ai/api/v1",
+  "model": "openai/gpt-4o-mini"
+}
+```
+
+Skill management commands are still available:
+
+```bash
+npm run dev -- skills list
+```
+
+Environment variables also work and override settings:
 
 ```bash
 export OPENAI_API_KEY=...
-export HAZE_MODEL=gpt-4o-mini
-# optional: export OPENAI_BASE_URL=https://...
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1
+export HAZE_MODEL=openai/gpt-4o-mini
 ```
 
-Without an API key, Haze uses a tiny heuristic planner for the bundled `files` skill.
+Without an API key or saved OpenRouter login, chat mode will ask you to run `/login`.
 
 ## Skills
 

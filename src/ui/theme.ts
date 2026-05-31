@@ -5,5 +5,7 @@ export const theme = {
   muted: '#9ca3af',
   danger: '#fb7185',
   success: '#34d399',
-  warning: '#fbbf24'
+  warning: '#fbbf24',
+  codeBg: '#1f1633',
+  quoteBg: '#171127'
 };
