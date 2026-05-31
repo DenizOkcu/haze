@@ -6,10 +6,14 @@ import {installSkill} from './commands/install-skill.js';
 import {chatCommand} from './commands/chat.js';
 
 const program = new Command();
-program.name('haze').description('A pragmatic, intentionally limited agentic CLI.').version('0.1.0');
+program
+  .name('haze')
+  .description('A pragmatic, intentionally limited agentic CLI.')
+  .version('0.1.0')
+  .option('--debug', 'show simple model/tool debug logs in the chat UI');
 
 program.action(async () => {
-  await chatCommand();
+  await chatCommand({debug: Boolean(program.opts<{debug?: boolean}>().debug)});
 });
 
 program.command('build-skill <description...>').description('Deliberately design and create a new file-based skill').action(async (d: string[]) => buildSkill(d.join(' ')));

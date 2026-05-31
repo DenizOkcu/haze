@@ -1,7 +1,7 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Box, render, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
-import {stepCountIs, streamText} from 'ai';
+import {stepCountIs, streamText, type ModelMessage} from 'ai';
 import {model} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
@@ -11,10 +11,54 @@ import {TextInput} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {theme} from '../../ui/theme.js';
 
-type Message = {role: 'system' | 'user' | 'assistant'; text: string; streaming?: boolean};
+type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean};
 type Mode = 'chat' | 'apiKey' | 'model';
 
-function ChatScreen() {
+interface ChatOptions {
+  debug?: boolean;
+}
+
+function compact(value: unknown, maxLength = 180) {
+  let text: string;
+  if (value instanceof Error) {
+    text = value.message;
+  } else if (typeof value === 'string') {
+    text = value;
+  } else {
+    text = JSON.stringify(value, (_key, nestedValue) => nestedValue instanceof Error ? nestedValue.message : nestedValue);
+  }
+  if (!text || text === '{}') return String(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function toolCallSummary(toolName: string, input: unknown) {
+  const data = input as Record<string, unknown>;
+  if (toolName === 'bash' && typeof data?.command === 'string') {
+    const timeout = typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
+    return `$ ${data.command}${timeout}`;
+  }
+  if (toolName === 'listFiles' && typeof data?.path === 'string') return `listFiles ${data.path}`;
+  if ((toolName === 'readFile' || toolName === 'writeFile') && typeof data?.path === 'string') return `${toolName} ${data.path}`;
+  if (toolName === 'editFile' && typeof data?.path === 'string') {
+    const edits = Array.isArray(data.edits) ? ` (${data.edits.length} edit${data.edits.length === 1 ? '' : 's'})` : '';
+    return `${toolName} ${data.path}${edits}`;
+  }
+  return `${toolName} ${compact(input)}`;
+}
+
+function toolResultSummary(event: {success: boolean; output?: unknown; error?: unknown}) {
+  if (!event.success) return `failed: ${compact(event.error)}`;
+  const output = event.output as Record<string, unknown> | undefined;
+  if (typeof output?.code === 'number') return `exited with code ${output.code}`;
+  if (typeof output?.ok === 'boolean') return output.ok ? 'completed' : `failed: ${compact(output)}`;
+  return 'completed';
+}
+
+function formatSeconds(milliseconds: number) {
+  return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
+function ChatScreen({debug = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const height = stdout.rows ?? process.stdout.rows ?? 24;
@@ -22,7 +66,10 @@ function ChatScreen() {
     {role: 'system', text: 'Welcome to Haze. Use /login for OpenRouter, /model to choose a model, /help for commands.'}
   ]);
   const [settings, setSettings] = useState<HazeSettings>({});
+  const [conversation, setConversation] = useState<ModelMessage[]>([]);
+  const conversationRef = useRef<ModelMessage[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
 
@@ -33,6 +80,11 @@ function ChatScreen() {
 
   function persistInputHistory(value: string) {
     addInputHistoryItem(value).then(setInputHistory).catch(() => undefined);
+  }
+
+  function debugLog(line: string) {
+    if (!debug) return;
+    setDebugLogs(current => [...current.slice(-7), line]);
   }
 
   async function submit(value: string) {
@@ -60,6 +112,8 @@ function ChatScreen() {
       return;
     }
     if (value === '/clear') {
+      conversationRef.current = [];
+      setConversation([]);
       setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
       return;
     }
@@ -90,6 +144,7 @@ function ChatScreen() {
     }
 
     const userMessage: Message = {role: 'user', text: value};
+    setDebugLogs([]);
     setMessages(m => [...m, userMessage]);
     setBusy(true);
     try {
@@ -98,42 +153,83 @@ function ChatScreen() {
         setMessages(current => [...current, {role: 'assistant', text: 'No model configured. Run /login, then /model <model-name>. Haze cannot hallucinate without credentials. Progress.'}]);
         return;
       }
-      const history = [...messages.filter(msg => msg.role !== 'system'), userMessage].slice(-12).map(msg => `${msg.role}: ${msg.text}`).join('\n');
-      setMessages(current => [...current, {role: 'assistant', text: '', streaming: true}]);
+      const requestMessages: ModelMessage[] = [...conversationRef.current, {role: 'user', content: value}];
+      conversationRef.current = requestMessages;
+      setConversation(requestMessages);
+      const assistantId = `assistant-${Date.now()}`;
+      let assistantStarted = false;
+      debugLog(`request started with ${requestMessages.length} conversation messages`);
       const result = streamText({
         model: m,
-        system: 'You are Haze, a pragmatic AI agent CLI for helping users build apps. Be concise, technical, and practical. You can inspect and modify files with tools. Prefer readFile/editFile for targeted changes, writeFile for new or complete file rewrites, and bash for tests/builds/inspection. Ask before destructive actions.',
-        prompt: history,
+        system: 'You are Haze, a pragmatic AI agent CLI for helping users build apps. Be concise, technical, and practical. You can inspect and modify files with tools. Workflow: use listFiles for project discovery instead of bash ls/find; file tools follow .gitignore by default; only set includeIgnored/allowIgnored when the user explicitly asks or the task truly requires ignored files, and say why; read only directly relevant files, usually once; do not read README/package files unless needed for the task; prefer editFile for existing files with one small unique replacement; if editFile fails twice for the same file, read the current file once and use writeFile with the complete corrected content; use bash mainly for tests/builds/commands. After tool use, always respond with a concise summary of what changed or what failed. Ask before destructive actions.',
+        messages: requestMessages,
         tools: hazeTools,
-        stopWhen: stepCountIs(10)
+        stopWhen: stepCountIs(15),
+        onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {
+          debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
+        },
+        onFinish({response}) {
+          const nextConversation = [...requestMessages, ...response.messages];
+          conversationRef.current = nextConversation;
+          setConversation(nextConversation);
+          debugLog(`conversation updated to ${nextConversation.length} messages`);
+        },
+        experimental_onToolCallStart({toolCall}) {
+          const text = toolCallSummary(toolCall.toolName, toolCall.input);
+          setMessages(current => [...current, {id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true}]);
+          debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
+        },
+        experimental_onToolCallFinish(event) {
+          const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${toolResultSummary(event)} in ${formatSeconds(event.durationMs)}`;
+          setMessages(current => current.map(message => message.id === `tool-${event.toolCall.toolCallId}` ? {...message, text, streaming: false} : message));
+          debugLog(event.success
+            ? `tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
+            : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
+        }
       });
       for await (const delta of result.textStream) {
-        setMessages(current => current.map((message, index) => index === current.length - 1 ? {...message, text: message.text + delta} : message));
+        if (!assistantStarted) {
+          assistantStarted = true;
+          setMessages(current => [...current, {id: assistantId, role: 'assistant', text: delta, streaming: true}]);
+        } else {
+          setMessages(current => current.map(message => message.id === assistantId ? {...message, text: message.text + delta} : message));
+        }
       }
-      setMessages(current => current.map((message, index) => index === current.length - 1 ? {...message, streaming: false} : message));
+      debugLog(`response stream finished; session has ${conversationRef.current.length || conversation.length} model messages`);
+      if (assistantStarted) {
+        setMessages(current => current.map(message => message.id === assistantId ? {...message, streaming: false} : message));
+      } else {
+        setMessages(current => [...current, {id: assistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false}]);
+      }
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      debugLog(`error: ${text}`);
+      setConversation(conversationRef.current);
       setMessages(current => [...current, {role: 'assistant', text: `Model call failed: ${text}`}]);
     } finally {
       setBusy(false);
     }
   }
 
-  const visible = messages.slice(-18);
+  const visible = messages;
   const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'openai/gpt-4o-mini' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
 
-  return <Box flexDirection="column" height={height}>
+  return <Box flexDirection="column" minHeight={height}>
     <Box flexShrink={0}>
       <Header subtitle="AI agent CLI for building apps" />
     </Box>
-    <Box flexDirection="column" flexGrow={1} minHeight={0}>
+    <Box flexDirection="column" flexGrow={1}>
       {visible.map((message, index) => <Box key={index} flexDirection="column" marginBottom={1}>
-        <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : theme.muted} bold>
-          {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Haze' : 'Info'}
+        <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.muted : theme.muted} bold>
+          {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Haze' : message.role === 'tool' ? 'Tool' : 'Info'}
         </Text>
-        {message.role === 'assistant' && !message.streaming ? <MarkdownText content={message.text} /> : <Text>{message.text}</Text>}
+        {message.role === 'assistant' && !message.streaming ? <MarkdownText content={message.text} /> : <Text color={message.role === 'tool' ? theme.muted : undefined}>{message.streaming && message.role === 'tool' ? <><Spinner type="dots" /> {message.text}</> : message.text}</Text>}
       </Box>)}
     </Box>
+    {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
+      <Text color={theme.muted} bold>Debug</Text>
+      {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
+    </Box>}
     {busy && <Box flexShrink={0} marginBottom={1}>
       <Text color={theme.muted}><Spinner type="dots" /> Haze is thinking...</Text>
     </Box>}
@@ -153,9 +249,7 @@ function ChatScreen() {
   </Box>;
 }
 
-export async function chatCommand() {
-  process.stdout.write('\u001B[?1049h\u001B[2J\u001B[H\u001B[?25l');
-  const app = render(<ChatScreen />);
+export async function chatCommand(options: ChatOptions = {}) {
+  const app = render(<ChatScreen debug={options.debug} />);
   await app.waitUntilExit();
-  process.stdout.write('\u001B[?25h\u001B[?1049l');
 }
