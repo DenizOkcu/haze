@@ -31,6 +31,22 @@ function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
   return count;
 }
 
+function isLikelyActionRequest(value: string) {
+  return /\b(add|create|write|implement|update|fix|change|support|wire|test|tests|document|docs|documentation|run|verify)\b/i.test(value);
+}
+
+function isValidationRequest(value: string) {
+  return /\b(run|verify|test|tests|check|validate)\b/i.test(value);
+}
+
+function looksIncomplete(text: string) {
+  return /\b(incomplete|what remains|remains:|next:|not implemented|not created|no tests exist|created no docs|has not been|have not been|not yet|never executed|not executed|not run|cannot retry|cannot write|cannot validate|tool budget reached)\b/i.test(text);
+}
+
+function sanitizeAssistantText(text: string) {
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u009B]/g, '');
+}
+
 export interface StreamCallbacks {
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
@@ -70,19 +86,35 @@ export async function runAgentTurn(
     let currentAssistantToolEpoch = 0;
     let editFileFailed = false;
     let mutatingToolSucceeded = false;
+    let validationToolSucceeded = false;
+    let sawReadOnlyTool = false;
     let sawToolCall = false;
     let textAfterTool = false;
+    let forcedContinuationUsed = false;
+    const likelyActionRequest = isLikelyActionRequest(value);
+    const likelyValidationRequest = isValidationRequest(value);
     const toolSummaries: string[] = [];
     const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
-    callbacks.debugLog(`request started with ${requestMessages.length} conversation messages`);
-    async function streamAssistantResponse(messages: ModelMessage[], reason: string) {
-      callbacks.debugLog(`requesting assistant text: ${reason}`);
+    callbacks.debugLog(`request started with ${requestMessages.length} conversation messages; action=${likelyActionRequest}`);
+    function recordToolFinish(event: {toolCall: {toolName: string}; success: boolean; output?: unknown}) {
+      if (!event.success && event.toolCall.toolName === 'editFile') editFileFailed = true;
+      if (event.success && ['listFiles', 'readFile'].includes(event.toolCall.toolName)) sawReadOnlyTool = true;
+      if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) mutatingToolSucceeded = true;
+      if (event.success && event.toolCall.toolName === 'bash') {
+        const ok = typeof event.output === 'object' && event.output != null && 'ok' in event.output ? Boolean((event.output as {ok?: unknown}).ok) : true;
+        if (ok) validationToolSucceeded = true;
+      }
+    }
+
+    async function streamAssistantResponse(messages: ModelMessage[], reason: string, prompt: string, allowTools = false) {
+      callbacks.debugLog(`requesting assistant ${allowTools ? 'continuation' : 'text'}: ${reason}`);
       const responseId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       let responseStarted = false;
       let responseText = '';
+      let continuationToolCalls = 0;
       const continuationMessages: ModelMessage[] = [
         ...messages,
-        {role: 'user', content: 'Continue from the tool result and answer my original request. Do not call tools.'},
+        {role: 'user', content: prompt},
       ];
       const followUp = streamText({
         model: activeModel,
@@ -90,8 +122,23 @@ export async function runAgentTurn(
         system: buildSystemPrompt(contextFiles),
         messages: continuationMessages,
         tools: hazeTools,
-        toolChoice: 'none',
+        toolChoice: allowTools ? 'auto' : 'none',
+        stopWhen: stepCountIs(10),
         experimental_context: toolExecutionContext,
+        prepareStep({steps, messages}) {
+          continuationToolCalls = steps.flatMap(step => step.toolCalls).length;
+          if (continuationToolCalls >= 10 || toolOnlyStepCount(steps) >= 5) {
+            return {
+              toolChoice: 'none',
+              messages: [
+                ...messages,
+                {role: 'user' as const, content: 'Tool budget reached. If the current request is complete, summarize only current-turn changes and validation. If incomplete, state the concrete blocker briefly; do not claim tools are unavailable and do not recap unrelated earlier tasks.'},
+              ],
+            };
+          }
+          if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof hazeTools>};
+          return undefined;
+        },
         onError({error}) {
           callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
         },
@@ -99,8 +146,27 @@ export async function runAgentTurn(
           callbacks.setConversation([...continuationMessages, ...response.messages]);
           callbacks.debugLog(`conversation updated to ${continuationMessages.length + response.messages.length} messages after follow-up`);
         },
+        experimental_onToolCallStart({toolCall}) {
+          sawToolCall = true;
+          const text = toolCallSummary(toolCall.toolName, toolCall.input);
+          callbacks.addMessage({id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true});
+          callbacks.debugLog(`follow-up tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
+        },
+        experimental_onToolCallFinish(event) {
+          recordToolFinish(event);
+          const summary = toolResultSummary(event);
+          const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
+          const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
+          toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
+          callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, {text, streaming: false});
+          toolEpoch += 1;
+          callbacks.debugLog(event.success
+            ? `follow-up tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
+            : `follow-up tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
+        },
       });
-      for await (const delta of followUp.textStream) {
+      for await (const rawDelta of followUp.textStream) {
+        const delta = sanitizeAssistantText(rawDelta);
         responseText += delta;
         if (!responseStarted) {
           responseStarted = true;
@@ -133,16 +199,6 @@ export async function runAgentTurn(
         const repeatedToolCall = repeatedToolNames.length > 0;
         const consecutiveToolOnlySteps = toolOnlyStepCount(steps);
 
-        if (mutatingToolSucceeded || toolCalls.length >= 8 || consecutiveToolOnlySteps >= 3) {
-          callbacks.debugLog('forcing text response to avoid tool loop');
-          return {
-            toolChoice: 'none',
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: 'Stop calling tools now. Do not repeat earlier status text. Give a concise final summary of what happened and what remains.'},
-            ],
-          };
-        }
         if (repeatedToolCall) {
           const activeTools = (Object.keys(hazeTools) as Array<keyof typeof hazeTools>).filter(name => !repeatedToolNames.includes(name));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
@@ -150,7 +206,26 @@ export async function runAgentTurn(
             activeTools,
             messages: [
               ...messages,
-              {role: 'user' as const, content: `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool or write the final answer.`},
+              {role: 'user' as const, content: `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool. If this is an action request and no file change has been made yet, continue with edit/write tools rather than summarizing.`},
+            ],
+          };
+        }
+        if (likelyActionRequest && !mutatingToolSucceeded && consecutiveToolOnlySteps >= 3 && toolCalls.length < 10) {
+          callbacks.debugLog('nudging action request toward mutation after read-only steps');
+          return {
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: 'You have inspected enough for now. This is an action request; make the requested change with editFile, replaceLines, or writeFile instead of saying tools are unavailable or summarizing.'},
+            ],
+          };
+        }
+        if (toolCalls.length >= 12 || consecutiveToolOnlySteps >= 5) {
+          callbacks.debugLog('forcing text response to avoid tool loop');
+          return {
+            toolChoice: 'none',
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: 'Tool budget reached. If the current request is complete, summarize only current-turn changes and validation. If the requested change is incomplete, state the concrete blocker briefly. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.'},
             ],
           };
         }
@@ -175,8 +250,7 @@ export async function runAgentTurn(
         const summary = toolResultSummary(event);
         const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
         const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
-        if (!event.success && event.toolCall.toolName === 'editFile') editFileFailed = true;
-        if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) mutatingToolSucceeded = true;
+        recordToolFinish(event);
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
         callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, {text, streaming: false});
         toolEpoch += 1;
@@ -185,7 +259,8 @@ export async function runAgentTurn(
           : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
       }
     });
-    for await (const delta of result.textStream) {
+    for await (const rawDelta of result.textStream) {
+      const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
       if (currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
         callbacks.updateMessage(currentAssistantId, {streaming: false});
@@ -212,17 +287,38 @@ export async function runAgentTurn(
       // Keep the conversation from onFinish if the response promise is unavailable.
     }
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
+    const finalAssistantText = assistantText.trim();
+    const assistantAdmitsIncomplete = looksIncomplete(finalAssistantText);
+    const needsActionContinuation = likelyActionRequest
+      && ((sawReadOnlyTool && !mutatingToolSucceeded) || editFileFailed || assistantAdmitsIncomplete);
+    const needsValidationContinuation = likelyValidationRequest && !validationToolSucceeded && (sawReadOnlyTool || mutatingToolSucceeded || assistantAdmitsIncomplete);
+
     if (assistantStarted) {
-      callbacks.setLastAssistantText(assistantText.trim());
+      callbacks.setLastAssistantText(finalAssistantText);
       callbacks.updateMessage(currentAssistantId, {streaming: false});
-      if (sawToolCall && !textAfterTool) {
-        const followUpText = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text');
+      if ((needsActionContinuation || needsValidationContinuation) && !forcedContinuationUsed) {
+        forcedContinuationUsed = true;
+        callbacks.updateMessage(currentAssistantId, {text: 'Continuing to complete the requested change...', streaming: false});
+        const prompt = editFileFailed
+          ? 'Your editFile attempt failed. Use the latest readFile line-numbered output and replaceLines to complete the requested change. Continue with any remaining tests or validation if relevant. Do not stop with a summary.'
+          : needsValidationContinuation
+            ? 'You have not run the requested validation yet. Continue now by running the appropriate test/check command. Summarize only after the command finishes.'
+            : mutatingToolSucceeded
+              ? 'Your previous response says the current request is incomplete. Continue now with the remaining edits and validation for this same request. Do not summarize a plan unless blocked.'
+              : 'You inspected files but have not made the requested change yet. Continue now by editing or writing the necessary files. Do not summarize a plan unless blocked.';
+        await streamAssistantResponse(completedConversation, 'current-turn completion gate', prompt, true);
+      } else if (sawToolCall && !textAfterTool) {
+        const followUpText = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text', 'Continue from the tool result and answer my original request. Do not call tools. Summarize only current-turn changes and validation; do not recap unrelated earlier tasks.', false);
         if (!followUpText) {
           callbacks.addMessage({role: 'assistant', text: 'Stopped after tool use without a follow-up response. You can ask me to continue if the task is not complete.'});
         }
       }
     } else if (sawToolCall) {
-      const followUpText = await streamAssistantResponse(completedConversation, 'tool-only turn completed without text');
+      const allowTools = (likelyActionRequest && (!mutatingToolSucceeded || editFileFailed)) || (likelyValidationRequest && !validationToolSucceeded);
+      const prompt = allowTools
+        ? 'Continue the original request now. If it asks for a change, edit or write the necessary files. If it asks to run or verify tests, run the command. Do not provide only a retrospective summary unless blocked.'
+        : 'Continue from the tool result and answer my original request. Do not call tools. Summarize only current-turn changes and validation; do not recap unrelated earlier tasks.';
+      const followUpText = await streamAssistantResponse(completedConversation, 'tool-only turn completed without text', prompt, allowTools);
       if (!followUpText) {
         const fallback = toolSummaries.length > 0
           ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`

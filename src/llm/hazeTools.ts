@@ -49,6 +49,8 @@ type ToolExecutionContext = {
 
 type HazeToolContext = {
   inFlightToolCalls?: Map<string, Promise<unknown>>;
+  completedToolCalls?: Map<string, number>;
+  mutationEpoch?: number;
 };
 
 function toolCallKey(toolName: string, input: unknown) {
@@ -61,11 +63,30 @@ function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined
     : undefined;
 }
 
+function isMutatingTool(toolName: string) {
+  return ['editFile', 'replaceLines', 'writeFile'].includes(toolName);
+}
+
+function isReadOnlyFileTool(toolName: string) {
+  return ['listFiles', 'readFile'].includes(toolName);
+}
+
 async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
   const ctx = hazeContext(context);
   if (!ctx) return execute();
   ctx.inFlightToolCalls ??= new Map();
+  ctx.completedToolCalls ??= new Map();
+  ctx.mutationEpoch ??= 0;
   const key = toolCallKey(toolName, input);
+  const completedAt = ctx.completedToolCalls.get(key);
+  if (isReadOnlyFileTool(toolName) && completedAt === ctx.mutationEpoch) {
+    return {
+      ok: true,
+      duplicateSkipped: true,
+      toolName,
+      reason: 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
+    };
+  }
   if (ctx.inFlightToolCalls.has(key)) {
     return {
       ok: true,
@@ -78,7 +99,10 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   const promise = execute();
   ctx.inFlightToolCalls.set(key, promise);
   try {
-    return await promise;
+    const result = await promise;
+    if (isMutatingTool(toolName)) ctx.mutationEpoch += 1;
+    ctx.completedToolCalls.set(key, ctx.mutationEpoch);
+    return result;
   } finally {
     ctx.inFlightToolCalls.delete(key);
   }
