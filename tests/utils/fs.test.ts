@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, it, expect} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {listFilesRecursive} from '../../src/utils/fs.js';
+import {listFilesRecursive, walkDir} from '../../src/utils/fs.js';
 
 describe('listFilesRecursive', () => {
   let tmp: string;
@@ -47,5 +47,15 @@ describe('listFilesRecursive', () => {
     for (const f of files) {
       expect(path.isAbsolute(f)).toBe(false);
     }
+  });
+
+  it('supports cursor pagination in traversal order', async () => {
+    await fs.writeFile(path.join(tmp, 'a.txt'), '');
+    await fs.writeFile(path.join(tmp, 'b.txt'), '');
+    await fs.writeFile(path.join(tmp, 'c.txt'), '');
+    const first = await walkDir(tmp, {maxEntries: 2});
+    expect(first.map(entry => entry.path)).toEqual(['a.txt', 'b.txt']);
+    const second = await walkDir(tmp, {maxEntries: 2, cursor: 'b.txt'});
+    expect(second.map(entry => entry.path)).toEqual(['c.txt']);
   });
 });

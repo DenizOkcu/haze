@@ -14,15 +14,18 @@ export interface WalkEntry {
 export interface WalkOptions {
   recursive?: boolean;
   maxEntries?: number;
+  cursor?: string;
   filter?: (entry: WalkEntry) => boolean | Promise<boolean>;
 }
 
 export async function walkDir(root: string, options: WalkOptions = {}): Promise<WalkEntry[]> {
-  const {recursive = false, maxEntries = Infinity, filter} = options;
+  const {recursive = false, maxEntries = Infinity, cursor, filter} = options;
   const result: WalkEntry[] = [];
+  let cursorSeen = cursor == null;
 
   async function walk(dir: string) {
-    for (const entry of await fs.readdir(dir, {withFileTypes: true})) {
+    const entries = (await fs.readdir(dir, {withFileTypes: true})).sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
       if (result.length >= maxEntries) return;
       if (SKIP_ENTRIES.has(entry.name)) continue;
       const absolutePath = path.join(dir, entry.name);
@@ -34,9 +37,10 @@ export async function walkDir(root: string, options: WalkOptions = {}): Promise<
         isDirectory: entry.isDirectory(),
         isFile: entry.isFile(),
       };
-      if (filter && !await filter(walkEntry)) continue;
-      result.push(walkEntry);
-      if (entry.isDirectory() && recursive) await walk(absolutePath);
+      const passesFilter = !filter || await filter(walkEntry);
+      if (passesFilter && cursorSeen) result.push(walkEntry);
+      if (passesFilter && !cursorSeen && relativePath === cursor) cursorSeen = true;
+      if (entry.isDirectory() && recursive && (!filter || passesFilter)) await walk(absolutePath);
     }
   }
 

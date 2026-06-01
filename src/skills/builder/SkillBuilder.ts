@@ -116,7 +116,7 @@ function assertSafeGeneratedFile(filePath: string) {
 
 async function generateSkill(description: string): Promise<GeneratedSkill> {
   const activeModel = await model();
-  if (!activeModel) throw new Error('No model configured. Run /login, then /model <model-name>, before using /skill create.');
+  if (!activeModel) throw new Error('No API key configured. Run /login, then /model x-ai/grok-build-0.1, before using /skill create.');
   const result = await generateObject({
     model: activeModel,
     temperature: 0,

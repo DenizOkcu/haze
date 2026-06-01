@@ -5,7 +5,7 @@ import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
-import {compact, toolCallSummary, toolOutputDetails, toolResultSummary, formatSeconds} from './formatters.js';
+import {compact, toolCallSummary, toolResultSummary, formatSeconds} from './formatters.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean};
 
@@ -105,7 +105,7 @@ export async function runAgentTurn(
   try {
     const m = await model();
     if (!m) {
-      callbacks.addMessage({role: 'assistant', text: 'No model configured. Run /login, then /model <model-name>. Haze cannot hallucinate without credentials. Progress.'});
+      callbacks.addMessage({role: 'assistant', text: 'No API key configured. Run /login, then /model x-ai/grok-build-0.1. Haze cannot hallucinate without credentials. Progress.'});
       return;
     }
     const activeModel = m;
@@ -139,6 +139,55 @@ export async function runAgentTurn(
     let editRecoveryReadSatisfied = false;
     const toolSummaries: string[] = [];
     const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
+    const toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const toolDisplayItems: Array<{id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; hidden?: boolean}> = [];
+    let toolGroupStarted = false;
+
+    function renderToolGroup(streaming: boolean) {
+      const visibleItems = toolDisplayItems.filter(item => !item.hidden);
+      const grouped = new Map<string, {item: typeof visibleItems[number]; count: number}>();
+      for (const item of visibleItems) {
+        const key = `${item.status}:${item.summary}:${item.result ?? ''}`;
+        const current = grouped.get(key);
+        if (current) current.count += 1;
+        else grouped.set(key, {item, count: 1});
+      }
+      const rows = [...grouped.values()];
+      const running = visibleItems.some(item => item.status === 'running');
+      const header = running || streaming ? 'Running tools…' : `Tools: ${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'}`;
+      const lines = rows.map(({item, count}) => {
+        const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
+        const countText = count > 1 ? ` ×${count}` : '';
+        const result = item.status === 'running' ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
+        return `  ${icon} ${item.summary}${countText}${result}`;
+      });
+      return [header, ...lines].join('\n');
+    }
+
+    function updateToolGroup(streaming = true) {
+      const text = renderToolGroup(streaming);
+      if (!toolGroupStarted) {
+        toolGroupStarted = true;
+        callbacks.addMessage({id: toolGroupId, role: 'tool', text, streaming});
+      } else {
+        callbacks.updateMessage(toolGroupId, {text, streaming});
+      }
+    }
+
+    function recordToolStart(toolCall: {toolCallId: string; toolName: string; input: unknown}) {
+      toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running'});
+      updateToolGroup(true);
+    }
+
+    function recordToolDisplayFinish(event: {toolCall: {toolCallId: string; toolName: string; input: unknown}; success: boolean; output?: unknown; error?: unknown; durationMs: number}) {
+      const item = toolDisplayItems.find(candidate => candidate.id === event.toolCall.toolCallId);
+      if (!item) return;
+      item.status = event.success ? 'success' : 'error';
+      item.result = toolResultSummary(event);
+      item.durationMs = event.durationMs;
+      item.hidden = isDuplicateSkippedOutput(event.output);
+      updateToolGroup(toolDisplayItems.some(candidate => candidate.status === 'running'));
+    }
     callbacks.debugLog(`request started with ${requestMessages.length} conversation messages; action=${likelyActionRequest}`);
     function recordToolFinish(event: {toolCall: {toolName: string; input?: unknown}; success: boolean; output?: unknown}) {
       const path = toolInputPath(event.toolCall.input);
@@ -164,15 +213,6 @@ export async function runAgentTurn(
         const ok = typeof event.output === 'object' && event.output != null && 'ok' in event.output ? Boolean((event.output as {ok?: unknown}).ok) : true;
         if (ok) validationToolSucceeded = true;
       }
-    }
-
-    function formatToolFinishText(event: {toolCall: {toolName: string; input: unknown}; success: boolean; output?: unknown; error?: unknown; durationMs: number}) {
-      const summary = toolResultSummary(event);
-      if (isDuplicateSkippedOutput(event.output)) {
-        return `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n↷ ${summary} in ${formatSeconds(event.durationMs)}`;
-      }
-      const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
-      return `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
     }
 
     async function streamAssistantResponse(messages: ModelMessage[], reason: string, prompt: string, allowTools = false) {
@@ -236,8 +276,7 @@ export async function runAgentTurn(
         },
         experimental_onToolCallStart({toolCall}) {
           sawToolCall = true;
-          const text = toolCallSummary(toolCall.toolName, toolCall.input);
-          callbacks.addMessage({id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true});
+          recordToolStart(toolCall);
           resetIdleTimer();
           callbacks.debugLog(`follow-up tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
         },
@@ -245,9 +284,8 @@ export async function runAgentTurn(
           resetIdleTimer();
           recordToolFinish(event);
           const summary = toolResultSummary(event);
-          const text = formatToolFinishText(event);
           toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
-          callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, isDuplicateSkippedOutput(event.output) ? {text, streaming: false, hidden: true} : {text, streaming: false});
+          recordToolDisplayFinish(event);
           if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;
           callbacks.debugLog(event.success
             ? `follow-up tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
@@ -351,18 +389,16 @@ export async function runAgentTurn(
       },
       experimental_onToolCallStart({toolCall}) {
         sawToolCall = true;
-        const text = toolCallSummary(toolCall.toolName, toolCall.input);
-        callbacks.addMessage({id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true});
+        recordToolStart(toolCall);
         resetIdleTimer();
         callbacks.debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
       },
       experimental_onToolCallFinish(event) {
         resetIdleTimer();
         const summary = toolResultSummary(event);
-        const text = formatToolFinishText(event);
         recordToolFinish(event);
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
-        callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, isDuplicateSkippedOutput(event.output) ? {text, streaming: false, hidden: true} : {text, streaming: false});
+        recordToolDisplayFinish(event);
         if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;
         callbacks.debugLog(event.success
           ? `tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`

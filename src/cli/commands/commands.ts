@@ -139,7 +139,7 @@ export async function handleSlashCommand(
       '/model',
       '  Prompt for an OpenRouter model name to use for future chats.',
       '/model <name>',
-      '  Set the OpenRouter model directly, for example openai/gpt-4o-mini.',
+      '  Set the OpenRouter model directly, for example x-ai/grok-build-0.1.',
       '/settings',
       '  Show the configured provider, model, API key status, and loaded context files.',
       '/skill help',
@@ -171,7 +171,7 @@ export async function handleSlashCommand(
   }
   if (value === '/model') {
     ctx.setMode('model');
-    ctx.addSystemMessage('Enter an OpenRouter model name, e.g. openai/gpt-4o-mini or anthropic/claude-3.5-sonnet.');
+    ctx.addSystemMessage('Enter an OpenRouter model name, e.g. x-ai/grok-build-0.1 or anthropic/claude-3.5-sonnet.');
     return 'handled';
   }
   if (value.startsWith('/model ')) {

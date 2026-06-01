@@ -33,8 +33,8 @@ async function currentBranchName() {
   }
 }
 
-function startupProviderInfo(settings: HazeSettings, branch?: string) {
-  const model = process.env.HAZE_MODEL ?? settings.model ?? 'openai/gpt-4o-mini';
+function startupProviderInfo(settings: HazeSettings) {
+  const model = process.env.HAZE_MODEL ?? settings.model ?? 'x-ai/grok-build-0.1';
   const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'default';
   const baseURL = process.env.OPENAI_BASE_URL ?? settings.baseURL ?? 'https://openrouter.ai/api/v1';
   const baseURLSource = process.env.OPENAI_BASE_URL ? 'OPENAI_BASE_URL env' : settings.baseURL ? 'settings' : 'default';
@@ -51,10 +51,6 @@ function startupProviderInfo(settings: HazeSettings, branch?: string) {
     `- Model: ${model} (${modelSource})`,
     `- Base URL: ${baseURL} (${baseURLSource})`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; run /login or set OPENAI_API_KEY' : `configured via ${apiKeySource}`}`,
-    '',
-    'Workspace',
-    `- Directory: ${process.cwd()}`,
-    `- Git branch: ${branch ?? 'not detected'}`,
   ].join('\n');
 }
 
@@ -63,7 +59,7 @@ function ChatScreen({debug = false}: ChatOptions) {
   const {stdout} = useStdout();
   const height = stdout.rows ?? process.stdout.rows ?? 24;
   const [messages, setMessages] = useState<Message[]>([
-    {role: 'system', text: 'Welcome to Haze. Use /login for OpenRouter, /model to choose a model, /help for commands.'}
+    {role: 'system', text: 'Welcome to Haze. Use /help for commands.'}
   ]);
   const [settings, setSettings] = useState<HazeSettings>({});
   const conversationRef = useRef<ModelMessage[]>([]);
@@ -82,11 +78,11 @@ function ChatScreen({debug = false}: ChatOptions) {
     Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
       setSettings(next);
       setBranchName(branch);
-      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next, branch)}]);
+      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next)}]);
     }).catch(() => {
       currentBranchName().then(branch => {
         setBranchName(branch);
-        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({}, branch)}]);
+        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
       }).catch(() => {
         setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
       });
@@ -94,6 +90,10 @@ function ChatScreen({debug = false}: ChatOptions) {
     readInputHistory().then(setInputHistory).catch(() => undefined);
     readContextFiles().then(setContextFiles).catch(() => undefined);
     refreshSkills().catch(() => undefined);
+    const branchTimer = setInterval(() => {
+      currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
+    }, 3000);
+    return () => clearInterval(branchTimer);
   }, []);
 
   function persistInputHistory(value: string) {
@@ -138,7 +138,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({provider: 'openrouter', apiKey: value, baseURL: 'https://openrouter.ai/api/v1'});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next, branchName)}`}]);
+      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next)}`}]);
       return;
     }
 
@@ -146,7 +146,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({model: value});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next, branchName)}`}]);
+      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next)}`}]);
       return;
     }
 
@@ -216,9 +216,25 @@ function ChatScreen({debug = false}: ChatOptions) {
   }
 
   const visible = messages.filter(message => !message.hidden);
-  const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'openai/gpt-4o-mini' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
-  const activeModelName = process.env.HAZE_MODEL ?? settings.model ?? 'openai/gpt-4o-mini';
+  const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'x-ai/grok-build-0.1' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
+  const activeModelName = process.env.HAZE_MODEL ?? settings.model ?? 'x-ai/grok-build-0.1';
+  const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey);
+  const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model);
+  const headerSubtitle = hasLogin && hasChosenModel
+    ? [
+      'A minimal LLM harness for growing your own workflows while you work.',
+      '',
+      'Start with simple chat, then teach Haze your habits with skills:',
+      '/skill create review my branch against main  — tiny spell, useful goblin.',
+      '',
+      'The most adaptive workflow is the one you shape as you go.',
+      '',
+      'Guardrails are light: Haze lets the LLM work from the terminal almost like you,',
+      'while trying to stay scoped to this project.',
+    ].join('\n')
+    : 'First things first: run /login to add your API key, then /model x-ai/grok-build-0.1 to choose a model.';
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${contextFiles.length} context file${contextFiles.length === 1 ? '' : 's'}`;
   const slashSuggestions: TextInputSuggestion[] = mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/login', description: 'Save an OpenRouter API key', kind: 'command'},
@@ -238,7 +254,7 @@ function ChatScreen({debug = false}: ChatOptions) {
 
   return <Box flexDirection="column" minHeight={height}>
     <Box flexShrink={0}>
-      <Header subtitle="AI agent CLI for building apps" />
+      <Header subtitle={headerSubtitle} />
     </Box>
     <Box flexDirection="column" flexGrow={1}>
       {visible.map((message, index) => <Box key={index} flexDirection="column" marginBottom={1}>
@@ -271,8 +287,13 @@ function ChatScreen({debug = false}: ChatOptions) {
       </Box>
     </Box>
     <Box flexShrink={0} justifyContent="space-between">
-      <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>
-      <Text color={theme.muted} dimColor wrap="truncate-start">{activeModelName}</Text>
+      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>
+        <Text color={theme.muted} dimColor wrap="truncate-end">{statusDetailLabel}</Text>
+      </Box>
+      <Box flexShrink={0} marginLeft={2}>
+        <Text color={theme.muted} dimColor wrap="truncate-start">{activeModelName}</Text>
+      </Box>
     </Box>
   </Box>;
 }

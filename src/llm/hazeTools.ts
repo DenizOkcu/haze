@@ -151,20 +151,23 @@ export const hazeTools = {
       path: z.string().default('.').describe('Directory path relative to the current workspace'),
       recursive: z.boolean().default(false).describe('Whether to list files recursively'),
       maxEntries: z.number().int().positive().max(500).default(100).describe('Maximum number of entries to return'),
+      cursor: z.string().optional().describe('Pagination cursor from a previous listFiles result. Continue after that entry.'),
       includeIgnored: z.boolean().default(false).describe('Include files ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: dirPath, recursive, maxEntries, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, includeIgnored}, context, async () => {
+    execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(dirPath);
       await assertNotIgnored(absolutePath, dirPath, includeIgnored);
       const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
       let ignoredSkipped = 0;
 
-      const walked = await walkDir(absolutePath, {recursive, maxEntries, filter: async entry => {
+      const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, filter: async entry => {
         if (!includeIgnored && await isGitIgnored(entry.absolutePath)) { ignoredSkipped++; return false; }
         return true;
       }});
+      const page = walked.slice(0, maxEntries);
+      const hasMore = walked.length > maxEntries;
 
-      for (const entry of walked) {
+      for (const entry of page) {
         if (entry.isDirectory) {
           entries.push({path: entry.path, type: 'directory'});
         } else if (entry.isFile) {
@@ -173,7 +176,7 @@ export const hazeTools = {
         }
       }
 
-      return {path: dirPath, recursive, includeIgnored, ignoredSkipped, entries, truncated: entries.length >= maxEntries};
+      return {path: dirPath, recursive, includeIgnored, cursor, nextCursor: hasMore ? page.at(-1)?.path : undefined, ignoredSkipped, entries, truncated: hasMore};
     }),
   }),
 
