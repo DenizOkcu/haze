@@ -15,7 +15,7 @@ export function toolCallSummary(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
   if (toolName === 'bash' && typeof data?.command === 'string') {
     const timeout = typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
-    return `$ ${data.command}${timeout}`;
+    return `bash $ ${data.command}${timeout}`;
   }
   if (toolName === 'listFiles' && typeof data?.path === 'string') return `listFiles ${data.path}`;
   if ((toolName === 'readFile' || toolName === 'writeFile') && typeof data?.path === 'string') return `${toolName} ${data.path}`;

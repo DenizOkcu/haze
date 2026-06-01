@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Haze — A tiny terminal fog machine for building software</title>
+  <meta name="description" content="A minimal AI agent CLI that gives an LLM a small set of tools, then gets out of the way. No ceremony. No framework. Just progress.">
+  <meta property="og:title" content="Haze — Tiny Spell, Useful Goblin">
+  <meta property="og:description" content="A pragmatic agentic CLI for building apps from the terminal.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌫️</text></svg>">
+  <style>
+    @import 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap';
+
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --purple: #a78bfa;
+      --deep-purple: #6d28d9;
+      --violet: #8b5cf6;
+      --bg: #0a0a0f;
+      --surface: #12111d;
+      --surface-2: #1a1729;
+      --text: #e2e0eb;
+      --muted: #7c7a8a;
+      --danger: #fb7185;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --code-bg: #1f1633;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: 'Inter', -apple-system, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Fog effect */
+    .fog {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    .fog::before, .fog::after {
+      content: '';
+      position: absolute;
+      width: 200%;
+      height: 200%;
+      top: -50%;
+      left: -50%;
+      background: radial-gradient(ellipse at 30% 20%, rgba(167, 139, 250, 0.04) 0%, transparent 60%),
+                  radial-gradient(ellipse at 70% 60%, rgba(109, 40, 217, 0.03) 0%, transparent 50%);
+      animation: drift 20s ease-in-out infinite alternate;
+    }
+
+    .fog::after {
+      background: radial-gradient(ellipse at 60% 80%, rgba(139, 92, 246, 0.03) 0%, transparent 50%),
+                  radial-gradient(ellipse at 20% 40%, rgba(167, 139, 250, 0.02) 0%, transparent 60%);
+      animation: drift 25s ease-in-out infinite alternate-reverse;
+    }
+
+    @keyframes drift {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      100% { transform: translate(-5%, 3%) rotate(2deg); }
+    }
+
+    /* Layout */
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    section {
+      padding: 80px 0;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(167, 139, 250, 0.08);
+    }
+
+    nav .container {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 56px;
+    }
+
+    nav .logo {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--purple);
+      text-decoration: none;
+    }
+
+    nav .links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    nav a:hover { color: var(--text); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(167, 139, 250, 0.1);
+      border: 1px solid rgba(167, 139, 250, 0.2);
+      color: var(--purple);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 100px;
+      font-weight: 500;
+    }
+
+    /* Hero */
+    .hero {
+      padding: 160px 0 80px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 7vw, 64px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 .fog-word {
+      background: linear-gradient(135deg, var(--purple), var(--violet), var(--deep-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 480px;
+      margin: 0 auto 20px;
+      line-height: 1.7;
+    }
+
+    .hero .subtitle {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--purple);
+      margin-bottom: 12px;
+      opacity: 0.8;
+    }
+
+    /* Terminal */
+    .terminal {
+      background: var(--surface);
+      border: 1px solid rgba(167, 139, 250, 0.12);
+      border-radius: 12px;
+      overflow: hidden;
+      text-align: left;
+      max-width: 640px;
+      margin: 0 auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(167, 139, 250, 0.05);
+    }
+
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--surface-2);
+      border-bottom: 1px solid rgba(167, 139, 250, 0.08);
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.r { background: var(--danger); }
+    .terminal-dot.y { background: var(--warning); }
+    .terminal-dot.g { background: var(--success); }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .terminal-body {
+      padding: 20px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.8;
+      min-height: 280px;
+      max-height: 320px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .terminal-body::-webkit-scrollbar { display: none; }
+
+    .terminal-body .prompt { color: var(--success); }
+    .terminal-body .cmd { color: var(--text); }
+    .terminal-body .output { color: var(--muted); }
+    .terminal-body .purple { color: var(--purple); }
+    .terminal-body .warning { color: var(--warning); }
+    .terminal-body .success { color: var(--success); }
+    .terminal-body .danger { color: var(--danger); }
+    .terminal-body .dim { opacity: 0.5; }
+
+    .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: var(--purple);
+      vertical-align: middle;
+      margin-left: 2px;
+      animation: blink 1s step-end infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    /* Install */
+    .install-box {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin: 24px auto 40px;
+      max-width: 480px;
+    }
+
+    .install-box code {
+      flex: 1;
+      background: var(--code-bg);
+      border: 1px solid rgba(167, 139, 250, 0.15);
+      padding: 14px 20px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      color: var(--text);
+      display: block;
+    }
+
+    .install-box code .dollar { color: var(--muted); }
+
+    .copy-btn {
+      background: rgba(167, 139, 250, 0.1);
+      border: 1px solid rgba(167, 139, 250, 0.2);
+      color: var(--purple);
+      padding: 14px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .copy-btn:hover {
+      background: rgba(167, 139, 250, 0.2);
+      border-color: rgba(167, 139, 250, 0.4);
+    }
+
+    /* Features */
+    .features {
+      display: grid;
+      gap: 2px;
+    }
+
+    .feature {
+      padding: 32px;
+      background: var(--surface);
+      border: 1px solid rgba(167, 139, 250, 0.06);
+      border-radius: 8px;
+    }
+
+    .feature .icon {
+      font-size: 24px;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .feature h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+
+    .feature p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .feature code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--warning);
+    }
+
+    /* Section headers */
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: clamp(28px, 4vw, 36px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+      line-height: 1.2;
+    }
+
+    .section-desc {
+      font-size: 16px;
+      color: var(--muted);
+      max-width: 500px;
+      line-height: 1.7;
+      margin-bottom: 48px;
+    }
+
+    .center { text-align: center; }
+    .center .section-desc { margin-left: auto; margin-right: auto; }
+
+    /* Skills section */
+    .skills-visual {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+
+    .skill-card {
+      background: var(--surface);
+      border: 1px solid rgba(167, 139, 250, 0.08);
+      border-radius: 8px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+
+    .skill-card:hover {
+      border-color: rgba(167, 139, 250, 0.3);
+    }
+
+    .skill-card .slash {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--purple);
+      margin-bottom: 4px;
+    }
+
+    .skill-card .desc {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* Tools grid */
+    .tools-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 2px;
+    }
+
+    .tool {
+      padding: 20px;
+      background: var(--surface);
+      border: 1px solid rgba(167, 139, 250, 0.06);
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .tool .tool-name {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--purple);
+      margin-bottom: 4px;
+    }
+
+    .tool .tool-desc {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Philosophy */
+    .quote {
+      font-size: clamp(24px, 4vw, 32px);
+      font-weight: 300;
+      line-height: 1.4;
+      text-align: center;
+      max-width: 520px;
+      margin: 0 auto;
+      color: var(--text);
+    }
+
+    .quote em {
+      font-style: normal;
+      color: var(--purple);
+      font-weight: 500;
+    }
+
+    .attribution {
+      text-align: center;
+      margin-top: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* CTA */
+    .cta {
+      text-align: center;
+      padding: 120px 0 80px;
+    }
+
+    .cta h2 {
+      font-size: clamp(28px, 5vw, 40px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 12px;
+    }
+
+    .cta p {
+      color: var(--muted);
+      margin-bottom: 32px;
+      font-size: 16px;
+    }
+
+    .cta-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--purple);
+      color: var(--bg);
+    }
+
+    .btn-primary:hover {
+      background: #b99dfd;
+      box-shadow: 0 4px 24px rgba(167, 139, 250, 0.3);
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid rgba(167, 139, 250, 0.2);
+      color: var(--purple);
+    }
+
+    .btn-ghost:hover {
+      border-color: rgba(167, 139, 250, 0.5);
+      background: rgba(167, 139, 250, 0.05);
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid rgba(167, 139, 250, 0.06);
+      padding: 40px 0;
+      text-align: center;
+    }
+
+    footer p {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    footer a {
+      color: var(--purple);
+      text-decoration: none;
+    }
+
+    footer a:hover { text-decoration: underline; }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.15), transparent);
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .hero { padding: 120px 0 60px; }
+      section { padding: 60px 0; }
+      .skills-visual { grid-template-columns: 1fr; }
+      .install-box { flex-direction: column; }
+      nav .links { gap: 16px; }
+      nav .links .hide-mobile { display: none; }
+    }
+
+    /* Scroll reveal */
+    .reveal {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Terminal animation elements */
+    .t-label { font-weight: 600; color: var(--text); }
+    .t-label-you { color: var(--purple); }
+    .t-count { color: var(--muted); font-size: 12px; }
+    .t-tool-line {
+      padding-left: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.8;
+      opacity: 0;
+      animation: toolFadeIn 0.3s ease forwards;
+    }
+    .t-check { color: var(--success); }
+    .t-tool-name { color: #c4b5fd; }
+    .t-bash-cmd { color: #c4b5fd; }
+    .t-detail { color: var(--muted); }
+    .t-spinner { color: var(--purple); margin-top: 8px; }
+    .t-response { margin-top: 6px; line-height: 1.7; }
+    .t-status {
+      padding: 10px 20px;
+      border-top: 1px solid rgba(167, 139, 250, 0.08);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .t-status-row { display: flex; justify-content: space-between; }
+    .t-branch { color: var(--success); }
+    .t-status-counts { margin-top: 2px; opacity: 0.6; }
+    .t-input-wrap {
+      margin: 8px 16px 12px;
+      padding: 8px 12px;
+      border: 1px solid var(--violet);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      opacity: 1;
+    }
+    .t-input-prompt {
+      color: var(--purple);
+      margin-right: 6px;
+      white-space: nowrap;
+    }
+    .t-input-text {
+      color: var(--text);
+    }
+    @keyframes toolFadeIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="fog"></div>
+
+  <nav>
+    <div class="container">
+      <a href="#" class="logo">~ haze</a>
+      <div class="links">
+        <a href="#features" class="hide-mobile">Features</a>
+        <a href="#skills" class="hide-mobile">Skills</a>
+        <a href="#tools" class="hide-mobile">Tools</a>
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <span class="badge">npm v0.0.1</span>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container">
+        <h1>
+          <span class="fog-word">Barely a <code style="font-family: var(--font-mono); font-size: 0.85em; background: var(--code-bg); border: 1px solid rgba(167, 139, 250, 0.15); padding: 2px 10px; border-radius: 6px; -webkit-text-fill-color: var(--purple);">haze</code>.</span><br>
+          Entirely yours.
+        </h1>
+        <p>
+          A minimal AI agent that gives an LLM a handful of tools,<br>
+          then gets out of the way.
+        </p>
+
+        <div class="install-box">
+          <code><span class="dollar">$ </span>npx @denizokcu/haze</code>
+          <button class="copy-btn" id="copy-btn" onclick="copyInstall()">copy</button>
+        </div>
+
+        <div class="terminal" id="terminal">
+          <div class="terminal-bar">
+            <span class="terminal-dot r"></span>
+            <span class="terminal-dot y"></span>
+            <span class="terminal-dot g"></span>
+            <span class="terminal-title">haze</span>
+          </div>
+          <div class="terminal-body" id="terminal-body"></div>
+          <div class="t-input-wrap" id="input-field">
+            <span class="t-input-prompt">›</span>
+            <span class="t-input-text" id="input-text"></span>
+          </div>
+          <div class="t-status" id="status-bar">
+            <div class="t-status-row">
+              <span>~/calc-app <span class="t-branch">(main)</span></span>
+              <span>anthropic/claude-sonnet-4.6</span>
+            </div>
+            <div class="t-status-counts">8 messages / 5 tool calls / 0 skills</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="container">
+        <div class="center reveal">
+          <p class="section-label">// what it does</p>
+          <h2 class="section-title">Six tools. One agent.<br>Infinite stubbornness.</h2>
+          <p class="section-desc">
+            Haze doesn't try to be everything. It gives the model read, write, edit, list, and bash — then watches it figure things out.
+          </p>
+        </div>
+
+        <div class="features">
+          <div class="feature reveal">
+            <span class="icon">🌫️</span>
+            <h3>Born in the terminal</h3>
+            <p>No web UI. No Electron. No Docker container that spawns other Docker containers. Haze lives in your terminal where code happens. Interactive TUI with streaming, syntax highlighting, and tool-call transparency. Watch it work. Keep your hands near the wheel.</p>
+          </div>
+
+          <div class="feature reveal">
+            <span class="icon">🔧</span>
+            <h3>Deliberately small toolset</h3>
+            <p>Read, edit, write, list, bash. That's it. No 47-tool sprawl. No tool that scaffolds a tool that generates a plan that plans to generate a plan. The model has six tricks. It's surprisingly effective.</p>
+          </div>
+
+          <div class="feature reveal">
+            <span class="icon">📜</span>
+            <h3>Markdown skills</h3>
+            <p>Notice a pattern? Run <code>/skill create</code> and teach Haze a new trick. Skills are just Markdown files. No YAML schemas, no plugin APIs, no registry. Write a prompt, save it, use it. Tiny spell, useful goblin.</p>
+          </div>
+
+          <div class="feature reveal">
+            <span class="icon">🧠</span>
+            <h3>Context-aware</h3>
+            <p>Reads <code>AGENTS.md</code> and <code>CLAUDE.md</code> from your project and home directory. Haze learns your conventions, your stack, your weird naming schemes. It adapts. Rude, but in a good way.</p>
+          </div>
+
+          <div class="feature reveal">
+            <span class="icon">🛡️</span>
+            <h3>Light guardrails</h3>
+            <p>File tools scoped to your workspace. Gitignore-aware by default. Bash mutations discouraged. Destructive actions require confirmation. Powerful enough to help, dumb enough to deserve supervision.</p>
+          </div>
+
+          <div class="feature reveal">
+            <span class="icon">🔌</span>
+            <h3>Bring your own model</h3>
+            <p>Works with any OpenAI-compatible API via <code>/login</code> or environment variables. Grok, GPT, Claude, DeepSeek, your weird local llama — if it speaks the protocol, Haze speaks to it. Default: <code>anthropic/claude-sonnet-4.6</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Skills -->
+    <section id="skills">
+      <div class="container">
+        <div class="center reveal">
+          <p class="section-label">// the magic system</p>
+          <h2 class="section-title">Skills grow while you work.</h2>
+          <p class="section-desc">
+            Hit friction? Create a skill. Keep going. The most adaptive workflow is the one you shape as you go.
+          </p>
+        </div>
+
+        <div class="skills-visual reveal">
+          <div class="skill-card">
+            <div class="slash">/skill create</div>
+            <div class="desc">Describe what you want. Haze writes the Markdown. You refine it. Done.</div>
+          </div>
+          <div class="skill-card">
+            <div class="slash">/deploy-check</div>
+            <div class="desc">Your custom skill, a slash command now. Lint, test, build, check. One invocation.</div>
+          </div>
+          <div class="skill-card">
+            <div class="slash">/review</div>
+            <div class="desc">Teach it your review standards. It remembers next time. Every time.</div>
+          </div>
+          <div class="skill-card">
+            <div class="slash">~/.haze/skills/</div>
+            <div class="desc">Plain Markdown files. Edit them. Delete them. Version them. They're yours.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Tools -->
+    <section id="tools">
+      <div class="container">
+        <div class="center reveal">
+          <p class="section-label">// the toolbox</p>
+          <h2 class="section-title">Six tools. That's the whole list.</h2>
+          <p class="section-desc">
+            No hidden tools. No surprise API calls. What you see is what the model gets.
+          </p>
+        </div>
+
+        <div class="tools-grid reveal">
+          <div class="tool">
+            <div class="tool-name">listFiles</div>
+            <div class="tool-desc">Discover project structure</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">readFile</div>
+            <div class="tool-desc">Read any UTF-8 file</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">editFile</div>
+            <div class="tool-desc">Exact text replacements</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">replaceLines</div>
+            <div class="tool-desc">Line-range edits</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">writeFile</div>
+            <div class="tool-desc">Create new files</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">bash</div>
+            <div class="tool-desc">Tests, builds, validation</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Philosophy -->
+    <section>
+      <div class="container">
+        <div class="center reveal">
+          <p class="quote">
+            "The most adaptive workflow is the one <em>you shape as you go</em>."
+          </p>
+          <p class="attribution">— The Haze Manifesto, probably</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- CTA -->
+    <section class="cta">
+      <div class="container reveal">
+        <h2>Stop reading. Start haze.</h2>
+        <p>It's free, it's MIT-licensed, and it won't judge your code.<br>(The model might, but that's between you two.)</p>
+        <div class="cta-buttons">
+          <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">View on GitHub</a>
+          <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="btn btn-ghost">npm package</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>
+        Built with misplaced confidence by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a> &middot;
+        MIT License &middot;
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">File issues</a> &middot;
+        Security theatre completed.
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const termBody = document.getElementById('terminal-body');
+    const statusBar = document.getElementById('status-bar');
+    const inputField = document.getElementById('input-field');
+    const inputText = document.getElementById('input-text');
+
+    function wait(ms) {
+      return new Promise(r => setTimeout(r, ms));
+    }
+
+    async function typeInto(el, text, speed) {
+      for (const ch of text) {
+        el.textContent += ch;
+        await wait(speed);
+        if (Math.random() < 0.07) await wait(speed * 5);
+      }
+    }
+
+    function scrollBottom() {
+      termBody.scrollTop = termBody.scrollHeight;
+    }
+
+    async function addYouLine(text) {
+      inputText.textContent = '';
+      await wait(150);
+      const label = document.createElement('div');
+      label.innerHTML = '<span class="t-label t-label-you">You</span>';
+      termBody.appendChild(label);
+      const line = document.createElement('div');
+      line.textContent = text;
+      termBody.appendChild(line);
+      scrollBottom();
+    }
+
+    async function addTools(calls) {
+      const header = document.createElement('div');
+      header.style.marginTop = '10px';
+      header.innerHTML = `<span class="t-label">Tool</span>  <span class="t-count">Tools: ${calls.length} calls</span>`;
+      termBody.appendChild(header);
+      await wait(250);
+
+      for (const tc of calls) {
+        const line = document.createElement('div');
+        line.className = 't-tool-line';
+        const detail = tc.isBash
+          ? `exited with code ${tc.exit} in ${tc.time}`
+          : `completed in ${tc.time}`;
+        const nameClass = tc.isBash ? 't-bash-cmd' : 't-tool-name';
+        line.innerHTML = `<span class="t-check">✓</span> <span class="${nameClass}">${tc.name}</span> <span class="t-detail">${tc.args}</span> — <span class="t-detail">${detail}</span>`;
+        termBody.appendChild(line);
+        scrollBottom();
+        await wait(180 + Math.random() * 140);
+      }
+    }
+
+    async function spin(duration) {
+      const el = document.createElement('div');
+      el.className = 't-spinner';
+      termBody.appendChild(el);
+      scrollBottom();
+      const chars = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+      let i = 0;
+      const iv = setInterval(() => {
+        i = (i + 1) % chars.length;
+        el.textContent = chars[i] + ' Haze is thinking... · esc to interrupt';
+      }, 80);
+      await wait(duration);
+      clearInterval(iv);
+      el.remove();
+      await wait(200);
+    }
+
+    async function runTerminal() {
+      // === TURN 1: Create a skill ===
+      await wait(300);
+      await typeInto(inputText, '/skill create you are a security reviewer', 32);
+      await wait(400);
+
+      await addYouLine('/skill create you are a security reviewer');
+      await wait(500);
+
+      const skillTools = [
+        { name: 'writeFile', args: '~/.haze/skills/security-reviewer.md', time: '0.04s' },
+      ];
+      await addTools(skillTools);
+      await wait(300);
+
+      await spin(1200);
+
+      const resp1 = document.createElement('div');
+      resp1.className = 't-response';
+      resp1.textContent = 'Created skill /security-reviewer. Try /security-reviewer when you\'re ready to feel something.';
+      termBody.appendChild(resp1);
+      scrollBottom();
+      await wait(800);
+
+      // Spacer
+      termBody.appendChild(document.createElement('div'));
+      scrollBottom();
+      await wait(400);
+
+      // === TURN 2: Use the skill ===
+      await typeInto(inputText, '/security-reviewer', 36);
+      await wait(400);
+
+      await addYouLine('/security-reviewer');
+      await wait(500);
+
+      const reviewTools = [
+        { name: 'listFiles', args: '.', time: '0.6s' },
+        { name: 'readFile', args: 'src/api/auth.ts', time: '0.07s' },
+        { name: 'readFile', args: 'src/api/auth.ts ×2', time: '0.05s' },
+        { name: 'readFile', args: 'src/middleware/session.ts', time: '0.06s' },
+        { name: 'bash', args: '$ grep -r "eval\\|innerHTML\\|document.write" src/ --include="*.ts"', exit: '0', time: '0.2s', isBash: true },
+      ];
+      await addTools(reviewTools);
+
+      await spin(1600);
+
+      // Security review — lines appear one by one
+      const findings = [
+        { html: '<span style="color:var(--warning);font-weight:600">Security Review — 7 findings. Yes, seven.</span>' },
+        { html: '' },
+        { html: '<span style="color:var(--danger)">● CRITICAL</span> <span style="color:var(--text)">auth.ts:42</span> — Admin password is "admin123". This is not a placeholder. Someone deployed this on a Friday.' },
+        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">auth.ts:89</span> — SQL injection via user input. Bob from accounting could DROP TABLE the entire database. Bob would.' },
+        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">.env</span> — API keys committed to git. Pushed straight to main. The commit message was "fixed stuff 🚀".' },
+        { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">session.ts:18</span> — No HTTPS. Everything sent in plain text over HTTP. Very retro. Very 1997.' },
+        { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">api/users.ts:53</span> — eval() on user input. ChatGPT really said "this looks good" and we just went with it huh.' },
+        { html: '<span style="color:var(--success)">● LOW</span>  <span style="color:var(--text)">auth.ts:7</span> — No rate limiting. A determined toddler could brute-force this login.' },
+        { html: '<span style="color:var(--success)">● LOW</span>  <span style="color:var(--text)">package.json</span> — Depends on "left-pad". We\'ve learned nothing as an industry.' },
+        { html: '' },
+        { html: '<span style="color:var(--muted)">Verdict: Ship it and pray, or fix it and sleep. Your call.</span>' },
+      ];
+
+      for (const f of findings) {
+        const line = document.createElement('div');
+        line.className = 't-response';
+        if (f.html) {
+          line.innerHTML = f.html;
+          line.style.lineHeight = '1.7';
+        }
+        termBody.appendChild(line);
+        scrollBottom();
+        await wait(600 + Math.random() * 300);
+      }
+    }
+
+    setTimeout(runTerminal, 800);
+
+    function copyInstall() {
+      navigator.clipboard.writeText('npx @denizokcu/haze');
+      const btn = document.getElementById('copy-btn');
+      btn.textContent = 'copied!';
+      setTimeout(() => { btn.textContent = 'copy'; }, 2000);
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('visible');
+          observer.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.1 });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>

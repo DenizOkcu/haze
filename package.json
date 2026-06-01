@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A pragmatic agentic CLI for building apps from the terminal.",
   "type": "module",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "node": ">=20"
   },
   "bin": {
-    "haze": "./bin/haze.js"
+    "haze": "bin/haze.js"
   },
   "files": [
     "bin",

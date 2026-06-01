@@ -2,10 +2,17 @@
 
 ## Unreleased
 
-- Moved skill management into in-app slash commands: `/skills list`, `/skills info`, `/skills validate`, `/skills remove --yes`, `/skills install --yes`, and `/skills build`.
-- Removed top-level skill management shell commands from the Commander CLI.
-- Added `Esc` abort support while Haze is thinking; the active AI SDK request receives an `AbortSignal` cancellation and input is re-enabled.
-- Documented current test and lint scripts.
+## 0.0.2 - 2026-06-01
+
+- Reworked skills into Markdown-first workflows stored in `~/.haze/skills/<name>/SKILL.md`.
+- Added LLM-generated `/skill create <description>` for creating workflow skills from natural language.
+- Exposed installed skills as model-selectable `skill_*` tools and slash-invokable commands.
+- Added slash-command and skill autocomplete with `Tab` completion.
+- Grouped tool calls into compact per-turn activity blocks.
+- Added `listFiles` cursor pagination for large recursive listings.
+- Refined startup/onboarding UI with ASCII logo, status bar, model/workspace details, and clearer setup guidance.
+- Updated README for the minimal LLM harness and adaptive skill workflow.
+- Removed old YAML/executable skill tooling.
 
 ## 0.0.1 - 2026-05-31
 

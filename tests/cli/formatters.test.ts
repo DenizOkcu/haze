@@ -37,11 +37,11 @@ describe('compact', () => {
 
 describe('toolCallSummary', () => {
   it('formats bash commands', () => {
-    expect(toolCallSummary('bash', {command: 'ls -la'})).toBe('$ ls -la');
+    expect(toolCallSummary('bash', {command: 'ls -la'})).toBe('bash $ ls -la');
   });
 
   it('includes timeout for bash commands', () => {
-    expect(toolCallSummary('bash', {command: 'sleep', timeoutSeconds: 30})).toBe('$ sleep (timeout 30s)');
+    expect(toolCallSummary('bash', {command: 'sleep', timeoutSeconds: 30})).toBe('bash $ sleep (timeout 30s)');
   });
 
   it('formats listFiles', () => {

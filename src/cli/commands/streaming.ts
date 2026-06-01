@@ -154,7 +154,7 @@ export async function runAgentTurn(
       }
       const rows = [...grouped.values()];
       const running = visibleItems.some(item => item.status === 'running');
-      const header = running || streaming ? 'Running tools…' : `Tools: ${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'}`;
+      const header = running || streaming ? 'Running tools' : `Tools: ${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'}`;
       const lines = rows.map(({item, count}) => {
         const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
         const countText = count > 1 ? ` ×${count}` : '';
@@ -270,9 +270,9 @@ export async function runAgentTurn(
         onError({error}) {
           callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
         },
-        onFinish({response}) {
-          callbacks.setConversation([...continuationMessages, ...response.messages]);
-          callbacks.debugLog(`conversation updated to ${continuationMessages.length + response.messages.length} messages after follow-up`);
+        onFinish(event) {
+          callbacks.setConversation([...continuationMessages, ...event.response.messages]);
+          callbacks.debugLog(`conversation updated to ${continuationMessages.length + event.response.messages.length} messages after follow-up`);
         },
         experimental_onToolCallStart({toolCall}) {
           sawToolCall = true;
@@ -382,8 +382,8 @@ export async function runAgentTurn(
       onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
       },
-      onFinish({response}) {
-        const nextConversation = [...requestMessages, ...response.messages];
+      onFinish(event) {
+        const nextConversation = [...requestMessages, ...event.response.messages];
         callbacks.setConversation(nextConversation);
         callbacks.debugLog(`conversation updated to ${nextConversation.length} messages`);
       },

@@ -20,6 +20,7 @@ export type Mode = 'chat' | 'apiKey' | 'model';
 
 interface ChatOptions {
   debug?: boolean;
+  version?: string;
 }
 
 const execFile = promisify(execFileCallback);
@@ -31,6 +32,60 @@ async function currentBranchName() {
   } catch {
     return undefined;
   }
+}
+
+function toolCallCount(messages: Message[]) {
+  return messages.reduce((total, message) => {
+    if (message.role !== 'tool') return total;
+    const headerCount = /Tools: (\d+) calls?/.exec(message.text)?.[1];
+    if (headerCount) return total + Number(headerCount);
+    const rows = message.text.split('\n').filter(line => /^\s+[✓✗…]\s/.test(line));
+    return total + rows.reduce((rowTotal, row) => rowTotal + Number(/×(\d+)/.exec(row)?.[1] ?? 1), 0);
+  }, 0);
+}
+
+function estimateTokens(text: string) {
+  return Math.ceil(text.length / 4);
+}
+
+function formatTokenCount(tokens: number) {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(tokens);
+}
+
+function estimateConversationTokens(messages: Message[]) {
+  const inputText = messages
+    .filter(message => message.role === 'user' || message.role === 'tool')
+    .map(message => message.text)
+    .join('\n');
+  const outputText = messages
+    .filter(message => message.role === 'assistant')
+    .map(message => message.text)
+    .join('\n');
+  return {
+    input: estimateTokens(inputText),
+    output: estimateTokens(outputText),
+  };
+}
+
+function ToolMessageText({text, streaming}: {text: string; streaming?: boolean}) {
+  const lines = text.split('\n');
+  return <Box flexDirection="column">
+    {lines.map((line, index) => {
+      const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
+      if (!row) {
+        return <Text key={`${index}-${line}`} color={theme.muted}>
+          {index === 0 && streaming ? <><Spinner type="dots" /> </> : null}{line}
+        </Text>;
+      }
+      const [, indent, icon, toolName, rest] = row;
+      const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;
+      return <Text key={`${index}-${line}`} color={theme.muted}>
+        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{rest}
+      </Text>;
+    })}
+  </Box>;
 }
 
 function startupProviderInfo(settings: HazeSettings) {
@@ -54,7 +109,7 @@ function startupProviderInfo(settings: HazeSettings) {
   ].join('\n');
 }
 
-function ChatScreen({debug = false}: ChatOptions) {
+function ChatScreen({debug = false, version}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const height = stdout.rows ?? process.stdout.rows ?? 24;
@@ -70,7 +125,7 @@ function ChatScreen({debug = false}: ChatOptions) {
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
-  const [busyLabel, setBusyLabel] = useState('Haze is thinking...');
+  const [busyLabel, setBusyLabel] = useState('Haze is thinking');
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
 
@@ -174,7 +229,7 @@ function ChatScreen({debug = false}: ChatOptions) {
     };
     let result;
     if (isSkillCreate) {
-      setBusyLabel('Creating skill...');
+      setBusyLabel('Creating skill');
       setBusy(true);
     }
     try {
@@ -186,7 +241,7 @@ function ChatScreen({debug = false}: ChatOptions) {
     } finally {
       if (isSkillCreate) {
         setBusy(false);
-        setBusyLabel('Haze is thinking...');
+        setBusyLabel('Haze is thinking');
       }
     }
     if (result === 'exit') return exit();
@@ -216,7 +271,7 @@ function ChatScreen({debug = false}: ChatOptions) {
   }
 
   const visible = messages.filter(message => !message.hidden);
-  const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'x-ai/grok-build-0.1' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
+  const placeholder = mode === 'apiKey' ? 'OpenRouter API key' : mode === 'model' ? 'x-ai/grok-build-0.1' : busy ? 'Thinking, allegedly' : 'Ask Haze to help build your app';
   const activeModelName = process.env.HAZE_MODEL ?? settings.model ?? 'x-ai/grok-build-0.1';
   const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey);
   const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model);
@@ -234,7 +289,9 @@ function ChatScreen({debug = false}: ChatOptions) {
     ].join('\n')
     : 'First things first: run /login to add your API key, then /model x-ai/grok-build-0.1 to choose a model.';
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${contextFiles.length} context file${contextFiles.length === 1 ? '' : 's'}`;
+  const toolsUsed = toolCallCount(messages);
+  const estimatedTokens = estimateConversationTokens(messages);
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
   const slashSuggestions: TextInputSuggestion[] = mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/login', description: 'Save an OpenRouter API key', kind: 'command'},
@@ -254,14 +311,18 @@ function ChatScreen({debug = false}: ChatOptions) {
 
   return <Box flexDirection="column" minHeight={height}>
     <Box flexShrink={0}>
-      <Header subtitle={headerSubtitle} />
+      <Header subtitle={headerSubtitle} version={version} />
     </Box>
     <Box flexDirection="column" flexGrow={1}>
       {visible.map((message, index) => <Box key={index} flexDirection="column" marginBottom={1}>
-        <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.muted : theme.muted} bold>
+        <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.blue : theme.muted} bold>
           {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Haze' : message.role === 'tool' ? 'Tool' : 'Info'}
         </Text>
-        {message.role === 'assistant' && !message.streaming ? <MarkdownText content={message.text} /> : <Text color={message.role === 'tool' ? theme.muted : undefined}>{message.streaming && message.role === 'tool' ? <><Spinner type="dots" /> {message.text}</> : message.text}</Text>}
+        {message.role === 'tool'
+          ? <ToolMessageText text={message.text} streaming={message.streaming} />
+          : message.role === 'assistant' && !message.streaming
+            ? <MarkdownText content={message.text} />
+            : <Text>{message.text}</Text>}
       </Box>)}
     </Box>
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
@@ -269,7 +330,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
     </Box>}
     {busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}><Spinner type="dots" /> {busyLabel}</Text>
+      <Text color={theme.muted}><Spinner type="dots" /> {busyLabel}<Text dimColor> · esc to interrupt</Text></Text>
     </Box>}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>

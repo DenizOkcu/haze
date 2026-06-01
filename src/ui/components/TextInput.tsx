@@ -179,7 +179,7 @@ export function TextInput({
       <Text color={theme.purple}>› </Text>
       {value.length === 0 ? <>
         <Text inverse> </Text>
-        <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
+        <Text color={theme.muted} dimColor> {placeholder ?? 'Type a message...'}</Text>
       </> : <>
         {beforeCursor}
         <Text inverse>{cursorChar}</Text>

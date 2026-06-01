@@ -16,7 +16,7 @@ program
   .option('--debug', 'show simple model/tool debug logs in the chat UI');
 
 program.action(async () => {
-  await chatCommand({debug: Boolean(program.opts<{debug?: boolean}>().debug)});
+  await chatCommand({debug: Boolean(program.opts<{debug?: boolean}>().debug), version: pkg.version});
 });
 
 program.parseAsync().catch(error => {
