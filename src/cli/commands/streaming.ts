@@ -54,7 +54,10 @@ function looksIncomplete(text: string) {
 }
 
 function sanitizeAssistantText(text: string) {
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u009B]/g, '');
+  return [...text].filter(char => {
+    const code = char.charCodeAt(0);
+    return !(code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31) || code === 127 || code === 155);
+  }).join('');
 }
 
 function toolInputPath(input: unknown) {
@@ -76,6 +79,7 @@ export interface StreamCallbacks {
   getConversation: () => ModelMessage[];
   getLastAssistantText: () => string;
   setLastAssistantText: (text: string) => void;
+  setAbortController?: (controller: AbortController | null) => void;
 }
 
 export async function runAgentTurn(
@@ -89,6 +93,7 @@ export async function runAgentTurn(
   callbacks.setBusy(true);
   callbacks.addMessage(userMessage);
   const abortController = new AbortController();
+  callbacks.setAbortController?.(abortController);
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
@@ -441,11 +446,17 @@ export async function runAgentTurn(
       callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false});
     }
   } catch (error) {
-    const text = error instanceof Error ? error.message : String(error);
-    callbacks.debugLog(`error: ${text}`);
-    callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
+    if (abortController.signal.aborted) {
+      callbacks.debugLog('request aborted');
+      callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
+    } else {
+      const text = error instanceof Error ? error.message : String(error);
+      callbacks.debugLog(`error: ${text}`);
+      callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
+    }
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
+    callbacks.setAbortController?.(null);
     callbacks.setBusy(false);
   }
 }

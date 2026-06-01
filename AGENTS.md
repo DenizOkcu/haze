@@ -23,6 +23,8 @@ npm run haze         # alias for the above
 
 # Validation & quality gates (run these frequently)
 npm run typecheck    # tsc --noEmit (strict)
+npm test             # vitest test suite
+npm run lint         # eslint src/
 
 # Build
 npm run build        # clean + tsc (outputs to dist/)
@@ -40,14 +42,14 @@ git push origin main --tags
 npm publish --access public
 ```
 
-No `test` or `lint` scripts exist. Typecheck is the primary static gate. `prepublishOnly` enforces typecheck + build.
+Typecheck, tests, and lint are the primary static gates. `prepublishOnly` enforces typecheck + build.
 
-For local skills development: `haze skills validate <dir>`, `haze build-skill ...`, etc.
+For local skills development, use in-app commands from an interactive Haze session: `/skills validate <dir>`, `/skills build <name> <toolName> <description...>`, etc.
 
 ## Architecture and important directories
 
 - `src/` — primary source (TS/TSX)
-  - `cli/` — Commander entrypoint (`index.ts`) and subcommands (`chat.tsx` is the main interactive TUI loop; `skills.tsx` handles skill commands).
+  - `cli/` — Commander entrypoint (`index.ts`) and chat commands (`chat.tsx` is the main interactive TUI loop; `commands.ts` handles slash commands, including `/skills ...`).
   - `llm/` — AI client, Haze's tool definitions (`hazeTools.ts`), system/init prompts.
   - `tools/` — ToolExecutor and runner for agent tools.
   - `skills/` — manifest schema (zod), loader, registry, builder, and GitHub installer.
@@ -81,14 +83,14 @@ File tools are always restricted to the current workspace and are `.gitignore`-a
 - npm + `package-lock.json` only.
 - Runtime TS via `tsx` (dev + skill execution).
 - Build is pure `tsc --outDir dist`.
-- No ESLint, Prettier, or other linters/formatters configured.
+- ESLint is configured for `src/`; no Prettier is configured.
 - Context files loaded at runtime: `AGENTS.md`, `CLAUDE.md` (and their `~/.haze/` global copies) are injected into the system prompt. Walking order starts at filesystem root.
 
 ## Testing / validation expectations
 
-- No unit/integration tests are currently present (`tests/` directory is minimal/empty).
-- Always run `npm run typecheck` before commits, builds, or PRs.
-- Skill-related work must pass `haze skills validate <dir>`.
+- Tests live under `tests/` and run with Vitest (`npm test`).
+- Always run `npm run typecheck`, `npm test`, and `npm run lint` before commits, builds, or PRs when practical.
+- Skill-related work must pass `/skills validate <dir>` inside Haze.
 - Manual smoke-testing via `npm run dev` / `npm run haze` and the published `haze` binary after `npm run build`.
 - For packaging: `npm pack --dry-run` + inspect tarball contents (only `bin/`, `dist/`, docs, and `examples/` ship).
 

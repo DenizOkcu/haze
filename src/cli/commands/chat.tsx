@@ -49,6 +49,7 @@ function ChatScreen({debug = false}: ChatOptions) {
   const [settings, setSettings] = useState<HazeSettings>({});
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
@@ -79,6 +80,12 @@ function ChatScreen({debug = false}: ChatOptions) {
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
+  }
+
+  function cancelThinking() {
+    if (!busy) return;
+    abortControllerRef.current?.abort('User pressed Esc.');
+    setBusy(false);
   }
 
   async function submit(value: string) {
@@ -132,6 +139,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       getConversation: () => conversationRef.current,
       getLastAssistantText: () => lastAssistantTextRef.current,
       setLastAssistantText: text => { lastAssistantTextRef.current = text; },
+      setAbortController: controller => { abortControllerRef.current = controller; },
     });
   }
 
@@ -166,6 +174,7 @@ function ChatScreen({debug = false}: ChatOptions) {
           historyItems={inputHistory}
           recordHistory={mode === 'chat'}
           onHistoryAdd={persistInputHistory}
+          onCancel={cancelThinking}
           onSubmit={submit}
         />
       </Box>

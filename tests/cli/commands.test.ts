@@ -28,6 +28,13 @@ describe('handleSlashCommand', () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/help', ctx)).toBe('handled');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/login'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills help'));
+  });
+
+  it('shows skill command help inside the app', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/skills help', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills list'));
   });
 
   it('clears conversation for /clear', async () => {

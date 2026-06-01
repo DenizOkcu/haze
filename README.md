@@ -54,11 +54,6 @@ export HAZE_MODEL=openai/gpt-4o-mini
 ```bash
 haze
 haze --debug
-haze skills list
-haze skills info <name>
-haze skills validate <dir>
-haze install-skill <githubRepo>
-haze build-skill <description>
 ```
 
 Chat commands:
@@ -69,6 +64,13 @@ Chat commands:
 /model <name>
 /model
 /settings
+/skills help
+/skills list
+/skills info <name>
+/skills validate <dir>
+/skills remove <name> --yes
+/skills install <githubRepo> --yes
+/skills build <name> <toolName> <description...>
 /init
 /clear
 /exit
@@ -80,7 +82,8 @@ Input conveniences:
 
 - `↑` / `↓` browse persisted input history.
 - `←` / `→` move the cursor.
-- `Esc` clears the input field.
+- `Esc` clears the input field while typing.
+- `Esc` aborts the active model/tool turn while Haze is thinking, then re-enables input.
 - `Ctrl+A` / `Ctrl+E` jump to start/end.
 
 Input history is stored in `~/.haze/history/input-history.json`.
@@ -124,13 +127,28 @@ Default skill locations:
 - `~/.haze/skills/`
 - `./.haze/skills/` local overrides global
 
-A skill is a directory containing `skill.yaml`, optional prompts, and TypeScript tool files. Skill tools run in a subprocess via `tsx`.
+A skill is a directory containing `skill.yaml`, optional prompts, and TypeScript tool files. Manage skills from inside the app with `/skills help`.
+
+Skill commands run inside the interactive Haze session, not as top-level shell subcommands:
+
+```txt
+/skills list
+/skills info <name>
+/skills validate <dir>
+/skills remove <name> --yes
+/skills install <githubRepo> --yes
+/skills build <name> <toolName> <description...>
+```
+
+`/skills remove` and `/skills install` require `--yes` because they delete files or install code from the internet.
 
 ## Development
 
 ```bash
 npm install
 npm run typecheck
+npm test
+npm run lint
 npm run build
 npm pack --dry-run
 ```

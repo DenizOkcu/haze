@@ -77,7 +77,7 @@ describe('writeFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function writeFile(params: {path: string; content: string}) {
+  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean}) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
@@ -95,9 +95,16 @@ describe('writeFile tool', () => {
     expect(content).toBe('hello');
   });
 
-  it('overwrites an existing file', async () => {
+  it('refuses to overwrite an existing file without explicit approval', async () => {
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'old');
-    await writeFile({path: 'existing.txt', content: 'new'});
+    await expect(writeFile({path: 'existing.txt', content: 'new'})).rejects.toThrow('Refusing to overwrite existing file');
+    const content = await fs.readFile(path.join(tmp, 'existing.txt'), 'utf8');
+    expect(content).toBe('old');
+  });
+
+  it('overwrites an existing file with explicit approval', async () => {
+    await fs.writeFile(path.join(tmp, 'existing.txt'), 'old');
+    await writeFile({path: 'existing.txt', content: 'new', overwriteExisting: true});
     const content = await fs.readFile(path.join(tmp, 'existing.txt'), 'utf8');
     expect(content).toBe('new');
   });

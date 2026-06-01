@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Moved skill management into in-app slash commands: `/skills list`, `/skills info`, `/skills validate`, `/skills remove --yes`, `/skills install --yes`, and `/skills build`.
+- Removed top-level skill management shell commands from the Commander CLI.
+- Added `Esc` abort support while Haze is thinking; the active AI SDK request receives an `AbortSignal` cancellation and input is re-enabled.
+- Documented current test and lint scripts.
+
 ## 0.0.1 - 2026-05-31
 
 Initial public release.

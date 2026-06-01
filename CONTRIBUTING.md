@@ -22,9 +22,9 @@ npm run lint         # Check code style
 
 ```
 src/
-  cli/          CLI entrypoint and command handlers
+  cli/          CLI entrypoint, chat UI, and in-app slash command handlers
   llm/          AI model client, tools, and prompts
-  skills/       Skill loading, registry, and management
+  skills/       Skill loading, registry, installer, and scaffold builder
   tools/        Tool execution
   config/       Settings, paths, context files
   ui/           React/Ink terminal UI components
@@ -45,6 +45,13 @@ src/
 1. Add handler in `src/cli/commands/commands.ts`
 2. Add command description to `/help` output
 3. Add test for the command
+
+Skill management commands also live here under `/skills ...`; do not add new top-level `haze skills ...` Commander subcommands unless the product direction changes.
+
+## Input and Cancellation
+
+- `Esc` clears the input field while typing.
+- While Haze is thinking, `Esc` aborts the active turn through the AI SDK `abortSignal` path and re-enables input.
 
 ## Adding a Tool
 

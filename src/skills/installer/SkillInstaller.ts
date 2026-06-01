@@ -14,27 +14,44 @@ function repoUrl(spec: string) {
   return spec;
 }
 
-export async function installSkill(spec: string) {
+export async function prepareSkillInstall(spec: string) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-skill-'));
   const url = repoUrl(spec);
-  const clone = spawnSync('git', ['clone', '--depth=1', url, tmp], {stdio: 'inherit'});
-  if (clone.status !== 0) throw new Error('git clone failed');
+  const clone = spawnSync('git', ['clone', '--depth=1', url, tmp], {stdio: 'pipe', encoding: 'utf8'});
+  if (clone.status !== 0) throw new Error(`git clone failed${clone.stderr ? `: ${clone.stderr.trim()}` : ''}`);
   const skill = await loadSkill(tmp, 'global');
   if (!skill) throw new Error('Repository does not contain a root skill.yaml');
-  console.log(`\nSkill: ${skill.manifest.name} ${skill.manifest.version}`);
-  console.log(skill.manifest.description);
-  console.log('\nFiles:');
-  for (const f of await listFilesRecursive(tmp)) console.log(`  ${f}`);
-  const deps = skill.manifest.dependencies;
-  if (deps?.cli?.length) console.log(`\nCLI dependencies: ${deps.cli.map(d => d.name).join(', ')}`);
-  if (deps?.env?.length) console.log(`Env dependencies: ${deps.env.map(d => d.name).join(', ')}`);
-  const dest = path.join(GLOBAL_SKILLS_DIR, skill.manifest.name);
-  if (await fs.pathExists(dest)) console.log(`\nExisting skill will be replaced: ${dest}`);
+  const files = await listFilesRecursive(tmp);
+  return {tmp, url, skill, files, dest: path.join(GLOBAL_SKILLS_DIR, skill.manifest.name)};
+}
+
+export function formatSkillInstallPreview(prepared: Awaited<ReturnType<typeof prepareSkillInstall>>) {
+  const deps = prepared.skill.manifest.dependencies;
+  return [
+    `Skill: ${prepared.skill.manifest.name} ${prepared.skill.manifest.version}`,
+    prepared.skill.manifest.description,
+    '',
+    'Files:',
+    ...prepared.files.map(f => `  ${f}`),
+    deps?.cli?.length ? `\nCLI dependencies: ${deps.cli.map(d => d.name).join(', ')}` : undefined,
+    deps?.env?.length ? `Env dependencies: ${deps.env.map(d => d.name).join(', ')}` : undefined,
+    `\nDestination: ${prepared.dest}`,
+  ].filter(Boolean).join('\n');
+}
+
+export async function activatePreparedSkillInstall(prepared: Awaited<ReturnType<typeof prepareSkillInstall>>) {
+  await fs.remove(prepared.dest);
+  await fs.ensureDir(path.dirname(prepared.dest));
+  await fs.copy(prepared.tmp, prepared.dest, {filter: src => !src.includes(`${path.sep}.git${path.sep}`)});
+  await fs.remove(path.join(prepared.dest, '.git'));
+  return `Installed ${prepared.skill.manifest.name} to ${prepared.dest}`;
+}
+
+export async function installSkill(spec: string) {
+  const prepared = await prepareSkillInstall(spec);
+  console.log(`\n${formatSkillInstallPreview(prepared)}`);
+  if (await fs.pathExists(prepared.dest)) console.log(`\nExisting skill will be replaced: ${prepared.dest}`);
   const ok = await confirm({message: 'Approve and activate this skill? It is code from the internet, regrettably.', default: false});
   if (!ok) return;
-  await fs.remove(dest);
-  await fs.ensureDir(path.dirname(dest));
-  await fs.copy(tmp, dest, {filter: src => !src.includes(`${path.sep}.git${path.sep}`)});
-  await fs.remove(path.join(dest, '.git'));
-  console.log(`Installed ${skill.manifest.name} to ${dest}`);
+  console.log(await activatePreparedSkillInstall(prepared));
 }

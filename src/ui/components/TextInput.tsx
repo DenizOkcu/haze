@@ -9,6 +9,7 @@ export function TextInput({
   historyItems = [],
   recordHistory = true,
   onHistoryAdd,
+  onCancel,
   onSubmit
 }: {
   placeholder?: string;
@@ -17,6 +18,7 @@ export function TextInput({
   historyItems?: string[];
   recordHistory?: boolean;
   onHistoryAdd?: (value: string) => void;
+  onCancel?: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -49,7 +51,10 @@ export function TextInput({
   }
 
   useInput((input, key) => {
-    if (disabled) return;
+    if (disabled) {
+      if (key.escape) onCancel?.();
+      return;
+    }
 
     if (key.escape) {
       setInput('');
