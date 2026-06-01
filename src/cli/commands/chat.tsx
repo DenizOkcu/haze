@@ -18,6 +18,27 @@ interface ChatOptions {
   debug?: boolean;
 }
 
+function startupProviderInfo(settings: HazeSettings) {
+  const model = process.env.HAZE_MODEL ?? settings.model ?? 'openai/gpt-4o-mini';
+  const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'default';
+  const baseURL = process.env.OPENAI_BASE_URL ?? settings.baseURL ?? 'https://openrouter.ai/api/v1';
+  const baseURLSource = process.env.OPENAI_BASE_URL ? 'OPENAI_BASE_URL env' : settings.baseURL ? 'settings' : 'default';
+  const apiKeySource = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY env' : settings.apiKey ? '~/.haze/settings.json' : 'missing';
+  const provider = process.env.OPENAI_BASE_URL
+    ? 'OpenAI-compatible custom endpoint'
+    : settings.provider === 'openrouter' || settings.baseURL || settings.apiKey
+      ? 'OpenRouter'
+      : 'OpenRouter (not logged in)';
+
+  return [
+    'Provider configuration',
+    `- Provider: ${provider}`,
+    `- Model: ${model} (${modelSource})`,
+    `- Base URL: ${baseURL} (${baseURLSource})`,
+    `- API key: ${apiKeySource === 'missing' ? 'not configured; run /login or set OPENAI_API_KEY' : `configured via ${apiKeySource}`}`,
+  ].join('\n');
+}
+
 function ChatScreen({debug = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -35,7 +56,12 @@ function ChatScreen({debug = false}: ChatOptions) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    readSettings().then(setSettings).catch(() => undefined);
+    readSettings().then(next => {
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next)}]);
+    }).catch(() => {
+      setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
+    });
     readInputHistory().then(setInputHistory).catch(() => undefined);
     readContextFiles().then(setContextFiles).catch(() => undefined);
   }, []);
@@ -62,7 +88,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({provider: 'openrouter', apiKey: value, baseURL: 'https://openrouter.ai/api/v1'});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: 'OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.'}]);
+      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next)}`}]);
       return;
     }
 
@@ -70,7 +96,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({model: value});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.`}]);
+      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next)}`}]);
       return;
     }
 
@@ -82,7 +108,11 @@ function ChatScreen({debug = false}: ChatOptions) {
       clearConversation,
       runAgentTurn: (prompt, displayValue) => doAgentTurn(prompt, displayValue),
       refreshContextFiles: async () => { const files = await readContextFiles().catch(() => contextFiles); setContextFiles(files); return files; },
-      updateSettings: patch => { const next = {...settings, ...patch}; setSettings(next); return Promise.resolve(next); },
+      updateSettings: async patch => {
+        const next = await updateSettings(patch);
+        setSettings(next);
+        return next;
+      },
     };
     const result = await handleSlashCommand(value, ctx);
     if (result === 'exit') return exit();

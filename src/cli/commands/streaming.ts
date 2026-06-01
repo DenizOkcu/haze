@@ -11,6 +11,26 @@ function stableToolKey(toolCall: {toolName: string; input: unknown}) {
   return `${toolCall.toolName}:${JSON.stringify(toolCall.input)}`;
 }
 
+function uniqueRepeatedToolNames(toolCalls: Array<{toolName: string; input: unknown}>) {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const toolCall of toolCalls) {
+    const key = stableToolKey(toolCall);
+    if (seen.has(key)) repeated.add(toolCall.toolName);
+    seen.add(key);
+  }
+  return [...repeated] as Array<keyof typeof hazeTools>;
+}
+
+function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
+  let count = 0;
+  for (const step of [...steps].reverse()) {
+    if (step.toolCalls.length === 0 || step.text.trim().length > 0) break;
+    count += 1;
+  }
+  return count;
+}
+
 export interface StreamCallbacks {
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
@@ -42,14 +62,18 @@ export async function runAgentTurn(
     const activeModel = m;
     const requestMessages: ModelMessage[] = [...callbacks.getConversation(), {role: 'user', content: value}];
     callbacks.setConversation(requestMessages);
-    const assistantId = `assistant-${Date.now()}`;
+    let currentAssistantId = `assistant-${Date.now()}`;
     let assistantStarted = false;
+    let currentAssistantText = '';
     let assistantText = '';
+    let toolEpoch = 0;
+    let currentAssistantToolEpoch = 0;
     let editFileFailed = false;
     let mutatingToolSucceeded = false;
     let sawToolCall = false;
     let textAfterTool = false;
     const toolSummaries: string[] = [];
+    const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
     callbacks.debugLog(`request started with ${requestMessages.length} conversation messages`);
     async function streamAssistantResponse(messages: ModelMessage[], reason: string) {
       callbacks.debugLog(`requesting assistant text: ${reason}`);
@@ -62,10 +86,15 @@ export async function runAgentTurn(
       ];
       const followUp = streamText({
         model: activeModel,
+        temperature: 0,
         system: buildSystemPrompt(contextFiles),
         messages: continuationMessages,
         tools: hazeTools,
         toolChoice: 'none',
+        experimental_context: toolExecutionContext,
+        onError({error}) {
+          callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
+        },
         onFinish({response}) {
           callbacks.setConversation([...continuationMessages, ...response.messages]);
           callbacks.debugLog(`conversation updated to ${continuationMessages.length + response.messages.length} messages after follow-up`);
@@ -89,24 +118,41 @@ export async function runAgentTurn(
 
     const result = streamText({
       model: activeModel,
+      temperature: 0,
       system: buildSystemPrompt(contextFiles),
       messages: requestMessages,
       tools: hazeTools,
       stopWhen: stepCountIs(12),
-      prepareStep({steps}) {
+      experimental_context: toolExecutionContext,
+      onError({error}) {
+        callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
+      },
+      prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
-        const consecutiveToolOnlySteps = [...steps].reverse().findIndex(step => step.toolCalls.length === 0 || step.text.trim().length > 0);
-        const toolKeys = new Set<string>();
-        const repeatedToolCall = toolCalls.some(toolCall => {
-          const key = stableToolKey(toolCall);
-          if (toolKeys.has(key)) return true;
-          toolKeys.add(key);
-          return false;
-        });
+        const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
+        const repeatedToolCall = repeatedToolNames.length > 0;
+        const consecutiveToolOnlySteps = toolOnlyStepCount(steps);
 
-        if (mutatingToolSucceeded || toolCalls.length >= 8 || consecutiveToolOnlySteps >= 3 || repeatedToolCall) {
+        if (mutatingToolSucceeded || toolCalls.length >= 8 || consecutiveToolOnlySteps >= 3) {
           callbacks.debugLog('forcing text response to avoid tool loop');
-          return {toolChoice: 'none'};
+          return {
+            toolChoice: 'none',
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: 'Stop calling tools now. Do not repeat earlier status text. Give a concise final summary of what happened and what remains.'},
+            ],
+          };
+        }
+        if (repeatedToolCall) {
+          const activeTools = (Object.keys(hazeTools) as Array<keyof typeof hazeTools>).filter(name => !repeatedToolNames.includes(name));
+          callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
+          return {
+            activeTools,
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool or write the final answer.`},
+            ],
+          };
         }
         if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof hazeTools>};
         return undefined;
@@ -133,6 +179,7 @@ export async function runAgentTurn(
         if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) mutatingToolSucceeded = true;
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
         callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, {text, streaming: false});
+        toolEpoch += 1;
         callbacks.debugLog(event.success
           ? `tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
           : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
@@ -140,12 +187,20 @@ export async function runAgentTurn(
     });
     for await (const delta of result.textStream) {
       if (sawToolCall) textAfterTool = true;
+      if (currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
+        callbacks.updateMessage(currentAssistantId, {streaming: false});
+        currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        currentAssistantText = '';
+        currentAssistantToolEpoch = toolEpoch;
+      }
+
       assistantText += delta;
-      if (!assistantStarted) {
+      currentAssistantText += delta;
+      if (currentAssistantText === delta) {
         assistantStarted = true;
-        callbacks.addMessage({id: assistantId, role: 'assistant', text: delta, streaming: true});
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: currentAssistantText, streaming: true});
       } else {
-        callbacks.updateMessage(assistantId, {text: assistantText});
+        callbacks.updateMessage(currentAssistantId, {text: currentAssistantText});
       }
     }
     let completedConversation = callbacks.getConversation();
@@ -159,7 +214,7 @@ export async function runAgentTurn(
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
     if (assistantStarted) {
       callbacks.setLastAssistantText(assistantText.trim());
-      callbacks.updateMessage(assistantId, {streaming: false});
+      callbacks.updateMessage(currentAssistantId, {streaming: false});
       if (sawToolCall && !textAfterTool) {
         const followUpText = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text');
         if (!followUpText) {
@@ -172,10 +227,10 @@ export async function runAgentTurn(
         const fallback = toolSummaries.length > 0
           ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`
           : 'Finished without a text response.';
-        callbacks.addMessage({id: assistantId, role: 'assistant', text: fallback, streaming: false});
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false});
       }
     } else {
-      callbacks.addMessage({id: assistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false});
+      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false});
     }
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);

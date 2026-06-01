@@ -42,6 +42,48 @@ function numberLines(lines: string[], startLine: number) {
   return lines.map((line, index) => `${String(startLine + index).padStart(4, ' ')} | ${line}`).join('\n');
 }
 
+type ToolExecutionContext = {
+  abortSignal?: AbortSignal;
+  experimental_context?: unknown;
+};
+
+type HazeToolContext = {
+  inFlightToolCalls?: Map<string, Promise<unknown>>;
+};
+
+function toolCallKey(toolName: string, input: unknown) {
+  return `${toolName}:${JSON.stringify(input)}`;
+}
+
+function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
+  return typeof context.experimental_context === 'object' && context.experimental_context != null
+    ? context.experimental_context as HazeToolContext
+    : undefined;
+}
+
+async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
+  const ctx = hazeContext(context);
+  if (!ctx) return execute();
+  ctx.inFlightToolCalls ??= new Map();
+  const key = toolCallKey(toolName, input);
+  if (ctx.inFlightToolCalls.has(key)) {
+    return {
+      ok: true,
+      duplicateSkipped: true,
+      toolName,
+      reason: 'Skipped duplicate in-flight tool call with identical input.',
+    };
+  }
+
+  const promise = execute();
+  ctx.inFlightToolCalls.set(key, promise);
+  try {
+    return await promise;
+  } finally {
+    ctx.inFlightToolCalls.delete(key);
+  }
+}
+
 export const hazeTools = {
   listFiles: tool({
     description: 'List files and directories in the current workspace. Prefer this over bash ls/find for discovering project structure.',
@@ -51,7 +93,7 @@ export const hazeTools = {
       maxEntries: z.number().int().positive().max(500).default(100).describe('Maximum number of entries to return'),
       includeIgnored: z.boolean().default(false).describe('Include files ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: dirPath, recursive, maxEntries, includeIgnored}) => {
+    execute: async ({path: dirPath, recursive, maxEntries, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, includeIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(dirPath);
       await assertNotIgnored(absolutePath, dirPath, includeIgnored);
       const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
@@ -72,7 +114,7 @@ export const hazeTools = {
       }
 
       return {path: dirPath, recursive, includeIgnored, ignoredSkipped, entries, truncated: entries.length >= maxEntries};
-    },
+    }),
   }),
 
   readFile: tool({
@@ -83,7 +125,7 @@ export const hazeTools = {
       limit: z.number().int().positive().max(2000).optional().describe('Maximum number of lines to return'),
       allowIgnored: z.boolean().default(false).describe('Read the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: filePath, offset, limit, allowIgnored}) => {
+    execute: async ({path: filePath, offset, limit, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, allowIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
       const content = await fs.readFile(absolutePath, 'utf8');
@@ -100,7 +142,7 @@ export const hazeTools = {
         lineNumberedText: numberLines(selectedLines, start + 1),
         ...truncate(selected),
       };
-    },
+    }),
   }),
 
   replaceLines: tool({
@@ -112,7 +154,7 @@ export const hazeTools = {
       content: z.string().describe('Replacement content for the line range'),
       allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: filePath, startLine, endLine, content, allowIgnored}) => {
+    execute: async ({path: filePath, startLine, endLine, content, allowIgnored}, context) => runDedupedTool('replaceLines', {path: filePath, startLine, endLine, content, allowIgnored}, context, async () => {
       if (endLine < startLine) throw new Error('endLine must be greater than or equal to startLine');
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
@@ -127,7 +169,7 @@ export const hazeTools = {
       const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
       await fs.writeFile(absolutePath, updated, 'utf8');
       return {ok: true, path: filePath, startLine, endLine, replacementLines: replacementLines.length};
-    },
+    }),
   }),
 
   writeFile: tool({
@@ -137,13 +179,13 @@ export const hazeTools = {
       content: z.string().describe('Complete file contents to write'),
       allowIgnored: z.boolean().default(false).describe('Write the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: filePath, content, allowIgnored}) => {
+    execute: async ({path: filePath, content, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, allowIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
       await fs.mkdir(path.dirname(absolutePath), {recursive: true});
       await fs.writeFile(absolutePath, content, 'utf8');
       return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8')};
-    },
+    }),
   }),
 
   editFile: tool({
@@ -156,7 +198,7 @@ export const hazeTools = {
       })).min(1).describe('One or more non-overlapping exact replacements'),
       allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: filePath, edits, allowIgnored}) => {
+    execute: async ({path: filePath, edits, allowIgnored}, context) => runDedupedTool('editFile', {path: filePath, edits, allowIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
       const original = await fs.readFile(absolutePath, 'utf8');
@@ -180,7 +222,7 @@ export const hazeTools = {
       }
       await fs.writeFile(absolutePath, updated, 'utf8');
       return {ok: true, path: filePath, edits: edits.length};
-    },
+    }),
   }),
 
   bash: tool({
@@ -189,7 +231,7 @@ export const hazeTools = {
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
     }),
-    execute: async ({command, timeoutSeconds}, {abortSignal}) => {
+    execute: async ({command, timeoutSeconds}, context) => runDedupedTool('bash', {command, timeoutSeconds}, context, async () => {
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
       return await new Promise(resolve => {
         const child = spawn('bash', ['-lc', command], {cwd: workspaceRoot(), stdio: ['ignore', 'pipe', 'pipe']});
@@ -200,13 +242,13 @@ export const hazeTools = {
           if (!settled) child.kill('SIGTERM');
         }, timeoutMs);
         const abort = () => child.kill('SIGTERM');
-        abortSignal?.addEventListener('abort', abort, {once: true});
+        context.abortSignal?.addEventListener('abort', abort, {once: true});
         child.stdout.on('data', data => stdout += data.toString());
         child.stderr.on('data', data => stderr += data.toString());
         child.on('close', code => {
           settled = true;
           clearTimeout(timer);
-          abortSignal?.removeEventListener('abort', abort);
+          context.abortSignal?.removeEventListener('abort', abort);
           resolve({
             ok: code === 0,
             code,
@@ -218,11 +260,11 @@ export const hazeTools = {
         child.on('error', error => {
           settled = true;
           clearTimeout(timer);
-          abortSignal?.removeEventListener('abort', abort);
+          context.abortSignal?.removeEventListener('abort', abort);
           resolve({ok: false, command, error: error.message});
         });
       });
-    },
+    }),
   }),
 };
 

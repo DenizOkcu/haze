@@ -1,7 +1,6 @@
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {HazeSettings} from '../../config/settings.js';
-import {updateSettings} from '../../config/settings.js';
 import type {Mode} from './chat.js';
 
 export type CommandContext = {
@@ -23,7 +22,27 @@ export async function handleSlashCommand(
 ): Promise<CommandResult> {
   if (value === '/exit' || value === '/quit') return 'exit';
   if (value === '/help') {
-    ctx.addSystemMessage('Commands: /login, /model <name>, /model, /settings, /init, /clear, /exit');
+    ctx.addSystemMessage([
+      'Commands:',
+      '/help',
+      '  Show all available slash commands and what they do.',
+      '/login',
+      '  Save an OpenRouter API key to ~/.haze/settings.json.',
+      '/model',
+      '  Prompt for an OpenRouter model name to use for future chats.',
+      '/model <name>',
+      '  Set the OpenRouter model directly, for example openai/gpt-4o-mini.',
+      '/settings',
+      '  Show the configured provider, model, API key status, and loaded context files.',
+      '/init',
+      '  Inspect the current workspace and create or update AGENTS.md project instructions.',
+      '/clear',
+      '  Clear the current chat conversation history.',
+      '/exit',
+      '  Exit Haze.',
+      '/quit',
+      '  Exit Haze.',
+    ].join('\n'));
     return 'handled';
   }
   if (value === '/clear') {
@@ -47,9 +66,8 @@ export async function handleSlashCommand(
   }
   if (value.startsWith('/model ')) {
     const modelName = value.slice('/model '.length).trim();
-    const next = await updateSettings({model: modelName});
-    ctx.updateSettings(next);
-    ctx.addSystemMessage(`Model set to ${modelName}.`);
+    await ctx.updateSettings({model: modelName});
+    ctx.addSystemMessage(`Model set to ${modelName}. Saved to ~/.haze/settings.json and will be used until you set a new model.`);
     return 'handled';
   }
   if (value === '/init') {

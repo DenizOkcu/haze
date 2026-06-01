@@ -68,7 +68,8 @@ describe('handleSlashCommand', () => {
   it('sets model directly with /model <name>', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model gpt-4', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('gpt-4'));
+    expect(ctx.updateSettings).toHaveBeenCalledWith({model: 'gpt-4'});
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
   });
 
   it('calls runAgentTurn for /init', async () => {
