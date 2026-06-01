@@ -1,6 +1,12 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Text, useInput} from 'ink';
+import {Box, Text, useInput} from 'ink';
 import {theme} from '../theme.js';
+
+export type TextInputSuggestion = {
+  value: string;
+  description?: string;
+  kind?: 'command' | 'skill';
+};
 
 export function TextInput({
   placeholder,
@@ -8,6 +14,7 @@ export function TextInput({
   mask,
   historyItems = [],
   recordHistory = true,
+  suggestions = [],
   onHistoryAdd,
   onCancel,
   onSubmit
@@ -17,6 +24,7 @@ export function TextInput({
   mask?: boolean;
   historyItems?: string[];
   recordHistory?: boolean;
+  suggestions?: TextInputSuggestion[];
   onHistoryAdd?: (value: string) => void;
   onCancel?: () => void;
   onSubmit: (value: string) => void;
@@ -50,6 +58,20 @@ export function TextInput({
     setInput(history.current[index] ?? '');
   }
 
+  const slashQuery = !mask && value.startsWith('/') ? value.slice(1).toLowerCase() : undefined;
+  const filteredSuggestions = slashQuery == null ? [] : suggestions
+    .filter(suggestion => suggestion.value.slice(1).toLowerCase().includes(slashQuery) || suggestion.description?.toLowerCase().includes(slashQuery))
+    .slice(0, 8);
+  const topSuggestion = filteredSuggestions[0];
+
+  function submitValue(submitted: string) {
+    if (recordHistory) {
+      if (history.current[history.current.length - 1] !== submitted) history.current = [...history.current, submitted];
+      onHistoryAdd?.(submitted);
+    }
+    onSubmit(submitted);
+  }
+
   useInput((input, key) => {
     if (disabled) {
       if (key.escape) onCancel?.();
@@ -63,18 +85,18 @@ export function TextInput({
       return;
     }
 
+    if (key.tab && topSuggestion) {
+      setInput(topSuggestion.value);
+      historyIndex.current = null;
+      return;
+    }
+
     if (key.return) {
-      const submitted = value.trim();
+      const submitted = (value.startsWith('/') && topSuggestion && topSuggestion.value !== value.trim()) ? topSuggestion.value : value.trim();
       setInput('');
       historyIndex.current = null;
       draft.current = '';
-      if (submitted) {
-        if (recordHistory) {
-          if (history.current[history.current.length - 1] !== submitted) history.current = [...history.current, submitted];
-          onHistoryAdd?.(submitted);
-        }
-        onSubmit(submitted);
-      }
+      if (submitted) submitValue(submitted);
       return;
     }
 
@@ -147,15 +169,22 @@ export function TextInput({
   const cursorChar = displayValue[cursor] ?? ' ';
   const afterCursor = displayValue.slice(cursor + 1);
 
-  return <Text wrap="truncate-end">
-    <Text color={theme.purple}>› </Text>
-    {value.length === 0 ? <>
-      <Text inverse> </Text>
-      <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
-    </> : <>
-      {beforeCursor}
-      <Text inverse>{cursorChar}</Text>
-      {afterCursor}
-    </>}
-  </Text>;
+  return <Box flexDirection="column" width="100%">
+    {filteredSuggestions.length > 0 && <Box flexDirection="column" marginBottom={1}>
+      {filteredSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index === 0 ? theme.success : theme.muted} wrap="truncate-end">
+        {index === 0 ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind === 'skill' ? 'skill' : 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
+      </Text>)}
+    </Box>}
+    <Text wrap="truncate-end">
+      <Text color={theme.purple}>› </Text>
+      {value.length === 0 ? <>
+        <Text inverse> </Text>
+        <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
+      </> : <>
+        {beforeCursor}
+        <Text inverse>{cursorChar}</Text>
+        {afterCursor}
+      </>}
+    </Text>
+  </Box>;
 }

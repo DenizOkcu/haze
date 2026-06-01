@@ -1,4 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
+import {execFile as execFileCallback} from 'node:child_process';
+import {promisify} from 'node:util';
 import {Box, render, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
@@ -6,11 +8,13 @@ import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
 import {Header} from '../../ui/components/Header.js';
-import {TextInput} from '../../ui/components/TextInput.js';
+import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message} from './streaming.js';
+import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
+import type {LoadedSkill} from '../../skills/types.js';
 
 export type Mode = 'chat' | 'apiKey' | 'model';
 
@@ -18,7 +22,18 @@ interface ChatOptions {
   debug?: boolean;
 }
 
-function startupProviderInfo(settings: HazeSettings) {
+const execFile = promisify(execFileCallback);
+
+async function currentBranchName() {
+  try {
+    const {stdout} = await execFile('git', ['branch', '--show-current'], {cwd: process.cwd()});
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function startupProviderInfo(settings: HazeSettings, branch?: string) {
   const model = process.env.HAZE_MODEL ?? settings.model ?? 'openai/gpt-4o-mini';
   const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'default';
   const baseURL = process.env.OPENAI_BASE_URL ?? settings.baseURL ?? 'https://openrouter.ai/api/v1';
@@ -36,6 +51,10 @@ function startupProviderInfo(settings: HazeSettings) {
     `- Model: ${model} (${modelSource})`,
     `- Base URL: ${baseURL} (${baseURLSource})`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; run /login or set OPENAI_API_KEY' : `configured via ${apiKeySource}`}`,
+    '',
+    'Workspace',
+    `- Directory: ${process.cwd()}`,
+    `- Git branch: ${branch ?? 'not detected'}`,
   ].join('\n');
 }
 
@@ -55,20 +74,44 @@ function ChatScreen({debug = false}: ChatOptions) {
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('Haze is thinking...');
+  const [skills, setSkills] = useState<LoadedSkill[]>([]);
+  const [branchName, setBranchName] = useState<string | undefined>();
 
   useEffect(() => {
-    readSettings().then(next => {
+    Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
       setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next)}]);
+      setBranchName(branch);
+      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next, branch)}]);
     }).catch(() => {
-      setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
+      currentBranchName().then(branch => {
+        setBranchName(branch);
+        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({}, branch)}]);
+      }).catch(() => {
+        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
+      });
     });
     readInputHistory().then(setInputHistory).catch(() => undefined);
     readContextFiles().then(setContextFiles).catch(() => undefined);
+    refreshSkills().catch(() => undefined);
   }, []);
 
   function persistInputHistory(value: string) {
     addInputHistoryItem(value).then(setInputHistory).catch(() => undefined);
+  }
+
+  async function refreshSkills() {
+    const registry = await loadSkillRegistry();
+    const nextSkills = [...registry.skills.values()];
+    setSkills(nextSkills);
+    return nextSkills;
+  }
+
+  function skillInvocation(value: string) {
+    if (!value.startsWith('/')) return undefined;
+    const name = value.slice(1).trim();
+    if (!name || name.includes(' ')) return undefined;
+    return skills.find(skill => skill.name === name);
   }
 
   function debugLog(line: string) {
@@ -95,7 +138,7 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({provider: 'openrouter', apiKey: value, baseURL: 'https://openrouter.ai/api/v1'});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next)}`}]);
+      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next, branchName)}`}]);
       return;
     }
 
@@ -103,9 +146,17 @@ function ChatScreen({debug = false}: ChatOptions) {
       const next = await updateSettings({model: value});
       setSettings(next);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next)}`}]);
+      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next, branchName)}`}]);
       return;
     }
+
+    const invokedSkill = skillInvocation(value);
+    if (invokedSkill) {
+      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.name}" skill. Call skill_${invokedSkill.name.replace(/[^a-zA-Z0-9_]/g, '_')} and follow its returned instructions.`, value);
+      return;
+    }
+
+    const isSkillCreate = /^\/skills? create(?:\s|$)/.test(value);
 
     const ctx: CommandContext = {
       settings,
@@ -121,9 +172,30 @@ function ChatScreen({debug = false}: ChatOptions) {
         return next;
       },
     };
-    const result = await handleSlashCommand(value, ctx);
+    let result;
+    if (isSkillCreate) {
+      setBusyLabel('Creating skill...');
+      setBusy(true);
+    }
+    try {
+      result = await handleSlashCommand(value, ctx);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
+      return;
+    } finally {
+      if (isSkillCreate) {
+        setBusy(false);
+        setBusyLabel('Haze is thinking...');
+      }
+    }
     if (result === 'exit') return exit();
-    if (result === 'handled') return;
+    if (result === 'handled') {
+      if (value === '/skill create' || value.startsWith('/skill create ') || value === '/skills create' || value.startsWith('/skills create ') || value.startsWith('/skill remove ') || value.startsWith('/skills remove ')) {
+        await refreshSkills().catch(() => undefined);
+      }
+      return;
+    }
 
     await doAgentTurn(value);
   }
@@ -145,6 +217,24 @@ function ChatScreen({debug = false}: ChatOptions) {
 
   const visible = messages.filter(message => !message.hidden);
   const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'openai/gpt-4o-mini' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
+  const activeModelName = process.env.HAZE_MODEL ?? settings.model ?? 'openai/gpt-4o-mini';
+  const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
+  const slashSuggestions: TextInputSuggestion[] = mode === 'chat' ? [
+    {value: '/help', description: 'Show commands', kind: 'command'},
+    {value: '/login', description: 'Save an OpenRouter API key', kind: 'command'},
+    {value: '/model', description: 'Choose a model', kind: 'command'},
+    {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
+    {value: '/skill create ', description: 'Create a Markdown skill', kind: 'command'},
+    {value: '/skill list', description: 'List installed skills', kind: 'command'},
+    {value: '/skill info ', description: 'Show details for a skill', kind: 'command'},
+    {value: '/skill validate ', description: 'Validate a skill', kind: 'command'},
+    {value: '/skill remove ', description: 'Remove a skill with --yes', kind: 'command'},
+    {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
+    {value: '/clear', description: 'Clear conversation history', kind: 'command'},
+    {value: '/exit', description: 'Exit Haze', kind: 'command'},
+    {value: '/quit', description: 'Exit Haze', kind: 'command'},
+    ...skills.map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
+  ] : [];
 
   return <Box flexDirection="column" minHeight={height}>
     <Box flexShrink={0}>
@@ -163,9 +253,9 @@ function ChatScreen({debug = false}: ChatOptions) {
       {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
     </Box>}
     {busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}><Spinner type="dots" /> Haze is thinking...</Text>
+      <Text color={theme.muted}><Spinner type="dots" /> {busyLabel}</Text>
     </Box>}
-    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} height={3} flexShrink={0}>
+    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput
           placeholder={placeholder}
@@ -173,11 +263,16 @@ function ChatScreen({debug = false}: ChatOptions) {
           mask={mode === 'apiKey'}
           historyItems={inputHistory}
           recordHistory={mode === 'chat'}
+          suggestions={slashSuggestions}
           onHistoryAdd={persistInputHistory}
           onCancel={cancelThinking}
           onSubmit={submit}
         />
       </Box>
+    </Box>
+    <Box flexShrink={0} justifyContent="space-between">
+      <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>
+      <Text color={theme.muted} dimColor wrap="truncate-start">{activeModelName}</Text>
     </Box>
   </Box>;
 }

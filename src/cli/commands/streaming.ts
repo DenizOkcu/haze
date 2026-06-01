@@ -2,6 +2,8 @@ import {stepCountIs, streamText, type ModelMessage} from 'ai';
 import {model} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {buildSystemPrompt} from '../../llm/systemPrompt.js';
+import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
+import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {compact, toolCallSummary, toolOutputDetails, toolResultSummary, formatSeconds} from './formatters.js';
 
@@ -107,6 +109,8 @@ export async function runAgentTurn(
       return;
     }
     const activeModel = m;
+    const skillRegistry = await loadSkillRegistry();
+    const availableTools = {...hazeTools, ...buildSkillTools(skillRegistry)};
     const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
     const likelyPlanImplementationRequest = isPlanImplementationRequest(value);
     const likelyActionRequest = isLikelyActionRequest(value);
@@ -186,7 +190,7 @@ export async function runAgentTurn(
         temperature: 0,
         system: buildSystemPrompt(contextFiles),
         messages: continuationMessages,
-        tools: hazeTools,
+        tools: availableTools,
         toolChoice: allowTools ? 'auto' : 'none',
         stopWhen: stepCountIs(10),
         abortSignal: abortController.signal,
@@ -213,14 +217,14 @@ export async function runAgentTurn(
           }
           if (editRecoveryPath && !editRecoveryReadSatisfied) {
             return {
-              activeTools: ['readFile'] as Array<keyof typeof hazeTools>,
+              activeTools: ['readFile'] as Array<keyof typeof availableTools>,
               messages: [
                 ...messages,
                 {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
               ],
             };
           }
-          if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof hazeTools>};
+          if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
           return undefined;
         },
         onError({error}) {
@@ -273,7 +277,7 @@ export async function runAgentTurn(
       temperature: 0,
       system: buildSystemPrompt(contextFiles),
       messages: requestMessages,
-      tools: hazeTools,
+      tools: availableTools,
       stopWhen: stepCountIs(12),
       abortSignal: abortController.signal,
       experimental_context: toolExecutionContext,
@@ -297,7 +301,7 @@ export async function runAgentTurn(
         }
         if (editRecoveryPath && !editRecoveryReadSatisfied) {
           return {
-            activeTools: ['readFile'] as Array<keyof typeof hazeTools>,
+            activeTools: ['readFile'] as Array<keyof typeof availableTools>,
             messages: [
               ...messages,
               {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
@@ -305,7 +309,7 @@ export async function runAgentTurn(
           };
         }
         if (repeatedToolCall) {
-          const activeTools = (Object.keys(hazeTools) as Array<keyof typeof hazeTools>).filter(name => !repeatedToolNames.includes(name));
+          const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as keyof typeof hazeTools));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
           return {
             activeTools,
@@ -334,7 +338,7 @@ export async function runAgentTurn(
             ],
           };
         }
-        if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof hazeTools>};
+        if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
         return undefined;
       },
       onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {

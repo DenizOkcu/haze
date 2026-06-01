@@ -28,13 +28,19 @@ describe('handleSlashCommand', () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/help', ctx)).toBe('handled');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/login'));
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills help'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skill help'));
   });
 
   it('shows skill command help inside the app', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/skills help', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills list'));
+    expect(await handleSlashCommand('/skill help', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skill list'));
+  });
+
+  it('handles singular and plural skill list commands', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/skill list', ctx)).toBe('handled');
+    expect(await handleSlashCommand('/skills list', ctx)).toBe('handled');
   });
 
   it('clears conversation for /clear', async () => {

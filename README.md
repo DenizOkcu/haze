@@ -64,13 +64,12 @@ Chat commands:
 /model <name>
 /model
 /settings
-/skills help
-/skills list
-/skills info <name>
-/skills validate <dir>
-/skills remove <name> --yes
-/skills install <githubRepo> --yes
-/skills build <name> <toolName> <description...>
+/skill help
+/skill create <description>
+/skill list
+/skill info <name>
+/skill validate <name-or-dir>
+/skill remove <name> --yes
 /init
 /clear
 /exit
@@ -98,6 +97,7 @@ Haze exposes a small toolset to the model:
 - `replaceLines` — replace a 1-based line range when exact edits are ambiguous.
 - `writeFile` — create or overwrite files.
 - `bash` — run shell commands for tests, builds, and inspection.
+- `skill_*` — Markdown skills from `~/.haze/skills`, exposed only by name and description until the model chooses one.
 
 Tool calls are shown inline in the chat transcript so you can see what Haze is doing.
 
@@ -122,25 +122,33 @@ Use `AGENTS.md` for shared project instructions. `CLAUDE.md` is supported for co
 
 ## Skills
 
-Default skill locations:
+Skills live in `~/.haze/skills/`. A skill is a directory containing a Markdown `SKILL.md` file. Metadata lives in frontmatter and behavior lives in Markdown instructions. `/skill create <description>` uses Haze's skill-creator prompt with the configured model to generate the new skill files:
 
-- `~/.haze/skills/`
-- `./.haze/skills/` local overrides global
+```md
+---
+name: commit-changes
+description: Use when the user asks to commit, save, checkpoint, or prepare a git commit.
+---
 
-A skill is a directory containing `skill.yaml`, optional prompts, and TypeScript tool files. Manage skills from inside the app with `/skills help`.
+Review uncommitted changes, decide what belongs in the commit, and create a concise commit message.
+
+References:
+- examples/good-commit-message.md
+```
+
+Additional files may live beside `SKILL.md`, but Haze only loads files explicitly referenced from `SKILL.md`. Skills do not execute code; each installed skill is exposed to the model as a `skill_*` tool that returns its instructions and referenced files.
 
 Skill commands run inside the interactive Haze session, not as top-level shell subcommands:
 
 ```txt
-/skills list
-/skills info <name>
-/skills validate <dir>
-/skills remove <name> --yes
-/skills install <githubRepo> --yes
-/skills build <name> <toolName> <description...>
+/skill create <description>
+/skill list
+/skill info <name>
+/skill validate <name-or-dir>
+/skill remove <name> --yes
 ```
 
-`/skills remove` and `/skills install` require `--yes` because they delete files or install code from the internet.
+`/skills ...` remains as a compatibility alias for `/skill ...`. `/skill remove` requires `--yes` because it deletes files.
 
 ## Development
 

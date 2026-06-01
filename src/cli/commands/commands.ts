@@ -21,26 +21,36 @@ export type CommandResult = 'handled' | 'unhandled' | 'exit';
 function skillHelp() {
   return [
     'Skill commands:',
-    '/skills list',
-    '  List installed global and local skills.',
-    '/skills info <name>',
-    '  Show a skill description, tools, and path.',
-    '/skills validate <dir>',
-    '  Validate a skill directory containing skill.yaml.',
-    '/skills remove <name> --yes',
+    '/skill create <description>',
+    '  Create a Markdown skill in ~/.haze/skills.',
+    '/skill list',
+    '  List installed skills.',
+    '/skill info <name>',
+    '  Show a skill description and path.',
+    '/skill validate <name-or-dir>',
+    '  Validate a skill directory containing SKILL.md.',
+    '/skill remove <name> --yes',
     '  Remove an installed skill. Requires --yes because it deletes files.',
-    '/skills install <githubRepo> --yes',
-    '  Clone, inspect, and install a skill from GitHub. Requires --yes.',
-    '/skills build <name> <toolName> <description...>',
-    '  Create a global skill scaffold.',
   ].join('\n');
 }
 
-async function handleSkillsCommand(value: string, ctx: CommandContext): Promise<CommandResult> {
+async function handleSkillCommand(value: string, ctx: CommandContext): Promise<CommandResult> {
   const parts = value.trim().split(/\s+/).filter(Boolean);
   const subcommand = parts[1];
   if (!subcommand || subcommand === 'help') {
     ctx.addSystemMessage(skillHelp());
+    return 'handled';
+  }
+
+  if (subcommand === 'create') {
+    const description = parts.slice(2).join(' ');
+    if (!description) {
+      ctx.addSystemMessage('Usage: /skill create <description>');
+      return 'handled';
+    }
+    const {createSkill} = await import('../../skills/builder/SkillBuilder.js');
+    const result = await createSkill(description);
+    ctx.addSystemMessage(`Created skill ${result.name} at ${result.file}. Edit SKILL.md to refine its workflow.`);
     return 'handled';
   }
 
@@ -50,14 +60,14 @@ async function handleSkillsCommand(value: string, ctx: CommandContext): Promise<
     const skills = [...registry.skills.values()];
     ctx.addSystemMessage(skills.length === 0
       ? 'No installed skills found.'
-      : ['Installed skills:', ...skills.map(s => `- ${s.manifest.name} ${s.manifest.version} — ${s.manifest.description} (${s.source})`)].join('\n'));
+      : ['Installed skills:', ...skills.map(s => `- ${s.name} — ${s.description}`)].join('\n'));
     return 'handled';
   }
 
   if (subcommand === 'info') {
     const name = parts[2];
     if (!name) {
-      ctx.addSystemMessage('Usage: /skills info <name>');
+      ctx.addSystemMessage('Usage: /skill info <name>');
       return 'handled';
     }
     const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
@@ -68,33 +78,34 @@ async function handleSkillsCommand(value: string, ctx: CommandContext): Promise<
       return 'handled';
     }
     ctx.addSystemMessage([
-      `${skill.manifest.name} ${skill.manifest.version}`,
-      skill.manifest.description,
+      `${skill.name}`,
+      skill.description,
       '',
-      'Tools:',
-      ...(skill.tools.length ? skill.tools.map(t => `- ${t.id}: ${t.description}`) : ['- none']),
-      '',
+      `References: ${skill.references.length}`,
       `Path: ${skill.dir}`,
     ].join('\n'));
     return 'handled';
   }
 
   if (subcommand === 'validate') {
-    const dir = parts[2];
-    if (!dir) {
-      ctx.addSystemMessage('Usage: /skills validate <dir>');
+    const target = parts[2];
+    if (!target) {
+      ctx.addSystemMessage('Usage: /skill validate <name-or-dir>');
       return 'handled';
     }
+    const {GLOBAL_SKILLS_DIR} = await import('../../config/paths.js');
     const {loadSkill} = await import('../../skills/SkillLoader.js');
-    const skill = await loadSkill(path.resolve(dir), 'local');
-    ctx.addSystemMessage(skill ? `Valid: ${skill.manifest.name}` : 'No skill.yaml found');
+    const direct = path.resolve(target);
+    const dir = await fs.pathExists(path.join(direct, 'SKILL.md')) ? direct : path.join(GLOBAL_SKILLS_DIR, target);
+    const skill = await loadSkill(dir, 'global');
+    ctx.addSystemMessage(skill ? `Valid: ${skill.name}` : 'No SKILL.md found');
     return 'handled';
   }
 
   if (subcommand === 'remove') {
     const name = parts[2];
     if (!name || !parts.includes('--yes')) {
-      ctx.addSystemMessage('Usage: /skills remove <name> --yes');
+      ctx.addSystemMessage('Usage: /skill remove <name> --yes');
       return 'handled';
     }
     const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
@@ -109,35 +120,7 @@ async function handleSkillsCommand(value: string, ctx: CommandContext): Promise<
     return 'handled';
   }
 
-  if (subcommand === 'install') {
-    const spec = parts[2];
-    if (!spec || !parts.includes('--yes')) {
-      ctx.addSystemMessage('Usage: /skills install <githubRepo> --yes\nThis command installs code from the internet, so explicit --yes is required.');
-      return 'handled';
-    }
-    const {prepareSkillInstall, formatSkillInstallPreview, activatePreparedSkillInstall} = await import('../../skills/installer/SkillInstaller.js');
-    const prepared = await prepareSkillInstall(spec);
-    const preview = formatSkillInstallPreview(prepared);
-    const installed = await activatePreparedSkillInstall(prepared);
-    ctx.addSystemMessage(`${preview}\n\n${installed}`);
-    return 'handled';
-  }
-
-  if (subcommand === 'build') {
-    const name = parts[2];
-    const toolName = parts[3];
-    const description = parts.slice(4).join(' ');
-    if (!name || !toolName || !description) {
-      ctx.addSystemMessage('Usage: /skills build <name> <toolName> <description...>');
-      return 'handled';
-    }
-    const {createSkillScaffold} = await import('../../skills/builder/SkillBuilder.js');
-    const result = await createSkillScaffold(name, toolName, description);
-    ctx.addSystemMessage(`Created ${name} at ${result.dir}. Edit ${result.files.find(file => file.endsWith(`${toolName}.ts`)) ?? 'the generated tool'} before expecting miracles.`);
-    return 'handled';
-  }
-
-  ctx.addSystemMessage(`Unknown skill command: /skills ${subcommand}\n\n${skillHelp()}`);
+  ctx.addSystemMessage(`Unknown skill command: ${parts[0]} ${subcommand}\n\n${skillHelp()}`);
   return 'handled';
 }
 
@@ -159,8 +142,8 @@ export async function handleSlashCommand(
       '  Set the OpenRouter model directly, for example openai/gpt-4o-mini.',
       '/settings',
       '  Show the configured provider, model, API key status, and loaded context files.',
-      '/skills help',
-      '  Manage skills from inside the Haze app.',
+      '/skill help',
+      '  Manage Markdown skills from inside the Haze app.',
       '/init',
       '  Inspect the current workspace and create or update AGENTS.md project instructions.',
       '/clear',
@@ -202,8 +185,9 @@ export async function handleSlashCommand(
     await ctx.refreshContextFiles();
     return 'handled';
   }
-  if (value === '/skills' || value.startsWith('/skills ')) {
-    return await handleSkillsCommand(value, ctx);
+  if (value === '/skill' || value.startsWith('/skill ') || value === '/skills' || value.startsWith('/skills ')) {
+    const normalized = value.replace(/^\/skills\b/, '/skill');
+    return await handleSkillCommand(normalized, ctx);
   }
   if (value.startsWith('/')) {
     ctx.addSystemMessage(`Unknown command: ${value}. Bold start.`);
