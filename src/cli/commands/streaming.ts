@@ -5,7 +5,7 @@ import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {compact, toolCallSummary, toolOutputDetails, toolResultSummary, formatSeconds} from './formatters.js';
 
-export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean};
+export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean};
 
 function stableToolKey(toolCall: {toolName: string; input: unknown}) {
   return `${toolCall.toolName}:${JSON.stringify(toolCall.input)}`;
@@ -45,12 +45,26 @@ function isValidationRequest(value: string) {
   return /\b(run|verify|test|tests|check|validate)\b/i.test(value);
 }
 
+function isPlanImplementationRequest(value: string) {
+  return /\b(implement|execute|do)\b.*\bplan\b|\bplan\.md\b|\btest_plan\.md\b/i.test(value);
+}
+
 function looksIncomplete(text: string) {
   return /\b(incomplete|what remains|remains:|next:|not implemented|not created|no tests exist|created no docs|has not been|have not been|not yet|never executed|not executed|not run|cannot retry|cannot write|cannot validate|tool budget reached)\b/i.test(text);
 }
 
 function sanitizeAssistantText(text: string) {
   return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u009B]/g, '');
+}
+
+function toolInputPath(input: unknown) {
+  return typeof input === 'object' && input != null && 'path' in input && typeof (input as {path?: unknown}).path === 'string'
+    ? (input as {path: string}).path
+    : undefined;
+}
+
+function isDuplicateSkippedOutput(output: unknown) {
+  return typeof output === 'object' && output != null && 'duplicateSkipped' in output && (output as {duplicateSkipped?: unknown}).duplicateSkipped === true;
 }
 
 export interface StreamCallbacks {
@@ -74,6 +88,12 @@ export async function runAgentTurn(
   const userMessage: Message = {role: 'user', text: displayVal};
   callbacks.setBusy(true);
   callbacks.addMessage(userMessage);
+  const abortController = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => abortController.abort('Haze turn timed out after no model/tool activity.'), 90_000);
+  };
 
   try {
     const m = await model();
@@ -82,8 +102,16 @@ export async function runAgentTurn(
       return;
     }
     const activeModel = m;
-    const requestMessages: ModelMessage[] = [...callbacks.getConversation(), {role: 'user', content: value}];
+    const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
+    const likelyPlanImplementationRequest = isPlanImplementationRequest(value);
+    const likelyActionRequest = isLikelyActionRequest(value);
+    const likelyValidationRequest = isValidationRequest(value);
+    const planImplementationGuidance = 'When implementing a plan file, first identify the concrete required checklist items and compare them with the current files. Do not edit source or tests when the required behavior is already present. Implement the smallest clearly required phase or required items, skip optional/design-question items unless explicitly requested, add tests rather than exploratory one-off scripts where possible, use file tools (not bash) for any file changes, run validation once after code/test edits, then update plan status with file tools if requested. Do not call unresolved optional scope a blocker.';
+    const requestMessages: ModelMessage[] = likelyPlanImplementationRequest
+      ? [...callbacks.getConversation(), {role: 'user', content: value}, {role: 'user', content: planImplementationGuidance}]
+      : [...callbacks.getConversation(), {role: 'user', content: value}];
     callbacks.setConversation(requestMessages);
+    resetIdleTimer();
     let currentAssistantId = `assistant-${Date.now()}`;
     let assistantStarted = false;
     let currentAssistantText = '';
@@ -98,19 +126,44 @@ export async function runAgentTurn(
     let textAfterTool = false;
     let forcedContinuationUsed = false;
     let secondContinuationUsed = false;
-    const likelyActionRequest = isLikelyActionRequest(value);
-    const likelyValidationRequest = isValidationRequest(value);
+    let editRecoveryPath: string | undefined;
+    let editRecoveryReadSatisfied = false;
     const toolSummaries: string[] = [];
     const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
     callbacks.debugLog(`request started with ${requestMessages.length} conversation messages; action=${likelyActionRequest}`);
-    function recordToolFinish(event: {toolCall: {toolName: string}; success: boolean; output?: unknown}) {
-      if (!event.success && event.toolCall.toolName === 'editFile') editFileFailed = true;
+    function recordToolFinish(event: {toolCall: {toolName: string; input?: unknown}; success: boolean; output?: unknown}) {
+      const path = toolInputPath(event.toolCall.input);
+      const duplicateSkipped = isDuplicateSkippedOutput(event.output);
+      if (!event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) {
+        editFileFailed = true;
+        editRecoveryPath = path;
+        editRecoveryReadSatisfied = false;
+      }
       if (event.success && ['listFiles', 'readFile'].includes(event.toolCall.toolName)) sawReadOnlyTool = true;
-      if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) mutatingToolSucceeded = true;
+      if (event.success && event.toolCall.toolName === 'readFile' && path && path === editRecoveryPath && !duplicateSkipped) {
+        editRecoveryReadSatisfied = true;
+      }
+      if (event.success && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) {
+        mutatingToolSucceeded = true;
+        if (!path || path === editRecoveryPath) {
+          editRecoveryPath = undefined;
+          editRecoveryReadSatisfied = false;
+          editFileFailed = false;
+        }
+      }
       if (event.success && event.toolCall.toolName === 'bash') {
         const ok = typeof event.output === 'object' && event.output != null && 'ok' in event.output ? Boolean((event.output as {ok?: unknown}).ok) : true;
         if (ok) validationToolSucceeded = true;
       }
+    }
+
+    function formatToolFinishText(event: {toolCall: {toolName: string; input: unknown}; success: boolean; output?: unknown; error?: unknown; durationMs: number}) {
+      const summary = toolResultSummary(event);
+      if (isDuplicateSkippedOutput(event.output)) {
+        return `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n↷ ${summary} in ${formatSeconds(event.durationMs)}`;
+      }
+      const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
+      return `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
     }
 
     async function streamAssistantResponse(messages: ModelMessage[], reason: string, prompt: string, allowTools = false) {
@@ -131,6 +184,7 @@ export async function runAgentTurn(
         tools: hazeTools,
         toolChoice: allowTools ? 'auto' : 'none',
         stopWhen: stepCountIs(10),
+        abortSignal: abortController.signal,
         experimental_context: toolExecutionContext,
         prepareStep({steps, messages}) {
           continuationToolCalls = steps.flatMap(step => step.toolCalls).length;
@@ -140,6 +194,24 @@ export async function runAgentTurn(
               messages: [
                 ...messages,
                 {role: 'user' as const, content: 'Tool budget reached. If the current request is complete, summarize only current-turn changes and validation. If incomplete, state the concrete blocker briefly; do not claim tools are unavailable and do not recap unrelated earlier tasks.'},
+              ],
+            };
+          }
+          if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
+            return {
+              toolChoice: 'none',
+              messages: [
+                ...messages,
+                {role: 'user' as const, content: 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'},
+              ],
+            };
+          }
+          if (editRecoveryPath && !editRecoveryReadSatisfied) {
+            return {
+              activeTools: ['readFile'] as Array<keyof typeof hazeTools>,
+              messages: [
+                ...messages,
+                {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
               ],
             };
           }
@@ -157,22 +229,24 @@ export async function runAgentTurn(
           sawToolCall = true;
           const text = toolCallSummary(toolCall.toolName, toolCall.input);
           callbacks.addMessage({id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true});
+          resetIdleTimer();
           callbacks.debugLog(`follow-up tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
         },
         experimental_onToolCallFinish(event) {
+          resetIdleTimer();
           recordToolFinish(event);
           const summary = toolResultSummary(event);
-          const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
-          const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
+          const text = formatToolFinishText(event);
           toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
-          callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, {text, streaming: false});
-          toolEpoch += 1;
+          callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, isDuplicateSkippedOutput(event.output) ? {text, streaming: false, hidden: true} : {text, streaming: false});
+          if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;
           callbacks.debugLog(event.success
             ? `follow-up tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
             : `follow-up tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
         },
       });
       for await (const rawDelta of followUp.textStream) {
+        resetIdleTimer();
         const delta = sanitizeAssistantText(rawDelta);
         responseText += delta;
         if (!responseStarted) {
@@ -196,6 +270,7 @@ export async function runAgentTurn(
       messages: requestMessages,
       tools: hazeTools,
       stopWhen: stepCountIs(12),
+      abortSignal: abortController.signal,
       experimental_context: toolExecutionContext,
       onError({error}) {
         callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
@@ -206,6 +281,24 @@ export async function runAgentTurn(
         const repeatedToolCall = repeatedToolNames.length > 0;
         const consecutiveToolOnlySteps = toolOnlyStepCount(steps);
 
+        if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
+          return {
+            toolChoice: 'none',
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'},
+            ],
+          };
+        }
+        if (editRecoveryPath && !editRecoveryReadSatisfied) {
+          return {
+            activeTools: ['readFile'] as Array<keyof typeof hazeTools>,
+            messages: [
+              ...messages,
+              {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
+            ],
+          };
+        }
         if (repeatedToolCall) {
           const activeTools = (Object.keys(hazeTools) as Array<keyof typeof hazeTools>).filter(name => !repeatedToolNames.includes(name));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
@@ -251,22 +344,24 @@ export async function runAgentTurn(
         sawToolCall = true;
         const text = toolCallSummary(toolCall.toolName, toolCall.input);
         callbacks.addMessage({id: `tool-${toolCall.toolCallId}`, role: 'tool', text, streaming: true});
+        resetIdleTimer();
         callbacks.debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
       },
       experimental_onToolCallFinish(event) {
+        resetIdleTimer();
         const summary = toolResultSummary(event);
-        const details = event.toolCall.toolName === 'bash' && event.success ? toolOutputDetails(event.output) : '';
-        const text = `${toolCallSummary(event.toolCall.toolName, event.toolCall.input)}\n${event.success ? '✓' : '✗'} ${summary} in ${formatSeconds(event.durationMs)}${details ? `\n\n${details}` : ''}`;
+        const text = formatToolFinishText(event);
         recordToolFinish(event);
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
-        callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, {text, streaming: false});
-        toolEpoch += 1;
+        callbacks.updateMessage(`tool-${event.toolCall.toolCallId}`, isDuplicateSkippedOutput(event.output) ? {text, streaming: false, hidden: true} : {text, streaming: false});
+        if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;
         callbacks.debugLog(event.success
           ? `tool done: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.output)}`
           : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
       }
     });
     for await (const rawDelta of result.textStream) {
+      resetIdleTimer();
       const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
       if (currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
@@ -296,9 +391,11 @@ export async function runAgentTurn(
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
     const finalAssistantText = assistantText.trim();
     const assistantAdmitsIncomplete = looksIncomplete(finalAssistantText);
+    const requestCompletedByTools = mutatingToolSucceeded && validationToolSucceeded && !editRecoveryPath;
     const needsActionContinuation = likelyActionRequest
+      && !requestCompletedByTools
       && ((sawReadOnlyTool && !mutatingToolSucceeded) || editFileFailed || assistantAdmitsIncomplete);
-    const needsValidationContinuation = likelyValidationRequest && !validationToolSucceeded && (sawReadOnlyTool || mutatingToolSucceeded || assistantAdmitsIncomplete);
+    const needsValidationContinuation = likelyValidationRequest && !requestCompletedByTools && !validationToolSucceeded && (sawReadOnlyTool || mutatingToolSucceeded || assistantAdmitsIncomplete);
 
     if (assistantStarted) {
       callbacks.setLastAssistantText(finalAssistantText);
@@ -348,6 +445,7 @@ export async function runAgentTurn(
     callbacks.debugLog(`error: ${text}`);
     callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
   } finally {
+    if (idleTimer) clearTimeout(idleTimer);
     callbacks.setBusy(false);
   }
 }

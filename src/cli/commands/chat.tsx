@@ -135,7 +135,7 @@ function ChatScreen({debug = false}: ChatOptions) {
     });
   }
 
-  const visible = messages;
+  const visible = messages.filter(message => !message.hidden);
   const placeholder = mode === 'apiKey' ? 'OpenRouter API key...' : mode === 'model' ? 'openai/gpt-4o-mini' : busy ? 'Thinking, allegedly...' : 'Ask Haze to help build your app...';
 
   return <Box flexDirection="column" minHeight={height}>

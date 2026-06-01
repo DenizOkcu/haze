@@ -138,6 +138,12 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   }
 }
 
+function looksLikeShellFileMutation(command: string) {
+  return /(^|[;&|]\s*)(sed\s+-i|perl\s+-pi|tee\b|chmod\b|mv\b|cp\b|rm\b|mkdir\b|touch\b)/.test(command)
+    || /(^|\s)(>|>>)(\s|\S)/.test(command)
+    || /\b(File\.write|writeFileSync|writeFile|appendFileSync|appendFile)\b/.test(command);
+}
+
 export const hazeTools = {
   listFiles: tool({
     description: 'List files and directories in the current workspace. Prefer this over bash ls/find for discovering project structure.',
@@ -204,25 +210,30 @@ export const hazeTools = {
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       startLine: z.number().int().positive().describe('First 1-based line number to replace'),
-      endLine: z.number().int().positive().describe('Last 1-based line number to replace, inclusive'),
+      endLine: z.number().int().nonnegative().describe('Last 1-based line number to replace, inclusive. To append at EOF, use startLine=totalLines+1 and endLine=totalLines.'),
       content: z.string().describe('Replacement content for the line range'),
       allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: filePath, startLine, endLine, content, allowIgnored}, context) => runDedupedTool('replaceLines', {path: filePath, startLine, endLine, content, allowIgnored}, context, async () => {
-      if (endLine < startLine) throw new Error('endLine must be greater than or equal to startLine');
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
       const original = await fs.readFile(absolutePath, 'utf8');
       const hasTrailingNewline = original.endsWith('\n');
       const lines = original.split(/\r?\n/);
       if (hasTrailingNewline) lines.pop();
+      const isAppend = startLine === lines.length + 1 && endLine === lines.length;
+      if (!isAppend && endLine < startLine) throw new Error('endLine must be greater than or equal to startLine, except when appending at EOF with startLine=totalLines+1 and endLine=totalLines');
       if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
       if (endLine > lines.length) throw new Error(`endLine ${endLine} is beyond end of file (${lines.length} lines)`);
       const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
-      lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
+      if (isAppend) {
+        lines.push(...replacementLines);
+      } else {
+        lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
+      }
       const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
       await fs.writeFile(absolutePath, updated, 'utf8');
-      return {ok: true, path: filePath, startLine, endLine, replacementLines: replacementLines.length};
+      return {ok: true, path: filePath, startLine, endLine, replacementLines: replacementLines.length, appended: isAppend};
     }),
   }),
 
@@ -290,12 +301,16 @@ export const hazeTools = {
   }),
 
   bash: tool({
-    description: 'Run a bash command in the current workspace. Use for inspecting files, running tests, builds, and other shell tasks. Avoid destructive commands unless the user explicitly asked.',
+    description: 'Run a bash command in the current workspace. Use for tests, builds, validation, and inspection. Do not use bash to edit files; use file tools instead unless the user explicitly requested a shell mutation.',
     inputSchema: z.object({
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
+      allowMutation: z.boolean().default(false).describe('Allow shell commands that mutate files (chmod, redirection, tee, sed -i, File.write, etc.). Use only when explicitly requested or when file tools cannot do the job.'),
     }),
-    execute: async ({command, timeoutSeconds}, context) => runDedupedTool('bash', {command, timeoutSeconds}, context, async () => {
+    execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
+      if (!allowMutation && looksLikeShellFileMutation(command)) {
+        throw new Error('Refusing to mutate files via bash. Use writeFile/editFile/replaceLines, or set allowMutation=true only when shell mutation is explicitly required.');
+      }
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
       return await new Promise(resolve => {
         const child = spawn('bash', ['-lc', command], {cwd: workspaceRoot(), stdio: ['ignore', 'pipe', 'pipe']});
