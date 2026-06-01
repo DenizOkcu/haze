@@ -30,6 +30,7 @@ export function toolCallSummary(toolName: string, input: unknown) {
 export function toolResultSummary(event: {success: boolean; output?: unknown; error?: unknown}) {
   if (!event.success) return `failed: ${compact(event.error)}`;
   const output = event.output as Record<string, unknown> | undefined;
+  if (output?.duplicateSkipped === true && typeof output.reason === 'string') return `skipped: ${output.reason}`;
   if (typeof output?.code === 'number') return `exited with code ${output.code}`;
   if (typeof output?.ok === 'boolean') return output.ok ? 'completed' : `failed: ${compact(output)}`;
   return 'completed';

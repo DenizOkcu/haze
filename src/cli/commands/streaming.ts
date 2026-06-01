@@ -31,11 +31,17 @@ function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
   return count;
 }
 
+function isPlanOnlyRequest(value: string) {
+  return /\b(create|make|write|draft|outline)\s+(?:a\s+)?plan\b|\bplan\s+(?:for|to)\b/i.test(value) && !/\bimplement|execute|do\b/i.test(value);
+}
+
 function isLikelyActionRequest(value: string) {
+  if (isPlanOnlyRequest(value)) return false;
   return /\b(add|create|write|implement|update|fix|change|support|wire|test|tests|document|docs|documentation|run|verify)\b/i.test(value);
 }
 
 function isValidationRequest(value: string) {
+  if (isPlanOnlyRequest(value)) return false;
   return /\b(run|verify|test|tests|check|validate)\b/i.test(value);
 }
 
@@ -91,6 +97,7 @@ export async function runAgentTurn(
     let sawToolCall = false;
     let textAfterTool = false;
     let forcedContinuationUsed = false;
+    let secondContinuationUsed = false;
     const likelyActionRequest = isLikelyActionRequest(value);
     const likelyValidationRequest = isValidationRequest(value);
     const toolSummaries: string[] = [];
@@ -306,7 +313,11 @@ export async function runAgentTurn(
             : mutatingToolSucceeded
               ? 'Your previous response says the current request is incomplete. Continue now with the remaining edits and validation for this same request. Do not summarize a plan unless blocked.'
               : 'You inspected files but have not made the requested change yet. Continue now by editing or writing the necessary files. Do not summarize a plan unless blocked.';
-        await streamAssistantResponse(completedConversation, 'current-turn completion gate', prompt, true);
+        const continuationText = await streamAssistantResponse(completedConversation, 'current-turn completion gate', prompt, true);
+        if (!secondContinuationUsed && looksIncomplete(continuationText) && (likelyActionRequest || likelyValidationRequest)) {
+          secondContinuationUsed = true;
+          await streamAssistantResponse(callbacks.getConversation(), 'post-continuation completion gate', 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If any tools are still available, complete the remaining edit or run the final validation now. Only call something a blocker if a concrete tool failure prevents progress.', true);
+        }
       } else if (sawToolCall && !textAfterTool) {
         const followUpText = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text', 'Continue from the tool result and answer my original request. Do not call tools. Summarize only current-turn changes and validation; do not recap unrelated earlier tasks.', false);
         if (!followUpText) {
@@ -319,6 +330,10 @@ export async function runAgentTurn(
         ? 'Continue the original request now. If it asks for a change, edit or write the necessary files. If it asks to run or verify tests, run the command. Do not provide only a retrospective summary unless blocked.'
         : 'Continue from the tool result and answer my original request. Do not call tools. Summarize only current-turn changes and validation; do not recap unrelated earlier tasks.';
       const followUpText = await streamAssistantResponse(completedConversation, 'tool-only turn completed without text', prompt, allowTools);
+      if (!secondContinuationUsed && allowTools && looksIncomplete(followUpText)) {
+        secondContinuationUsed = true;
+        await streamAssistantResponse(callbacks.getConversation(), 'post-follow-up completion gate', 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If any tools are still available, complete the remaining edit or run the final validation now. Only call something a blocker if a concrete tool failure prevents progress.', true);
+      }
       if (!followUpText) {
         const fallback = toolSummaries.length > 0
           ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`

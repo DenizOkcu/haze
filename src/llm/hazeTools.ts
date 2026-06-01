@@ -51,6 +51,8 @@ type HazeToolContext = {
   inFlightToolCalls?: Map<string, Promise<unknown>>;
   completedToolCalls?: Map<string, number>;
   mutationEpoch?: number;
+  failedMutationPaths?: Set<string>;
+  pathsReadAfterFailedMutation?: Set<string>;
 };
 
 function toolCallKey(toolName: string, input: unknown) {
@@ -71,20 +73,35 @@ function isReadOnlyFileTool(toolName: string) {
   return ['listFiles', 'readFile'].includes(toolName);
 }
 
+function inputPath(input: unknown) {
+  return typeof input === 'object' && input != null && 'path' in input && typeof (input as {path?: unknown}).path === 'string'
+    ? (input as {path: string}).path
+    : undefined;
+}
+
 async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
   const ctx = hazeContext(context);
   if (!ctx) return execute();
   ctx.inFlightToolCalls ??= new Map();
   ctx.completedToolCalls ??= new Map();
+  ctx.failedMutationPaths ??= new Set();
+  ctx.pathsReadAfterFailedMutation ??= new Set();
   ctx.mutationEpoch ??= 0;
   const key = toolCallKey(toolName, input);
+  const pathForInput = inputPath(input);
+  if (isMutatingTool(toolName) && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput)) {
+    throw new Error(`Read ${pathForInput} before attempting another edit after the previous edit failure.`);
+  }
   const completedAt = ctx.completedToolCalls.get(key);
-  if (isReadOnlyFileTool(toolName) && completedAt === ctx.mutationEpoch) {
+  const readAfterFailedMutation = toolName === 'readFile' && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput);
+  if ((isReadOnlyFileTool(toolName) || toolName === 'bash') && completedAt === ctx.mutationEpoch && !readAfterFailedMutation) {
     return {
       ok: true,
       duplicateSkipped: true,
       toolName,
-      reason: 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
+      reason: toolName === 'bash'
+        ? 'Skipped duplicate bash command; no files changed since the previous run.'
+        : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
     };
   }
   if (ctx.inFlightToolCalls.has(key)) {
@@ -100,9 +117,22 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   ctx.inFlightToolCalls.set(key, promise);
   try {
     const result = await promise;
-    if (isMutatingTool(toolName)) ctx.mutationEpoch += 1;
+    if (toolName === 'readFile' && pathForInput) ctx.pathsReadAfterFailedMutation.add(pathForInput);
+    if (isMutatingTool(toolName)) {
+      ctx.mutationEpoch += 1;
+      if (pathForInput) {
+        ctx.failedMutationPaths.delete(pathForInput);
+        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+      }
+    }
     ctx.completedToolCalls.set(key, ctx.mutationEpoch);
     return result;
+  } catch (error) {
+    if (isMutatingTool(toolName) && pathForInput) {
+      ctx.failedMutationPaths.add(pathForInput);
+      ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+    }
+    throw error;
   } finally {
     ctx.inFlightToolCalls.delete(key);
   }
@@ -197,18 +227,28 @@ export const hazeTools = {
   }),
 
   writeFile: tool({
-    description: 'Create or overwrite a UTF-8 text file in the current workspace. Creates parent directories as needed. Use for new files or after smaller edit tools are not suitable.',
+    description: 'Create a UTF-8 text file in the current workspace. For existing files, prefer editFile/replaceLines; set overwriteExisting=true only for an intentional complete rewrite.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       content: z.string().describe('Complete file contents to write'),
+      overwriteExisting: z.boolean().default(false).describe('Required to overwrite an existing file. Prefer editFile or replaceLines for existing files unless a complete rewrite is intentional.'),
       allowIgnored: z.boolean().default(false).describe('Write the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
-    execute: async ({path: filePath, content, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, allowIgnored}, context, async () => {
+    execute: async ({path: filePath, content, overwriteExisting, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, allowIgnored}, context, async () => {
       const absolutePath = resolveWorkspacePath(filePath);
       await assertNotIgnored(absolutePath, filePath, allowIgnored);
+      try {
+        await fs.access(absolutePath);
+        if (!overwriteExisting) {
+          throw new Error(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`);
+        }
+      } catch (error) {
+        const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
+        if (code !== 'ENOENT') throw error;
+      }
       await fs.mkdir(path.dirname(absolutePath), {recursive: true});
       await fs.writeFile(absolutePath, content, 'utf8');
-      return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8')};
+      return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8'), overwritten: overwriteExisting};
     }),
   }),
 
