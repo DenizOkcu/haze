@@ -551,7 +551,7 @@ export async function runAgentTurn(
     goal.phase = 'done';
     goal.status = 'complete';
     turnStatus = 'complete';
-    callbacks.setGoalStatus?.(formatGoalStatus(goal));
+    callbacks.setGoalStatus?.(undefined);
   } catch (error) {
     if (abortController.signal.aborted) {
       turnStatus = 'aborted';

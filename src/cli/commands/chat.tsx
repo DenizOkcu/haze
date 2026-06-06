@@ -18,6 +18,7 @@ import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
+import {createSessionGoal, formatGoalStatus} from '../../core/goal/sessionGoal.js';
 
 export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels';
 
@@ -518,6 +519,14 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
 
     const isSkillCreate = /^\/create-skill(?:\s|$)/.test(value) || /^\/skills? create(?:\s|$)/.test(value);
+    const skillCreateGoal = isSkillCreate ? createSessionGoal(value) : undefined;
+    if (skillCreateGoal) {
+      setDebugLogs([]);
+      setMessages(m => [...m, {role: 'user', text: value}]);
+      const session = sessionRef.current;
+      if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: 'user', text: value}).catch(() => undefined);
+      setActiveGoalStatus(formatGoalStatus(skillCreateGoal));
+    }
 
     const ctx: CommandContext = {
       settings,
@@ -551,11 +560,21 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     try {
       result = await handleSlashCommand(value, ctx);
     } catch (error) {
+      if (skillCreateGoal) {
+        skillCreateGoal.status = 'blocked';
+        skillCreateGoal.blocker = error instanceof Error ? error.message : String(error);
+        setActiveGoalStatus(formatGoalStatus(skillCreateGoal));
+      }
       const text = error instanceof Error ? error.message : String(error);
       setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
       return;
     } finally {
       if (isSkillCreate) {
+        if (skillCreateGoal?.status === 'active') {
+          skillCreateGoal.phase = 'done';
+          skillCreateGoal.status = 'complete';
+          setActiveGoalStatus(undefined);
+        }
         setBusy(false);
         setBusyLabel('Haze is thinking');
       }

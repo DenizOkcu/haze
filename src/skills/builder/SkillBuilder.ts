@@ -71,15 +71,29 @@ type GeneratedSkillFile = {path: string; content: string};
 type GeneratedSkill = {name: string; files: GeneratedSkillFile[]};
 
 const generatedSkillSchema = z.object({
-  name: z.string().min(1).describe('Kebab-case skill name'),
+  name: z.string().min(1).describe('Meaningful kebab-case skill name with 2-4 words'),
   files: z.array(z.object({
     path: z.string().min(1).describe('Relative file path inside the skill directory'),
     content: z.string().describe('Complete file content'),
   })).min(1).describe('Generated skill files, including SKILL.md'),
 });
 
+const SKILL_NAME_STOP_WORDS = new Set([
+  'a', 'an', 'the', 'to', 'for', 'with', 'and', 'or', 'of', 'in', 'on', 'my', 'our', 'me', 'i', 'from', 'against', 'as', 'by', 'into', 'using', 'use', 'when', 'asks', 'ask',
+]);
+
+const SKILL_NAME_TRAILING_FILLER_WORDS = new Set([
+  'write', 'create', 'make', 'build', 'generate', 'do', 'run', 'handle', 'help', 'using', 'with', 'for', 'to',
+]);
+
 export function slug(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'custom-skill';
+  const rawWords = s.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const meaningfulWords = rawWords.filter(word => !SKILL_NAME_STOP_WORDS.has(word));
+  const words = (meaningfulWords.length >= 2 ? meaningfulWords : rawWords).slice(0, 4);
+  while (words.length > 2 && SKILL_NAME_TRAILING_FILLER_WORDS.has(words.at(-1) ?? '')) words.pop();
+  if (words.length === 0) return 'custom-skill';
+  if (words.length === 1) words.push(words[0] === 'custom' ? 'skill' : 'workflow');
+  return words.join('-');
 }
 
 function yamlString(value: string) {
@@ -101,6 +115,23 @@ function withStandardRequirements(content: string) {
   return content.includes('# Operational guardrails') ? content : `${content.trim()}${STANDARD_SKILL_REQUIREMENTS}\n`;
 }
 
+function withSkillName(content: string, name: string) {
+  if (/^---\n[\s\S]*?^name:\s*.*$/m.test(content)) return content.replace(/^(---\n[\s\S]*?^name:\s*).*$/m, `$1${name}`);
+  return content;
+}
+
+function normalizeSkillDescription(description: string) {
+  const trimmed = description.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return 'Use when the user asks for this workflow.';
+  return /^use when\b/i.test(trimmed) ? trimmed : `Use when ${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`;
+}
+
+function withSkillDescription(content: string, description: string) {
+  const normalized = normalizeSkillDescription(description);
+  if (/^---\n[\s\S]*?^description:\s*.*$/m.test(content)) return content.replace(/^(---\n[\s\S]*?^description:\s*).*$/m, `$1${yamlString(normalized)}`);
+  return content;
+}
+
 function extractJson(text: string) {
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/.exec(text);
   return fenced?.[1] ?? text;
@@ -114,6 +145,69 @@ function parseGeneratedSkill(text: string, description: string): GeneratedSkill 
   }) : [];
   if (!files.some(file => file.path === 'SKILL.md')) throw new Error('Generated skill did not include SKILL.md');
   return {name, files};
+}
+
+async function descriptionFromSkillSummary(description: string, finalName: string, files: GeneratedSkillFile[]) {
+  const skillMd = files.find(file => file.path === 'SKILL.md')?.content;
+  if (!skillMd) return normalizeSkillDescription(`the user asks: ${description}`);
+  const activeModel = await model();
+  if (!activeModel) return normalizeSkillDescription(`the user asks: ${description}`);
+  const result = await generateObject({
+    model: activeModel,
+    temperature: 0,
+    schema: z.object({description: z.string().min(1).describe('Final Use when description that tells an LLM when to invoke this skill')}),
+    schemaName: 'GeneratedHazeSkillDescription',
+    schemaDescription: 'A final skill description chosen from the complete generated SKILL.md.',
+    prompt: [
+      'Write the final Haze skill frontmatter description after reading the entire generated SKILL.md.',
+      '',
+      `Original user request: ${description}`,
+      `Final skill name: ${finalName}`,
+      '',
+      'Description rules:',
+      '- Start with "Use when".',
+      '- Optimize for LLM understandability: make it obvious when this skill should be invoked.',
+      '- Summarize the actual workflow in the SKILL.md, not only the user wording.',
+      '- Be specific about the trigger and desired outcome.',
+      '- Keep it one sentence, concise but complete.',
+      '- Avoid vague descriptions like "Use when the user asks for this workflow" unless no better signal exists.',
+      '',
+      'Generated SKILL.md:',
+      skillMd,
+    ].join('\n'),
+  });
+  return normalizeSkillDescription(result.object.description || `the user asks: ${description}`);
+}
+
+async function nameFromSkillSummary(description: string, generatedName: string, files: GeneratedSkillFile[]) {
+  const skillMd = files.find(file => file.path === 'SKILL.md')?.content;
+  if (!skillMd) return slug(generatedName || description);
+  const activeModel = await model();
+  if (!activeModel) return slug(generatedName || description);
+  const result = await generateObject({
+    model: activeModel,
+    temperature: 0,
+    schema: z.object({name: z.string().min(1).describe('Final meaningful 2-4 word kebab-case skill name')}),
+    schemaName: 'GeneratedHazeSkillName',
+    schemaDescription: 'A final skill name chosen from the complete generated SKILL.md.',
+    prompt: [
+      'Choose the final Haze skill directory name after reading the entire generated SKILL.md.',
+      '',
+      `Original user request: ${description}`,
+      `Draft/generated name: ${generatedName}`,
+      '',
+      'Naming rules:',
+      '- Return 2-4 meaningful words in kebab-case.',
+      '- The name must summarize the whole skill workflow, not just copy the first words of the request.',
+      '- Do not include a loose trailing word from a cut-off sentence. Bad: commit-current-changes-write. Good: commit-current-changes.',
+      '- Prefer nouns that convey the outcome, such as review, commit, release-notes, migration, validation, or triage.',
+      '- Avoid vague words like helper, workflow, custom-skill, write, create, make, or do unless they are essential to the meaning.',
+      '',
+      'Generated SKILL.md:',
+      skillMd,
+    ].join('\n'),
+  });
+  return slug(result.object.name || generatedName || description);
 }
 
 function assertSafeGeneratedFile(filePath: string) {
@@ -140,6 +234,10 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
       '',
       'Rules:',
       '- SKILL.md must include frontmatter with name and description.',
+      '- The skill name must be 2-4 meaningful words in kebab-case and convey the workflow intent, for example "branch-diff-review" or "release-notes-draft".',
+      '- Pick the name as if it were written after summarizing the complete SKILL.md, not by truncating the first words of the request.',
+      '- Do not include loose trailing words from cut-off sentences. Bad: "commit-current-changes-write". Good: "commit-current-changes".',
+      '- Avoid vague names like "helper", "workflow", or "custom-skill" unless paired with a specific domain word.',
       '- The frontmatter description must start with "Use when".',
       '- Infer the user intent from the description and make it explicit in the Focused prompt.',
       '- The body must start with these headings immediately after frontmatter: Role, Focused prompt.',
@@ -159,7 +257,11 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
     ].join('\n'),
   });
   const generated = result.object;
-  return {name: slug(generated.name || description), files: generated.files};
+  const draftName = slug(generated.name || description);
+  const finalName = await nameFromSkillSummary(description, draftName, generated.files).catch(() => draftName);
+  const finalDescription = await descriptionFromSkillSummary(description, finalName, generated.files).catch(() => normalizeSkillDescription(`the user asks: ${description}`));
+  const files = generated.files.map(file => file.path === 'SKILL.md' ? {...file, content: withSkillDescription(file.content, finalDescription)} : file);
+  return {name: finalName, files};
 }
 
 export async function createSkill(description: string) {
@@ -178,7 +280,7 @@ export async function createSkill(description: string) {
     const safePath = assertSafeGeneratedFile(generatedFile.path);
     const absolutePath = path.join(dir, safePath);
     await fs.ensureDir(path.dirname(absolutePath));
-    const content = safePath === 'SKILL.md' ? withStandardRequirements(generatedFile.content) : generatedFile.content;
+    const content = safePath === 'SKILL.md' ? withSkillName(withStandardRequirements(generatedFile.content), name) : generatedFile.content;
     await fs.writeFile(absolutePath, content, 'utf8');
   }
 
@@ -198,4 +300,4 @@ export async function createSkill(description: string) {
   return {name, dir, file: skillFile};
 }
 
-export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements};
+export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements, withSkillName, withSkillDescription, normalizeSkillDescription};
