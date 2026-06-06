@@ -76,6 +76,8 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
   });
 }
 
+const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+
 function toolOutputOk(output: unknown, success: boolean) {
   if (!success) return false;
   return !(typeof output === 'object' && output != null && 'ok' in output && (output as {ok?: unknown}).ok === false);
@@ -144,6 +146,7 @@ export async function runAgentTurn(
     resetIdleTimer();
     let currentAssistantId = `assistant-${Date.now()}`;
     let assistantStarted = false;
+    let currentAssistantStarted = false;
     let currentAssistantText = '';
     let assistantText = '';
     let toolEpoch = 0;
@@ -184,7 +187,7 @@ export async function runAgentTurn(
       const compactSuffix = !running && visibleItems.length > 12 ? ` · showing ${compactItems.length} important` : '';
       const header = running || streaming
         ? 'Running tools'
-        : `Tools: ${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed${compactSuffix}`;
+        : `${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed${compactSuffix}`;
       const lines = rows.map(({item, count}) => {
         const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
         const countText = count > 1 ? ` ×${count}` : '';
@@ -256,6 +259,7 @@ export async function runAgentTurn(
       let responseStarted = false;
       let responseText = '';
       let continuationToolCalls = 0;
+      let followUpStreamError: unknown;
       const continuationMessages: ModelMessage[] = [
         ...messages,
         {role: 'user', content: prompt},
@@ -263,6 +267,7 @@ export async function runAgentTurn(
       const followUp = streamText({
         model: activeModel,
         temperature: 0,
+        maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
         system: buildSystemPrompt(contextFiles),
         messages: continuationMessages,
         tools: availableTools,
@@ -303,6 +308,7 @@ export async function runAgentTurn(
           return undefined;
         },
         onError({error}) {
+          followUpStreamError = error;
           callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
         },
         onFinish(event) {
@@ -342,6 +348,11 @@ export async function runAgentTurn(
           callbacks.updateMessage(responseId, {text: displayText});
         }
       }
+      try {
+        await followUp.response;
+      } catch (error) {
+        throw followUpStreamError ?? error;
+      }
       const finalText = hideSyntheticToolCallMarkup(responseText).trim();
       if (responseStarted) {
         callbacks.setLastAssistantText(finalText);
@@ -351,9 +362,11 @@ export async function runAgentTurn(
       return {text: finalText, id: responseId, started: responseStarted};
     }
 
+    let streamError: unknown;
     const result = streamText({
       model: activeModel,
       temperature: 0,
+      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
       system: buildSystemPrompt(contextFiles),
       messages: requestMessages,
       tools: availableTools,
@@ -361,6 +374,7 @@ export async function runAgentTurn(
       abortSignal: abortController.signal,
       experimental_context: toolExecutionContext,
       onError({error}) {
+        streamError = error;
         callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
       },
       prepareStep({steps, messages}) {
@@ -450,10 +464,11 @@ export async function runAgentTurn(
       resetIdleTimer();
       const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
-      if (currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
+      if (currentAssistantStarted && currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: hideSyntheticToolCallMarkup(currentAssistantText).trim()}));
         callbacks.updateMessage(currentAssistantId, {streaming: false});
         currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        currentAssistantStarted = false;
         currentAssistantText = '';
         currentAssistantToolEpoch = toolEpoch;
       }
@@ -461,9 +476,10 @@ export async function runAgentTurn(
       assistantText += delta;
       currentAssistantText += delta;
       const displayText = hideSyntheticToolCallMarkup(currentAssistantText);
-      if (!displayText && !assistantStarted) continue;
-      if (!assistantStarted) {
+      if (!displayText && !currentAssistantStarted) continue;
+      if (!currentAssistantStarted) {
         assistantStarted = true;
+        currentAssistantStarted = true;
         callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
         callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: displayText, streaming: true});
       } else {
@@ -476,8 +492,8 @@ export async function runAgentTurn(
       const response = await result.response;
       completedConversation = [...requestMessages, ...response.messages];
       callbacks.setConversation(completedConversation);
-    } catch {
-      // Keep the conversation from onFinish if the response promise is unavailable.
+    } catch (error) {
+      throw streamError ?? error;
     }
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
     const finalAssistantText = hideSyntheticToolCallMarkup(assistantText).trim();

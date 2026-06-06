@@ -4,6 +4,7 @@
 
 ## 0.0.3 - 2026-06-06
 
+- Added stable transcript rendering for long sessions, compact placeholders for large multiline pastes, and clearer goal/status display.
 - Added OpenAI-compatible provider management with `/provider`, provider-qualified model selection, and legacy OpenRouter settings migration.
 - Added durable workspace sessions with `haze --continue`, `--no-session`, `/session`, `/resume`, `/new`, and `/compact`.
 - Added context compaction and goal-aware completion tracking to improve long-running agent turns.

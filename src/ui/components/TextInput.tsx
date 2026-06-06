@@ -2,6 +2,63 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, useInput} from 'ink';
 import {theme} from '../theme.js';
 
+const COMPACT_PASTE_MIN_LINES = 4;
+
+type PasteBlock = {
+  id: number;
+  start: number;
+  end: number;
+  lineCount: number;
+};
+
+function normalizeLineEndings(text: string) {
+  return text.replace(/\r\n|\r/g, '\n');
+}
+
+function lineCount(text: string) {
+  return normalizeLineEndings(text).split('\n').length;
+}
+
+function pastePlaceholder(block: PasteBlock) {
+  return `[paste #${block.id} +${block.lineCount} lines]`;
+}
+
+function updatePasteBlocksForReplacement(blocks: PasteBlock[], start: number, end: number, insertedLength: number) {
+  const delta = insertedLength - (end - start);
+  return blocks.flatMap(block => {
+    const replacesInsideBlock = start < block.end && end > block.start;
+    const insertsInsideBlock = start === end && start > block.start && start < block.end;
+    if (replacesInsideBlock || insertsInsideBlock) return [];
+    if (block.start >= end) return [{...block, start: block.start + delta, end: block.end + delta}];
+    return [block];
+  });
+}
+
+function displayCursorForValueCursor(blocks: PasteBlock[], valueCursor: number) {
+  let displayCursor = valueCursor;
+  for (const block of [...blocks].sort((a, b) => a.start - b.start)) {
+    const placeholderLength = pastePlaceholder(block).length;
+    const compactedLength = block.end - block.start - placeholderLength;
+    if (valueCursor <= block.start) break;
+    if (valueCursor < block.end) return block.start + placeholderLength;
+    displayCursor -= compactedLength;
+  }
+  return displayCursor;
+}
+
+function compactPasteBlocksForDisplay(value: string, blocks: PasteBlock[]) {
+  if (blocks.length === 0) return value;
+  let displayValue = '';
+  let offset = 0;
+  for (const block of [...blocks].sort((a, b) => a.start - b.start)) {
+    displayValue += value.slice(offset, block.start);
+    displayValue += pastePlaceholder(block);
+    offset = block.end;
+  }
+  displayValue += value.slice(offset);
+  return displayValue;
+}
+
 export type TextInputSuggestion = {
   value: string;
   description?: string;
@@ -37,10 +94,12 @@ export function TextInput({
 }) {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
+  const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const history = useRef<string[]>(historyItems);
   const historyIndex = useRef<number | null>(null);
   const draft = useRef('');
+  const nextPasteId = useRef(1);
 
   useEffect(() => {
     history.current = historyItems;
@@ -50,16 +109,31 @@ export function TextInput({
     if (!disabled) {
       setValue('');
       setCursor(0);
+      setPasteBlocks([]);
       setSelectedSuggestionIndex(0);
       historyIndex.current = null;
       draft.current = '';
+      nextPasteId.current = 1;
     }
   }, [disabled]);
 
-  function setInput(next: string, nextCursor = next.length) {
+  function setInput(next: string, nextCursor = next.length, nextPasteBlocks: PasteBlock[] = []) {
     setValue(next);
     setCursor(Math.max(0, Math.min(nextCursor, next.length)));
+    setPasteBlocks(nextPasteBlocks);
     setSelectedSuggestionIndex(0);
+  }
+
+  function replaceInput(start: number, end: number, inserted: string) {
+    const normalizedInserted = normalizeLineEndings(inserted);
+    const next = value.slice(0, start) + normalizedInserted + value.slice(end);
+    const insertedLineCount = lineCount(normalizedInserted);
+    const updatedPasteBlocks = updatePasteBlocksForReplacement(pasteBlocks, start, end, normalizedInserted.length);
+    const insertedPasteBlock = !mask && insertedLineCount >= COMPACT_PASTE_MIN_LINES
+      ? [{id: nextPasteId.current++, start, end: start + normalizedInserted.length, lineCount: insertedLineCount}]
+      : [];
+    setInput(next, start + normalizedInserted.length, [...updatedPasteBlocks, ...insertedPasteBlock]);
+    historyIndex.current = null;
   }
 
   function showHistory(index: number) {
@@ -97,6 +171,7 @@ export function TextInput({
       setInput('');
       historyIndex.current = null;
       draft.current = '';
+      nextPasteId.current = 1;
       onEscape?.();
       return;
     }
@@ -115,6 +190,7 @@ export function TextInput({
       setInput('');
       historyIndex.current = null;
       draft.current = '';
+      nextPasteId.current = 1;
       if (submitted || submitOnEmpty) submitValue(submitted, historyValue);
       return;
     }
@@ -161,15 +237,13 @@ export function TextInput({
 
     if (key.backspace) {
       if (cursor === 0) return;
-      setInput(value.slice(0, cursor - 1) + value.slice(cursor), cursor - 1);
-      historyIndex.current = null;
+      replaceInput(cursor - 1, cursor, '');
       return;
     }
 
     if (key.delete) {
       if (cursor >= value.length) return;
-      setInput(value.slice(0, cursor) + value.slice(cursor + 1), cursor);
-      historyIndex.current = null;
+      replaceInput(cursor, cursor + 1, '');
       return;
     }
 
@@ -186,15 +260,15 @@ export function TextInput({
     if (key.ctrl && input === 'c') return;
 
     if (input) {
-      setInput(value.slice(0, cursor) + input + value.slice(cursor), cursor + input.length);
-      historyIndex.current = null;
+      replaceInput(cursor, cursor, input);
     }
   });
 
-  const displayValue = mask ? '•'.repeat(value.length) : value;
-  const beforeCursor = displayValue.slice(0, cursor);
-  const cursorChar = displayValue[cursor] ?? ' ';
-  const afterCursor = displayValue.slice(cursor + 1);
+  const displayValue = mask ? '•'.repeat(value.length) : compactPasteBlocksForDisplay(value, pasteBlocks);
+  const displayCursor = mask ? cursor : displayCursorForValueCursor(pasteBlocks, cursor);
+  const beforeCursor = displayValue.slice(0, displayCursor);
+  const cursorChar = displayValue[displayCursor] ?? ' ';
+  const afterCursor = displayValue.slice(displayCursor + 1);
 
   return <Box flexDirection="column" width="100%">
     {filteredSuggestions.length > 0 && <Box flexDirection="column" marginBottom={1}>

@@ -2,6 +2,10 @@
 
 A minimal LLM harness for your terminal.
 
+## What's new in 0.0.3
+
+Haze 0.0.3 keeps long sessions calmer with stable transcript rendering, compact placeholders for large multiline pastes, and clearer goal/status display. Pasted text is still sent to the model with line breaks preserved.
+
 Haze gives an AI model a small set of transparent local tools — read files, edit files, write files, list files, and run commands — then gets out of the way. Start with chat. Build your workflows as you work. Teach Haze with Markdown skills when a pattern repeats. Tiny spell, useful goblin.
 
 Haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.

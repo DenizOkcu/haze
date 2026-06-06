@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import {Box, render, Text, useApp, useStdout} from 'ink';
+import {Box, render, Static, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
@@ -60,6 +60,11 @@ function formatTokenCount(tokens: number) {
   return String(tokens);
 }
 
+function truncateWithEllipsis(text: string, maxLength: number) {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength).trimEnd()}…`;
+}
+
 function displayMessagesFromConversation(conversation: ModelMessage[]): Message[] {
   return conversation.flatMap(message => {
     if (message.role !== 'user' && message.role !== 'assistant') return [];
@@ -86,7 +91,7 @@ function estimateConversationTokens(messages: Message[]) {
 function fullWidthLines(text: string, width: number, leftPadding = 0) {
   const safeWidth = Math.max(1, width);
   const prefix = ' '.repeat(leftPadding);
-  return text.split('\n').map(line => `${prefix}${line}`.padEnd(Math.max(safeWidth, line.length + leftPadding)));
+  return text.replace(/\r\n|\r/g, '\n').split('\n').map(line => `${prefix}${line}`.padEnd(Math.max(safeWidth, line.length + leftPadding)));
 }
 
 function fullWidthBlankLine(width: number) {
@@ -112,6 +117,32 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
   </Box>;
 }
 
+function MessageView({message, width}: {message: Message; width: number}) {
+  if (message.role === 'user') {
+    return <Box flexDirection="column" marginBottom={1}>
+      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
+      <Text color={theme.success} bold backgroundColor={theme.quoteBg}>{'  You asked'.padEnd(width)}</Text>
+      {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color="white" backgroundColor={theme.quoteBg}>{line}</Text>)}
+      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
+    </Box>;
+  }
+
+  return <Box flexDirection="column" marginBottom={1}>
+    <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>
+      {message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}
+    </Text>
+    {message.role === 'tool'
+      ? <ToolMessageText text={message.text} streaming={message.streaming} />
+      : message.role === 'assistant' && !message.streaming
+        ? <MarkdownText content={message.text} />
+        : <Text>{message.text}</Text>}
+  </Box>;
+}
+
+function messageKey(message: Message, index: number) {
+  return message.id ?? `${index}-${message.role}-${message.text}`;
+}
+
 function startupProviderInfo(settings: HazeSettings) {
   const selection = activeModel(settings);
   const model = process.env.HAZE_MODEL ?? selection.model;
@@ -134,7 +165,6 @@ function startupProviderInfo(settings: HazeSettings) {
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
-  const height = stdout.rows ?? process.stdout.rows ?? 24;
   const width = stdout.columns ?? process.stdout.columns ?? 80;
   const [messages, setMessages] = useState<Message[]>([
     {role: 'system', text: 'Welcome to Haze. Use /help for commands.'}
@@ -631,6 +661,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   const visible = messages.filter(message => !message.hidden);
+  const transcriptItems = visible
+    .map((message, index) => ({key: messageKey(message, index), message}))
+    .filter(item => !item.message.streaming);
+  const liveMessages = visible.filter(message => message.streaming);
   const activeSelection = activeModel(settings);
   const placeholder = mode === 'provider'
     ? 'Choose provider'
@@ -668,7 +702,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const estimatedTokens = estimateConversationTokens(messages);
   const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
-  const [goalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
+  const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
+  const goalRequest = truncateWithEllipsis(rawGoalRequest ?? '', 120);
   const goalStatusText = goalStatusParts.join(' · ');
   const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
@@ -690,30 +725,20 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/quit', description: 'Exit Haze', kind: 'command'},
     ...skills.map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
   ] : [];
+  const staticItems = [
+    {kind: 'header' as const, key: `header-${activeModelName}-${hasLogin}-${hasChosenModel}`, subtitle: headerSubtitle},
+    ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
+  ];
 
-  return <Box flexDirection="column" minHeight={height}>
-    <Box flexShrink={0}>
-      <Header subtitle={headerSubtitle} version={version} />
-    </Box>
-    <Box flexDirection="column" flexGrow={1}>
-      {visible.map((message, index) => message.role === 'user'
-        ? <Box key={index} flexDirection="column" marginBottom={1}>
-          <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
-          <Text color={theme.purple} bold backgroundColor={theme.quoteBg}>{'  You asked'.padEnd(width)}</Text>
-          {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color="white" backgroundColor={theme.quoteBg}>{line}</Text>)}
-          <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
-        </Box>
-        : <Box key={index} flexDirection="column" marginBottom={1}>
-          <Text color={message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.blue : theme.muted} bold>
-            {message.role === 'assistant' ? 'Haze' : message.role === 'tool' ? 'Tool' : 'Info'}
-          </Text>
-          {message.role === 'tool'
-            ? <ToolMessageText text={message.text} streaming={message.streaming} />
-            : message.role === 'assistant' && !message.streaming
-              ? <MarkdownText content={message.text} />
-              : <Text>{message.text}</Text>}
-        </Box>)}
-    </Box>
+  return <Box flexDirection="column">
+    <Static items={staticItems}>
+      {item => item.kind === 'header'
+        ? <Header key={item.key} subtitle={item.subtitle} version={version} />
+        : <MessageView key={item.key} message={item.message} width={width} />}
+    </Static>
+    {liveMessages.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {liveMessages.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
+    </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
       {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
@@ -759,6 +784,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 }
 
 export async function chatCommand(options: ChatOptions = {}) {
+  if (process.stdout.isTTY) {
+    process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
+  }
   const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} noSession={options.noSession} />);
   await app.waitUntilExit();
 }
