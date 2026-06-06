@@ -38,7 +38,7 @@ On first run, create or choose a provider, then choose your first model:
 /model
 ```
 
-`/provider` opens provider setup. Pick the default OpenRouter provider, or choose **add provider** for any OpenAI-compatible endpoint. Haze will ask for a provider name, base URL, optional API key, and model names.
+`/provider` opens provider setup for any OpenAI-compatible endpoint — e.g. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. Haze will ask for a provider name, base URL, optional API key, and model names.
 
 `/model` selects the model Haze should use. You can also set one directly:
 
@@ -47,12 +47,13 @@ On first run, create or choose a provider, then choose your first model:
 /model local:llama3.1
 ```
 
-Or use environment variables:
+Or use environment variables for any OpenAI-compatible endpoint:
 
 ```bash
-export OPENAI_API_KEY=... # provider API key, if needed
-export OPENAI_BASE_URL=https://openrouter.ai/api/v1
-export HAZE_MODEL=x-ai/grok-build-0.1
+# e.g. OpenRouter, OpenAI, LM Studio, Ollama, or an OpenAI-compatible proxy
+export OPENAI_API_KEY=... # provider API key, if needed; local providers may not need one
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1 # or http://localhost:1234/v1, http://localhost:11434/v1, ...
+export HAZE_MODEL=x-ai/grok-build-0.1 # or gpt-4.1, llama3.1, qwen2.5-coder, ...
 ```
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key.
@@ -84,15 +85,15 @@ Useful starters:
 
 ## Skills: your workflows, grown while working
 
-Skills are Markdown workflows stored in `~/.haze/skills`.
+Skills are Markdown workflows that Haze creates with `/create-skill` and stores in `~/.haze/skills` so you can inspect or refine them later.
 
-When you notice yourself asking for the same kind of work, make it a skill:
+If you do something for the second time, build a skill for it:
 
 ```txt
 /create-skill review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
 ```
 
-Haze uses the model to create:
+Haze uses the model to create the skill file for you:
 
 ```txt
 ~/.haze/skills/<skill-name>/SKILL.md

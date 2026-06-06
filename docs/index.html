@@ -84,7 +84,7 @@
     }
 
     section {
-      padding: 80px 0;
+      padding: 68px 0;
     }
 
     /* Nav */
@@ -529,7 +529,7 @@
     /* CTA */
     .cta {
       text-align: center;
-      padding: 120px 0 80px;
+      padding: 104px 0 68px;
     }
 
     .cta h2 {
@@ -614,7 +614,7 @@
     /* Responsive */
     @media (max-width: 600px) {
       .hero { padding: 120px 0 60px; }
-      section { padding: 60px 0; }
+      section { padding: 52px 0; }
       .skills-visual { grid-template-columns: 1fr; }
       .install-box { flex-direction: column; }
       nav .links { gap: 16px; }
@@ -761,10 +761,10 @@
         <div class="start-card reveal">
           <ol class="start-steps">
             <li><span class="start-num">01</span><span class="start-cmd">$ haze</span><span>Open Haze from a project directory after installing.</span></li>
-            <li><span class="start-num">02</span><span class="start-cmd">/provider</span><span>Choose OpenRouter or add any OpenAI-compatible endpoint with URL, optional key, and models.</span></li>
+            <li><span class="start-num">02</span><span class="start-cmd">/provider</span><span>Add any OpenAI-compatible endpoint — e.g. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy — with URL, optional key, and models.</span></li>
             <li><span class="start-num">03</span><span class="start-cmd">/model</span><span>Pick the first model, or set one directly like <code>/model local:llama3.1</code>.</span></li>
             <li><span class="start-num">04</span><span class="start-text">Start chatting</span><span>Ask Haze to inspect, edit, run commands, or explain the project.</span></li>
-            <li><span class="start-num">05</span><span class="start-cmd">/create-skill</span><span>Create Markdown skills in <code>~/.haze/skills</code> for reviews, release prep, deploy checks, or your own workflows.</span></li>
+            <li><span class="start-num">05</span><span class="start-cmd">/create-skill</span><span>If you do something for the second time, ask Haze to build a Markdown skill for it; find it later in <code>~/.haze/skills</code>.</span></li>
           </ol>
           <p class="start-note">
             That's the core on purpose. Anything more specific is meant to be created with the LLM through skills.
@@ -799,7 +799,7 @@
 
           <div class="feature reveal">
             <h3>Markdown skills</h3>
-            <p>Notice a pattern? Run <code>/create-skill</code> and teach Haze a new trick. Skills are just Markdown files. No YAML schemas, no plugin APIs, no registry. Write a prompt, save it, use it. Tiny spell, useful goblin.</p>
+            <p>If you do something for the second time, run <code>/create-skill</code> and have Haze turn it into a reusable Markdown workflow. Skills are plain files you can inspect, refine, and version. Tiny spell, useful goblin.</p>
           </div>
 
           <div class="feature reveal">
@@ -848,7 +848,7 @@
           </div>
           <div class="skill-card">
             <div class="slash">~/.haze/skills/</div>
-            <div class="desc">Plain Markdown files. Edit them. Delete them. Version them. They're yours.</div>
+            <div class="desc">Skills created by <code>/create-skill</code> live here as plain Markdown. Inspect, edit, delete, or version them.</div>
           </div>
         </div>
       </div>
@@ -1081,6 +1081,9 @@
         scrollBottom();
         await wait(600 + Math.random() * 300);
       }
+
+      await wait(1400);
+      termBody.scrollTo({top: 0, behavior: 'smooth'});
     }
 
     setTimeout(runTerminal, 800);
