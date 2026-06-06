@@ -9,7 +9,7 @@ Haze is a pragmatic, intentionally limited agentic CLI for building apps from th
 - Published as `@denizokcu/haze` (ESM package).
 - Core is a source-only ESM TypeScript project with a thin published `bin/` + `dist/`.
 - Self-documents its own agent tools and context-file mechanisms (see README).
-- Current version: 0.0.2 (see package.json for exact).
+- Current version: 0.0.3 (see package.json for exact).
 
 ## Common commands
 
@@ -46,7 +46,7 @@ npm publish --access public
 
 Typecheck, tests, and lint are the primary static gates. `prepublishOnly` enforces typecheck + build.
 
-For local skills development, use in-app commands from an interactive Haze session: `/skills validate <dir>`, `/skills build <name> <toolName> <description...>`, etc.
+For local skills development, use in-app commands from an interactive Haze session: `/create-skill <description>`, `/list-skills`, `/skill-info <name>`, `/validate-skill <dir-or-name>`, etc. Legacy `/skill ...` and `/skills ...` aliases still work.
 
 Use `/init` (or the root `/init` command) to create or refresh this AGENTS.md file for the current project.
 
@@ -55,15 +55,15 @@ Use `/init` (or the root `/init` command) to create or refresh this AGENTS.md fi
 - `src/` — primary source (TS/TSX)
   - `cli/` — Commander entrypoint (`index.ts`) and chat commands (`commands/chat.tsx` is the main interactive TUI loop; slash commands including `/skills ...` handled in `commands/commands.ts`; core agent turn/streaming/loop + goal integration in `commands/streaming.ts`; formatters and skills UI in sibling files).
   - `llm/` — AI client (`client.ts`), Haze's tool definitions (`hazeTools.ts`), system/init prompts (`systemPrompt.ts`, `initPrompt.ts`).
-  - `core/goal/` — Session goal model and creation, request intent classification (`requestClassifier.ts`), completion/continuation policy for agent loops (`completionPolicy.ts`), goal observation for phase tracking.
+  - `core/agent/` and `core/goal/` — Conversation compaction, agent event/error helpers, request intent classification, completion/continuation policy for agent loops, and goal observation for phase tracking.
   - `skills/` — Skill loading from SKILL.md + YAML frontmatter (`SkillLoader.ts`), registry (`SkillRegistry.ts`), creation/builder from natural language (`builder/SkillBuilder.ts`), exposure as `skill_*` tools (`skillTools.ts`), types.
-  - `config/` — paths, settings (JSON + env), persistent input history, context-file walker (loads AGENTS.md / CLAUDE.md walking up from cwd + ~/.haze/ copies).
+  - `config/` — paths, provider/model settings (JSON + env), persistent input history, context-file walker (loads AGENTS.md / CLAUDE.md walking up from cwd + ~/.haze/ copies).
   - `ui/` — reusable Ink/React components (TextInput, MarkdownText, etc.) + theme.
   - `utils/` — small fs + yaml + path helpers.
 - `bin/haze.js` — published CLI shim.
 - `examples/skills/` — reference skill templates (directories with `SKILL.md` + optional referenced files, e.g. under `files/`).
 - `dist/` — compiled output (generated; never commit or edit directly).
-- `.haze/` — local skill overrides and runtime data (see .gitignore for `.haze/memory.json`).
+- `.haze/` — local skill overrides and runtime data (sessions/history/memory are ignored where appropriate).
 - `tests/` — Vitest test suite.
 - `docs/` — additional documentation.
 - `.github/` — GitHub workflows and repo config.

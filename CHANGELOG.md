@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.3 - 2026-06-06
+
+- Added OpenAI-compatible provider management with `/provider`, provider-qualified model selection, and legacy OpenRouter settings migration.
+- Added durable workspace sessions with `haze --continue`, `--no-session`, `/session`, `/resume`, `/new`, and `/compact`.
+- Added context compaction and goal-aware completion tracking to improve long-running agent turns.
+- Hardened file tools with structured recoverable failures, safer concurrent mutation handling, line-number-prefix tolerant edits, and EOF-clamped line replacements.
+- Simplified generated skill structure around role, focused prompt, and compact output templates.
+- Updated docs site install/version copy and refreshed dependencies.
+
 ## 0.0.2 - 2026-06-01
 
 - Reworked skills into Markdown-first workflows stored in `~/.haze/skills/<name>/SKILL.md`.

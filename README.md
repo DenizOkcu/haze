@@ -4,7 +4,7 @@ A minimal LLM harness for your terminal.
 
 Haze gives an AI model a small set of transparent local tools — read files, edit files, write files, list files, and run commands — then gets out of the way. Start with chat. Build your workflows as you work. Teach Haze with Markdown skills when a pattern repeats. Tiny spell, useful goblin.
 
-MVP scope: Haze currently uses OpenRouter only. More providers are on the roadmap after the goblin learns to hold a spoon safely.
+Haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.
 
 ```txt
   _
@@ -17,30 +17,47 @@ MVP scope: Haze currently uses OpenRouter only. More providers are on the roadma
 
 Haze keeps guardrails light. The LLM can work from the terminal with freedoms close to yours, while trying to stay scoped to the current project. Watch the tool calls. Keep your hands near the wheel. Progress.
 
-## Install
+## Getting started
+
+Install Haze:
 
 ```bash
 npm install -g @denizokcu/haze
-haze
 ```
 
-First run inside Haze, do both steps:
+Open Haze from your project:
+
+```bash
+$ haze
+```
+
+On first run, create or choose a provider, then choose your first model:
 
 ```txt
-/login
-/model x-ai/grok-build-0.1
+/provider
+/model
 ```
 
-`/login` saves your API key. `/model` saves the model Haze should use. The recommended MVP model is `x-ai/grok-build-0.1`.
+`/provider` opens provider setup. Pick the default OpenRouter provider, or choose **add provider** for any OpenAI-compatible endpoint. Haze will ask for a provider name, base URL, optional API key, and model names.
+
+`/model` selects the model Haze should use. You can also set one directly:
+
+```txt
+/model x-ai/grok-build-0.1
+/model local:llama3.1
+```
 
 Or use environment variables:
 
 ```bash
-export OPENAI_API_KEY=... # your OpenRouter API key
+export OPENAI_API_KEY=... # provider API key, if needed
+export OPENAI_BASE_URL=https://openrouter.ai/api/v1
 export HAZE_MODEL=x-ai/grok-build-0.1
 ```
 
-Saved settings live in `~/.haze/settings.json`. The current MVP experience is documented around OpenRouter; more provider docs are future work.
+Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key.
+
+Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill <description>`. If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
 ## Get productive immediately
 
@@ -50,7 +67,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-Haze will inspect, write files, run commands, and show compact tool activity inline.
+Haze will inspect, write files, run commands, and show compact tool activity inline. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
 
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
@@ -127,11 +144,16 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 
 ```txt
 /help
-/login
-/model <name>
+/provider
 /model
+/model <name-or-provider:name>
+/model list
 /settings
 /init
+/session
+/resume
+/new
+/compact [instructions]
 /clear
 /exit
 
@@ -144,21 +166,31 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 
 Legacy `/skill ...` and `/skills ...` commands still work as aliases.
 
+CLI flags:
+
+```bash
+haze --debug       # show model/tool debug logs
+haze --continue    # resume the latest saved session for this workspace
+haze --no-session  # run without durable session storage
+```
+
 ## Agent tools
 
 Haze exposes a deliberately small toolset:
 
 - `listFiles` — structured discovery, recursive with cursor pagination when needed.
 - `readFile` — read UTF-8 files with optional line ranges.
-- `editFile` — exact unique text replacements.
-- `replaceLines` — line-range edits when exact replacements are awkward.
+- `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
+- `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
 - `bash` — run tests, builds, git commands, and inspections.
 - `skill_*` — load Markdown skill instructions on demand.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. File-tool failures return structured recovery hints instead of mystery stack traces.
 
 ## Context files
+
+Haze saves durable workspace sessions in `~/.haze/sessions`. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context while keeping recent messages.
 
 Haze loads project instructions from:
 
@@ -195,12 +227,14 @@ Package check:
 npm pack --dry-run
 ```
 
-The npm package ships `bin`, `dist`, docs, license, changelog, and examples.
+The npm package ships `bin`, `dist`, README, license, changelog, and examples.
 
 ## Release
 
 ```bash
 npm run typecheck
+npm test
+npm run lint
 npm run build
 npm pack --dry-run
 git tag vX.Y.Z

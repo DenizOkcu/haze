@@ -8,7 +8,7 @@
   <meta property="og:title" content="Haze — Tiny Spell, Useful Goblin">
   <meta property="og:description" content="A pragmatic agentic CLI for building apps from the terminal.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌫️</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.85em' x='.12em' font-size='82' font-family='monospace'>h</text></svg>">
   <style>
     @import 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap';
 
@@ -339,6 +339,77 @@
       color: var(--warning);
     }
 
+    .start-card {
+      max-width: 760px;
+      margin: 32px auto 0;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid rgba(167, 139, 250, 0.08);
+      border-radius: 10px;
+    }
+
+    .start-steps {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 18px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .start-steps li {
+      display: grid;
+      grid-template-columns: 28px minmax(180px, max-content) 1fr;
+      gap: 12px;
+      align-items: baseline;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .start-num, .start-cmd {
+      font-family: var(--font-mono);
+    }
+
+    .start-num {
+      color: var(--purple);
+    }
+
+    .start-cmd {
+      color: var(--warning);
+      background: var(--code-bg);
+      padding: 3px 7px;
+      border-radius: 4px;
+      width: fit-content;
+    }
+
+    .start-text {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .start-note {
+      margin: 0;
+      padding-top: 16px;
+      border-top: 1px solid rgba(167, 139, 250, 0.08);
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .start-note code, .start-steps code {
+      color: var(--warning);
+      font-family: var(--font-mono);
+    }
+
+    @media (max-width: 700px) {
+      .start-steps li {
+        grid-template-columns: 24px 1fr;
+      }
+      .start-steps li span:last-child {
+        grid-column: 2;
+      }
+    }
+
     /* Section headers */
     .section-label {
       font-family: var(--font-mono);
@@ -623,11 +694,12 @@
     <div class="container">
       <a href="#" class="logo">~ haze</a>
       <div class="links">
+        <a href="#getting-started" class="hide-mobile">Start</a>
         <a href="#features" class="hide-mobile">Features</a>
         <a href="#skills" class="hide-mobile">Skills</a>
         <a href="#tools" class="hide-mobile">Tools</a>
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <span class="badge">npm v0.0.2</span>
+        <span class="badge">npm v0.0.3</span>
       </div>
     </div>
   </nav>
@@ -646,7 +718,7 @@
         </p>
 
         <div class="install-box">
-          <code><span class="dollar">$ </span>npm i -g @denizokcu/haze && haze</code>
+          <code><span class="dollar">$ </span>npm i -g @denizokcu/haze</code>
           <button class="copy-btn" id="copy-btn" onclick="copyInstall()">copy</button>
         </div>
 
@@ -665,10 +737,38 @@
           <div class="t-status" id="status-bar">
             <div class="t-status-row">
               <span>~/calc-app <span class="t-branch">(main)</span></span>
-              <span>anthropic/claude-sonnet-4.6</span>
+              <span>x-ai/grok-build-0.1</span>
             </div>
             <div class="t-status-counts">8 messages / 5 tool calls / 0 skills</div>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- Getting started -->
+    <section id="getting-started">
+      <div class="container">
+        <div class="center reveal">
+          <p class="section-label">// getting started</p>
+          <h2 class="section-title">Install. Add a provider.<br>Pick a model.</h2>
+          <p class="section-desc">
+            Haze starts intentionally small. First give it an OpenAI-compatible provider, then select the model it should use.
+          </p>
+        </div>
+
+        <div class="start-card reveal">
+          <ol class="start-steps">
+            <li><span class="start-num">01</span><span class="start-cmd">$ haze</span><span>Open Haze from a project directory after installing.</span></li>
+            <li><span class="start-num">02</span><span class="start-cmd">/provider</span><span>Choose OpenRouter or add any OpenAI-compatible endpoint with URL, optional key, and models.</span></li>
+            <li><span class="start-num">03</span><span class="start-cmd">/model</span><span>Pick the first model, or set one directly like <code>/model local:llama3.1</code>.</span></li>
+            <li><span class="start-num">04</span><span class="start-text">Start chatting</span><span>Ask Haze to inspect, edit, run commands, or explain the project.</span></li>
+            <li><span class="start-num">05</span><span class="start-cmd">/create-skill</span><span>Create Markdown skills in <code>~/.haze/skills</code> for reviews, release prep, deploy checks, or your own workflows.</span></li>
+          </ol>
+          <p class="start-note">
+            That's the core on purpose. Anything more specific is meant to be created with the LLM through skills.
+          </p>
         </div>
       </div>
     </section>
@@ -688,39 +788,33 @@
 
         <div class="features">
           <div class="feature reveal">
-            <span class="icon">🌫️</span>
             <h3>Born in the terminal</h3>
             <p>No web UI. No Electron. No Docker container that spawns other Docker containers. Haze lives in your terminal where code happens. Interactive TUI with streaming, syntax highlighting, and tool-call transparency. Watch it work. Keep your hands near the wheel.</p>
           </div>
 
           <div class="feature reveal">
-            <span class="icon">🔧</span>
             <h3>Deliberately small toolset</h3>
             <p>Read, edit, write, list, bash. That's it. No 47-tool sprawl. No tool that scaffolds a tool that generates a plan that plans to generate a plan. The model has six tricks. It's surprisingly effective.</p>
           </div>
 
           <div class="feature reveal">
-            <span class="icon">📜</span>
             <h3>Markdown skills</h3>
-            <p>Notice a pattern? Run <code>/skill create</code> and teach Haze a new trick. Skills are just Markdown files. No YAML schemas, no plugin APIs, no registry. Write a prompt, save it, use it. Tiny spell, useful goblin.</p>
+            <p>Notice a pattern? Run <code>/create-skill</code> and teach Haze a new trick. Skills are just Markdown files. No YAML schemas, no plugin APIs, no registry. Write a prompt, save it, use it. Tiny spell, useful goblin.</p>
           </div>
 
           <div class="feature reveal">
-            <span class="icon">🧠</span>
             <h3>Context-aware</h3>
-            <p>Reads <code>AGENTS.md</code> and <code>CLAUDE.md</code> from your project and home directory. Haze learns your conventions, your stack, your weird naming schemes. It adapts. Rude, but in a good way.</p>
+            <p>Reads <code>AGENTS.md</code> and <code>CLAUDE.md</code> from your project and home directory. Durable sessions can be resumed with <code>haze --continue</code>, and <code>/compact</code> keeps long chats manageable. Rude, but in a good way.</p>
           </div>
 
           <div class="feature reveal">
-            <span class="icon">🛡️</span>
             <h3>Light guardrails</h3>
             <p>File tools scoped to your workspace. Gitignore-aware by default. Bash mutations discouraged. Destructive actions require confirmation. Powerful enough to help, dumb enough to deserve supervision.</p>
           </div>
 
           <div class="feature reveal">
-            <span class="icon">🔌</span>
             <h3>Bring your own model</h3>
-            <p>Works with any OpenAI-compatible API via <code>/login</code> or environment variables. Grok, GPT, Claude, DeepSeek, your weird local llama — if it speaks the protocol, Haze speaks to it. Default: <code>anthropic/claude-sonnet-4.6</code>.</p>
+            <p>Works with any OpenAI-compatible API via <code>/provider</code>, <code>/model</code>, or environment variables. Grok, GPT, Claude, DeepSeek, your weird local llama — if it speaks the protocol, Haze speaks to it. Default: <code>x-ai/grok-build-0.1</code>.</p>
           </div>
         </div>
       </div>
@@ -741,7 +835,7 @@
 
         <div class="skills-visual reveal">
           <div class="skill-card">
-            <div class="slash">/skill create</div>
+            <div class="slash">/create-skill</div>
             <div class="desc">Describe what you want. Haze writes the Markdown. You refine it. Done.</div>
           </div>
           <div class="skill-card">
@@ -917,14 +1011,14 @@
     async function runTerminal() {
       // === TURN 1: Create a skill ===
       await wait(300);
-      await typeInto(inputText, '/skill create you are a security reviewer', 32);
+      await typeInto(inputText, '/create-skill you are a security reviewer', 32);
       await wait(400);
 
-      await addYouLine('/skill create you are a security reviewer');
+      await addYouLine('/create-skill you are a security reviewer');
       await wait(500);
 
       const skillTools = [
-        { name: 'writeFile', args: '~/.haze/skills/security-reviewer.md', time: '0.04s' },
+        { name: 'writeFile', args: '~/.haze/skills/security-reviewer/SKILL.md', time: '0.04s' },
       ];
       await addTools(skillTools);
       await wait(300);
@@ -967,7 +1061,7 @@
         { html: '' },
         { html: '<span style="color:var(--danger)">● CRITICAL</span> <span style="color:var(--text)">auth.ts:42</span> — Admin password is "admin123". This is not a placeholder. Someone deployed this on a Friday.' },
         { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">auth.ts:89</span> — SQL injection via user input. Bob from accounting could DROP TABLE the entire database. Bob would.' },
-        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">.env</span> — API keys committed to git. Pushed straight to main. The commit message was "fixed stuff 🚀".' },
+        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">.env</span> — API keys committed to git. Pushed straight to main. The commit message was "fixed stuff".' },
         { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">session.ts:18</span> — No HTTPS. Everything sent in plain text over HTTP. Very retro. Very 1997.' },
         { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">api/users.ts:53</span> — eval() on user input. ChatGPT really said "this looks good" and we just went with it huh.' },
         { html: '<span style="color:var(--success)">● LOW</span>  <span style="color:var(--text)">auth.ts:7</span> — No rate limiting. A determined toddler could brute-force this login.' },
@@ -992,7 +1086,7 @@
     setTimeout(runTerminal, 800);
 
     function copyInstall() {
-      navigator.clipboard.writeText('npm i -g @denizokcu/haze && haze');
+      navigator.clipboard.writeText('npm i -g @denizokcu/haze');
       const btn = document.getElementById('copy-btn');
       btn.textContent = 'copied!';
       setTimeout(() => { btn.textContent = 'copy'; }, 2000);
