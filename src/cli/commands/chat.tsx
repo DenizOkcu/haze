@@ -169,6 +169,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [messages, setMessages] = useState<Message[]>([
     {role: 'system', text: 'Welcome to Haze. Use /help for commands.'}
   ]);
+  const [liveMessages, setLiveMessages] = useState<Message[]>([]);
+  const liveMessagesRef = useRef<Message[]>([]);
+  const setLiveMessagesState = (updater: (messages: Message[]) => Message[]) => {
+    setLiveMessages(previous => {
+      const next = updater(previous);
+      liveMessagesRef.current = next;
+      return next;
+    });
+  };
   const [settings, setSettings] = useState<HazeSettings>({});
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
@@ -264,6 +273,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         sessionRef.current = session;
         conversationRef.current = conversation;
         setSessionLabel(session.id);
+        setLiveMessagesState(() => []);
         setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
         return;
       }
@@ -274,6 +284,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   function clearConversation() {
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
+    setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
     const session = sessionRef.current;
     if (session) void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'clear', text: 'Conversation cleared'}).catch(() => undefined);
@@ -305,6 +316,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     sessionRef.current = session;
     conversationRef.current = conversation;
     setSessionLabel(session.id);
+    setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
   }
 
@@ -568,6 +580,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       newSession: async () => {
         conversationRef.current = [];
         lastAssistantTextRef.current = '';
+        setLiveMessagesState(() => []);
         setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
         await startNewSession('Started a new session.');
       },
@@ -633,13 +646,38 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string) {
+    const persistUiMessage = (msg: Message) => {
+      const session = sessionRef.current;
+      if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: msg.role, text: msg.text}).catch(() => undefined);
+    };
+    const finalizeMessage = (msg: Message) => {
+      if (msg.hidden) return;
+      setMessages(m => [...m, msg]);
+      persistUiMessage(msg);
+    };
+
     await runAgentTurn(value, displayValue, contextFiles, {
       addMessage: msg => {
-        setMessages(m => [...m, msg]);
-        const session = sessionRef.current;
-        if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: msg.role, text: msg.text}).catch(() => undefined);
+        if (msg.streaming) {
+          setLiveMessagesState(m => [...m, msg]);
+          return;
+        }
+        finalizeMessage(msg);
       },
-      updateMessage: (id, update) => setMessages(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg)),
+      updateMessage: (id, update) => {
+        const liveMessage = liveMessagesRef.current.find(msg => msg.id === id);
+        if (liveMessage) {
+          const updated = {...liveMessage, ...update};
+          if (updated.streaming === false) {
+            setLiveMessagesState(m => m.filter(msg => msg.id !== id));
+            finalizeMessage(updated);
+            return;
+          }
+          setLiveMessagesState(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg));
+          return;
+        }
+        setMessages(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg));
+      },
       setConversation: msgs => {
         conversationRef.current = msgs;
         const session = sessionRef.current;
@@ -661,10 +699,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   const visible = messages.filter(message => !message.hidden);
-  const transcriptItems = visible
-    .map((message, index) => ({key: messageKey(message, index), message}))
-    .filter(item => !item.message.streaming);
-  const liveMessages = visible.filter(message => message.streaming);
+  const transcriptItems = visible.map((message, index) => ({key: messageKey(message, index), message}));
+  const activeLiveMessages = liveMessages.filter(message => !message.hidden);
   const activeSelection = activeModel(settings);
   const placeholder = mode === 'provider'
     ? 'Choose provider'
@@ -698,8 +734,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     ].join('\n')
     : 'First things first: run /provider to choose or add a provider, then select a model.';
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
-  const toolsUsed = toolCallCount(messages);
-  const estimatedTokens = estimateConversationTokens(messages);
+  const allDisplayMessages = [...messages, ...liveMessages];
+  const toolsUsed = toolCallCount(allDisplayMessages);
+  const estimatedTokens = estimateConversationTokens(allDisplayMessages);
   const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
@@ -736,8 +773,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
         : <MessageView key={item.key} message={item.message} width={width} />}
     </Static>
-    {liveMessages.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {liveMessages.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
+    {activeLiveMessages.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {activeLiveMessages.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
