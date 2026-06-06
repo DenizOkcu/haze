@@ -58,9 +58,9 @@ Useful starters:
 
 ```txt
 /init
-/skill create review my current branch against main like a senior engineer
-/skill create prepare clean git commits from my uncommitted changes
-/skill create implement small features with tests and a concise summary
+/create-skill review my current branch against main like a senior engineer
+/create-skill prepare clean git commits from my uncommitted changes
+/create-skill implement small features with tests and a concise summary
 ```
 
 `/init` creates or updates `AGENTS.md` so future sessions understand the project.
@@ -72,7 +72,7 @@ Skills are Markdown workflows stored in `~/.haze/skills`.
 When you notice yourself asking for the same kind of work, make it a skill:
 
 ```txt
-/skill create review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
+/create-skill review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
 ```
 
 Haze uses the model to create:
@@ -81,7 +81,7 @@ Haze uses the model to create:
 ~/.haze/skills/<skill-name>/SKILL.md
 ```
 
-A skill is just Markdown with frontmatter:
+A skill is just Markdown with frontmatter, a role, a focused prompt, and a small output template:
 
 ```md
 ---
@@ -89,13 +89,28 @@ name: code-review-diff-main
 description: Use when the user asks for a code review of the current branch against main.
 ---
 
-# Goal
+# Role
+
+You are a focused code reviewer.
+
+# Focused prompt
 
 Review the actual change and return useful, evidence-based feedback.
 
 # Procedure
 
 Inspect branch state, changed files, staged and unstaged diffs, then review incrementally.
+
+# Output template
+
+## Summary
+- <scope and result>
+
+## Findings
+- <prioritized findings, or "No issues found">
+
+## Evidence inspected
+- <commands/files used>
 ```
 
 Installed skills appear as slash commands like:
@@ -120,14 +135,14 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /clear
 /exit
 
-/skill create <description>
-/skill list
-/skill info <name>
-/skill validate <name-or-dir>
-/skill remove <name> --yes
+/create-skill <description>
+/list-skills
+/skill-info <name>
+/validate-skill <name-or-dir>
+/remove-skill <name> --yes
 ```
 
-`/skills ...` also works as an alias for `/skill ...`.
+Legacy `/skill ...` and `/skills ...` commands still work as aliases.
 
 ## Agent tools
 

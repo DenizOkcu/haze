@@ -9,7 +9,7 @@ Haze is a pragmatic, intentionally limited agentic CLI for building apps from th
 - Published as `@denizokcu/haze` (ESM package).
 - Core is a source-only ESM TypeScript project with a thin published `bin/` + `dist/`.
 - Self-documents its own agent tools and context-file mechanisms (see README).
-- Initial public release (v0.0.1).
+- Current version: 0.0.2 (see package.json for exact).
 
 ## Common commands
 
@@ -25,6 +25,8 @@ npm run haze         # alias for the above
 npm run typecheck    # tsc --noEmit (strict)
 npm test             # vitest test suite
 npm run lint         # eslint src/
+npm run lint:fix     # eslint src/ --fix
+npm run test:watch   # vitest watch mode
 
 # Build
 npm run build        # clean + tsc (outputs to dist/)
@@ -46,22 +48,27 @@ Typecheck, tests, and lint are the primary static gates. `prepublishOnly` enforc
 
 For local skills development, use in-app commands from an interactive Haze session: `/skills validate <dir>`, `/skills build <name> <toolName> <description...>`, etc.
 
+Use `/init` (or the root `/init` command) to create or refresh this AGENTS.md file for the current project.
+
 ## Architecture and important directories
 
 - `src/` — primary source (TS/TSX)
-  - `cli/` — Commander entrypoint (`index.ts`) and chat commands (`chat.tsx` is the main interactive TUI loop; `commands.ts` handles slash commands, including `/skills ...`).
-  - `llm/` — AI client, Haze's tool definitions (`hazeTools.ts`), system/init prompts.
-  - `tools/` — ToolExecutor and runner for agent tools.
-  - `skills/` — manifest schema (zod), loader, registry, builder, and GitHub installer.
-  - `config/` — paths, settings (JSON + env), persistent input history, context-file walker (loads AGENTS.md / CLAUDE.md walking up from cwd).
+  - `cli/` — Commander entrypoint (`index.ts`) and chat commands (`commands/chat.tsx` is the main interactive TUI loop; slash commands including `/skills ...` handled in `commands/commands.ts`; core agent turn/streaming/loop + goal integration in `commands/streaming.ts`; formatters and skills UI in sibling files).
+  - `llm/` — AI client (`client.ts`), Haze's tool definitions (`hazeTools.ts`), system/init prompts (`systemPrompt.ts`, `initPrompt.ts`).
+  - `core/goal/` — Session goal model and creation, request intent classification (`requestClassifier.ts`), completion/continuation policy for agent loops (`completionPolicy.ts`), goal observation for phase tracking.
+  - `skills/` — Skill loading from SKILL.md + YAML frontmatter (`SkillLoader.ts`), registry (`SkillRegistry.ts`), creation/builder from natural language (`builder/SkillBuilder.ts`), exposure as `skill_*` tools (`skillTools.ts`), types.
+  - `config/` — paths, settings (JSON + env), persistent input history, context-file walker (loads AGENTS.md / CLAUDE.md walking up from cwd + ~/.haze/ copies).
   - `ui/` — reusable Ink/React components (TextInput, MarkdownText, etc.) + theme.
-  - `utils/` — small fs + yaml helpers.
+  - `utils/` — small fs + yaml + path helpers.
 - `bin/haze.js` — published CLI shim.
-- `examples/skills/` — reference skill templates (copy of built-in examples; `skill.yaml` + tool .ts + optional prompts/).
+- `examples/skills/` — reference skill templates (directories with `SKILL.md` + optional referenced files, e.g. under `files/`).
 - `dist/` — compiled output (generated; never commit or edit directly).
 - `.haze/` — local skill overrides and runtime data (see .gitignore for `.haze/memory.json`).
-- `haiku-app/` — example project created with Haze (treat as external; do not assume it reflects current source).
-- Root: `package.json`, `tsconfig.json`, README, CHANGELOG, LICENSE.
+- `tests/` — Vitest test suite.
+- `docs/` — additional documentation.
+- `.github/` — GitHub workflows and repo config.
+- Example projects (treat as external; do not assume they reflect current source): `haiku/`, `calc-app/`, `test-calculator/`.
+- Root: `package.json`, `tsconfig.json`, `eslint.config.js`, `vitest.config.ts`, README, CHANGELOG, LICENSE, CONTRIBUTING.md.
 
 File tools are always restricted to the current workspace and are `.gitignore`-aware by default (with opt-in for ignored files when explicitly required by the task).
 

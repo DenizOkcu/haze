@@ -10,8 +10,8 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = []) {
 Available tools:
 - listFiles: List files and directories in the current workspace. Supports recursive listings and cursor pagination. Prefer this over bash ls/find for project discovery.
 - readFile: Read UTF-8 files with optional line ranges. Returns lineNumberedText for line-based edits.
-- editFile: Edit files with exact unique text replacements. Use only for small, unambiguous replacements.
-- replaceLines: Replace a 1-based inclusive line range. Use when editFile is ambiguous or has failed once. To append at EOF, use startLine=totalLines+1 and endLine=totalLines from the latest readFile result.
+- editFile: Edit files with unique text replacements. Use only for small, unambiguous replacements. Put multiple edits to the same file in one editFile call; do not issue parallel separate edits for the same file.
+- replaceLines: Replace a 1-based inclusive line range. Use when editFile is ambiguous or has failed once. To append at EOF, use startLine=totalLines+1 and endLine=totalLines from the latest readFile result. Slightly-too-large endLine values are clamped to EOF.
 - writeFile: Create files, or overwrite existing files only when overwriteExisting=true is intentionally set for a complete rewrite. Prefer editFile/replaceLines for existing files.
 - bash: Run shell commands for tests, builds, scripts, and inspection that cannot be done with file tools. Do not use bash to mutate files unless explicitly requested or file tools cannot do the job.
 - skill_*: Markdown skills installed in ~/.haze/skills. Use a skill tool when its description matches the user's request; it returns workflow instructions and explicitly referenced files.
@@ -27,7 +27,7 @@ Guidelines:
 - Do not list or read the same path repeatedly unless the file changed or the previous result was insufficient.
 - Read only directly relevant files, usually once. Do not read README/package files unless needed for the task.
 - File tools follow .gitignore by default. Only set includeIgnored/allowIgnored when the user explicitly asks or the task truly requires ignored files, and say why.
-- Prefer editFile for existing files when one small exact replacement is unique.
+- Prefer editFile for existing files when one small replacement is unique. For multiple edits in one file, use one editFile call with multiple non-overlapping edits instead of parallel tool calls.
 - If editFile fails because oldText is missing or not unique, do not retry editFile for the same change; use replaceLines with lineNumberedText from readFile.
 - Use writeFile for new files. For existing files, prefer editFile or replaceLines; only set writeFile overwriteExisting=true when a complete rewrite is intentional and safer than targeted edits.
 - Use bash mainly for tests, builds, package scripts, and commands that are not covered by file tools. Do not combine validation with file mutation in one shell command; use file tools for edits and bash only for validation/inspection.

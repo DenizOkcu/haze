@@ -29,31 +29,41 @@ description: Use when the user asks Haze to create a new skill from a natural-la
 You create predictable, high-quality Haze skills.
 
 A Haze skill is a directory in ~/.haze/skills containing SKILL.md and optional referenced files.
-SKILL.md must be Markdown with YAML frontmatter:
+SKILL.md must be Markdown with YAML frontmatter, followed by a role and focused prompt:
 
 ---
 name: kebab-case-name
 description: Use when the user asks ...
 ---
 
+# Role
+You are a focused, practical assistant for this workflow.
+
+# Focused prompt
+Complete the user's goal with the smallest reliable workflow.
+
 The description must tell the model exactly when to use the skill.
 The body must be a deterministic operating procedure, not generic advice.
+Keep skills simple, short, and practical: prefer the fewest commands and sections that reliably complete the workflow.
+Avoid exhaustive checklists, rigid citation requirements, or heavyweight output formats unless the user's request truly requires them.
 Additional files are allowed only when SKILL.md explicitly references them with relative paths.
 Skills do not execute code. They teach Haze how to behave for a workflow.
 
-Every skill you create must include:
-- Goal: the user's underlying intent, outcome, and definition of success inferred from their description.
-- Trigger: when to use the skill.
-- Inputs to inspect: exact commands/files/state to read, with incremental inspection for large outputs.
-- Procedure: ordered steps with fallback paths for empty, missing, or truncated primary inputs.
+Every skill you create must include, in this order:
+- YAML frontmatter.
+- Role: the specific assistant role to adopt for this workflow.
+- Focused prompt: a concise directive that explains the goal and keeps the workflow scoped.
+- Inputs to inspect: only the essential commands/files/state needed for the workflow, with incremental inspection for large outputs.
+- Procedure: a short ordered list with fallback paths for empty, missing, or truncated primary inputs.
 - Stop conditions: when it is valid to say there is nothing to do.
 - Blocker policy: concrete conditions that justify stopping, excluding truncation when narrower inspection is possible.
-- Output format: predictable sections for the final answer.
-- Evidence rule: require final answers to be grounded in actual inspected content.
+- Output template: a compact, reusable final-answer template with predictable headings/placeholders.
+- Evidence rule: require final answers to be grounded in actual inspected content, but do not require exhaustive citations.
 
-Infer the user's intent from their wording and make that intent the explicit goal of the skill. A good goal states what the skill should accomplish, not just what commands it should run.
-Avoid fragile skills that stop after one empty command or one truncated command. If a workflow has common edge cases, encode them explicitly.
-For diff/review skills, require this pattern: get branch/status/stat/name-only first; if a full diff is empty, inspect staged and unstaged diffs; if a full diff is truncated, inspect targeted per-file diffs or read changed files before reviewing.
+Infer the user's intent from their wording and make that intent explicit in the Focused prompt. A good focused prompt states what the skill should accomplish, not just what commands it should run.
+Favor skills that a small or slower model can follow in one pass. The model should be able to finish with a concise response after a small number of tool calls.
+Avoid fragile skills that stop after one empty command or one truncated command, but do not over-correct by requiring exhaustive inspection. Encode only common, necessary fallbacks.
+For diff/review skills, keep the default path simple: get status/stat/name-only, inspect unstaged and staged diffs if present, and if no changes or target exist, return a short no-changes response. Use targeted per-file diffs only when the full diff is too large or truncated.
 Do not require exact line citations for every finding in generated skills; require concrete file/function/code-area evidence instead, with exact lines only when available.
 `;
 
@@ -82,7 +92,7 @@ function fallbackSkill(description: string): GeneratedSkill {
     name,
     files: [{
       path: 'SKILL.md',
-      content: `---\nname: ${name}\ndescription: ${yamlString(`Use when the user asks: ${description}`)}\n---\n\n# Goal\n\nAccomplish the user's intended outcome: ${description}\n\n# Trigger\n\nUse this skill when the user asks: ${description}\n\n# Inputs to inspect\n\nIdentify the concrete commands, files, diffs, logs, or project state needed for this workflow. Inspect actual content, not only summaries.\n\n# Procedure\n\n1. Confirm the relevant project state.\n2. Inspect the primary input for the workflow.\n3. If the primary input is empty, unavailable, or truncated, inspect natural fallback inputs or narrower targeted inputs before stopping.\n4. For large inputs, inspect summaries first, then targeted files, sections, or commands most relevant to the goal.\n5. Perform the requested analysis or implementation using the inspected evidence.\n6. Produce the final answer in the output format below.\n\n# Stop conditions\n\nOnly say there is nothing to do after every relevant input source has been checked and is empty.\n\n# Blocker policy\n\nOnly stop as blocked for a concrete tool failure, missing permission, unavailable dependency, or ambiguous requirement that prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.\n\n# Output format\n\n- Summary\n- Findings or actions\n- Evidence inspected\n- Recommendation or next step\n${STANDARD_SKILL_REQUIREMENTS}\n# References\n\nAdd relative file references here if this skill needs examples, templates, or supporting docs.\n`,
+      content: `---\nname: ${name}\ndescription: ${yamlString(`Use when the user asks: ${description}`)}\n---\n\n# Role\n\nYou are a focused, practical assistant for this workflow.\n\n# Focused prompt\n\nAccomplish the user's intended outcome with the smallest reliable workflow: ${description}\n\n# Inputs to inspect\n\nIdentify the concrete commands, files, diffs, logs, or project state needed for this workflow. Inspect actual content, not only summaries.\n\n# Procedure\n\n1. Confirm the relevant project state.\n2. Inspect the primary input for the workflow.\n3. If the primary input is empty, unavailable, or truncated, inspect natural fallback inputs or narrower targeted inputs before stopping.\n4. For large inputs, inspect summaries first, then targeted files, sections, or commands most relevant to the goal.\n5. Perform the requested analysis or implementation using the inspected evidence.\n6. Produce the final answer using the output template below.\n\n# Stop conditions\n\nOnly say there is nothing to do after every relevant input source has been checked and is empty.\n\n# Blocker policy\n\nOnly stop as blocked for a concrete tool failure, missing permission, unavailable dependency, or ambiguous requirement that prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.\n\n# Output template\n\n## Summary\n- <one-to-three bullets with the result>\n\n## Actions or findings\n- <concrete actions taken or findings discovered>\n\n## Evidence inspected\n- <commands, files, diffs, or outputs used>\n\n## Next step\n- <recommended next action, or "None" if complete>\n${STANDARD_SKILL_REQUIREMENTS}\n# References\n\nAdd relative file references here if this skill needs examples, templates, or supporting docs.\n`,
     }],
   };
 }
@@ -116,7 +126,7 @@ function assertSafeGeneratedFile(filePath: string) {
 
 async function generateSkill(description: string): Promise<GeneratedSkill> {
   const activeModel = await model();
-  if (!activeModel) throw new Error('No API key configured. Run /login, then /model x-ai/grok-build-0.1, before using /skill create.');
+  if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before using /create-skill.');
   const result = await generateObject({
     model: activeModel,
     temperature: 0,
@@ -131,11 +141,15 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
       'Rules:',
       '- SKILL.md must include frontmatter with name and description.',
       '- The frontmatter description must start with "Use when".',
-      '- Infer the user intent from the description and make it the explicit Goal of the skill.',
-      '- The body must use these headings: Goal, Trigger, Inputs to inspect, Procedure, Fallbacks, Stop conditions, Blocker policy, Output format.',
-      '- The Goal must describe the desired outcome and definition of success, not just restate the trigger.',
-      '- Procedure steps must name exact commands/files/state to inspect whenever the workflow implies them.',
-      '- Include fallback behavior for empty or truncated primary inputs. Example: if branch diff is empty, inspect staged and unstaged changes before stopping; if full diff is truncated, inspect per-file diffs or read changed files.',
+      '- Infer the user intent from the description and make it explicit in the Focused prompt.',
+      '- The body must start with these headings immediately after frontmatter: Role, Focused prompt.',
+      '- The body must then include these headings: Inputs to inspect, Procedure, Fallbacks, Stop conditions, Blocker policy, Output template.',
+      '- The Focused prompt must describe the desired outcome and definition of success, not just restate the trigger.',
+      '- Keep the skill simple enough for a small or slower model to complete in one pass.',
+      '- Prefer short procedures, compact final output templates, and the minimum necessary tool calls.',
+      '- Avoid exhaustive checklists, mandatory line citations for every claim, and large rigid report templates unless the user explicitly asks for them.',
+      '- Procedure steps must name exact commands/files/state to inspect whenever the workflow implies them, but only include essential inspections.',
+      '- Include fallback behavior for empty or truncated primary inputs. Example: if branch diff is empty, inspect staged and unstaged changes before stopping; if no changes or target exist, return a concise no-changes response; if full diff is truncated, inspect per-file diffs or read changed files.',
       '- For workflows with potentially large outputs, require incremental inspection: stat/name-only/summary first, then targeted content reads.',
       '- Define when it is valid to say "nothing to do".',
       '- Define blockers narrowly: concrete tool failure, missing permission/dependency, or ambiguous requirement. Truncation alone is not a blocker if targeted follow-up inspection is possible.',
@@ -150,7 +164,9 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
 
 export async function createSkill(description: string) {
   const generated = await generateSkill(description).catch(error => {
-    throw error instanceof Error ? error : new Error(String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('No model provider configured.')) throw error instanceof Error ? error : new Error(message);
+    return fallbackSkill(description);
   });
   const name = generated.name || fallbackSkill(description).name;
   const dir = path.join(GLOBAL_SKILLS_DIR, name);

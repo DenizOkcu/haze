@@ -15,9 +15,11 @@ describe('SkillBuilder', () => {
     const generated = internals.fallbackSkill('review code');
     expect(generated.files[0]?.path).toBe('SKILL.md');
     expect(generated.files[0]?.content).toContain('---\nname: review-code');
-    expect(generated.files[0]?.content).toContain('# Goal');
+    expect(generated.files[0]?.content).toContain('# Role');
+    expect(generated.files[0]?.content).toContain('# Focused prompt');
     expect(generated.files[0]?.content).toContain('# Inputs to inspect');
     expect(generated.files[0]?.content).toContain('# Stop conditions');
+    expect(generated.files[0]?.content).toContain('# Output template');
     expect(generated.files[0]?.content).toContain('# Operational guardrails');
   });
 
@@ -28,8 +30,10 @@ describe('SkillBuilder', () => {
     expect(content).toContain('Truncated output is not a blocker');
   });
 
-  it('skill creator prompt asks for intent, fallbacks, truncation handling, and blocker policy', () => {
-    expect(internals.SKILL_CREATOR_SKILL).toContain('user\'s underlying intent');
+  it('skill creator prompt asks for role, focused prompt, fallbacks, truncation handling, and blocker policy', () => {
+    expect(internals.SKILL_CREATOR_SKILL).toContain('Role');
+    expect(internals.SKILL_CREATOR_SKILL).toContain('Focused prompt');
+    expect(internals.SKILL_CREATOR_SKILL).toContain('Output template');
     expect(internals.SKILL_CREATOR_SKILL).toContain('fallback paths');
     expect(internals.SKILL_CREATOR_SKILL).toContain('truncated command');
     expect(internals.SKILL_CREATOR_SKILL).toContain('Blocker policy');
