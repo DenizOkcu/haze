@@ -42,6 +42,60 @@ function numberLines(lines: string[], startLine: number) {
   return lines.map((line, index) => `${String(startLine + index).padStart(4, ' ')} | ${line}`).join('\n');
 }
 
+function stripLineNumberPrefixes(text: string) {
+  return text.replace(/^\s*\d+\s+\| ?/gm, '');
+}
+
+function lineStartOffsets(text: string) {
+  const offsets = [0];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === '\n') offsets.push(index + 1);
+  }
+  return offsets;
+}
+
+function findLineTrimmedRange(original: string, oldText: string) {
+  const wantedLines = oldText.replace(/\r\n/g, '\n').split('\n').map(line => line.trimEnd());
+  if (wantedLines.at(-1) === '') wantedLines.pop();
+  if (wantedLines.length === 0) return undefined;
+
+  const originalLines = original.replace(/\r\n/g, '\n').split('\n');
+  const hasTrailingNewline = original.endsWith('\n');
+  if (hasTrailingNewline) originalLines.pop();
+  const offsets = lineStartOffsets(original);
+  const matches: Array<{start: number; end: number}> = [];
+
+  for (let lineIndex = 0; lineIndex <= originalLines.length - wantedLines.length; lineIndex++) {
+    const window = originalLines.slice(lineIndex, lineIndex + wantedLines.length).map(line => line.trimEnd());
+    if (window.every((line, index) => line === wantedLines[index])) {
+      const start = offsets[lineIndex] ?? 0;
+      const endLineIndex = lineIndex + wantedLines.length;
+      const end = endLineIndex < offsets.length ? (offsets[endLineIndex] ?? original.length) : original.length;
+      matches.push({start, end});
+    }
+  }
+
+  if (matches.length !== 1) return undefined;
+  return matches[0];
+}
+
+function findEditRange(original: string, oldText: string) {
+  const candidates = [oldText, stripLineNumberPrefixes(oldText)].filter((candidate, index, all) => candidate.length > 0 && all.indexOf(candidate) === index);
+  for (const candidate of candidates) {
+    const first = original.indexOf(candidate);
+    if (first !== -1) {
+      const second = original.indexOf(candidate, first + candidate.length);
+      if (second !== -1) return {kind: 'multiple' as const};
+      return {kind: 'found' as const, start: first, end: first + candidate.length, approximate: candidate !== oldText};
+    }
+  }
+  for (const candidate of candidates) {
+    const range = findLineTrimmedRange(original, candidate);
+    if (range) return {kind: 'found' as const, ...range, approximate: true};
+  }
+  return {kind: 'missing' as const};
+}
+
 type ToolExecutionContext = {
   abortSignal?: AbortSignal;
   experimental_context?: unknown;
@@ -53,6 +107,7 @@ type HazeToolContext = {
   mutationEpoch?: number;
   failedMutationPaths?: Set<string>;
   pathsReadAfterFailedMutation?: Set<string>;
+  inFlightMutationPaths?: Set<string>;
 };
 
 function toolCallKey(toolName: string, input: unknown) {
@@ -79,6 +134,15 @@ function inputPath(input: unknown) {
     : undefined;
 }
 
+function isStructuredFailure(value: unknown) {
+  return typeof value === 'object' && value != null && 'ok' in value && (value as {ok?: unknown}).ok === false;
+}
+
+function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  return {ok: false, toolName, path: pathForError, error: message, recoverable: true, suggestedNextStep};
+}
+
 async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
   const ctx = hazeContext(context);
   if (!ctx) return execute();
@@ -86,9 +150,18 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   ctx.completedToolCalls ??= new Map();
   ctx.failedMutationPaths ??= new Set();
   ctx.pathsReadAfterFailedMutation ??= new Set();
+  ctx.inFlightMutationPaths ??= new Set();
   ctx.mutationEpoch ??= 0;
   const key = toolCallKey(toolName, input);
   const pathForInput = inputPath(input);
+  if (isMutatingTool(toolName) && pathForInput && ctx.inFlightMutationPaths.has(pathForInput)) {
+    return {
+      ok: true,
+      duplicateSkipped: true,
+      toolName,
+      reason: `Skipped concurrent mutation for ${pathForInput}. Read the file again, then make one editFile call with all non-overlapping replacements or one replaceLines call based on the latest line numbers.`,
+    };
+  }
   if (isMutatingTool(toolName) && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput)) {
     throw new Error(`Read ${pathForInput} before attempting another edit after the previous edit failure.`);
   }
@@ -113,10 +186,18 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
     };
   }
 
+  if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths.add(pathForInput);
   const promise = execute();
   ctx.inFlightToolCalls.set(key, promise);
   try {
     const result = await promise;
+    if (isStructuredFailure(result)) {
+      if (isMutatingTool(toolName) && pathForInput) {
+        ctx.failedMutationPaths.add(pathForInput);
+        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+      }
+      return result;
+    }
     if (toolName === 'readFile' && pathForInput) ctx.pathsReadAfterFailedMutation.add(pathForInput);
     if (isMutatingTool(toolName)) {
       ctx.mutationEpoch += 1;
@@ -135,6 +216,7 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
     throw error;
   } finally {
     ctx.inFlightToolCalls.delete(key);
+    if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths?.delete(pathForInput);
   }
 }
 
@@ -155,28 +237,32 @@ export const hazeTools = {
       includeIgnored: z.boolean().default(false).describe('Include files ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context, async () => {
-      const absolutePath = resolveWorkspacePath(dirPath);
-      await assertNotIgnored(absolutePath, dirPath, includeIgnored);
-      const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
-      let ignoredSkipped = 0;
+      try {
+        const absolutePath = resolveWorkspacePath(dirPath);
+        await assertNotIgnored(absolutePath, dirPath, includeIgnored);
+        const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
+        let ignoredSkipped = 0;
 
-      const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, filter: async entry => {
-        if (!includeIgnored && await isGitIgnored(entry.absolutePath)) { ignoredSkipped++; return false; }
-        return true;
-      }});
-      const page = walked.slice(0, maxEntries);
-      const hasMore = walked.length > maxEntries;
+        const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, filter: async entry => {
+          if (!includeIgnored && await isGitIgnored(entry.absolutePath)) { ignoredSkipped++; return false; }
+          return true;
+        }});
+        const page = walked.slice(0, maxEntries);
+        const hasMore = walked.length > maxEntries;
 
-      for (const entry of page) {
-        if (entry.isDirectory) {
-          entries.push({path: entry.path, type: 'directory'});
-        } else if (entry.isFile) {
-          const stat = await fs.stat(entry.absolutePath);
-          entries.push({path: entry.path, type: 'file', size: stat.size});
+        for (const entry of page) {
+          if (entry.isDirectory) {
+            entries.push({path: entry.path, type: 'directory'});
+          } else if (entry.isFile) {
+            const stat = await fs.stat(entry.absolutePath);
+            entries.push({path: entry.path, type: 'file', size: stat.size});
+          }
         }
-      }
 
-      return {path: dirPath, recursive, includeIgnored, cursor, nextCursor: hasMore ? page.at(-1)?.path : undefined, ignoredSkipped, entries, truncated: hasMore};
+        return {path: dirPath, recursive, includeIgnored, cursor, nextCursor: hasMore ? page.at(-1)?.path : undefined, ignoredSkipped, entries, truncated: hasMore};
+      } catch (error) {
+        return structuredToolFailure('listFiles', error, 'Check that the directory exists and is not ignored, or retry with a narrower path.', dirPath);
+      }
     }),
   }),
 
@@ -189,27 +275,31 @@ export const hazeTools = {
       allowIgnored: z.boolean().default(false).describe('Read the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: filePath, offset, limit, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, allowIgnored}, context, async () => {
-      const absolutePath = resolveWorkspacePath(filePath);
-      await assertNotIgnored(absolutePath, filePath, allowIgnored);
-      const content = await fs.readFile(absolutePath, 'utf8');
-      const lines = content.split(/\r?\n/);
-      const start = offset == null ? 0 : offset - 1;
-      const end = limit == null ? lines.length : start + limit;
-      const selectedLines = lines.slice(start, end);
-      const selected = selectedLines.join('\n');
-      return {
-        path: filePath,
-        startLine: start + 1,
-        endLine: Math.min(end, lines.length),
-        totalLines: lines.length,
-        lineNumberedText: numberLines(selectedLines, start + 1),
-        ...truncate(selected),
-      };
+      try {
+        const absolutePath = resolveWorkspacePath(filePath);
+        await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const content = await fs.readFile(absolutePath, 'utf8');
+        const lines = content.split(/\r?\n/);
+        const start = offset == null ? 0 : offset - 1;
+        const end = limit == null ? lines.length : start + limit;
+        const selectedLines = lines.slice(start, end);
+        const selected = selectedLines.join('\n');
+        return {
+          path: filePath,
+          startLine: start + 1,
+          endLine: Math.min(end, lines.length),
+          totalLines: lines.length,
+          lineNumberedText: numberLines(selectedLines, start + 1),
+          ...truncate(selected),
+        };
+      } catch (error) {
+        return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);
+      }
     }),
   }),
 
   replaceLines: tool({
-    description: 'Replace a 1-based inclusive line range in an existing UTF-8 text file. Prefer this after reading a file when exact editFile replacements are ambiguous or fail.',
+    description: 'Replace a 1-based inclusive line range in an existing UTF-8 text file. Prefer this after reading a file when exact editFile replacements are ambiguous or fail. If endLine is slightly beyond EOF, it is clamped to the current last line.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       startLine: z.number().int().positive().describe('First 1-based line number to replace'),
@@ -218,25 +308,29 @@ export const hazeTools = {
       allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: filePath, startLine, endLine, content, allowIgnored}, context) => runDedupedTool('replaceLines', {path: filePath, startLine, endLine, content, allowIgnored}, context, async () => {
-      const absolutePath = resolveWorkspacePath(filePath);
-      await assertNotIgnored(absolutePath, filePath, allowIgnored);
-      const original = await fs.readFile(absolutePath, 'utf8');
-      const hasTrailingNewline = original.endsWith('\n');
-      const lines = original.split(/\r?\n/);
-      if (hasTrailingNewline) lines.pop();
-      const isAppend = startLine === lines.length + 1 && endLine === lines.length;
-      if (!isAppend && endLine < startLine) throw new Error('endLine must be greater than or equal to startLine, except when appending at EOF with startLine=totalLines+1 and endLine=totalLines');
-      if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
-      if (endLine > lines.length) throw new Error(`endLine ${endLine} is beyond end of file (${lines.length} lines)`);
-      const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
-      if (isAppend) {
-        lines.push(...replacementLines);
-      } else {
-        lines.splice(startLine - 1, endLine - startLine + 1, ...replacementLines);
+      try {
+        const absolutePath = resolveWorkspacePath(filePath);
+        await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const original = await fs.readFile(absolutePath, 'utf8');
+        const hasTrailingNewline = original.endsWith('\n');
+        const lines = original.split(/\r?\n/);
+        if (hasTrailingNewline) lines.pop();
+        const isAppend = startLine === lines.length + 1 && endLine === lines.length;
+        if (!isAppend && endLine < startLine) throw new Error('endLine must be greater than or equal to startLine, except when appending at EOF with startLine=totalLines+1 and endLine=totalLines');
+        if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
+        const effectiveEndLine = !isAppend && endLine > lines.length ? lines.length : endLine;
+        const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
+        if (isAppend) {
+          lines.push(...replacementLines);
+        } else {
+          lines.splice(startLine - 1, effectiveEndLine - startLine + 1, ...replacementLines);
+        }
+        const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
+        await fs.writeFile(absolutePath, updated, 'utf8');
+        return {ok: true, path: filePath, startLine, endLine: effectiveEndLine, requestedEndLine: endLine, endLineClamped: effectiveEndLine !== endLine, replacementLines: replacementLines.length, appended: isAppend};
+      } catch (error) {
+        return structuredToolFailure('replaceLines', error, 'Read the file again for current line numbers, then retry replaceLines with a valid range.', filePath);
       }
-      const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
-      await fs.writeFile(absolutePath, updated, 'utf8');
-      return {ok: true, path: filePath, startLine, endLine, replacementLines: replacementLines.length, appended: isAppend};
     }),
   }),
 
@@ -249,25 +343,29 @@ export const hazeTools = {
       allowIgnored: z.boolean().default(false).describe('Write the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: filePath, content, overwriteExisting, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, allowIgnored}, context, async () => {
-      const absolutePath = resolveWorkspacePath(filePath);
-      await assertNotIgnored(absolutePath, filePath, allowIgnored);
       try {
-        await fs.access(absolutePath);
-        if (!overwriteExisting) {
-          throw new Error(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`);
+        const absolutePath = resolveWorkspacePath(filePath);
+        await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        try {
+          await fs.access(absolutePath);
+          if (!overwriteExisting) {
+            throw new Error(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`);
+          }
+        } catch (error) {
+          const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
+          if (code !== 'ENOENT') throw error;
         }
+        await fs.mkdir(path.dirname(absolutePath), {recursive: true});
+        await fs.writeFile(absolutePath, content, 'utf8');
+        return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8'), overwritten: overwriteExisting};
       } catch (error) {
-        const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
-        if (code !== 'ENOENT') throw error;
+        return structuredToolFailure('writeFile', error, 'Use editFile/replaceLines for existing files, set overwriteExisting=true only for an intentional rewrite, or check the path/ignored-file setting.', filePath);
       }
-      await fs.mkdir(path.dirname(absolutePath), {recursive: true});
-      await fs.writeFile(absolutePath, content, 'utf8');
-      return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8'), overwritten: overwriteExisting};
     }),
   }),
 
   editFile: tool({
-    description: 'Edit a text file using exact replacements. Each oldText must match exactly once in the original file and edits must not overlap. If this fails because text is missing or not unique, do not retry; use replaceLines instead.',
+    description: 'Edit a text file using unique replacements. Each oldText should match the current file; line-number prefixes from readFile output and trailing-whitespace-only differences are tolerated when the match is still unique. Put multiple edits to the same file in one call. If this fails because text is missing or not unique, read the file again and use replaceLines.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       edits: z.array(z.object({
@@ -277,29 +375,32 @@ export const hazeTools = {
       allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
     }),
     execute: async ({path: filePath, edits, allowIgnored}, context) => runDedupedTool('editFile', {path: filePath, edits, allowIgnored}, context, async () => {
-      const absolutePath = resolveWorkspacePath(filePath);
-      await assertNotIgnored(absolutePath, filePath, allowIgnored);
-      const original = await fs.readFile(absolutePath, 'utf8');
-      const ranges = edits.map((edit, index) => {
-        const first = original.indexOf(edit.oldText);
-        if (first === -1) throw new Error(`edit ${index}: oldText was not found`);
-        const second = original.indexOf(edit.oldText, first + edit.oldText.length);
-        if (second !== -1) throw new Error(`edit ${index}: oldText is not unique`);
-        return {index, start: first, end: first + edit.oldText.length, edit};
-      }).sort((a, b) => a.start - b.start);
+      try {
+        const absolutePath = resolveWorkspacePath(filePath);
+        await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const original = await fs.readFile(absolutePath, 'utf8');
+        const ranges = edits.map((edit, index) => {
+          const match = findEditRange(original, edit.oldText);
+          if (match.kind === 'missing') throw new Error(`edit ${index}: oldText was not found. Read the file again and use the exact current text, or use replaceLines with the latest line numbers.`);
+          if (match.kind === 'multiple') throw new Error(`edit ${index}: oldText is not unique`);
+          return {index, start: match.start, end: match.end, edit, approximate: match.approximate};
+        }).sort((a, b) => a.start - b.start);
 
-      for (let i = 1; i < ranges.length; i++) {
-        if (ranges[i]!.start < ranges[i - 1]!.end) {
-          throw new Error(`edits ${ranges[i - 1]!.index} and ${ranges[i]!.index} overlap`);
+        for (let i = 1; i < ranges.length; i++) {
+          if (ranges[i]!.start < ranges[i - 1]!.end) {
+            throw new Error(`edits ${ranges[i - 1]!.index} and ${ranges[i]!.index} overlap`);
+          }
         }
-      }
 
-      let updated = original;
-      for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
-        updated = updated.slice(0, range.start) + range.edit.newText + updated.slice(range.end);
+        let updated = original;
+        for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
+          updated = updated.slice(0, range.start) + range.edit.newText + updated.slice(range.end);
+        }
+        await fs.writeFile(absolutePath, updated, 'utf8');
+        return {ok: true, path: filePath, edits: edits.length, approximateMatches: ranges.filter(range => range.approximate).length};
+      } catch (error) {
+        return structuredToolFailure('editFile', error, 'Read the file again, then retry with exact current text or use replaceLines with the latest line numbers.', filePath);
       }
-      await fs.writeFile(absolutePath, updated, 'utf8');
-      return {ok: true, path: filePath, edits: edits.length};
     }),
   }),
 
@@ -312,7 +413,7 @@ export const hazeTools = {
     }),
     execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
       if (!allowMutation && looksLikeShellFileMutation(command)) {
-        throw new Error('Refusing to mutate files via bash. Use writeFile/editFile/replaceLines, or set allowMutation=true only when shell mutation is explicitly required.');
+        return structuredToolFailure('bash', 'Refusing to mutate files via bash. Use writeFile/editFile/replaceLines, or set allowMutation=true only when shell mutation is explicitly required.', 'Use writeFile/editFile/replaceLines for file changes, or retry bash with allowMutation=true only when shell mutation is explicitly required.');
       }
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
       return await new Promise(resolve => {

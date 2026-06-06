@@ -52,34 +52,65 @@ describe('editFile tool', () => {
     expect(content).toBe('one bar three\n');
   });
 
-  it('rejects when oldText is not found', async () => {
+  it('returns structured failure when oldText is not found', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'hello world\n');
-    await expect(editFile({
+    const result = await editFile({
       path: 'test.txt',
       edits: [{oldText: 'missing', newText: 'replacement'}],
-    })).rejects.toThrow('was not found');
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('was not found');
+    expect(result.suggestedNextStep).toContain('Read the file again');
   });
 
-  it('rejects when oldText is not unique', async () => {
+  it('accepts line-numbered oldText copied from readFile output', async () => {
+    const file = path.join(tmp, 'test.txt');
+    await fs.writeFile(file, 'alpha\nbeta\ngamma\n');
+    const result = await editFile({
+      path: 'test.txt',
+      edits: [{oldText: '   2 | beta\n', newText: 'BETA\n'}],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.approximateMatches).toBe(1);
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('alpha\nBETA\ngamma\n');
+  });
+
+  it('matches unique blocks when only trailing whitespace differs', async () => {
+    const file = path.join(tmp, 'test.txt');
+    await fs.writeFile(file, 'one  \ntwo\nthree\n');
+    const result = await editFile({
+      path: 'test.txt',
+      edits: [{oldText: 'one\ntwo\n', newText: '1\n2\n'}],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.approximateMatches).toBe(1);
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('1\n2\nthree\n');
+  });
+
+  it('returns structured failure when oldText is not unique', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'dup dup\n');
-    await expect(editFile({
+    const result = await editFile({
       path: 'test.txt',
       edits: [{oldText: 'dup', newText: 'one'}],
-    })).rejects.toThrow('not unique');
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('not unique');
   });
 
-  it('rejects overlapping edits', async () => {
+  it('returns structured failure for overlapping edits', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'abcdefgh\n');
-    await expect(editFile({
+    const result = await editFile({
       path: 'test.txt',
       edits: [
         {oldText: 'abcd', newText: 'X'},
         {oldText: 'cdef', newText: 'Y'},
       ],
-    })).rejects.toThrow('overlap');
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('overlap');
   });
 
   it('preserves file that doesn\'t end with newline', async () => {
@@ -91,5 +122,22 @@ describe('editFile tool', () => {
     });
     const content = await fs.readFile(file, 'utf8');
     expect(content).toBe('no ending');
+  });
+
+  it('skips concurrent mutations to the same file instead of racing stale edits', async () => {
+    const file = path.join(tmp, 'test.txt');
+    await fs.writeFile(file, 'a\nb\n');
+    const originalCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const context = {experimental_context: {}};
+      const first = hazeTools.editFile.execute({path: 'test.txt', edits: [{oldText: 'a', newText: 'A'}]}, context);
+      const second = await hazeTools.editFile.execute({path: 'test.txt', edits: [{oldText: 'b', newText: 'B'}]}, context);
+      await first;
+      expect(second).toMatchObject({ok: true, duplicateSkipped: true});
+      await expect(fs.readFile(file, 'utf8')).resolves.toBe('A\nb\n');
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

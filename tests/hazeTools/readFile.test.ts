@@ -61,8 +61,10 @@ describe('readFile tool', () => {
     expect(result.lineNumberedText).toMatch(/2.*world/);
   });
 
-  it('throws for nonexistent file', async () => {
-    await expect(readFile({path: 'nope.txt'})).rejects.toThrow();
+  it('returns structured failure for nonexistent file', async () => {
+    const result = await readFile({path: 'nope.txt'});
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
   });
 });
 
@@ -95,9 +97,11 @@ describe('writeFile tool', () => {
     expect(content).toBe('hello');
   });
 
-  it('refuses to overwrite an existing file without explicit approval', async () => {
+  it('returns structured failure when overwriting an existing file without explicit approval', async () => {
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'old');
-    await expect(writeFile({path: 'existing.txt', content: 'new'})).rejects.toThrow('Refusing to overwrite existing file');
+    const result = await writeFile({path: 'existing.txt', content: 'new'});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Refusing to overwrite existing file');
     const content = await fs.readFile(path.join(tmp, 'existing.txt'), 'utf8');
     expect(content).toBe('old');
   });

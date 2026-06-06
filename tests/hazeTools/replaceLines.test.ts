@@ -41,25 +41,28 @@ describe('replaceLines tool', () => {
     expect(content).toBe('a\nX\nY\ne\n');
   });
 
-  it('rejects endLine < startLine', async () => {
+  it('returns structured failure for endLine < startLine', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'content\n');
-    await expect(replaceLines({path: 'test.txt', startLine: 3, endLine: 1, content: 'x'}))
-      .rejects.toThrow('endLine must be greater than or equal to startLine');
+    const result = await replaceLines({path: 'test.txt', startLine: 3, endLine: 1, content: 'x'});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('endLine must be greater than or equal to startLine');
   });
 
-  it('rejects startLine beyond file length', async () => {
+  it('returns structured failure for startLine beyond file length', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'only one\n');
-    await expect(replaceLines({path: 'test.txt', startLine: 10, endLine: 10, content: 'x'}))
-      .rejects.toThrow('beyond end of file');
+    const result = await replaceLines({path: 'test.txt', startLine: 10, endLine: 10, content: 'x'});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('beyond end of file');
   });
 
-  it('rejects endLine beyond file length', async () => {
+  it('clamps endLine beyond file length to avoid off-by-one edit failures', async () => {
     const file = path.join(tmp, 'test.txt');
-    await fs.writeFile(file, 'only one\n');
-    await expect(replaceLines({path: 'test.txt', startLine: 1, endLine: 10, content: 'x'}))
-      .rejects.toThrow('beyond end of file');
+    await fs.writeFile(file, 'one\ntwo\n');
+    const result = await replaceLines({path: 'test.txt', startLine: 1, endLine: 10, content: 'x'});
+    expect(result).toMatchObject({ok: true, endLine: 2, requestedEndLine: 10, endLineClamped: true});
+    await expect(fs.readFile(file, 'utf8')).resolves.toBe('x\n');
   });
 
   it('handles empty content (deletion)', async () => {
