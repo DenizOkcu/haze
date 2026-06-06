@@ -2,7 +2,7 @@ import {isActionRequest, isPlanOnlyRequest, isValidationRequest} from './request
 import type {SessionGoal} from './sessionGoal.js';
 
 export function looksIncomplete(text: string) {
-  return /\b(incomplete|what remains|remains:|remaining:|next:|not implemented|not created|no tests exist|created no docs|has not been|have not been|not yet|never executed|not executed|not run|cannot retry|cannot write|cannot validate|tool budget reached)/i.test(text);
+  return /\b(incomplete|what remains|remains:|remaining:|next:|unfinished|not implemented|not created|no tests exist|created no docs|has not been|have not been|not yet|never executed|not executed|not run|cannot retry|cannot write|cannot validate|tool budget reached|tool slice reached)/i.test(text);
 }
 
 export function looksBlocked(text: string) {
@@ -80,7 +80,7 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
 }
 
 export function toolLoopBudgetPrompt() {
-  return 'Tool budget reached. You cannot call tools now, and you must not output XML, JSON tool-call syntax, <tool_call> blocks, or function-call markup. If the current request is complete, summarize only current-turn changes and validation. If the requested change is incomplete, state the concrete blocker briefly. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.';
+  return 'Tool slice reached for this model step. Do not output XML, JSON tool-call syntax, <tool_call> blocks, or function-call markup. If the current request is complete, summarize only current-turn changes and validation. If the requested change is incomplete, state the next concrete unfinished action briefly so Haze can continue autonomously in a fresh tool slice. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.';
 }
 
 export function postContinuationPrompt() {

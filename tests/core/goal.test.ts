@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {classifyRequestIntent, isActionRequest, isPlanOnlyRequest, isValidationRequest} from '../../src/core/goal/requestClassifier.js';
-import {completionDecision, looksBlocked, looksIncomplete} from '../../src/core/goal/completionPolicy.js';
+import {completionDecision, looksBlocked, looksIncomplete, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
 
 describe('requestClassifier', () => {
@@ -129,6 +129,13 @@ describe('completionDecision', () => {
 
   it('detects incomplete assistant summaries and blockers', () => {
     expect(looksIncomplete('Remaining: run validation.')).toBe(true);
+    expect(looksIncomplete('Tool slice reached; next action is writing App.vue.')).toBe(true);
     expect(looksBlocked('Blocked: missing dependency.')).toBe(true);
+  });
+
+  it('uses autonomous-friendly tool slice wording', () => {
+    const prompt = toolLoopBudgetPrompt();
+    expect(prompt).toContain('Haze can continue autonomously');
+    expect(prompt).not.toContain('You cannot call tools now');
   });
 });

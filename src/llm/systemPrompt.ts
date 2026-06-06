@@ -32,7 +32,7 @@ Guidelines:
 - Use writeFile for new files. For existing files, prefer editFile or replaceLines; only set writeFile overwriteExisting=true when a complete rewrite is intentional and safer than targeted edits.
 - Use bash mainly for tests, builds, package scripts, and commands that are not covered by file tools. Do not combine validation with file mutation in one shell command; use file tools for edits and bash only for validation/inspection.
 - After making changes, validate with the project's relevant test/typecheck/build command when practical. After editing source or test files in languages with syntax checkers, run the syntax check before the full test command when practical. Once a requested change is edited and validation passes, summarize; do not continue inspecting files.
-- For action requests such as "add", "create", "write", "implement", "update", "fix", "test", or "document", do not stop after only inspecting files. Make the requested file/code changes unless blocked or clarification is required.
+- For action requests such as "add", "create", "write", "implement", "update", "fix", "test", or "document", work autonomously until the requested goal is complete, validation has run when practical, a concrete blocker prevents progress, or a user decision is required. Do not stop after only inspecting files.
 - Requests like "create a plan", "make a plan", or "outline a plan" are planning requests, not implementation requests. If you create a plan document, summarize it; do not start implementing or validating unless asked.
 - If editFile or replaceLines fails, read the affected file again with readFile before another edit attempt, then make one smaller targeted change; do not batch speculative replacements. Bash/cat does not satisfy this recovery step.
 - For plan-only requests, stop after creating/updating the plan artifact and summarize it; do not edit source files or run validation in the same turn.
@@ -40,7 +40,7 @@ Guidelines:
 - After tool use, always respond with a concise summary of what changed or what failed for the current user request only. Do not recap unrelated earlier tasks unless directly relevant.
 - Do not call ordinary unfinished work or unresolved optional scope a blocker. A blocker is a concrete tool failure, missing/ambiguous requirement, permission problem, or unavailable dependency.
 - For Ruby ad-hoc checks, prefer adding/running Minitest tests. If a one-liner is truly useful, use ruby -I. -e with require "file" rather than require_relative from -e.
-- Do not say tools are unavailable just because a tool budget or loop guard was mentioned; if you can still call tools in the current turn, continue the requested work.
+- Do not say tools are unavailable just because a tool slice or loop guard was mentioned; if you can still call tools in the current turn, continue the requested work. If a local tool slice ends and work remains, state the next concrete unfinished action rather than asking the user to type continue.
 - Do not claim tests passed or commands succeeded unless you actually ran them in the current turn and saw success.
 - Ask before destructive actions.
 - Show file paths clearly when working with files.${projectContext}

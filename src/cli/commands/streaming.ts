@@ -51,6 +51,22 @@ function hideSyntheticToolCallMarkup(text: string) {
     .replace(/(^|\n)\s*(?:```(?:xml)?\s*)?(?:xml\s*)?<tool_call>[\s\S]*$/i, '$1');
 }
 
+function isNonSubstantiveAssistantText(text: string) {
+  return /^[`\s]*$/.test(text);
+}
+
+function assistantDisplayText(text: string) {
+  return hideSyntheticToolCallMarkup(text).trim();
+}
+
+function normalizeAssistantText(text: string) {
+  return assistantDisplayText(text)
+    .replace(/[`*_~#>\-–—:;,.!?()[\]{}"']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function toolInputPath(input: unknown) {
   return typeof input === 'object' && input != null && 'path' in input && typeof (input as {path?: unknown}).path === 'string'
     ? (input as {path: string}).path
@@ -77,6 +93,14 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
 }
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+const IDLE_TIMEOUT_MS = 5 * 60_000;
+const MAIN_STEP_LIMIT = 40;
+const MAIN_TOOL_CALL_LIMIT = 40;
+const MAIN_TOOL_ONLY_STEP_LIMIT = 12;
+const FOLLOW_UP_STEP_LIMIT = 30;
+const FOLLOW_UP_TOOL_CALL_LIMIT = 30;
+const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 10;
+const COMPLETION_CONTINUATION_LIMIT = 30;
 
 function toolOutputOk(output: unknown, success: boolean) {
   if (!success) return false;
@@ -118,7 +142,7 @@ export async function runAgentTurn(
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => abortController.abort('Haze turn timed out after no model/tool activity.'), 90_000);
+    idleTimer = setTimeout(() => abortController.abort('Haze turn timed out after no model/tool activity.'), IDLE_TIMEOUT_MS);
   };
 
   try {
@@ -159,10 +183,27 @@ export async function runAgentTurn(
     let sawToolCall = false;
     let textAfterTool = false;
     let completionContinuationCount = 0;
-    const maxCompletionContinuations = 4;
+    const maxCompletionContinuations = COMPLETION_CONTINUATION_LIMIT;
     let editRecoveryPath: string | undefined;
     let editRecoveryReadSatisfied = false;
     const toolSummaries: string[] = [];
+    const visibleAssistantTexts = new Set<string>();
+    const previousAssistantText = normalizeAssistantText(callbacks.getLastAssistantText());
+    if (previousAssistantText) visibleAssistantTexts.add(previousAssistantText);
+    const rememberVisibleAssistantText = (text: string) => {
+      const normalized = normalizeAssistantText(text);
+      if (!normalized) return;
+      visibleAssistantTexts.add(normalized);
+      callbacks.setLastAssistantText(text);
+    };
+    const isDuplicateVisibleAssistantText = (text: string) => {
+      const normalized = normalizeAssistantText(text);
+      return normalized.length > 0 && visibleAssistantTexts.has(normalized);
+    };
+    const isPrefixOfVisibleAssistantText = (text: string) => {
+      const normalized = normalizeAssistantText(text);
+      return normalized.length > 0 && [...visibleAssistantTexts].some(previous => previous.startsWith(normalized) && previous !== normalized);
+    };
     const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
     const toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const toolDisplayItems: Array<{id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; hidden?: boolean}> = [];
@@ -272,12 +313,12 @@ export async function runAgentTurn(
         messages: continuationMessages,
         tools: availableTools,
         toolChoice: allowTools ? 'auto' : 'none',
-        stopWhen: stepCountIs(10),
+        stopWhen: stepCountIs(FOLLOW_UP_STEP_LIMIT),
         abortSignal: abortController.signal,
         experimental_context: toolExecutionContext,
         prepareStep({steps, messages}) {
           continuationToolCalls = steps.flatMap(step => step.toolCalls).length;
-          if (continuationToolCalls >= 10 || toolOnlyStepCount(steps) >= 5) {
+          if (continuationToolCalls >= FOLLOW_UP_TOOL_CALL_LIMIT || toolOnlyStepCount(steps) >= FOLLOW_UP_TOOL_ONLY_STEP_LIMIT) {
             return {
               toolChoice: 'none',
               messages: [
@@ -337,8 +378,8 @@ export async function runAgentTurn(
         resetIdleTimer();
         const delta = sanitizeAssistantText(rawDelta);
         responseText += delta;
-        const displayText = hideSyntheticToolCallMarkup(responseText);
-        if (!displayText && !responseStarted) continue;
+        const displayText = assistantDisplayText(responseText);
+        if ((!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) && !responseStarted) continue;
         if (!responseStarted) {
           responseStarted = true;
           callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
@@ -353,11 +394,13 @@ export async function runAgentTurn(
       } catch (error) {
         throw followUpStreamError ?? error;
       }
-      const finalText = hideSyntheticToolCallMarkup(responseText).trim();
+      const finalText = assistantDisplayText(responseText);
+      const visibleFinalText = finalText;
+      const hidden = visibleFinalText.length === 0 || isNonSubstantiveAssistantText(visibleFinalText) || isDuplicateVisibleAssistantText(visibleFinalText);
       if (responseStarted) {
-        callbacks.setLastAssistantText(finalText);
-        callbacks.onEvent?.(agentEvent({type: 'message_end', id: responseId, text: finalText, hidden: finalText.length === 0}));
-        callbacks.updateMessage(responseId, {text: finalText, streaming: false, hidden: finalText.length === 0});
+        if (!hidden) rememberVisibleAssistantText(visibleFinalText);
+        callbacks.onEvent?.(agentEvent({type: 'message_end', id: responseId, text: visibleFinalText, hidden}));
+        callbacks.updateMessage(responseId, {text: visibleFinalText, streaming: false, hidden});
       }
       return {text: finalText, id: responseId, started: responseStarted};
     }
@@ -370,7 +413,7 @@ export async function runAgentTurn(
       system: buildSystemPrompt(contextFiles),
       messages: requestMessages,
       tools: availableTools,
-      stopWhen: stepCountIs(12),
+      stopWhen: stepCountIs(MAIN_STEP_LIMIT),
       abortSignal: abortController.signal,
       experimental_context: toolExecutionContext,
       onError({error}) {
@@ -412,7 +455,7 @@ export async function runAgentTurn(
             ],
           };
         }
-        if (likelyActionRequest && !mutatingToolSucceeded && consecutiveToolOnlySteps >= 3 && toolCalls.length < 10) {
+        if (likelyActionRequest && !mutatingToolSucceeded && consecutiveToolOnlySteps >= 3 && toolCalls.length < MAIN_TOOL_CALL_LIMIT) {
           callbacks.debugLog('nudging action request toward mutation after read-only steps');
           return {
             messages: [
@@ -421,7 +464,7 @@ export async function runAgentTurn(
             ],
           };
         }
-        if (toolCalls.length >= 12 || consecutiveToolOnlySteps >= 5) {
+        if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || consecutiveToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
           return {
             toolChoice: 'none',
@@ -465,8 +508,11 @@ export async function runAgentTurn(
       const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
       if (currentAssistantStarted && currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
-        callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: hideSyntheticToolCallMarkup(currentAssistantText).trim()}));
-        callbacks.updateMessage(currentAssistantId, {streaming: false});
+        const intermediateText = assistantDisplayText(currentAssistantText);
+        const hidden = intermediateText.length === 0 || isNonSubstantiveAssistantText(intermediateText) || isDuplicateVisibleAssistantText(intermediateText);
+        if (!hidden) rememberVisibleAssistantText(intermediateText);
+        callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: intermediateText, hidden}));
+        callbacks.updateMessage(currentAssistantId, {text: intermediateText, streaming: false, hidden});
         currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         currentAssistantStarted = false;
         currentAssistantText = '';
@@ -475,8 +521,8 @@ export async function runAgentTurn(
 
       assistantText += delta;
       currentAssistantText += delta;
-      const displayText = hideSyntheticToolCallMarkup(currentAssistantText);
-      if (!displayText && !currentAssistantStarted) continue;
+      const displayText = assistantDisplayText(currentAssistantText);
+      if ((!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) && !currentAssistantStarted) continue;
       if (!currentAssistantStarted) {
         assistantStarted = true;
         currentAssistantStarted = true;
@@ -496,7 +542,7 @@ export async function runAgentTurn(
       throw streamError ?? error;
     }
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
-    const finalAssistantText = hideSyntheticToolCallMarkup(assistantText).trim();
+    const finalAssistantText = assistantDisplayText(assistantText);
     const decideCompletion = (text: string) => completionDecision({
       request: value,
       goal,
@@ -522,12 +568,9 @@ export async function runAgentTurn(
         loopConversation = callbacks.getConversation();
         if (continuation.text) latestText = continuation.text;
         decision = decideCompletion(latestText);
-        if (continuation.started && (decision.needsActionContinuation || decision.needsValidationContinuation)) {
-          callbacks.updateMessage(continuation.id, {hidden: true});
-        }
       }
       if ((decision.needsActionContinuation || decision.needsValidationContinuation) && completionContinuationCount >= maxCompletionContinuations) {
-        callbacks.addMessage({role: 'assistant', text: 'Stopped after the bounded completion loop. The current goal may still need work; ask me to continue and I will resume from the latest tool results.'});
+        callbacks.addMessage({role: 'assistant', text: 'Stopped after the autonomous safety limit. The current goal may still need work; ask me to continue and I will resume from the latest tool results.'});
       }
       if (!latestText && toolSummaries.length > 0) {
         const followUp = await streamAssistantResponse(loopConversation, 'completion loop ended without text', noTextAfterToolPrompt(false), false);
@@ -537,11 +580,12 @@ export async function runAgentTurn(
 
     if (assistantStarted) {
       const hidePreToolFragment = sawToolCall && !textAfterTool;
-      callbacks.setLastAssistantText(hidePreToolFragment ? '' : finalAssistantText);
-      callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: finalAssistantText, hidden: finalAssistantText.length === 0 || hidePreToolFragment}));
-      callbacks.updateMessage(currentAssistantId, {text: finalAssistantText, streaming: false, hidden: finalAssistantText.length === 0 || hidePreToolFragment});
+      const visibleFinalAssistantText = assistantDisplayText(currentAssistantText);
+      const hidden = visibleFinalAssistantText.length === 0 || isNonSubstantiveAssistantText(visibleFinalAssistantText) || isDuplicateVisibleAssistantText(visibleFinalAssistantText) || hidePreToolFragment;
+      if (!hidden) rememberVisibleAssistantText(visibleFinalAssistantText);
+      callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: visibleFinalAssistantText, hidden}));
+      callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden});
       if (decision.needsActionContinuation || decision.needsValidationContinuation) {
-        callbacks.updateMessage(currentAssistantId, {streaming: false, hidden: true});
         await runCompletionLoop(completedConversation, finalAssistantText);
       } else if (sawToolCall && !textAfterTool) {
         const followUp = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text', noTextAfterToolPrompt(false), false);
