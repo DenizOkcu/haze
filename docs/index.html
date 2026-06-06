@@ -627,7 +627,7 @@
         <a href="#skills" class="hide-mobile">Skills</a>
         <a href="#tools" class="hide-mobile">Tools</a>
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <span class="badge">npm v0.0.1</span>
+        <span class="badge">npm v0.0.2</span>
       </div>
     </div>
   </nav>
@@ -646,7 +646,7 @@
         </p>
 
         <div class="install-box">
-          <code><span class="dollar">$ </span>npx @denizokcu/haze</code>
+          <code><span class="dollar">$ </span>npm i -g @denizokcu/haze && haze</code>
           <button class="copy-btn" id="copy-btn" onclick="copyInstall()">copy</button>
         </div>
 
@@ -992,7 +992,7 @@
     setTimeout(runTerminal, 800);
 
     function copyInstall() {
-      navigator.clipboard.writeText('npx @denizokcu/haze');
+      navigator.clipboard.writeText('npm i -g @denizokcu/haze && haze');
       const btn = document.getElementById('copy-btn');
       btn.textContent = 'copied!';
       setTimeout(() => { btn.textContent = 'copy'; }, 2000);
