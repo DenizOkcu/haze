@@ -6,7 +6,8 @@ import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
-import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
+import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
+import {activeModel, configuredProviders, DEFAULT_PROVIDER_NAME, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -15,12 +16,16 @@ import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message} from './streaming.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
+import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, type HazeSession} from '../../core/session/sessionStore.js';
+import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
 
-export type Mode = 'chat' | 'apiKey' | 'model';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels';
 
 interface ChatOptions {
   debug?: boolean;
   version?: string;
+  continueSession?: boolean;
+  noSession?: boolean;
 }
 
 const execFile = promisify(execFileCallback);
@@ -54,6 +59,14 @@ function formatTokenCount(tokens: number) {
   return String(tokens);
 }
 
+function displayMessagesFromConversation(conversation: ModelMessage[]): Message[] {
+  return conversation.flatMap(message => {
+    if (message.role !== 'user' && message.role !== 'assistant') return [];
+    const text = modelMessageText(message).trim();
+    return text ? [{role: message.role, text} satisfies Message] : [];
+  });
+}
+
 function estimateConversationTokens(messages: Message[]) {
   const inputText = messages
     .filter(message => message.role === 'user' || message.role === 'tool')
@@ -67,6 +80,16 @@ function estimateConversationTokens(messages: Message[]) {
     input: estimateTokens(inputText),
     output: estimateTokens(outputText),
   };
+}
+
+function fullWidthLines(text: string, width: number, leftPadding = 0) {
+  const safeWidth = Math.max(1, width);
+  const prefix = ' '.repeat(leftPadding);
+  return text.split('\n').map(line => `${prefix}${line}`.padEnd(Math.max(safeWidth, line.length + leftPadding)));
+}
+
+function fullWidthBlankLine(width: number) {
+  return ''.padEnd(Math.max(1, width));
 }
 
 function ToolMessageText({text, streaming}: {text: string; streaming?: boolean}) {
@@ -89,30 +112,29 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
 }
 
 function startupProviderInfo(settings: HazeSettings) {
-  const model = process.env.HAZE_MODEL ?? settings.model ?? 'x-ai/grok-build-0.1';
-  const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'default';
-  const baseURL = process.env.OPENAI_BASE_URL ?? settings.baseURL ?? 'https://openrouter.ai/api/v1';
-  const baseURLSource = process.env.OPENAI_BASE_URL ? 'OPENAI_BASE_URL env' : settings.baseURL ? 'settings' : 'default';
-  const apiKeySource = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY env' : settings.apiKey ? '~/.haze/settings.json' : 'missing';
-  const provider = process.env.OPENAI_BASE_URL
-    ? 'OpenAI-compatible custom endpoint'
-    : settings.provider === 'openrouter' || settings.baseURL || settings.apiKey
-      ? 'OpenRouter'
-      : 'OpenRouter (not logged in)';
+  const selection = activeModel(settings);
+  const model = process.env.HAZE_MODEL ?? selection.model;
+  const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'provider default';
+  const baseURL = process.env.OPENAI_BASE_URL ?? selection.provider.url;
+  const baseURLSource = process.env.OPENAI_BASE_URL ? 'OPENAI_BASE_URL env' : 'settings';
+  const apiKeySource = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY env' : providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
+  const provider = process.env.OPENAI_BASE_URL ? 'OpenAI-compatible custom endpoint' : selection.provider.name;
 
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
     `- Base URL: ${baseURL} (${baseURLSource})`,
-    `- API key: ${apiKeySource === 'missing' ? 'not configured; run /login or set OPENAI_API_KEY' : `configured via ${apiKeySource}`}`,
+    `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
+    `- Configured providers: ${configuredProviders(settings).length}`,
   ].join('\n');
 }
 
-function ChatScreen({debug = false, version}: ChatOptions) {
+function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const height = stdout.rows ?? process.stdout.rows ?? 24;
+  const width = stdout.columns ?? process.stdout.columns ?? 80;
   const [messages, setMessages] = useState<Message[]>([
     {role: 'system', text: 'Welcome to Haze. Use /help for commands.'}
   ]);
@@ -120,14 +142,22 @@ function ChatScreen({debug = false, version}: ChatOptions) {
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sessionRef = useRef<HazeSession | undefined>(undefined);
+  const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
+  const [activeGoalStatus, setActiveGoalStatus] = useState<string | undefined>();
+  const [sessionLabel, setSessionLabel] = useState<string | undefined>();
+  const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
+  const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
+  const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
+  const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
 
   useEffect(() => {
     Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
@@ -141,6 +171,10 @@ function ChatScreen({debug = false, version}: ChatOptions) {
       }).catch(() => {
         setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
       });
+    });
+    initializeSession().catch(error => {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
     });
     readInputHistory().then(setInputHistory).catch(() => undefined);
     readContextFiles().then(setContextFiles).catch(() => undefined);
@@ -164,9 +198,10 @@ function ChatScreen({debug = false, version}: ChatOptions) {
 
   function skillInvocation(value: string) {
     if (!value.startsWith('/')) return undefined;
-    const name = value.slice(1).trim();
-    if (!name || name.includes(' ')) return undefined;
-    return skills.find(skill => skill.name === name);
+    const [name, ...args] = value.slice(1).trim().split(/\s+/).filter(Boolean);
+    if (!name) return undefined;
+    const skill = skills.find(candidate => candidate.name === name);
+    return skill ? {skill, args: args.join(' ')} : undefined;
   }
 
   function debugLog(line: string) {
@@ -174,51 +209,332 @@ function ChatScreen({debug = false, version}: ChatOptions) {
     setDebugLogs(current => [...current.slice(-7), line]);
   }
 
+  async function startNewSession(message = 'Started a new session.') {
+    if (noSession) {
+      sessionRef.current = undefined;
+      setSessionLabel('session off');
+      return;
+    }
+    const session = await createSession({hazeVersion: version});
+    sessionRef.current = session;
+    setSessionLabel(session.id);
+    setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
+  }
+
+  async function initializeSession() {
+    if (noSession) {
+      setSessionLabel('session off');
+      return;
+    }
+    if (continueSession) {
+      const session = await latestSession();
+      if (session) {
+        const conversation = await restoreConversation(session);
+        sessionRef.current = session;
+        conversationRef.current = conversation;
+        setSessionLabel(session.id);
+        setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
+        return;
+      }
+    }
+    await startNewSession(continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.');
+  }
+
   function clearConversation() {
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
+    const session = sessionRef.current;
+    if (session) void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'clear', text: 'Conversation cleared'}).catch(() => undefined);
+  }
+
+  function compactConversation(instructions?: string) {
+    const result = compactModelMessages(conversationRef.current, {instructions});
+    if (!result.compacted) {
+      setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
+      return false;
+    }
+    conversationRef.current = result.messages;
+    const session = sessionRef.current;
+    if (session) {
+      void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'compact', text: `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`}).catch(() => undefined);
+      void appendSessionEntry(session, {type: 'conversation_snapshot', at: new Date().toISOString(), messages: result.messages}).catch(() => undefined);
+    }
+    setMessages(m => [...m, {role: 'system', text: `Compacted context: summarized ${result.olderCount} older model messages and kept the last ${result.keptCount}.`}]);
+    return true;
+  }
+
+  async function resumeLatestSession() {
+    const session = await latestSession();
+    if (!session) {
+      setMessages(m => [...m, {role: 'system', text: 'No previous session found for this workspace.'}]);
+      return;
+    }
+    const conversation = await restoreConversation(session);
+    sessionRef.current = session;
+    conversationRef.current = conversation;
+    setSessionLabel(session.id);
+    setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
   }
 
   function cancelThinking() {
     if (!busy) return;
     abortControllerRef.current?.abort('User pressed Esc.');
+    if (followUpQueueRef.current.length > 0) {
+      followUpQueueRef.current = [];
+      setQueuedFollowUps([]);
+      setMessages(m => [...m, {role: 'system', text: 'Cleared queued follow-ups after interrupt.'}]);
+    }
     setBusy(false);
   }
 
-  async function submit(value: string) {
-    if (busy) return;
+  function queueFollowUp(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    followUpQueueRef.current = [...followUpQueueRef.current, trimmed];
+    setQueuedFollowUps(followUpQueueRef.current);
+    setMessages(m => [...m, {role: 'system', text: `Queued follow-up (${followUpQueueRef.current.length}): ${trimmed}`}]);
+  }
 
-    if (mode === 'apiKey') {
-      const next = await updateSettings({provider: 'openrouter', apiKey: value, baseURL: 'https://openrouter.ai/api/v1'});
-      setSettings(next);
+  function closeInputList() {
+    if (mode === 'provider' || mode === 'providerAction' || mode === 'model') {
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `OpenRouter login saved to ~/.haze/settings.json. Security theatre completed.\n\n${startupProviderInfo(next)}`}]);
+      setModelProviderFilter(undefined);
+      setSelectedProviderName(undefined);
+    }
+  }
+
+  function providerSuggestions(): TextInputSuggestion[] {
+    return [
+      ...configuredProviders(settings).map(provider => ({
+        value: provider.name,
+        description: `${provider.url} · ${provider.models.length} model${provider.models.length === 1 ? '' : 's'}`,
+        kind: 'provider' as const,
+      })),
+      {value: 'add provider', description: 'Add a new OpenAI-compatible provider', kind: 'provider' as const},
+    ];
+  }
+
+  function providerActionSuggestions(): TextInputSuggestion[] {
+    return [
+      {value: 'use provider', description: 'Set this provider and choose a model', kind: 'provider' as const},
+      {value: 'add models', description: 'Append comma-separated model names to this provider', kind: 'provider' as const},
+    ];
+  }
+
+  function modelSuggestions(): TextInputSuggestion[] {
+    const providers = configuredProviders(settings).filter(provider => !modelProviderFilter || provider.name === modelProviderFilter);
+    return providers.flatMap(provider => provider.models.map(model => ({
+      value: modelProviderFilter ? model : modelSelector(provider, model),
+      description: provider.name,
+      kind: 'model' as const,
+    })));
+  }
+
+  async function selectProvider(providerName: string) {
+    if (providerName === 'add provider') {
+      setProviderDraft({});
+      setMode('providerAddName');
+      setMessages(m => [...m, {role: 'system', text: 'Provider name? Example: openrouter, local, lmstudio.'}]);
+      return;
+    }
+    const provider = findProvider(settings, providerName);
+    if (!provider) {
+      setMessages(m => [...m, {role: 'system', text: `No provider named ${providerName}. Use /provider and choose add provider.`}]);
+      setMode('chat');
+      return;
+    }
+    setSelectedProviderName(provider.name);
+    setMode('providerAction');
+    setMessages(m => [...m, {role: 'system', text: `${provider.name}: choose an action.`}]);
+  }
+
+  async function useProvider(providerName: string) {
+    const provider = findProvider(settings, providerName);
+    if (!provider) {
+      setMessages(m => [...m, {role: 'system', text: `No provider named ${providerName}.`}]);
+      setMode('chat');
+      setSelectedProviderName(undefined);
+      return;
+    }
+    const next = await updateSettings({provider: provider.name});
+    setSettings(next);
+    setSelectedProviderName(undefined);
+    setModelProviderFilter(provider.name);
+    setMode('model');
+    setMessages(m => [...m, {role: 'system', text: `Provider set to ${provider.name}. Choose a model.`}]);
+  }
+
+  async function selectProviderAction(action: string) {
+    if (!selectedProviderName) {
+      setMode('provider');
+      return;
+    }
+    if (action === 'use provider') {
+      await useProvider(selectedProviderName);
+      return;
+    }
+    if (action === 'add models') {
+      setMode('providerAppendModels');
+      setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to add to ${selectedProviderName}?`}]);
+      return;
+    }
+    setMessages(m => [...m, {role: 'system', text: `Unknown provider action: ${action}`}]);
+  }
+
+  async function selectModel(selector: string) {
+    const scopedSelector = modelProviderFilter ? `${modelProviderFilter}:${selector}` : selector;
+    const resolved = resolveModelSelector(settings, scopedSelector);
+    if (resolved.status === 'ambiguous') {
+      setMessages(m => [...m, {role: 'system', text: `Model ${resolved.model} exists on multiple providers: ${resolved.providers.map(provider => modelSelector(provider, resolved.model)).join(', ')}`}]);
+      return;
+    }
+    if (resolved.status === 'missing') {
+      setMessages(m => [...m, {role: 'system', text: `No configured model named ${selector}. Use /provider, select a provider, then choose add models.`}]);
+      return;
+    }
+    const next = await updateSettings({provider: resolved.provider.name, model: resolved.model});
+    setSettings(next);
+    setModelProviderFilter(undefined);
+    setMode('chat');
+    setMessages(m => [...m, {role: 'system', text: `Model set to ${resolved.model} on ${resolved.provider.name}.\n\n${startupProviderInfo(next)}`}]);
+  }
+
+  async function appendModelsToProvider(modelsValue: string) {
+    const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
+    const models = modelsValue.split(',').map(model => model.trim()).filter(Boolean);
+    if (!provider) {
+      setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+      setMode('chat');
+      return;
+    }
+    if (models.length === 0) {
+      setMessages(m => [...m, {role: 'system', text: 'Enter at least one model name.'}]);
+      return;
+    }
+    const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])]};
+    const next = await updateSettings({providers: upsertProvider(settings, nextProvider), provider: provider.name});
+    setSettings(next);
+    setSelectedProviderName(undefined);
+    setModelProviderFilter(provider.name);
+    setMode('model');
+    setMessages(m => [...m, {role: 'system', text: `Added ${models.length} model${models.length === 1 ? '' : 's'} to ${provider.name}. Choose a model.`}]);
+  }
+
+  async function finishProviderAdd(modelsValue: string) {
+    const models = modelsValue.split(',').map(model => model.trim()).filter(Boolean);
+    if (!providerDraft.name || !providerDraft.url || models.length === 0) {
+      setMessages(m => [...m, {role: 'system', text: 'Provider name, URL, and at least one model are required.'}]);
+      setMode('chat');
+      setProviderDraft({});
+      return;
+    }
+    const provider: HazeProviderSettings = {
+      name: providerDraft.name,
+      url: providerDraft.url,
+      ...(providerDraft.key ? {key: providerDraft.key} : {}),
+      models: [...new Set(models)],
+    };
+    const next = await updateSettings({providers: upsertProvider(settings, provider), provider: provider.name});
+    setSettings(next);
+    setProviderDraft({});
+    setModelProviderFilter(provider.name);
+    setMode('model');
+    setMessages(m => [...m, {role: 'system', text: `Added provider ${provider.name}. Choose a model.`}]);
+  }
+
+  async function submit(value: string) {
+    if (busy) {
+      if (mode === 'chat') queueFollowUp(value);
+      return;
+    }
+
+    if (mode === 'provider') {
+      await selectProvider(value);
+      return;
+    }
+
+    if (mode === 'providerAction') {
+      await selectProviderAction(value);
       return;
     }
 
     if (mode === 'model') {
-      const next = await updateSettings({model: value});
-      setSettings(next);
-      setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `Model set to ${value}.\n\n${startupProviderInfo(next)}`}]);
+      await selectModel(value);
+      return;
+    }
+
+    if (mode === 'providerAddName') {
+      const name = value.trim();
+      if (!name) {
+        setMessages(m => [...m, {role: 'system', text: 'Provider name is required.'}]);
+        return;
+      }
+      if (settings.providers?.some(provider => provider.name === name)) {
+        setMessages(m => [...m, {role: 'system', text: `Provider ${name} already exists. Choose a unique name.`}]);
+        return;
+      }
+      setProviderDraft({name});
+      setMode('providerAddUrl');
+      setMessages(m => [...m, {role: 'system', text: 'OpenAI-compatible base URL? Example: https://openrouter.ai/api/v1 or http://localhost:1234/v1'}]);
+      return;
+    }
+
+    if (mode === 'providerAddUrl') {
+      try {
+        new URL(value);
+      } catch {
+        setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example http://localhost:1234/v1.'}]);
+        return;
+      }
+      setProviderDraft(draft => ({...draft, url: value.trim()}));
+      setMode('providerAddKey');
+      setMessages(m => [...m, {role: 'system', text: 'API key? Leave blank for local/keyless providers.'}]);
+      return;
+    }
+
+    if (mode === 'providerAddKey') {
+      setProviderDraft(draft => ({...draft, ...(value.trim() ? {key: value.trim()} : {})}));
+      setMode('providerAddModels');
+      setMessages(m => [...m, {role: 'system', text: 'Comma-separated model names? Example: llama3.1, qwen2.5-coder, gpt-4o'}]);
+      return;
+    }
+
+    if (mode === 'providerAddModels') {
+      await finishProviderAdd(value);
+      return;
+    }
+
+    if (mode === 'providerAppendModels') {
+      await appendModelsToProvider(value);
       return;
     }
 
     const invokedSkill = skillInvocation(value);
     if (invokedSkill) {
-      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.name}" skill. Call skill_${invokedSkill.name.replace(/[^a-zA-Z0-9_]/g, '_')} and follow its returned instructions.`, value);
+      const argumentText = invokedSkill.args ? `\nUser-provided skill arguments: ${invokedSkill.args}` : '';
+      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.skill.name}" skill. Call skill_${invokedSkill.skill.name.replace(/[^a-zA-Z0-9_]/g, '_')} and follow its returned instructions.${argumentText}`, value);
       return;
     }
 
-    const isSkillCreate = /^\/skills? create(?:\s|$)/.test(value);
+    const isSkillCreate = /^\/create-skill(?:\s|$)/.test(value) || /^\/skills? create(?:\s|$)/.test(value);
 
     const ctx: CommandContext = {
       settings,
       contextFiles,
       setMode,
+      setModelProviderFilter,
       addSystemMessage: text => setMessages(m => [...m, {role: 'system', text}]),
       clearConversation,
+      newSession: async () => {
+        conversationRef.current = [];
+        lastAssistantTextRef.current = '';
+        setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
+        await startNewSession('Started a new session.');
+      },
+      resumeSession: resumeLatestSession,
+      sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
+      compactConversation,
       runAgentTurn: (prompt, displayValue) => doAgentTurn(prompt, displayValue),
       refreshContextFiles: async () => { const files = await readContextFiles().catch(() => contextFiles); setContextFiles(files); return files; },
       updateSettings: async patch => {
@@ -246,7 +562,7 @@ function ChatScreen({debug = false, version}: ChatOptions) {
     }
     if (result === 'exit') return exit();
     if (result === 'handled') {
-      if (value === '/skill create' || value.startsWith('/skill create ') || value === '/skills create' || value.startsWith('/skills create ') || value.startsWith('/skill remove ') || value.startsWith('/skills remove ')) {
+      if (value === '/create-skill' || value.startsWith('/create-skill ') || value === '/skill create' || value.startsWith('/skill create ') || value === '/skills create' || value.startsWith('/skills create ') || value.startsWith('/remove-skill ') || value.startsWith('/skill remove ') || value.startsWith('/skills remove ')) {
         await refreshSkills().catch(() => undefined);
       }
       return;
@@ -257,52 +573,99 @@ function ChatScreen({debug = false, version}: ChatOptions) {
 
   async function doAgentTurn(value: string, displayValue?: string) {
     setDebugLogs([]);
+    await runSingleAgentTurn(value, displayValue);
+    while (followUpQueueRef.current.length > 0) {
+      const next = followUpQueueRef.current[0];
+      followUpQueueRef.current = followUpQueueRef.current.slice(1);
+      setQueuedFollowUps(followUpQueueRef.current);
+      setMessages(m => [...m, {role: 'system', text: `Running queued follow-up: ${next}`}]);
+      await runSingleAgentTurn(next);
+    }
+  }
+
+  async function runSingleAgentTurn(value: string, displayValue?: string) {
     await runAgentTurn(value, displayValue, contextFiles, {
-      addMessage: msg => setMessages(m => [...m, msg]),
+      addMessage: msg => {
+        setMessages(m => [...m, msg]);
+        const session = sessionRef.current;
+        if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: msg.role, text: msg.text}).catch(() => undefined);
+      },
       updateMessage: (id, update) => setMessages(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg)),
-      setConversation: msgs => { conversationRef.current = msgs; },
+      setConversation: msgs => {
+        conversationRef.current = msgs;
+        const session = sessionRef.current;
+        if (session) void appendSessionEntry(session, {type: 'conversation_snapshot', at: new Date().toISOString(), messages: msgs}).catch(() => undefined);
+      },
       setBusy,
       debugLog,
       getConversation: () => conversationRef.current,
       getLastAssistantText: () => lastAssistantTextRef.current,
       setLastAssistantText: text => { lastAssistantTextRef.current = text; },
       setAbortController: controller => { abortControllerRef.current = controller; },
+      setGoalStatus: setActiveGoalStatus,
+      compactConversation,
+      onEvent: event => {
+        const session = sessionRef.current;
+        if (session) void appendSessionEntry(session, {type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)}).catch(() => undefined);
+      },
     });
   }
 
   const visible = messages.filter(message => !message.hidden);
-  const placeholder = mode === 'apiKey' ? 'OpenRouter API key' : mode === 'model' ? 'x-ai/grok-build-0.1' : busy ? 'Thinking, allegedly' : 'Ask Haze to help build your app';
-  const activeModelName = process.env.HAZE_MODEL ?? settings.model ?? 'x-ai/grok-build-0.1';
-  const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey);
-  const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model);
+  const activeSelection = activeModel(settings);
+  const placeholder = mode === 'provider'
+    ? 'Choose provider'
+    : mode === 'providerAction'
+      ? 'Choose provider action'
+      : mode === 'model'
+        ? 'Choose model'
+        : mode === 'providerAddName'
+          ? 'Provider name'
+          : mode === 'providerAddUrl'
+            ? 'https://example.com/v1'
+            : mode === 'providerAddKey'
+              ? 'API key, or blank for local'
+              : mode === 'providerAddModels' || mode === 'providerAppendModels'
+                ? 'model-a, model-b'
+                : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
+  const activeModelName = `${activeSelection.provider.name}:${process.env.HAZE_MODEL ?? activeSelection.model}`;
+  const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey ?? activeSelection.provider.key) || activeSelection.provider.name !== DEFAULT_PROVIDER_NAME;
+  const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model ?? activeSelection.model);
   const headerSubtitle = hasLogin && hasChosenModel
     ? [
       'A minimal LLM harness for growing your own workflows while you work.',
       '',
       'Start with simple chat, then teach Haze your habits with skills:',
-      '/skill create review my branch against main  — tiny spell, useful goblin.',
+      '/create-skill review my branch against main  — tiny spell, useful goblin.',
       '',
       'The most adaptive workflow is the one you shape as you go.',
       '',
       'Guardrails are light: Haze lets the LLM work from the terminal almost like you,',
       'while trying to stay scoped to this project.',
     ].join('\n')
-    : 'First things first: run /login to add your API key, then /model x-ai/grok-build-0.1 to choose a model.';
+    : 'First things first: run /provider to choose or add a provider, then select a model.';
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
   const toolsUsed = toolCallCount(messages);
   const estimatedTokens = estimateConversationTokens(messages);
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
-  const slashSuggestions: TextInputSuggestion[] = mode === 'chat' ? [
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
+  const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
+  const [goalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
+  const goalStatusText = goalStatusParts.join(' · ');
+  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
-    {value: '/login', description: 'Save an OpenRouter API key', kind: 'command'},
+    {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
-    {value: '/skill create ', description: 'Create a Markdown skill', kind: 'command'},
-    {value: '/skill list', description: 'List installed skills', kind: 'command'},
-    {value: '/skill info ', description: 'Show details for a skill', kind: 'command'},
-    {value: '/skill validate ', description: 'Validate a skill', kind: 'command'},
-    {value: '/skill remove ', description: 'Remove a skill with --yes', kind: 'command'},
+    {value: '/create-skill ', description: 'Create a Markdown skill', kind: 'command'},
+    {value: '/list-skills', description: 'List installed skills', kind: 'command'},
+    {value: '/skill-info ', description: 'Show details for a skill', kind: 'command'},
+    {value: '/validate-skill ', description: 'Validate a skill', kind: 'command'},
+    {value: '/remove-skill ', description: 'Remove a skill with --yes', kind: 'command'},
     {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
+    {value: '/session', description: 'Show current session path', kind: 'command'},
+    {value: '/resume', description: 'Resume latest session for this workspace', kind: 'command'},
+    {value: '/new', description: 'Start a new session', kind: 'command'},
+    {value: '/compact ', description: 'Summarize older context and keep recent messages', kind: 'command'},
     {value: '/clear', description: 'Clear conversation history', kind: 'command'},
     {value: '/exit', description: 'Exit Haze', kind: 'command'},
     {value: '/quit', description: 'Exit Haze', kind: 'command'},
@@ -314,35 +677,52 @@ function ChatScreen({debug = false, version}: ChatOptions) {
       <Header subtitle={headerSubtitle} version={version} />
     </Box>
     <Box flexDirection="column" flexGrow={1}>
-      {visible.map((message, index) => <Box key={index} flexDirection="column" marginBottom={1}>
-        <Text color={message.role === 'user' ? theme.purple : message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.blue : theme.muted} bold>
-          {message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Haze' : message.role === 'tool' ? 'Tool' : 'Info'}
-        </Text>
-        {message.role === 'tool'
-          ? <ToolMessageText text={message.text} streaming={message.streaming} />
-          : message.role === 'assistant' && !message.streaming
-            ? <MarkdownText content={message.text} />
-            : <Text>{message.text}</Text>}
-      </Box>)}
+      {visible.map((message, index) => message.role === 'user'
+        ? <Box key={index} flexDirection="column" marginBottom={1}>
+          <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
+          <Text color={theme.purple} bold backgroundColor={theme.quoteBg}>{'  You asked'.padEnd(width)}</Text>
+          {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color="white" backgroundColor={theme.quoteBg}>{line}</Text>)}
+          <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
+        </Box>
+        : <Box key={index} flexDirection="column" marginBottom={1}>
+          <Text color={message.role === 'assistant' ? theme.success : message.role === 'tool' ? theme.blue : theme.muted} bold>
+            {message.role === 'assistant' ? 'Haze' : message.role === 'tool' ? 'Tool' : 'Info'}
+          </Text>
+          {message.role === 'tool'
+            ? <ToolMessageText text={message.text} streaming={message.streaming} />
+            : message.role === 'assistant' && !message.streaming
+              ? <MarkdownText content={message.text} />
+              : <Text>{message.text}</Text>}
+        </Box>)}
     </Box>
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
       {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
     </Box>}
+    {queuedFollowUps.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
+      <Text color={theme.muted}>Queued follow-ups:</Text>
+      {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} dimColor>  {index + 1}. {item}</Text>)}
+    </Box>}
     {busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}><Spinner type="dots" /> {busyLabel}<Text dimColor> · esc to interrupt</Text></Text>
+      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+    </Box>}
+    {goalText && <Box flexShrink={0}>
+      <Text wrap="truncate-end"><Text color={theme.blue} bold>Goal:</Text><Text color="white"> {goalRequest}</Text>{goalStatusText ? <Text color={theme.orange}> · {goalStatusText}</Text> : null}</Text>
     </Box>}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput
           placeholder={placeholder}
-          disabled={busy}
-          mask={mode === 'apiKey'}
+          disabled={busy && mode !== 'chat'}
+          mask={mode === 'providerAddKey'}
           historyItems={inputHistory}
           recordHistory={mode === 'chat'}
-          suggestions={slashSuggestions}
+          suggestions={inputSuggestions}
+          suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'model' ? 'always' : 'slash'}
+          submitOnEmpty={mode === 'providerAddKey'}
           onHistoryAdd={persistInputHistory}
           onCancel={cancelThinking}
+          onEscape={closeInputList}
           onSubmit={submit}
         />
       </Box>
@@ -360,6 +740,6 @@ function ChatScreen({debug = false, version}: ChatOptions) {
 }
 
 export async function chatCommand(options: ChatOptions = {}) {
-  const app = render(<ChatScreen debug={options.debug} />);
+  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} noSession={options.noSession} />);
   await app.waitUntilExit();
 }

@@ -32,7 +32,10 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
   const output = event.output as Record<string, unknown> | undefined;
   if (output?.duplicateSkipped === true) return 'skipped duplicate';
   if (typeof output?.code === 'number') return `exited with code ${output.code}`;
-  if (typeof output?.ok === 'boolean') return output.ok ? 'completed' : `failed: ${compact(output)}`;
+  if (typeof output?.ok === 'boolean') {
+    if (output.ok) return 'completed';
+    return typeof output.error === 'string' ? `failed: ${compact(output.error)}` : 'failed';
+  }
   return 'completed';
 }
 

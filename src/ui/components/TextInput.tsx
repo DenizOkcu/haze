@@ -5,7 +5,7 @@ import {theme} from '../theme.js';
 export type TextInputSuggestion = {
   value: string;
   description?: string;
-  kind?: 'command' | 'skill';
+  kind?: 'command' | 'skill' | 'provider' | 'model';
 };
 
 export function TextInput({
@@ -15,8 +15,11 @@ export function TextInput({
   historyItems = [],
   recordHistory = true,
   suggestions = [],
+  suggestionMode = 'slash',
+  submitOnEmpty = false,
   onHistoryAdd,
   onCancel,
+  onEscape,
   onSubmit
 }: {
   placeholder?: string;
@@ -25,12 +28,16 @@ export function TextInput({
   historyItems?: string[];
   recordHistory?: boolean;
   suggestions?: TextInputSuggestion[];
+  suggestionMode?: 'slash' | 'always';
+  submitOnEmpty?: boolean;
   onHistoryAdd?: (value: string) => void;
   onCancel?: () => void;
+  onEscape?: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
   const history = useRef<string[]>(historyItems);
   const historyIndex = useRef<number | null>(null);
   const draft = useRef('');
@@ -43,6 +50,7 @@ export function TextInput({
     if (!disabled) {
       setValue('');
       setCursor(0);
+      setSelectedSuggestionIndex(0);
       historyIndex.current = null;
       draft.current = '';
     }
@@ -51,6 +59,7 @@ export function TextInput({
   function setInput(next: string, nextCursor = next.length) {
     setValue(next);
     setCursor(Math.max(0, Math.min(nextCursor, next.length)));
+    setSelectedSuggestionIndex(0);
   }
 
   function showHistory(index: number) {
@@ -58,16 +67,22 @@ export function TextInput({
     setInput(history.current[index] ?? '');
   }
 
-  const slashQuery = !mask && value.startsWith('/') ? value.slice(1).toLowerCase() : undefined;
-  const filteredSuggestions = slashQuery == null ? [] : suggestions
-    .filter(suggestion => suggestion.value.slice(1).toLowerCase().includes(slashQuery) || suggestion.description?.toLowerCase().includes(slashQuery))
+  const suggestionQuery = !mask && (suggestionMode === 'always' || value.startsWith('/'))
+    ? (suggestionMode === 'always' ? value : value.slice(1)).toLowerCase()
+    : undefined;
+  const filteredSuggestions = suggestionQuery == null ? [] : suggestions
+    .filter(suggestion => {
+      const suggestionValue = suggestionMode === 'always' ? suggestion.value : suggestion.value.slice(1);
+      return suggestionValue.toLowerCase().includes(suggestionQuery) || suggestion.description?.toLowerCase().includes(suggestionQuery);
+    })
     .slice(0, 8);
-  const topSuggestion = filteredSuggestions[0];
+  const activeSuggestionIndex = Math.min(selectedSuggestionIndex, Math.max(0, filteredSuggestions.length - 1));
+  const activeSuggestion = filteredSuggestions[activeSuggestionIndex];
 
-  function submitValue(submitted: string) {
-    if (recordHistory) {
-      if (history.current[history.current.length - 1] !== submitted) history.current = [...history.current, submitted];
-      onHistoryAdd?.(submitted);
+  function submitValue(submitted: string, historyValue = submitted) {
+    if (recordHistory && historyValue) {
+      if (history.current[history.current.length - 1] !== historyValue) history.current = [...history.current, historyValue];
+      onHistoryAdd?.(historyValue);
     }
     onSubmit(submitted);
   }
@@ -82,21 +97,25 @@ export function TextInput({
       setInput('');
       historyIndex.current = null;
       draft.current = '';
+      onEscape?.();
       return;
     }
 
-    if (key.tab && topSuggestion) {
-      setInput(topSuggestion.value);
+    if (key.tab && activeSuggestion) {
+      setInput(activeSuggestion.value);
       historyIndex.current = null;
       return;
     }
 
     if (key.return) {
-      const submitted = (value.startsWith('/') && topSuggestion && topSuggestion.value !== value.trim()) ? topSuggestion.value : value.trim();
+      const shouldUseSuggestion = activeSuggestion && activeSuggestion.value !== value.trim() && (suggestionMode === 'always' || value.startsWith('/'));
+      const submitted = shouldUseSuggestion ? activeSuggestion.value : value.trim();
+      const submittedSuggestion = activeSuggestion?.value === submitted ? activeSuggestion : undefined;
+      const historyValue = submittedSuggestion && submittedSuggestion.kind !== 'command' ? '' : submitted;
       setInput('');
       historyIndex.current = null;
       draft.current = '';
-      if (submitted) submitValue(submitted);
+      if (submitted || submitOnEmpty) submitValue(submitted, historyValue);
       return;
     }
 
@@ -111,6 +130,10 @@ export function TextInput({
     }
 
     if (key.upArrow) {
+      if (filteredSuggestions.length > 0 && activeSuggestionIndex > 0) {
+        setSelectedSuggestionIndex(current => Math.max(0, current - 1));
+        return;
+      }
       if (history.current.length === 0) return;
       if (historyIndex.current === null) {
         draft.current = value;
@@ -122,6 +145,10 @@ export function TextInput({
     }
 
     if (key.downArrow) {
+      if (filteredSuggestions.length > 0 && activeSuggestionIndex < filteredSuggestions.length - 1) {
+        setSelectedSuggestionIndex(current => Math.min(filteredSuggestions.length - 1, current + 1));
+        return;
+      }
       if (historyIndex.current === null) return;
       if (historyIndex.current < history.current.length - 1) {
         showHistory(historyIndex.current + 1);
@@ -171,8 +198,8 @@ export function TextInput({
 
   return <Box flexDirection="column" width="100%">
     {filteredSuggestions.length > 0 && <Box flexDirection="column" marginBottom={1}>
-      {filteredSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index === 0 ? theme.success : theme.muted} wrap="truncate-end">
-        {index === 0 ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind === 'skill' ? 'skill' : 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
+      {filteredSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index === activeSuggestionIndex ? theme.success : theme.muted} wrap="truncate-end">
+        {index === activeSuggestionIndex ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind ?? 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
       </Text>)}
     </Box>}
     <Text wrap="truncate-end">

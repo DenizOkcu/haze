@@ -83,8 +83,8 @@ describe('toolResultSummary', () => {
     expect(toolResultSummary({success: true, output: {ok: true}})).toBe('completed');
   });
 
-  it('reports failed for ok:false output', () => {
-    expect(toolResultSummary({success: true, output: {ok: false}})).toMatch(/^failed:/);
+  it('reports failed for ok:false output with the concise error message', () => {
+    expect(toolResultSummary({success: true, output: {ok: false, error: 'oldText was not found', suggestedNextStep: 'Read again'}})).toBe('failed: oldText was not found');
   });
 
   it('reports completed for success with no output', () => {

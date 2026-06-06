@@ -1,0 +1,58 @@
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import fs from 'fs-extra';
+import os from 'node:os';
+import path from 'node:path';
+import type {ModelMessage} from 'ai';
+import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation} from '../../src/core/session/sessionStore.js';
+
+describe('sessionStore', () => {
+  let tmp: string;
+  let sessionsDir: string;
+  let cwd: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-session-test-'));
+    sessionsDir = path.join(tmp, 'sessions');
+    cwd = path.join(tmp, 'workspace');
+    await fs.ensureDir(cwd);
+  });
+
+  afterEach(async () => {
+    await fs.remove(tmp);
+  });
+
+  it('creates a session under the configured sessions directory', async () => {
+    const session = await createSession({cwd, sessionsDir, hazeVersion: 'test'});
+    expect(session.cwd).toBe(cwd);
+    expect(session.file.startsWith(sessionsDir)).toBe(true);
+    expect(await fs.pathExists(session.file)).toBe(true);
+    const entries = await readSessionEntries(session);
+    expect(entries[0]).toMatchObject({type: 'header', cwd, hazeVersion: 'test'});
+  });
+
+  it('appends and reads JSONL entries', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: 'now', role: 'user', text: 'hello'});
+    const entries = await readSessionEntries(session);
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toEqual({type: 'ui_message', at: 'now', role: 'user', text: 'hello'});
+  });
+
+  it('restores the latest conversation snapshot', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const first: ModelMessage[] = [{role: 'user', content: 'old'}];
+    const latest: ModelMessage[] = [{role: 'user', content: 'new'}, {role: 'assistant', content: 'done'}];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: first});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: latest});
+    await expect(restoreConversation(session)).resolves.toEqual(latest);
+  });
+
+  it('returns the latest session for a cwd', async () => {
+    const first = await createSession({cwd, sessionsDir});
+    await new Promise(resolve => setTimeout(resolve, 2));
+    const second = await createSession({cwd, sessionsDir});
+    const latest = await latestSession(cwd, sessionsDir);
+    expect(latest?.id).toBe(second.id);
+    expect(latest?.id).not.toBe(first.id);
+  });
+});

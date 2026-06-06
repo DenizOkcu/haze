@@ -13,10 +13,13 @@ program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
   .version(pkg.version)
-  .option('--debug', 'show simple model/tool debug logs in the chat UI');
+  .option('--debug', 'show simple model/tool debug logs in the chat UI')
+  .option('-c, --continue', 'resume the latest saved session for this workspace')
+  .option('--no-session', 'run without saving or resuming a durable session');
 
 program.action(async () => {
-  await chatCommand({debug: Boolean(program.opts<{debug?: boolean}>().debug), version: pkg.version});
+  const opts = program.opts<{debug?: boolean; continue?: boolean; session?: boolean}>();
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), noSession: opts.session === false, version: pkg.version});
 });
 
 program.parseAsync().catch(error => {

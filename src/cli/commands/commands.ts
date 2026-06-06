@@ -3,14 +3,20 @@ import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {HazeSettings} from '../../config/settings.js';
+import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {Mode} from './chat.js';
 
 export type CommandContext = {
   settings: HazeSettings;
   contextFiles: ContextFile[];
   setMode: (mode: Mode) => void;
+  setModelProviderFilter?: (providerName: string | undefined) => void;
   addSystemMessage: (text: string) => void;
   clearConversation: () => void;
+  newSession?: () => Promise<void>;
+  resumeSession?: () => Promise<void>;
+  sessionInfo?: () => string;
+  compactConversation?: (instructions?: string) => boolean;
   runAgentTurn: (prompt: string, displayValue?: string) => Promise<void>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
@@ -21,36 +27,46 @@ export type CommandResult = 'handled' | 'unhandled' | 'exit';
 function skillHelp() {
   return [
     'Skill commands:',
-    '/skill create <description>',
+    '/create-skill <description>',
     '  Create a Markdown skill in ~/.haze/skills.',
-    '/skill list',
+    '/list-skills',
     '  List installed skills.',
-    '/skill info <name>',
+    '/skill-info <name>',
     '  Show a skill description and path.',
-    '/skill validate <name-or-dir>',
+    '/validate-skill <name-or-dir>',
     '  Validate a skill directory containing SKILL.md.',
-    '/skill remove <name> --yes',
+    '/remove-skill <name> --yes',
     '  Remove an installed skill. Requires --yes because it deletes files.',
   ].join('\n');
+}
+
+async function skillOverview(): Promise<string> {
+  const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
+  const registry = await loadSkillRegistry();
+  const skills = [...registry.skills.values()];
+  const installed = skills.length === 0
+    ? ['Installed skills:', '- None yet. Create one with /create-skill <description>.']
+    : ['Installed skills:', ...skills.map(s => `- /${s.name} — ${s.description}`)];
+  return `${skillHelp()}\n\n${installed.join('\n')}`;
 }
 
 async function handleSkillCommand(value: string, ctx: CommandContext): Promise<CommandResult> {
   const parts = value.trim().split(/\s+/).filter(Boolean);
   const subcommand = parts[1];
   if (!subcommand || subcommand === 'help') {
-    ctx.addSystemMessage(skillHelp());
+    ctx.addSystemMessage(await skillOverview());
     return 'handled';
   }
 
   if (subcommand === 'create') {
     const description = parts.slice(2).join(' ');
     if (!description) {
-      ctx.addSystemMessage('Usage: /skill create <description>');
+      ctx.addSystemMessage('Usage: /create-skill <description>');
       return 'handled';
     }
     const {createSkill} = await import('../../skills/builder/SkillBuilder.js');
     const result = await createSkill(description);
-    ctx.addSystemMessage(`Created skill ${result.name} at ${result.file}. Edit SKILL.md to refine its workflow.`);
+    ctx.addSystemMessage(`Created skill ${result.name} at ${result.file}. Invoke it with /${result.name}. Edit SKILL.md to refine its workflow.`);
     return 'handled';
   }
 
@@ -59,15 +75,15 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
     const registry = await loadSkillRegistry();
     const skills = [...registry.skills.values()];
     ctx.addSystemMessage(skills.length === 0
-      ? 'No installed skills found.'
-      : ['Installed skills:', ...skills.map(s => `- ${s.name} — ${s.description}`)].join('\n'));
+      ? 'No installed skills found. Create one with /create-skill <description>.'
+      : ['Installed skills:', ...skills.map(s => `- /${s.name} — ${s.description}`)].join('\n'));
     return 'handled';
   }
 
   if (subcommand === 'info') {
     const name = parts[2];
     if (!name) {
-      ctx.addSystemMessage('Usage: /skill info <name>');
+      ctx.addSystemMessage('Usage: /skill-info <name>');
       return 'handled';
     }
     const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
@@ -90,7 +106,7 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
   if (subcommand === 'validate') {
     const target = parts[2];
     if (!target) {
-      ctx.addSystemMessage('Usage: /skill validate <name-or-dir>');
+      ctx.addSystemMessage('Usage: /validate-skill <name-or-dir>');
       return 'handled';
     }
     const {GLOBAL_SKILLS_DIR} = await import('../../config/paths.js');
@@ -105,7 +121,7 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
   if (subcommand === 'remove') {
     const name = parts[2];
     if (!name || !parts.includes('--yes')) {
-      ctx.addSystemMessage('Usage: /skill remove <name> --yes');
+      ctx.addSystemMessage('Usage: /remove-skill <name> --yes');
       return 'handled';
     }
     const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
@@ -134,18 +150,28 @@ export async function handleSlashCommand(
       'Commands:',
       '/help',
       '  Show all available slash commands and what they do.',
-      '/login',
-      '  Save an OpenRouter API key to ~/.haze/settings.json.',
+      '/provider',
+      '  Choose a provider, then use it or add models; choose add provider at the bottom to create one.',
       '/model',
-      '  Prompt for an OpenRouter model name to use for future chats.',
-      '/model <name>',
-      '  Set the OpenRouter model directly, for example x-ai/grok-build-0.1.',
+      '  Choose a model from all configured providers.',
+      '/model <name-or-provider:name>',
+      '  Set a model directly. Selecting a model also sets its provider.',
       '/settings',
       '  Show the configured provider, model, API key status, and loaded context files.',
-      '/skill help',
-      '  Manage Markdown skills from inside the Haze app.',
+      '/create-skill <description>',
+      '  Create a reusable Markdown workflow from how you work.',
+      '/skills',
+      '  Show Markdown skill commands and installed skill slash commands.',
       '/init',
       '  Inspect the current workspace and create or update AGENTS.md project instructions.',
+      '/session',
+      '  Show the current durable session file.',
+      '/resume',
+      '  Resume the latest saved session for this workspace.',
+      '/new',
+      '  Start a fresh durable session.',
+      '/compact [instructions]',
+      '  Summarize older model context and keep recent messages.',
       '/clear',
       '  Clear the current chat conversation history.',
       '/exit',
@@ -155,29 +181,76 @@ export async function handleSlashCommand(
     ].join('\n'));
     return 'handled';
   }
+  if (value === '/session') {
+    ctx.addSystemMessage(ctx.sessionInfo?.() ?? 'Session persistence is unavailable.');
+    return 'handled';
+  }
+  if (value === '/resume') {
+    if (ctx.resumeSession) await ctx.resumeSession();
+    else ctx.addSystemMessage('Session persistence is unavailable.');
+    return 'handled';
+  }
+  if (value === '/new') {
+    if (ctx.newSession) await ctx.newSession();
+    else ctx.addSystemMessage('Session persistence is unavailable.');
+    return 'handled';
+  }
+  if (value === '/compact' || value.startsWith('/compact ')) {
+    if (ctx.compactConversation) ctx.compactConversation(value.slice('/compact'.length).trim() || undefined);
+    else ctx.addSystemMessage('Compaction is unavailable.');
+    return 'handled';
+  }
   if (value === '/clear') {
     ctx.clearConversation();
     ctx.addSystemMessage('Cleared. The void is productive.');
     return 'handled';
   }
   if (value === '/settings') {
-    ctx.addSystemMessage(`Provider: ${ctx.settings.provider ?? 'not configured'} | Model: ${ctx.settings.model ?? 'not set'} | API key: ${ctx.settings.apiKey ? 'saved' : 'missing'} | Context files: ${ctx.contextFiles.length ? ctx.contextFiles.map(file => file.path).join(', ') : 'none'}`);
+    const providers = configuredProviders(ctx.settings);
+    const activeProvider = providers.find(provider => provider.name === ctx.settings.provider) ?? providers[0];
+    ctx.addSystemMessage([
+      `Provider: ${activeProvider?.name ?? 'not configured'}`,
+      `Model: ${ctx.settings.model ?? 'not set'}`,
+      `Base URL: ${activeProvider?.url ?? ctx.settings.baseURL ?? 'not configured'}`,
+      `API key: ${activeProvider && providerHasKey(ctx.settings, activeProvider) ? 'saved' : 'missing'}`,
+      `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
+      `Context files: ${ctx.contextFiles.length ? ctx.contextFiles.map(file => file.path).join(', ') : 'none'}`,
+    ].join(' | '));
     return 'handled';
   }
-  if (value === '/login') {
-    ctx.setMode('apiKey');
-    ctx.addSystemMessage('Paste your OpenRouter API key. It will be stored in ~/.haze/settings.json.');
+  if (value === '/provider') {
+    ctx.setModelProviderFilter?.(undefined);
+    ctx.setMode('provider');
+    ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose “add provider” at the bottom to add a new provider.');
     return 'handled';
   }
   if (value === '/model') {
+    ctx.setModelProviderFilter?.(undefined);
     ctx.setMode('model');
-    ctx.addSystemMessage('Enter an OpenRouter model name, e.g. x-ai/grok-build-0.1 or anthropic/claude-3.5-sonnet.');
+    ctx.addSystemMessage('Choose a model. Selecting a model also sets its provider.');
+    return 'handled';
+  }
+  if (value === '/model list') {
+    const providers = configuredProviders(ctx.settings);
+    ctx.addSystemMessage(['Configured models:', ...providers.flatMap(provider => provider.models.map(model => `- ${modelSelector(provider, model)} — ${provider.name}`))].join('\n'));
     return 'handled';
   }
   if (value.startsWith('/model ')) {
-    const modelName = value.slice('/model '.length).trim();
-    await ctx.updateSettings({model: modelName});
-    ctx.addSystemMessage(`Model set to ${modelName}. Saved to ~/.haze/settings.json and will be used until you set a new model.`);
+    const selector = value.slice('/model '.length).trim();
+    const resolved = resolveModelSelector(ctx.settings, selector);
+    if (resolved.status === 'ambiguous') {
+      ctx.addSystemMessage(`Model ${resolved.model} exists on multiple providers: ${resolved.providers.map(provider => modelSelector(provider, resolved.model)).join(', ')}`);
+      return 'handled';
+    }
+    if (resolved.status === 'missing') {
+      const provider = activeProvider(ctx.settings);
+      const nextProvider = provider.models.includes(selector) ? provider : {...provider, models: [...provider.models, selector]};
+      await ctx.updateSettings({provider: provider.name, model: selector, providers: upsertProvider(ctx.settings, nextProvider)});
+      ctx.addSystemMessage(`Model set to ${selector} on ${provider.name}. Saved to ~/.haze/settings.json.`);
+      return 'handled';
+    }
+    await ctx.updateSettings({provider: resolved.provider.name, model: resolved.model});
+    ctx.addSystemMessage(`Model set to ${resolved.model} on ${resolved.provider.name}. Saved to ~/.haze/settings.json.`);
     return 'handled';
   }
   if (value === '/init') {
@@ -185,7 +258,13 @@ export async function handleSlashCommand(
     await ctx.refreshContextFiles();
     return 'handled';
   }
-  if (value === '/skill' || value.startsWith('/skill ') || value === '/skills' || value.startsWith('/skills ')) {
+  if (value === '/skills') return await handleSkillCommand('/skill help', ctx);
+  if (value === '/list-skills') return await handleSkillCommand('/skill list', ctx);
+  if (value === '/create-skill' || value.startsWith('/create-skill ')) return await handleSkillCommand(`/skill create${value.slice('/create-skill'.length)}`, ctx);
+  if (value === '/skill-info' || value.startsWith('/skill-info ')) return await handleSkillCommand(`/skill info${value.slice('/skill-info'.length)}`, ctx);
+  if (value === '/validate-skill' || value.startsWith('/validate-skill ')) return await handleSkillCommand(`/skill validate${value.slice('/validate-skill'.length)}`, ctx);
+  if (value === '/remove-skill' || value.startsWith('/remove-skill ')) return await handleSkillCommand(`/skill remove${value.slice('/remove-skill'.length)}`, ctx);
+  if (value === '/skill' || value.startsWith('/skill ') || value.startsWith('/skills ')) {
     const normalized = value.replace(/^\/skills\b/, '/skill');
     return await handleSkillCommand(normalized, ctx);
   }

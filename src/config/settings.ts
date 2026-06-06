@@ -2,11 +2,21 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import {HAZE_DIR} from './paths.js';
 
+export interface HazeProviderSettings {
+  name: string;
+  url: string;
+  key?: string;
+  models: string[];
+}
+
 export interface HazeSettings {
-  provider?: 'openrouter';
+  provider?: string;
+  model?: string;
+  providers?: HazeProviderSettings[];
+
+  // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
   baseURL?: string;
-  model?: string;
 }
 
 export const SETTINGS_FILE = path.join(HAZE_DIR, 'settings.json');

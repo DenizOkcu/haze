@@ -27,18 +27,19 @@ describe('handleSlashCommand', () => {
   it('shows help for /help', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/help', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/login'));
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skill help'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/provider'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills'));
   });
 
   it('shows skill command help inside the app', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/skill help', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skill list'));
+    expect(await handleSlashCommand('/skills', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/list-skills'));
   });
 
-  it('handles singular and plural skill list commands', async () => {
+  it('handles one-word and legacy skill list commands', async () => {
     const ctx = mockContext();
+    expect(await handleSlashCommand('/list-skills', ctx)).toBe('handled');
     expect(await handleSlashCommand('/skill list', ctx)).toBe('handled');
     expect(await handleSlashCommand('/skills list', ctx)).toBe('handled');
   });
@@ -66,12 +67,6 @@ describe('handleSlashCommand', () => {
     expect(msg).toContain('missing');
   });
 
-  it('enters apiKey mode for /login', async () => {
-    const ctx = mockContext();
-    expect(await handleSlashCommand('/login', ctx)).toBe('handled');
-    expect(ctx.setMode).toHaveBeenCalledWith('apiKey');
-  });
-
   it('enters model mode for /model', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model', ctx)).toBe('handled');
@@ -81,8 +76,22 @@ describe('handleSlashCommand', () => {
   it('sets model directly with /model <name>', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model gpt-4', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith({model: 'gpt-4'});
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4'}));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
+  });
+
+  it('enters provider mode for /provider', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/provider', ctx)).toBe('handled');
+    expect(ctx.setMode).toHaveBeenCalledWith('provider');
+  });
+
+  it('sets provider and model for qualified model selectors', async () => {
+    const ctx = mockContext({
+      settings: {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['llama3.1']}]},
+    });
+    expect(await handleSlashCommand('/model local:llama3.1', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith({provider: 'local', model: 'llama3.1'});
   });
 
   it('calls runAgentTurn for /init', async () => {
