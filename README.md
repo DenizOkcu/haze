@@ -2,16 +2,17 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.1.0
+## What's new in 0.2.0
 
-Haze 0.1.0 is the foundation release: the agent can now *find*, *delegate*, and *show its work* without turning your terminal into soup.
+Haze 0.2.0 is a reliability release for the everyday coding loop: inspect, edit, validate, and report what happened without getting timid or noisy.
 
-- `grep` gives the model fast, targeted codebase search with regex, globs, context lines, and `.gitignore` awareness — no more brute-force file spelunking.
-- Subagents let Haze fan out independent investigations into fresh contexts, then fold the result back into the main turn as a concise summary.
-- File edits now render compact, colorized inline diffs with one context line around the change; big diffs stay summarized so signal beats scrollback.
-- Long-turn handling is calmer: truncated model output and tool-heavy loops recover more gracefully.
+- The agent loop is more persistent after failed edits, failed validation, missing validation, and tool-heavy turns. Haze now pushes toward a concrete final status instead of stopping at a vague recap.
+- Bash execution now includes command classification, working directory, duration, timeout state, and parsed validation summaries for common test/typecheck/lint/build output.
+- File-tool failures carry structured reason codes and recovery hints, making exact-edit failures easier for the model to repair with a fresh read and targeted retry.
+- The system and subagent prompts now assume expert users: relevant commands should run directly, including mutating shell workflows, while blockers are reserved for concrete tool failures or real ambiguity.
+- The chat input wraps across multiple visible lines and supports vertical cursor movement, which makes longer prompts and pasted context easier to edit.
 
-The result is a more capable agent loop while keeping the core small and inspectable. Haze gives an AI model transparent local tools — read, search, edit, write, list, and run commands — plus focused delegation when work can split safely. Tiny spell, sharper goblin.
+The result is a sharper supervised coding loop while keeping the core small and inspectable. Haze gives an AI model transparent local tools — read, search, edit, write, list, and run commands — plus focused delegation when work can split safely. Tiny spell, steadier goblin.
 
 Haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.
 
@@ -24,7 +25,7 @@ Haze works with OpenAI-compatible providers, including OpenRouter and local endp
  |_| |_|\__,_/___\___|
 ```
 
-Haze keeps guardrails light. The LLM can work from the terminal with freedoms close to yours, while trying to stay scoped to the current project. Watch the tool calls. Keep your hands near the wheel. Progress.
+Haze keeps guardrails light. The LLM can work from the terminal with freedoms close to yours, while trying to stay scoped to the current project. It is aimed at developers who want an expert-oriented tool, not a permission dialog factory. Watch the tool calls. Keep your hands near the wheel. Progress.
 
 ## Getting started
 
@@ -77,7 +78,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-Haze will inspect, search, write files, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
+Haze will inspect, search, write files, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Bash validation output is summarized when possible so failures point at the relevant files, tests, or diagnostics. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
 
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
@@ -194,10 +195,10 @@ Haze exposes a deliberately small toolset:
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
-- `bash` — run tests, builds, git commands, and inspections.
+- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with command classification metadata.
 - `skill_*` — load Markdown skill instructions on demand.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured recovery hints instead of mystery stack traces.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints instead of mystery stack traces. Bash validation commands can return parsed summaries with failed files, failed tests, diagnostics, and suggested next steps.
 
 ## Subagents
 
@@ -223,8 +224,8 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and thing
 - File tools are restricted to the current workspace.
 - File tools follow `.gitignore` by default.
 - Ignored files require an explicit override.
-- Bash mutations are discouraged by the tool contract.
-- Destructive actions should require explicit user confirmation.
+- Bash commands are classified and shown with working-directory metadata, but Haze does not use command confirmation gates.
+- Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.
 - Haze is powerful enough to help and dumb enough to deserve supervision. Ideal software, basically.
 
 ## Local development

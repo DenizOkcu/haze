@@ -24,7 +24,7 @@ npm run lint         # Check code style
 src/
   cli/          CLI entrypoint, chat UI, streaming loop, and slash commands
   llm/          AI model client, built-in tools, and prompts
-  core/         Agent goal/completion logic and subagent runner
+  core/         Agent goal/completion logic, bash classification, validation parsing, and subagents
   skills/       Skill loading, registry, installer, and scaffold builder
   config/       Settings, paths, sessions, history, and context files
   ui/           React/Ink terminal UI components
@@ -52,13 +52,16 @@ Skill management commands also live here under `/skills ...`; do not add new top
 
 - `Esc` clears the input field while typing.
 - While Haze is thinking, `Esc` aborts the active turn through the AI SDK `abortSignal` path and re-enables input.
+- Long prompts wrap across multiple visible input lines. Preserve cursor behavior when changing `TextInput`, including vertical movement through wrapped lines and compacted paste-block cursor mapping.
 
 ## Adding a Tool
+
+Haze is aimed at expert users. Do not add command-confirmation gates for normal bash execution; prefer transparent classification, structured output, and clear transcript rendering. Ask the user only when the requested product or implementation decision is ambiguous.
 
 1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function.
 2. Add or update the tool description in `src/llm/systemPrompt.ts`.
 3. Add display formatting in `src/cli/commands/formatters.ts` and, if the result needs rich transcript rendering, in `src/cli/commands/streaming.ts` / `src/cli/commands/chat.tsx`.
-4. Keep mutating file tools workspace-scoped, `.gitignore`-aware, and structured in their success/failure output. For targeted edits, return compact added/removed counts and only small inline diffs.
+4. Keep mutating file tools workspace-scoped, `.gitignore`-aware, and structured in their success/failure output. For targeted edits, return compact added/removed counts, reason codes on recoverable failures, and only small inline diffs.
 5. Add tests.
 
 ## Pull Requests
