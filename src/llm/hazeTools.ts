@@ -125,7 +125,7 @@ function isMutatingTool(toolName: string) {
 }
 
 function isReadOnlyFileTool(toolName: string) {
-  return ['listFiles', 'readFile'].includes(toolName);
+  return ['listFiles', 'readFile', 'grep'].includes(toolName);
 }
 
 function inputPath(input: unknown) {
@@ -294,6 +294,72 @@ export const hazeTools = {
         };
       } catch (error) {
         return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);
+      }
+    }),
+  }),
+
+  grep: tool({
+    description: 'Search file contents with a regex pattern using ripgrep. Use this to find symbol definitions, usages, string literals, import paths, and code patterns across the workspace. Much faster and more targeted than reading files one by one with readFile. Respects .gitignore by default.',
+    inputSchema: z.object({
+      pattern: z.string().min(1).describe('Regex pattern to search for (PCRE-compatible). Examples: "function handleClick", "import.*from.*react", "class UserService", "TODO|FIXME"'),
+      path: z.string().default('.').describe('Directory or file path to search in, relative to the workspace. Narrow this to focus results.'),
+      glob: z.string().optional().describe('File glob filter. Examples: "*.ts", "*.{js,jsx}", "src/**/*.py". Narrows search to matching files.'),
+      contextLines: z.number().int().nonnegative().max(5).default(2).describe('Number of context lines before and after each match (0-5). Use 0 for compact output, 2-3 for understanding surrounding code.'),
+      maxMatches: z.number().int().positive().max(200).default(50).describe('Maximum number of matches to return. Increase for broad searches, decrease for focused lookups.'),
+      caseInsensitive: z.boolean().default(false).describe('Case-insensitive matching. Useful for symbol names that may vary in casing.'),
+    }),
+    execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context, async () => {
+      try {
+        const absolutePath = resolveWorkspacePath(searchPath);
+        const args = [
+          '--no-heading', '--line-number', '--color=never',
+          '--max-count', String(maxMatches),
+          '--context', String(contextLines),
+        ];
+        if (caseInsensitive) args.push('--ignore-case');
+        if (glob) args.push('--glob', glob);
+        args.push('--', pattern, absolutePath);
+
+        let stdout = '';
+        let stderr = '';
+        try {
+          const result = await execFile('rg', args, {cwd: workspaceRoot(), timeout: 30_000});
+          stdout = result.stdout;
+          stderr = result.stderr;
+        } catch (error) {
+          const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
+          if (code === 1) {
+            stdout = '';
+            stderr = '';
+          } else {
+            throw error;
+          }
+        }
+
+        if (!stdout) {
+          return {pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches: [], totalMatches: 0, truncated: false};
+        }
+
+        const {text: output, truncated} = truncate(stdout);
+        const lines = output.split('\n').filter(Boolean);
+        const matches: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
+        let currentFile = '';
+
+        for (const line of lines) {
+          const match = line.match(/^(\S+?):(\d+)[-:](.*)$/);
+          if (!match) continue;
+          const [, file, lineStr, content] = match;
+          if (file && lineStr && content !== undefined) {
+            currentFile = file;
+            const isContext = line.includes('-');
+            const relativePath = path.relative(workspaceRoot(), file);
+            matches.push({file: relativePath, line: Number(lineStr), content, isContext});
+          }
+        }
+
+        return {pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches, totalMatches: matches.filter(m => !m.isContext).length, truncated};
+      } catch (error) {
+        return structuredToolFailure('grep', error, 'Check that the search path exists and the pattern is valid regex. Try a narrower path or simpler pattern.', searchPath);
       }
     }),
   }),

@@ -17,6 +17,11 @@ export function toolCallSummary(toolName: string, input: unknown) {
     const timeout = typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
     return `bash $ ${data.command}${timeout}`;
   }
+  if (toolName === 'grep' && typeof data?.pattern === 'string') {
+    const path = typeof data.path === 'string' && data.path !== '.' ? ` in ${data.path}` : '';
+    const glob = typeof data.glob === 'string' ? ` (${data.glob})` : '';
+    return `grep "${data.pattern}"${path}${glob}`;
+  }
   if (toolName === 'listFiles' && typeof data?.path === 'string') return `listFiles ${data.path}`;
   if ((toolName === 'readFile' || toolName === 'writeFile') && typeof data?.path === 'string') return `${toolName} ${data.path}`;
   if (toolName === 'editFile' && typeof data?.path === 'string') {
@@ -31,6 +36,10 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
   if (!event.success) return `failed: ${compact(event.error)}`;
   const output = event.output as Record<string, unknown> | undefined;
   if (output?.duplicateSkipped === true) return 'skipped duplicate';
+  if (typeof output?.totalMatches === 'number') {
+    const count = output.totalMatches as number;
+    return count === 0 ? 'no matches' : `${count} match${count === 1 ? '' : 'es'}`;
+  }
   if (typeof output?.code === 'number') return `exited with code ${output.code}`;
   if (typeof output?.ok === 'boolean') {
     if (output.ok) return 'completed';
