@@ -108,6 +108,44 @@ function toolOutputOk(output: unknown, success: boolean) {
   return !(typeof output === 'object' && output != null && 'ok' in output && (output as {ok?: unknown}).ok === false);
 }
 
+function estimateTokens(text: string) {
+  return Math.ceil(text.length / 4);
+}
+
+function estimateModelMessageTokens(messages: ModelMessage[]) {
+  return estimateTokens(JSON.stringify(messages));
+}
+
+function estimateToolSchemaTokens(tools: Record<string, unknown>) {
+  const names = Object.keys(tools);
+  return estimateTokens(names.join('\n')) + names.length * 250;
+}
+
+function estimateLlmInputTokens(input: {system: string; messages: ModelMessage[]; tools?: Record<string, unknown>}) {
+  return estimateTokens(input.system) + estimateModelMessageTokens(input.messages) + (input.tools ? estimateToolSchemaTokens(input.tools) : 0);
+}
+
+function estimateLlmOutputTokens(messages: ModelMessage[]) {
+  return estimateModelMessageTokens(messages);
+}
+
+function subagentTokenEstimate(output: unknown) {
+  if (typeof output !== 'object' || output == null || !('tokens' in output)) return undefined;
+  const tokens = (output as {tokens?: {in?: unknown; out?: unknown}}).tokens;
+  const input = typeof tokens?.in === 'number' ? tokens.in : 0;
+  const outputTokens = typeof tokens?.out === 'number' ? tokens.out : 0;
+  return input > 0 || outputTokens > 0 ? {input, output: outputTokens} : undefined;
+}
+
+function usageTokenEstimate(event: unknown, fallback: {input: number; output: number}) {
+  const usage = typeof event === 'object' && event != null && 'usage' in event
+    ? (event as {usage?: {inputTokens?: unknown; outputTokens?: unknown}}).usage
+    : undefined;
+  const input = typeof usage?.inputTokens === 'number' ? usage.inputTokens : fallback.input;
+  const output = typeof usage?.outputTokens === 'number' ? usage.outputTokens : fallback.output;
+  return {input, output};
+}
+
 export interface StreamCallbacks {
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
@@ -122,6 +160,7 @@ export interface StreamCallbacks {
   setGoalStatus?: (status: string | undefined) => void;
   onEvent?: AgentEventSink;
   compactConversation?: (instructions?: string) => boolean;
+  recordTokenEstimate?: (tokens: {input: number; output: number}) => void;
 }
 
 export async function runAgentTurn(
@@ -358,10 +397,12 @@ export async function runAgentTurn(
         ...messages,
         {role: 'user', content: prompt},
       ];
+      const followUpSystemPrompt = buildSystemPrompt(contextFiles);
+      const followUpInputEstimate = estimateLlmInputTokens({system: followUpSystemPrompt, messages: continuationMessages, tools: availableTools});
       const followUp = streamText({
         model: activeModel,
         maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-        system: buildSystemPrompt(contextFiles),
+        system: followUpSystemPrompt,
         messages: continuationMessages,
         tools: availableTools,
         toolChoice: allowTools ? 'auto' : 'none',
@@ -405,6 +446,7 @@ export async function runAgentTurn(
           callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
         },
         onFinish(event) {
+          callbacks.recordTokenEstimate?.(usageTokenEstimate(event, {input: followUpInputEstimate, output: estimateLlmOutputTokens(event.response.messages)}));
           callbacks.setConversation([...continuationMessages, ...event.response.messages]);
           callbacks.debugLog(`conversation updated to ${continuationMessages.length + event.response.messages.length} messages after follow-up`);
         },
@@ -417,6 +459,8 @@ export async function runAgentTurn(
         experimental_onToolCallFinish(event) {
           resetIdleTimer();
           recordToolFinish(event);
+          const nestedTokens = subagentTokenEstimate(event.output);
+          if (nestedTokens) callbacks.recordTokenEstimate?.(nestedTokens);
           const summary = toolResultSummary(event);
           toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
           recordToolDisplayFinish(event);
@@ -459,10 +503,12 @@ export async function runAgentTurn(
 
     let streamError: unknown;
     let lastFinishReason: string | undefined;
+    const mainSystemPrompt = buildSystemPrompt(contextFiles);
+    const mainInputEstimate = estimateLlmInputTokens({system: mainSystemPrompt, messages: requestMessages, tools: availableTools});
     const result = streamText({
       model: activeModel,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-      system: buildSystemPrompt(contextFiles),
+      system: mainSystemPrompt,
       messages: requestMessages,
       tools: availableTools,
       stopWhen: stepCountIs(MAIN_STEP_LIMIT),
@@ -534,6 +580,7 @@ export async function runAgentTurn(
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
       },
       onFinish(event) {
+        callbacks.recordTokenEstimate?.(usageTokenEstimate(event, {input: mainInputEstimate, output: estimateLlmOutputTokens(event.response.messages)}));
         const nextConversation = [...requestMessages, ...event.response.messages];
         callbacks.setConversation(nextConversation);
         callbacks.debugLog(`conversation updated to ${nextConversation.length} messages`);
@@ -548,6 +595,8 @@ export async function runAgentTurn(
         resetIdleTimer();
         const summary = toolResultSummary(event);
         recordToolFinish(event);
+        const nestedTokens = subagentTokenEstimate(event.output);
+        if (nestedTokens) callbacks.recordTokenEstimate?.(nestedTokens);
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
         recordToolDisplayFinish(event);
         if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;

@@ -207,6 +207,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
   const [activeGoalStatus, setActiveGoalStatus] = useState<string | undefined>();
   const [sessionLabel, setSessionLabel] = useState<string | undefined>();
+  const [llmTokenEstimate, setLlmTokenEstimate] = useState({input: 0, output: 0});
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
@@ -272,6 +273,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     const session = await createSession({hazeVersion: version});
     sessionRef.current = session;
+    setLlmTokenEstimate({input: 0, output: 0});
     setSessionLabel(session.id);
     setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
   }
@@ -289,7 +291,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         conversationRef.current = conversation;
         setSessionLabel(session.id);
         setLiveMessagesState(() => []);
-        setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
+        const restoredMessages = displayMessagesFromConversation(conversation);
+        setLlmTokenEstimate(estimateConversationTokens(restoredMessages));
+        setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...restoredMessages]);
         return;
       }
     }
@@ -299,6 +303,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   function clearConversation() {
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
+    setLlmTokenEstimate({input: 0, output: 0});
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
     const session = sessionRef.current;
@@ -707,6 +712,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setAbortController: controller => { abortControllerRef.current = controller; },
       setGoalStatus: setActiveGoalStatus,
       compactConversation,
+      recordTokenEstimate: tokens => {
+        setLlmTokenEstimate(current => ({input: current.input + tokens.input, output: current.output + tokens.output}));
+      },
       onEvent: event => {
         const session = sessionRef.current;
         if (session) void appendSessionEntry(session, {type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)}).catch(() => undefined);
@@ -752,8 +760,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
   const allDisplayMessages = [...messages, ...liveMessages];
   const toolsUsed = toolCallCount(allDisplayMessages);
-  const estimatedTokens = estimateConversationTokens(allDisplayMessages);
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
+  const estimatedTokens = llmTokenEstimate.input > 0 || llmTokenEstimate.output > 0 ? llmTokenEstimate : estimateConversationTokens(allDisplayMessages);
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
   const goalRequest = truncateWithEllipsis(rawGoalRequest ?? '', 120);
