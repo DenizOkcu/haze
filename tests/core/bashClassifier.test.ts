@@ -15,9 +15,10 @@ describe('bash classifier', () => {
     expect(result.requiresConfirmation).toBe(true);
   });
 
-  it('requires confirmation for mutating shell commands', () => {
+  it('classifies mutating shell commands without requiring confirmation', () => {
     const result = classifyBashCommand('echo hi > file.txt');
     expect(result.riskLevel).toBe('mutating');
+    expect(result.requiresConfirmation).toBe(false);
     expect(result.traits).toContain('writes_files');
   });
 });

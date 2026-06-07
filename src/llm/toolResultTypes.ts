@@ -6,8 +6,7 @@ export type ToolFailureReasonCode =
   | 'existing_file_requires_overwrite'
   | 'invalid_line_range'
   | 'io_error'
-  | 'destructive_command_requires_confirmation'
-  | 'mutating_command_requires_confirmation';
+  | 'destructive_command_requires_confirmation';
 
 export type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
 

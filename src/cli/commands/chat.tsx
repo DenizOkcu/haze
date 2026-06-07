@@ -817,6 +817,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           suggestions={inputSuggestions}
           suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'model' ? 'always' : 'slash'}
           submitOnEmpty={mode === 'providerAddKey'}
+          width={Math.max(20, width - 4)}
           onHistoryAdd={persistInputHistory}
           onCancel={cancelThinking}
           onEscape={() => {

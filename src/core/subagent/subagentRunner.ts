@@ -79,7 +79,6 @@ export async function runSubagent(
   try {
     const result = streamText({
       model: options.model,
-      temperature: 0,
       maxOutputTokens: 4096,
       system: `${SUBAGENT_SYSTEM_PROMPT}\n\n${buildSystemPrompt(options.contextFiles)}`,
       messages: [{role: 'user' as const, content: task}],

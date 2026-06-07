@@ -364,7 +364,6 @@ export async function runAgentTurn(
       ];
       const followUp = streamText({
         model: activeModel,
-        temperature: 0,
         maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
         system: buildSystemPrompt(contextFiles),
         messages: continuationMessages,
@@ -466,7 +465,6 @@ export async function runAgentTurn(
     let lastFinishReason: string | undefined;
     const result = streamText({
       model: activeModel,
-      temperature: 0,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
       system: buildSystemPrompt(contextFiles),
       messages: requestMessages,

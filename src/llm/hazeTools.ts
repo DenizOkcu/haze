@@ -565,16 +565,13 @@ export const hazeTools = {
     inputSchema: z.object({
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
-      allowMutation: z.boolean().default(false).describe('Allow non-destructive professional workflow commands that mutate local state (chmod, redirects, tee, sed -i, installs, git add/commit, scripts). Set true when the user requested the operation or bash is materially more efficient. Destructive commands still require explicit confirmation.'),
+      allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Non-destructive professional workflow commands may run without extra confirmation; destructive commands still require explicit confirmation.'),
     }),
     execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
       const cwd = workspaceRoot();
       const classification = classifyBashCommand(command);
       if (classification.riskLevel === 'destructive') {
         return structuredToolFailure('bash', 'Command requires explicit user confirmation before execution.', 'Ask the user to confirm this destructive command, or choose a safer alternative.', undefined, {reasonCode: 'destructive_command_requires_confirmation', needsConfirmation: true, recoveryInput: {command, cwd, classification}});
-      }
-      if (classification.requiresConfirmation && !allowMutation) {
-        return structuredToolFailure('bash', 'Command requires confirmation or allowMutation=true before execution.', 'Ask the user to confirm this command, or use file tools for file edits.', undefined, {reasonCode: 'mutating_command_requires_confirmation', needsConfirmation: true, recoveryInput: {command, cwd, classification}});
       }
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
       const startedAt = Date.now();

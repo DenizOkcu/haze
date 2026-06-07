@@ -39,11 +39,17 @@ describe('bash tool safety', () => {
     expect(result.reasonCode).toBe('destructive_command_requires_confirmation');
   });
 
-  it('requires confirmation for mutating commands without allowMutation', async () => {
+  it('runs non-destructive mutating commands without confirmation', async () => {
     const result = await bash('touch file.txt');
-    expect(result.ok).toBe(false);
-    expect(result.needsConfirmation).toBe(true);
-    expect(result.reasonCode).toBe('mutating_command_requires_confirmation');
-    await expect(fs.pathExists(path.join(tmp, 'file.txt'))).resolves.toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.classification.riskLevel).toBe('mutating');
+    await expect(fs.pathExists(path.join(tmp, 'file.txt'))).resolves.toBe(true);
+  });
+
+  it('runs unknown-but-recoverable validation commands without confirmation', async () => {
+    await fs.outputFile(path.join(tmp, 'public/app.js'), 'const value = 1;\n');
+    const result = await bash('node --check public/app.js');
+    expect(result.ok).toBe(true);
+    expect(result.needsConfirmation).toBeUndefined();
   });
 });

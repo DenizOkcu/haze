@@ -155,7 +155,6 @@ async function descriptionFromSkillSummary(description: string, finalName: strin
   if (!activeModel) return normalizeSkillDescription(`the user asks: ${description}`);
   const result = await generateObject({
     model: activeModel,
-    temperature: 0,
     schema: z.object({description: z.string().min(1).describe('Final Use when description that tells an LLM when to invoke this skill')}),
     schemaName: 'GeneratedHazeSkillDescription',
     schemaDescription: 'A final skill description chosen from the complete generated SKILL.md.',
@@ -187,7 +186,6 @@ async function nameFromSkillSummary(description: string, generatedName: string, 
   if (!activeModel) return slug(generatedName || description);
   const result = await generateObject({
     model: activeModel,
-    temperature: 0,
     schema: z.object({name: z.string().min(1).describe('Final meaningful 2-4 word kebab-case skill name')}),
     schemaName: 'GeneratedHazeSkillName',
     schemaDescription: 'A final skill name chosen from the complete generated SKILL.md.',
@@ -224,7 +222,6 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
   if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before using /create-skill.');
   const result = await generateObject({
     model: activeModel,
-    temperature: 0,
     system: SKILL_CREATOR_SKILL,
     schema: generatedSkillSchema,
     schemaName: 'GeneratedHazeSkill',
