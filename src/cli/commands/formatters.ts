@@ -29,6 +29,10 @@ export function toolCallSummary(toolName: string, input: unknown) {
     return `${toolName} ${data.path}${edits}`;
   }
   if (toolName === 'replaceLines' && typeof data?.path === 'string') return `replaceLines ${data.path}:${data.startLine}-${data.endLine}`;
+  if (toolName === 'subagent' && typeof data?.task === 'string') {
+    const taskPreview = data.task.length > 60 ? `${data.task.slice(0, 60).trimEnd()}…` : data.task;
+    return `subagent "${taskPreview}"`;
+  }
   return `${toolName} ${compact(input)}`;
 }
 
@@ -41,6 +45,11 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     return count === 0 ? 'no matches' : `${count} match${count === 1 ? '' : 'es'}`;
   }
   if (typeof output?.code === 'number') return `exited with code ${output.code}`;
+  if (typeof output?.status === 'string' && typeof output?.summary === 'string') {
+    const summary = (output.summary as string).split('\n')[0] ?? '';
+    const preview = summary.length > 80 ? `${summary.slice(0, 80).trimEnd()}…` : summary;
+    return `${output.status as string}${preview ? `: ${preview}` : ''}`;
+  }
   if (typeof output?.ok === 'boolean') {
     if (output.ok) return 'completed';
     return typeof output.error === 'string' ? `failed: ${compact(output.error)}` : 'failed';

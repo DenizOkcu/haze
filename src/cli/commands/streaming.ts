@@ -11,6 +11,7 @@ import {completionDecision, looksIncomplete, noTextAfterToolPrompt, postContinua
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
+import {createSubagentTool} from '../../core/subagent/subagentRunner.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean};
 
@@ -112,6 +113,7 @@ export interface StreamCallbacks {
   updateMessage: (id: string, update: Partial<Message>) => void;
   setConversation: (messages: ModelMessage[]) => void;
   setBusy: (busy: boolean) => void;
+  setBusyLabel?: (label: string) => void;
   debugLog: (line: string) => void;
   getConversation: () => ModelMessage[];
   getLastAssistantText: () => string;
@@ -153,7 +155,8 @@ export async function runAgentTurn(
     }
     const activeModel = m;
     const skillRegistry = await loadSkillRegistry();
-    const availableTools = {...hazeTools, ...buildSkillTools(skillRegistry)};
+    const subagentTool = createSubagentTool({model: activeModel, contextFiles});
+    const availableTools = {...hazeTools, subagent: subagentTool, ...buildSkillTools(skillRegistry)};
     const goal = createSessionGoal(value);
     callbacks.setGoalStatus?.(formatGoalStatus(goal));
     const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
@@ -252,6 +255,8 @@ export async function runAgentTurn(
       callbacks.onEvent?.(agentEvent({type: 'tool_start', id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}));
       toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running'});
       updateToolGroup(true);
+      const runningSubagents = toolDisplayItems.filter(item => item.status === 'running' && item.summary.startsWith('subagent')).length;
+      if (runningSubagents > 0) callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
     }
 
     function recordToolDisplayFinish(event: {toolCall: {toolCallId: string; toolName: string; input: unknown}; success: boolean; output?: unknown; error?: unknown; durationMs: number}) {
@@ -263,6 +268,9 @@ export async function runAgentTurn(
       item.durationMs = event.durationMs;
       item.hidden = isDuplicateSkippedOutput(event.output);
       updateToolGroup(toolDisplayItems.some(candidate => candidate.status === 'running'));
+      const runningSubagents = toolDisplayItems.filter(i => i.status === 'running' && i.summary.startsWith('subagent')).length;
+      if (runningSubagents === 0) callbacks.setBusyLabel?.('Haze is thinking');
+      else callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
     }
     callbacks.debugLog(`request started with ${requestMessages.length} conversation messages; intent=${goal.normalizedIntent}; action=${likelyActionRequest}`);
     function recordToolFinish(event: {toolCall: {toolName: string; input?: unknown}; success: boolean; output?: unknown}) {

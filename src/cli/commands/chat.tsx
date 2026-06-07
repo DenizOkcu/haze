@@ -684,6 +684,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         if (session) void appendSessionEntry(session, {type: 'conversation_snapshot', at: new Date().toISOString(), messages: msgs}).catch(() => undefined);
       },
       setBusy,
+      setBusyLabel,
       debugLog,
       getConversation: () => conversationRef.current,
       getLastAssistantText: () => lastAssistantTextRef.current,
