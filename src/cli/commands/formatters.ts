@@ -44,7 +44,21 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     const count = output.totalMatches as number;
     return count === 0 ? 'no matches' : `${count} match${count === 1 ? '' : 'es'}`;
   }
-  if (typeof output?.code === 'number') return `exited with code ${output.code}`;
+  if (output?.needsConfirmation === true) {
+    const reasonCode = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
+    return `blocked pending confirmation${reasonCode}`;
+  }
+  if (typeof output?.validationSummary === 'object' && output.validationSummary != null && 'summaryText' in output.validationSummary) {
+    const summary = output.validationSummary as {summaryText?: unknown; suggestedNextStep?: unknown};
+    const next = typeof summary.suggestedNextStep === 'string' ? `; next: ${summary.suggestedNextStep}` : '';
+    return `${String(summary.summaryText)}${next}`;
+  }
+  if (typeof output?.code === 'number') {
+    const risk = typeof (output.classification as {riskLevel?: unknown} | undefined)?.riskLevel === 'string'
+      ? ` (${(output.classification as {riskLevel: string}).riskLevel})`
+      : '';
+    return `exited with code ${output.code}${risk}`;
+  }
   if (typeof output?.status === 'string' && typeof output?.summary === 'string') {
     const summary = (output.summary as string).split('\n')[0] ?? '';
     const preview = summary.length > 120 ? `${summary.slice(0, 120).trimEnd()}…` : summary;
@@ -62,7 +76,9 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       }
       return 'completed';
     }
-    return typeof output.error === 'string' ? `failed: ${compact(output.error)}` : 'failed';
+    if (output.needsConfirmation === true) return `blocked pending confirmation: ${compact(output.error)}`;
+    const reason = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
+    return typeof output.error === 'string' ? `failed${reason}: ${compact(output.error)}` : `failed${reason}`;
   }
   return 'completed';
 }
@@ -74,12 +90,21 @@ export function formatSeconds(milliseconds: number) {
 export function toolOutputDetails(value: unknown) {
   if (!value || typeof value !== 'object') return '';
   const output = value as {
+    cwd?: string;
+    classification?: {riskLevel?: string; reason?: string; traits?: string[]};
+    validationSummary?: {summaryText?: string; suggestedNextStep?: string};
     stdout?: {text?: string; truncated?: boolean};
     stderr?: {text?: string; truncated?: boolean};
   };
   const stdout = output.stdout?.text?.trim();
   const stderr = output.stderr?.text?.trim();
+  const meta = [
+    output.cwd ? `cwd: ${output.cwd}` : '',
+    output.classification?.riskLevel ? `classification: ${output.classification.riskLevel}${output.classification.reason ? ` — ${output.classification.reason}` : ''}` : '',
+    output.validationSummary?.summaryText ? `validation: ${output.validationSummary.summaryText}${output.validationSummary.suggestedNextStep ? `\nnext: ${output.validationSummary.suggestedNextStep}` : ''}` : '',
+  ].filter(Boolean).join('\n');
   const parts = [
+    meta,
     stdout ? `stdout:\n${compact(stdout, 1200)}` : '',
     stderr ? `stderr:\n${compact(stderr, 1200)}` : '',
   ].filter(Boolean);

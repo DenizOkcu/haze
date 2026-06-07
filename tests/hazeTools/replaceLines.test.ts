@@ -47,6 +47,7 @@ describe('replaceLines tool', () => {
     const result = await replaceLines({path: 'test.txt', startLine: 3, endLine: 1, content: 'x'});
     expect(result.ok).toBe(false);
     expect(result.error).toContain('endLine must be greater than or equal to startLine');
+    expect(result.reasonCode).toBe('invalid_line_range');
   });
 
   it('returns structured failure for startLine beyond file length', async () => {
@@ -55,6 +56,7 @@ describe('replaceLines tool', () => {
     const result = await replaceLines({path: 'test.txt', startLine: 10, endLine: 10, content: 'x'});
     expect(result.ok).toBe(false);
     expect(result.error).toContain('beyond end of file');
+    expect(result.reasonCode).toBe('invalid_line_range');
   });
 
   it('clamps endLine beyond file length to avoid off-by-one edit failures', async () => {

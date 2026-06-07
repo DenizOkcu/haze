@@ -8,15 +8,16 @@ import {z} from 'zod';
 
 const STANDARD_SKILL_REQUIREMENTS = `
 
-# Operational guardrails
+# Operating rules
 
+- Optimize for autonomous completion for professional users: keep permission checks minimal and stop only for concrete blockers or destructive actions.
 - Always ground the work in actual tool output or file contents before producing the final answer.
 - Define the exact commands, files, or project state that count as input for this workflow.
 - Inspect large inputs incrementally. Prefer summary/list commands first, then targeted per-file reads or per-file diffs for the files most relevant to the goal.
 - If a command output is truncated, do not stop. Run narrower commands or read specific files to gather enough evidence for a useful answer.
 - If the primary expected input is empty, check the natural fallback inputs before stopping. For example, when reviewing a branch diff, also inspect staged and unstaged working-tree changes.
 - Only report "nothing to do" when every explicitly relevant input source has been checked and is empty.
-- Only call something a blocker when a concrete tool failure, missing permission, missing dependency, or ambiguous user requirement prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.
+- Only call something a blocker when a concrete tool failure, missing dependency/permission, pending destructive confirmation, or ambiguous user requirement prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.
 - Do not stop after status/summary commands when the workflow requires analysis; inspect the actual content to analyze.
 - In the final response, cite the concrete files, commands, or evidence used. Exact line numbers are helpful but must not be required when the available evidence supports file/function-level feedback.
 `;
@@ -44,7 +45,7 @@ Complete the user's goal with the smallest reliable workflow.
 
 The description must tell the model exactly when to use the skill.
 The body must be a deterministic operating procedure, not generic advice.
-Keep skills simple, short, and practical: prefer the fewest commands and sections that reliably complete the workflow.
+Keep skills simple, short, and practical: prefer the fewest commands and sections that reliably complete the workflow for a professional user.
 Avoid exhaustive checklists, rigid citation requirements, or heavyweight output formats unless the user's request truly requires them.
 Additional files are allowed only when SKILL.md explicitly references them with relative paths.
 Skills do not execute code. They teach Haze how to behave for a workflow.
@@ -56,7 +57,7 @@ Every skill you create must include, in this order:
 - Inputs to inspect: only the essential commands/files/state needed for the workflow, with incremental inspection for large outputs.
 - Procedure: a short ordered list with fallback paths for empty, missing, or truncated primary inputs.
 - Stop conditions: when it is valid to say there is nothing to do.
-- Blocker policy: concrete conditions that justify stopping, excluding truncation when narrower inspection is possible.
+- Blocker policy: concrete conditions that justify stopping, excluding truncation or ordinary non-destructive operations when narrower inspection or autonomous action is possible.
 - Output template: a compact, reusable final-answer template with predictable headings/placeholders.
 - Evidence rule: require final answers to be grounded in actual inspected content, but do not require exhaustive citations.
 
@@ -112,7 +113,7 @@ function fallbackSkill(description: string): GeneratedSkill {
 }
 
 function withStandardRequirements(content: string) {
-  return content.includes('# Operational guardrails') ? content : `${content.trim()}${STANDARD_SKILL_REQUIREMENTS}\n`;
+  return content.includes('# Operating rules') || content.includes('# Operational guardrails') ? content : `${content.trim()}${STANDARD_SKILL_REQUIREMENTS}\n`;
 }
 
 function withSkillName(content: string, name: string) {

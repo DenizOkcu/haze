@@ -33,6 +33,8 @@ export interface CompletionPolicyInput {
   validationToolFailed: boolean;
   editFileFailed: boolean;
   editRecoveryPath?: string;
+  editRecoveryReasonCode?: string;
+  pendingConfirmation?: boolean;
 }
 
 export interface CompletionDecision {
@@ -50,36 +52,50 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
   const likelyValidationRequest = isValidationRequest(input.request);
   const assistantAdmitsIncomplete = looksIncomplete(input.assistantText) || looksTruncated(input.assistantText);
   const assistantReportsBlocker = looksBlocked(input.assistantText);
-  const requestCompletedByTools = input.mutatingToolSucceeded && input.validationToolSucceeded && !input.editRecoveryPath;
+  const requestCompletedByTools = input.mutatingToolSucceeded && input.validationToolSucceeded && !input.editRecoveryPath && !input.pendingConfirmation;
   const changedActionNeedsValidation = likelyActionRequest
     && !likelyPlanOnlyRequest
     && input.mutatingToolSucceeded
     && !input.validationToolSucceeded
     && !input.validationToolFailed
     && !input.editRecoveryPath
-    && !assistantReportsBlocker;
+    && !assistantReportsBlocker
+    && !input.pendingConfirmation;
   const needsActionContinuation = likelyActionRequest
     && !likelyPlanOnlyRequest
     && !requestCompletedByTools
+    && !input.pendingConfirmation
     && ((input.sawReadOnlyTool && !input.mutatingToolSucceeded) || input.validationToolFailed || input.editFileFailed || assistantAdmitsIncomplete);
   const needsValidationContinuation = (likelyValidationRequest || changedActionNeedsValidation)
     && !requestCompletedByTools
     && !input.validationToolSucceeded
-    && !assistantReportsBlocker;
+    && !assistantReportsBlocker
+    && !input.pendingConfirmation;
+
+  const stateLines = [
+    `User goal: ${input.request}`,
+    input.editRecoveryPath ? `Edit recovery path: ${input.editRecoveryPath}` : undefined,
+    input.editRecoveryReasonCode ? `Edit failure reason: ${input.editRecoveryReasonCode}` : undefined,
+    input.mutatingToolSucceeded ? 'Files changed in this turn: yes' : 'Files changed in this turn: no',
+    input.validationToolSucceeded ? 'Validation status: passed' : input.validationToolFailed ? 'Validation status: failed' : 'Validation status: not run',
+    input.pendingConfirmation ? 'Pending confirmation: yes' : undefined,
+  ].filter((line): line is string => line !== undefined).join('\n');
 
   let continuationPrompt: string | undefined;
-  if (input.editFileFailed) {
-    continuationPrompt = 'Your editFile attempt failed. Use the latest readFile line-numbered output and replaceLines to complete the requested change. Continue with any remaining tests or validation if relevant. Do not stop with a summary.';
+  if (input.pendingConfirmation) {
+    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: stop using tools and ask the user for the specific command confirmation or decision needed. Begin with "Status: needs user decision".`;
+  } else if (input.editFileFailed) {
+    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: call readFile on the exact edit recovery path first. Then use the latest line-numbered output with replaceLines, or a corrected editFile call, to complete the requested change. Continue with relevant validation if practical. Do not stop with a summary while tools are available.`;
   } else if (input.validationToolFailed && input.mutatingToolSucceeded) {
-    continuationPrompt = 'Validation failed after files changed in this task. Inspect the failure output, fix failures that are plausibly caused by the current change, then rerun the relevant validation once. If the failure is clearly unrelated or environment-specific, summarize the blocker instead of expanding scope.';
+    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: Validation failed after files changed in this task. Use the validation summary/output to inspect the first relevant failure, make one focused fix if it is plausibly caused by this change, then rerun the same relevant validation once. If it is an environment/dependency/unrelated failure, finish with Status: blocked or Status: partial and concrete evidence.`;
   } else if (needsValidationContinuation) {
     continuationPrompt = changedActionNeedsValidation
-      ? 'Files changed for this request, but no validation has run yet. Continue by running the smallest relevant test/check command you can identify from the project. If no practical validation exists, state that concrete blocker briefly instead of claiming the goal is complete.'
-      : 'You have not run the requested validation yet. Continue now by running the appropriate test/check command. Summarize only after the command finishes.';
+      ? `State:\n${stateLines}\n\nRequired next action: files changed for this request, but no validation has run. Run the smallest relevant test/typecheck/build command you can identify. If no practical validation exists, finish with the final status template and say why validation was not run.`
+      : `State:\n${stateLines}\n\nRequired next action: run the requested validation now. Summarize only after the command finishes.`;
   } else if (input.mutatingToolSucceeded && assistantAdmitsIncomplete) {
-    continuationPrompt = 'Your previous response says the current request is incomplete. Continue now with the remaining edits and validation for this same request. Do not summarize a plan unless blocked.';
+    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: your previous response described unfinished work. Continue with the remaining in-scope edits and validation for this same request. Do not summarize a plan unless concretely blocked.`;
   } else if (needsActionContinuation) {
-    continuationPrompt = 'You inspected files but have not made the requested change yet. Continue now by editing or writing the necessary files. Do not summarize a plan unless blocked.';
+    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: you inspected files but have not made the requested change yet. Edit or write the necessary files now. Do not summarize a plan unless concretely blocked.`;
   }
 
   return {
@@ -93,15 +109,15 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
 }
 
 export function toolLoopBudgetPrompt() {
-  return 'Tool slice reached for this model step. Do not output XML, JSON tool-call syntax, <tool_call> blocks, or function-call markup. If the current request is complete, summarize only current-turn changes and validation. If the requested change is incomplete, state the next concrete unfinished action briefly so Haze can continue autonomously in a fresh tool slice. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.';
+  return 'Tool slice reached for this model step. Do not output XML, JSON tool-call syntax, <tool_call> blocks, or function-call markup. If the current request is complete, answer with the final status template using only current-turn changes and validation evidence. If incomplete, state the single next concrete unfinished action so Haze can continue autonomously in a fresh tool slice. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.';
 }
 
 export function postContinuationPrompt() {
-  return 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If any tools are still available, complete the remaining edit or run the final validation now. Only call something a blocker if a concrete tool failure prevents progress.';
+  return 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If tools are available, complete the remaining edit or run the final validation now. Only call something blocked for a concrete tool failure, missing dependency/permission, pending confirmation, or unavoidable ambiguity.';
 }
 
 export function noTextAfterToolPrompt(allowTools: boolean) {
   return allowTools
-    ? 'Continue the original request now. If it asks for a change, edit or write the necessary files. If it asks to run or verify tests, run the command. Do not provide only a retrospective summary unless blocked.'
-    : 'Continue from the tool result and answer my original request. Do not call tools. Summarize only current-turn changes and validation; do not recap unrelated earlier tasks.';
+    ? 'Continue the original request now. If it asks for a change, edit or write the necessary files. If it asks to run or verify tests, run the command. Do not provide only a retrospective summary unless blocked or needing a user decision.'
+    : 'Continue from the tool result and answer my original request. Do not call tools. Use the final status template for implementation-like requests; summarize only current-turn changes and validation; do not recap unrelated earlier tasks.';
 }

@@ -61,6 +61,8 @@ describe('editFile tool', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('was not found');
+    expect(result.reasonCode).toBe('old_text_missing');
+    expect(result.recoveryTool).toBe('readFile');
     expect(result.suggestedNextStep).toContain('Read the file again');
   });
 
@@ -97,6 +99,7 @@ describe('editFile tool', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('not unique');
+    expect(result.reasonCode).toBe('old_text_not_unique');
   });
 
   it('returns structured failure for overlapping edits', async () => {
@@ -111,6 +114,7 @@ describe('editFile tool', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('overlap');
+    expect(result.reasonCode).toBe('overlapping_edits');
   });
 
   it('preserves file that doesn\'t end with newline', async () => {

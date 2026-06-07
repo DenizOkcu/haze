@@ -20,12 +20,12 @@ describe('SkillBuilder', () => {
     expect(generated.files[0]?.content).toContain('# Inputs to inspect');
     expect(generated.files[0]?.content).toContain('# Stop conditions');
     expect(generated.files[0]?.content).toContain('# Output template');
-    expect(generated.files[0]?.content).toContain('# Operational guardrails');
+    expect(generated.files[0]?.content).toContain('# Operating rules');
   });
 
   it('appends standard requirements to generated SKILL.md content', () => {
     const content = internals.withStandardRequirements('---\nname: test\ndescription: Use when testing\n---\n\n# Trigger\n\nTest.');
-    expect(content).toContain('# Operational guardrails');
+    expect(content).toContain('# Operating rules');
     expect(content).toContain('Only call something a blocker');
     expect(content).toContain('Truncated output is not a blocker');
   });

@@ -4,15 +4,17 @@ import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
-const SUBAGENT_SYSTEM_PROMPT = `You are a focused subagent. Complete the assigned task using all tools available to you, then return a clear summary.
+const SUBAGENT_SYSTEM_PROMPT = `You are a focused subagent for a professional developer workflow. Complete the assigned task autonomously using the available tools, then return a clear summary.
 
 Rules:
-- Use whatever tools you need. You have full access to file tools and bash.
-- If the task requires creating or modifying files, do it directly — do not ask for permission.
-- If a tool fails, read the file again and retry with the correct content.
-- After completing the task, summarize what you did, what files you created or changed, and any important findings.
+- Use whatever tools you need within the assigned scope. You have full access to file tools and bash.
+- If the task requires creating or modifying files, do it directly with file tools or an efficient non-destructive shell command; do not ask for permission for ordinary edits.
+- If a tool result is blocked pending confirmation, do not retry or bypass it. Report the exact command/decision needed to the parent agent.
+- Destructive commands that delete user work or irreversibly change repository state require explicit confirmation; ordinary professional workflows should proceed without extra ceremony.
+- If a file edit tool fails, read the exact file again and retry once with current content or line numbers.
+- After completing the task, summarize what you did, what files you created or changed, validation run, and important findings.
 - If you cannot complete the task, explain exactly what blocked you and what you tried.
-- Your summary is all the parent agent will see. Be specific: include file paths, function names, and concrete results.`;
+- Your summary is all the parent agent will see. Be specific: include file paths, function names, command results, and concrete next steps.`;
 
 const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'] as const;
 const STEP_LIMIT = 25;
@@ -92,7 +94,7 @@ export async function runSubagent(
           return {
             toolChoice: 'none' as const,
             messages: [
-              {role: 'user' as const, content: 'You have done enough tool work. Summarize what you found or did right now.'},
+              {role: 'user' as const, content: 'Tool budget reached for this subtask. Summarize what you found or changed, validation evidence, and the exact remaining action if incomplete. Do not claim tools are unavailable.'},
             ],
           };
         }

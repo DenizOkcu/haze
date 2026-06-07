@@ -163,7 +163,7 @@ export async function runAgentTurn(
     const likelyPlanImplementationRequest = isPlanImplementationRequest(value);
     const likelyActionRequest = isActionRequest(value);
     const likelyValidationRequest = isValidationRequest(value);
-    const planImplementationGuidance = 'When implementing a plan file, first identify the concrete required checklist items and compare them with the current files. Do not edit source or tests when the required behavior is already present. Implement the smallest clearly required phase or required items, skip optional/design-question items unless explicitly requested, add tests rather than exploratory one-off scripts where possible, use file tools (not bash) for any file changes, run validation once after code/test edits, then update plan status with file tools if requested. Do not call unresolved optional scope a blocker.';
+    const planImplementationGuidance = 'Haze internal guidance for implementing plan files. The original user request remains authoritative. First identify the concrete required checklist items and compare them with the current files. Do not edit source or tests when the required behavior is already present. Implement the smallest clearly required phase or required items, skip optional/design-question items unless explicitly requested, add tests rather than exploratory one-off scripts where possible, prefer file tools for source changes, run validation once after code/test edits, then update plan status with file tools if requested. Do not call unresolved optional scope a blocker.';
     const requestMessages: ModelMessage[] = retryingExistingRequest
       ? callbacks.getConversation()
       : likelyPlanImplementationRequest
@@ -188,7 +188,9 @@ export async function runAgentTurn(
     let completionContinuationCount = 0;
     const maxCompletionContinuations = COMPLETION_CONTINUATION_LIMIT;
     let editRecoveryPath: string | undefined;
+    let editRecoveryReasonCode: string | undefined;
     let editRecoveryReadSatisfied = false;
+    let pendingConfirmation = false;
     const toolSummaries: string[] = [];
     const visibleAssistantTexts = new Set<string>();
     const previousAssistantText = normalizeAssistantText(callbacks.getLastAssistantText());
@@ -324,7 +326,11 @@ export async function runAgentTurn(
       if (!ok && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) {
         editFileFailed = true;
         editRecoveryPath = path;
+        editRecoveryReasonCode = typeof event.output === 'object' && event.output != null && 'reasonCode' in event.output && typeof event.output.reasonCode === 'string' ? event.output.reasonCode : undefined;
         editRecoveryReadSatisfied = false;
+      }
+      if (!ok && event.toolCall.toolName === 'bash' && typeof event.output === 'object' && event.output != null && 'needsConfirmation' in event.output && event.output.needsConfirmation === true) {
+        pendingConfirmation = true;
       }
       if (ok && ['listFiles', 'readFile'].includes(event.toolCall.toolName)) sawReadOnlyTool = true;
       if (ok && event.toolCall.toolName === 'readFile' && path && path === editRecoveryPath && !duplicateSkipped) {
@@ -334,6 +340,7 @@ export async function runAgentTurn(
         mutatingToolSucceeded = true;
         if (!path || path === editRecoveryPath) {
           editRecoveryPath = undefined;
+          editRecoveryReasonCode = undefined;
           editRecoveryReadSatisfied = false;
           editFileFailed = false;
         }
@@ -391,7 +398,7 @@ export async function runAgentTurn(
               activeTools: ['readFile'] as Array<keyof typeof availableTools>,
               messages: [
                 ...messages,
-                {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
+                {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
               ],
             };
           }
@@ -491,7 +498,7 @@ export async function runAgentTurn(
             activeTools: ['readFile'] as Array<keyof typeof availableTools>,
             messages: [
               ...messages,
-              {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
+              {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
             ],
           };
         }
@@ -621,6 +628,8 @@ export async function runAgentTurn(
       validationToolFailed,
       editFileFailed,
       editRecoveryPath,
+      editRecoveryReasonCode,
+      pendingConfirmation,
     });
     let decision = decideCompletion(combinedAssistantText);
 

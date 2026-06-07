@@ -7,6 +7,9 @@ import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
 import {walkDir} from '../utils/fs.js';
 import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
+import {classifyBashCommand, isValidationClassification} from '../core/safety/bashClassifier.js';
+import {parseValidationOutput} from '../core/validation/outputParser.js';
+import type {ToolDiffLine, ToolFailureReasonCode} from './toolResultTypes.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
 const execFile = promisify(execFileCallback);
@@ -24,9 +27,23 @@ async function isGitIgnored(absolutePath: string) {
   }
 }
 
+class HazeToolError extends Error {
+  reasonCode: ToolFailureReasonCode;
+  recoveryTool?: string;
+  recoveryInput?: unknown;
+
+  constructor(message: string, reasonCode: ToolFailureReasonCode, options?: {recoveryTool?: string; recoveryInput?: unknown}) {
+    super(message);
+    this.name = 'HazeToolError';
+    this.reasonCode = reasonCode;
+    this.recoveryTool = options?.recoveryTool;
+    this.recoveryInput = options?.recoveryInput;
+  }
+}
+
 async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean) {
   if (!allowIgnored && await isGitIgnored(absolutePath)) {
-    throw new Error(`Path is ignored by .gitignore: ${inputPath}. Set allowIgnored=true only if you explicitly need to access ignored files.`);
+    throw new HazeToolError(`Path is ignored by .gitignore: ${inputPath}. Set allowIgnored=true only if you explicitly need to access ignored files.`, 'ignored_path', {recoveryTool: 'listFiles'});
   }
 }
 
@@ -107,6 +124,7 @@ type HazeToolContext = {
   completedToolCalls?: Map<string, number>;
   mutationEpoch?: number;
   failedMutationPaths?: Set<string>;
+  failedMutationReasons?: Map<string, ToolFailureReasonCode | undefined>;
   pathsReadAfterFailedMutation?: Set<string>;
   inFlightMutationPaths?: Set<string>;
 };
@@ -139,14 +157,24 @@ function isStructuredFailure(value: unknown) {
   return typeof value === 'object' && value != null && 'ok' in value && (value as {ok?: unknown}).ok === false;
 }
 
-function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string) {
+function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown; needsConfirmation?: boolean}) {
   const message = error instanceof Error ? error.message : String(error);
-  return {ok: false, toolName, path: pathForError, error: message, recoverable: true, suggestedNextStep};
+  const hazeError = error instanceof HazeToolError ? error : undefined;
+  return {
+    ok: false,
+    toolName,
+    path: pathForError,
+    error: message,
+    reasonCode: options?.reasonCode ?? hazeError?.reasonCode,
+    recoverable: true,
+    suggestedNextStep,
+    recoveryTool: options?.recoveryTool ?? hazeError?.recoveryTool,
+    recoveryInput: options?.recoveryInput ?? hazeError?.recoveryInput,
+    needsConfirmation: options?.needsConfirmation,
+  };
 }
 
 const INLINE_DIFF_LINE_LIMIT = 20;
-
-type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
 
 function splitDiffLines(text: string) {
   const lines = text.split(/\r?\n/);
@@ -187,6 +215,7 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   ctx.inFlightToolCalls ??= new Map();
   ctx.completedToolCalls ??= new Map();
   ctx.failedMutationPaths ??= new Set();
+  ctx.failedMutationReasons ??= new Map();
   ctx.pathsReadAfterFailedMutation ??= new Set();
   ctx.inFlightMutationPaths ??= new Set();
   ctx.mutationEpoch ??= 0;
@@ -201,7 +230,8 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
     };
   }
   if (isMutatingTool(toolName) && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput)) {
-    throw new Error(`Read ${pathForInput} before attempting another edit after the previous edit failure.`);
+    const reason = ctx.failedMutationReasons.get(pathForInput);
+    throw new HazeToolError(`Read ${pathForInput} before attempting another edit after the previous edit failure${reason ? ` (${reason})` : ''}.`, reason ?? 'io_error', {recoveryTool: 'readFile', recoveryInput: {path: pathForInput}});
   }
   const completedAt = ctx.completedToolCalls.get(key);
   const readAfterFailedMutation = toolName === 'readFile' && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput);
@@ -232,6 +262,8 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
     if (isStructuredFailure(result)) {
       if (isMutatingTool(toolName) && pathForInput) {
         ctx.failedMutationPaths.add(pathForInput);
+        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as ToolFailureReasonCode | undefined : undefined;
+        ctx.failedMutationReasons.set(pathForInput, reasonCode);
         ctx.pathsReadAfterFailedMutation.delete(pathForInput);
       }
       return result;
@@ -241,6 +273,7 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
       ctx.mutationEpoch += 1;
       if (pathForInput) {
         ctx.failedMutationPaths.delete(pathForInput);
+        ctx.failedMutationReasons.delete(pathForInput);
         ctx.pathsReadAfterFailedMutation.delete(pathForInput);
       }
     }
@@ -249,6 +282,7 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   } catch (error) {
     if (isMutatingTool(toolName) && pathForInput) {
       ctx.failedMutationPaths.add(pathForInput);
+      ctx.failedMutationReasons.set(pathForInput, error instanceof HazeToolError ? error.reasonCode : undefined);
       ctx.pathsReadAfterFailedMutation.delete(pathForInput);
     }
     throw error;
@@ -256,12 +290,6 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
     ctx.inFlightToolCalls.delete(key);
     if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths?.delete(pathForInput);
   }
-}
-
-function looksLikeShellFileMutation(command: string) {
-  return /(^|[;&|]\s*)(sed\s+-i|perl\s+-pi|tee\b|chmod\b|mv\b|cp\b|rm\b|mkdir\b|touch\b)/.test(command)
-    || /(^|\s)(>|>>)(\s|\S)/.test(command)
-    || /\b(File\.write|writeFileSync|writeFile|appendFileSync|appendFile)\b/.test(command);
 }
 
 export const hazeTools = {
@@ -415,8 +443,8 @@ export const hazeTools = {
         const lines = original.split(/\r?\n/);
         if (hasTrailingNewline) lines.pop();
         const isAppend = startLine === lines.length + 1 && endLine === lines.length;
-        if (!isAppend && endLine < startLine) throw new Error('endLine must be greater than or equal to startLine, except when appending at EOF with startLine=totalLines+1 and endLine=totalLines');
-        if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
+        if (!isAppend && endLine < startLine) throw new HazeToolError('endLine must be greater than or equal to startLine, except when appending at EOF with startLine=totalLines+1 and endLine=totalLines', 'invalid_line_range', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
+        if (startLine > lines.length + 1) throw new HazeToolError(`startLine ${startLine} is beyond end of file (${lines.length} lines)`, 'invalid_line_range', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
         const effectiveEndLine = !isAppend && endLine > lines.length ? lines.length : endLine;
         const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
         const removedText = isAppend ? '' : lines.slice(startLine - 1, effectiveEndLine).join('\n');
@@ -455,7 +483,7 @@ export const hazeTools = {
         try {
           await fs.access(absolutePath);
           if (!overwriteExisting) {
-            throw new Error(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`);
+            throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
@@ -487,14 +515,14 @@ export const hazeTools = {
         const original = await fs.readFile(absolutePath, 'utf8');
         const ranges = edits.map((edit, index) => {
           const match = findEditRange(original, edit.oldText);
-          if (match.kind === 'missing') throw new Error(`edit ${index}: oldText was not found. Read the file again and use the exact current text, or use replaceLines with the latest line numbers.`);
-          if (match.kind === 'multiple') throw new Error(`edit ${index}: oldText is not unique`);
+          if (match.kind === 'missing') throw new HazeToolError(`edit ${index}: oldText was not found. Read the file again and use the exact current text, or use replaceLines with the latest line numbers.`, 'old_text_missing', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
+          if (match.kind === 'multiple') throw new HazeToolError(`edit ${index}: oldText is not unique`, 'old_text_not_unique', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           return {index, start: match.start, end: match.end, edit, approximate: match.approximate};
         }).sort((a, b) => a.start - b.start);
 
         for (let i = 1; i < ranges.length; i++) {
           if (ranges[i]!.start < ranges[i - 1]!.end) {
-            throw new Error(`edits ${ranges[i - 1]!.index} and ${ranges[i]!.index} overlap`);
+            throw new HazeToolError(`edits ${ranges[i - 1]!.index} and ${ranges[i]!.index} overlap`, 'overlapping_edits', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
         }
 
@@ -537,20 +565,30 @@ export const hazeTools = {
     inputSchema: z.object({
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
-      allowMutation: z.boolean().default(false).describe('Allow shell commands that mutate files (chmod, redirection, tee, sed -i, File.write, etc.). Use only when explicitly requested or when file tools cannot do the job.'),
+      allowMutation: z.boolean().default(false).describe('Allow non-destructive professional workflow commands that mutate local state (chmod, redirects, tee, sed -i, installs, git add/commit, scripts). Set true when the user requested the operation or bash is materially more efficient. Destructive commands still require explicit confirmation.'),
     }),
     execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
-      if (!allowMutation && looksLikeShellFileMutation(command)) {
-        return structuredToolFailure('bash', 'Refusing to mutate files via bash. Use writeFile/editFile/replaceLines, or set allowMutation=true only when shell mutation is explicitly required.', 'Use writeFile/editFile/replaceLines for file changes, or retry bash with allowMutation=true only when shell mutation is explicitly required.');
+      const cwd = workspaceRoot();
+      const classification = classifyBashCommand(command);
+      if (classification.riskLevel === 'destructive') {
+        return structuredToolFailure('bash', 'Command requires explicit user confirmation before execution.', 'Ask the user to confirm this destructive command, or choose a safer alternative.', undefined, {reasonCode: 'destructive_command_requires_confirmation', needsConfirmation: true, recoveryInput: {command, cwd, classification}});
+      }
+      if (classification.requiresConfirmation && !allowMutation) {
+        return structuredToolFailure('bash', 'Command requires confirmation or allowMutation=true before execution.', 'Ask the user to confirm this command, or use file tools for file edits.', undefined, {reasonCode: 'mutating_command_requires_confirmation', needsConfirmation: true, recoveryInput: {command, cwd, classification}});
       }
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
+      const startedAt = Date.now();
       return await new Promise(resolve => {
-        const child = spawn('bash', ['-lc', command], {cwd: workspaceRoot(), stdio: ['ignore', 'pipe', 'pipe']});
+        const child = spawn('bash', ['-lc', command], {cwd, stdio: ['ignore', 'pipe', 'pipe']});
         let stdout = '';
         let stderr = '';
         let settled = false;
+        let timedOut = false;
         const timer = setTimeout(() => {
-          if (!settled) child.kill('SIGTERM');
+          if (!settled) {
+            timedOut = true;
+            child.kill('SIGTERM');
+          }
         }, timeoutMs);
         const abort = () => child.kill('SIGTERM');
         context.abortSignal?.addEventListener('abort', abort, {once: true});
@@ -560,19 +598,29 @@ export const hazeTools = {
           settled = true;
           clearTimeout(timer);
           context.abortSignal?.removeEventListener('abort', abort);
+          const truncatedStdout = truncate(stdout);
+          const truncatedStderr = truncate(stderr);
+          const validationSummary = isValidationClassification(classification)
+            ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: truncatedStdout.truncated, stderrTruncated: truncatedStderr.truncated, classification})
+            : undefined;
           resolve({
-            ok: code === 0,
+            ok: code === 0 && !timedOut,
             code,
             command,
-            stdout: truncate(stdout),
-            stderr: truncate(stderr),
+            cwd,
+            classification,
+            durationMs: Date.now() - startedAt,
+            timedOut,
+            stdout: truncatedStdout,
+            stderr: truncatedStderr,
+            validationSummary,
           });
         });
         child.on('error', error => {
           settled = true;
           clearTimeout(timer);
           context.abortSignal?.removeEventListener('abort', abort);
-          resolve({ok: false, command, error: error.message});
+          resolve({ok: false, command, cwd, classification, durationMs: Date.now() - startedAt, error: error.message});
         });
       });
     }),
