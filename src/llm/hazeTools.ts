@@ -157,7 +157,7 @@ function isStructuredFailure(value: unknown) {
   return typeof value === 'object' && value != null && 'ok' in value && (value as {ok?: unknown}).ok === false;
 }
 
-function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown; needsConfirmation?: boolean}) {
+function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown}) {
   const message = error instanceof Error ? error.message : String(error);
   const hazeError = error instanceof HazeToolError ? error : undefined;
   return {
@@ -170,7 +170,6 @@ function structuredToolFailure(toolName: string, error: unknown, suggestedNextSt
     suggestedNextStep,
     recoveryTool: options?.recoveryTool ?? hazeError?.recoveryTool,
     recoveryInput: options?.recoveryInput ?? hazeError?.recoveryInput,
-    needsConfirmation: options?.needsConfirmation,
   };
 }
 
@@ -565,14 +564,11 @@ export const hazeTools = {
     inputSchema: z.object({
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
-      allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Non-destructive professional workflow commands may run without extra confirmation; destructive commands still require explicit confirmation.'),
+      allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Commands run without confirmation; retained for compatibility.'),
     }),
     execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
       const cwd = workspaceRoot();
       const classification = classifyBashCommand(command);
-      if (classification.riskLevel === 'destructive') {
-        return structuredToolFailure('bash', 'Command requires explicit user confirmation before execution.', 'Ask the user to confirm this destructive command, or choose a safer alternative.', undefined, {reasonCode: 'destructive_command_requires_confirmation', needsConfirmation: true, recoveryInput: {command, cwd, classification}});
-      }
       const timeoutMs = (timeoutSeconds ?? 60) * 1000;
       const startedAt = Date.now();
       return await new Promise(resolve => {

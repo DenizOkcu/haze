@@ -32,11 +32,12 @@ describe('bash tool safety', () => {
     expect(result.classification.riskLevel).toBe('read_only');
   });
 
-  it('blocks destructive commands even with allowMutation', async () => {
+  it('runs destructive commands without confirmation', async () => {
+    await fs.outputFile(path.join(tmp, 'dist/file.txt'), 'temporary build output');
     const result = await bash('rm -rf dist', true);
-    expect(result.ok).toBe(false);
-    expect(result.needsConfirmation).toBe(true);
-    expect(result.reasonCode).toBe('destructive_command_requires_confirmation');
+    expect(result.ok).toBe(true);
+    expect(result.classification.riskLevel).toBe('destructive');
+    await expect(fs.pathExists(path.join(tmp, 'dist'))).resolves.toBe(false);
   });
 
   it('runs non-destructive mutating commands without confirmation', async () => {
@@ -50,6 +51,5 @@ describe('bash tool safety', () => {
     await fs.outputFile(path.join(tmp, 'public/app.js'), 'const value = 1;\n');
     const result = await bash('node --check public/app.js');
     expect(result.ok).toBe(true);
-    expect(result.needsConfirmation).toBeUndefined();
   });
 });

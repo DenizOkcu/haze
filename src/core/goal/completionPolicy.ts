@@ -34,7 +34,6 @@ export interface CompletionPolicyInput {
   editFileFailed: boolean;
   editRecoveryPath?: string;
   editRecoveryReasonCode?: string;
-  pendingConfirmation?: boolean;
 }
 
 export interface CompletionDecision {
@@ -52,25 +51,22 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
   const likelyValidationRequest = isValidationRequest(input.request);
   const assistantAdmitsIncomplete = looksIncomplete(input.assistantText) || looksTruncated(input.assistantText);
   const assistantReportsBlocker = looksBlocked(input.assistantText);
-  const requestCompletedByTools = input.mutatingToolSucceeded && input.validationToolSucceeded && !input.editRecoveryPath && !input.pendingConfirmation;
+  const requestCompletedByTools = input.mutatingToolSucceeded && input.validationToolSucceeded && !input.editRecoveryPath;
   const changedActionNeedsValidation = likelyActionRequest
     && !likelyPlanOnlyRequest
     && input.mutatingToolSucceeded
     && !input.validationToolSucceeded
     && !input.validationToolFailed
     && !input.editRecoveryPath
-    && !assistantReportsBlocker
-    && !input.pendingConfirmation;
+    && !assistantReportsBlocker;
   const needsActionContinuation = likelyActionRequest
     && !likelyPlanOnlyRequest
     && !requestCompletedByTools
-    && !input.pendingConfirmation
     && ((input.sawReadOnlyTool && !input.mutatingToolSucceeded) || input.validationToolFailed || input.editFileFailed || assistantAdmitsIncomplete);
   const needsValidationContinuation = (likelyValidationRequest || changedActionNeedsValidation)
     && !requestCompletedByTools
     && !input.validationToolSucceeded
-    && !assistantReportsBlocker
-    && !input.pendingConfirmation;
+    && !assistantReportsBlocker;
 
   const stateLines = [
     `User goal: ${input.request}`,
@@ -78,13 +74,10 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
     input.editRecoveryReasonCode ? `Edit failure reason: ${input.editRecoveryReasonCode}` : undefined,
     input.mutatingToolSucceeded ? 'Files changed in this turn: yes' : 'Files changed in this turn: no',
     input.validationToolSucceeded ? 'Validation status: passed' : input.validationToolFailed ? 'Validation status: failed' : 'Validation status: not run',
-    input.pendingConfirmation ? 'Pending confirmation: yes' : undefined,
   ].filter((line): line is string => line !== undefined).join('\n');
 
   let continuationPrompt: string | undefined;
-  if (input.pendingConfirmation) {
-    continuationPrompt = `State:\n${stateLines}\n\nRequired next action: stop using tools and ask the user for the specific command confirmation or decision needed. Begin with "Status: needs user decision".`;
-  } else if (input.editFileFailed) {
+  if (input.editFileFailed) {
     continuationPrompt = `State:\n${stateLines}\n\nRequired next action: call readFile on the exact edit recovery path first. Then use the latest line-numbered output with replaceLines, or a corrected editFile call, to complete the requested change. Continue with relevant validation if practical. Do not stop with a summary while tools are available.`;
   } else if (input.validationToolFailed && input.mutatingToolSucceeded) {
     continuationPrompt = `State:\n${stateLines}\n\nRequired next action: Validation failed after files changed in this task. Use the validation summary/output to inspect the first relevant failure, make one focused fix if it is plausibly caused by this change, then rerun the same relevant validation once. If it is an environment/dependency/unrelated failure, finish with Status: blocked or Status: partial and concrete evidence.`;
@@ -113,7 +106,7 @@ export function toolLoopBudgetPrompt() {
 }
 
 export function postContinuationPrompt() {
-  return 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If tools are available, complete the remaining edit or run the final validation now. Only call something blocked for a concrete tool failure, missing dependency/permission, pending confirmation, or unavoidable ambiguity.';
+  return 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If tools are available, complete the remaining edit or run the final validation now. Only call something blocked for a concrete tool failure, missing dependency/permission, or unavoidable ambiguity.';
 }
 
 export function noTextAfterToolPrompt(allowTools: boolean) {

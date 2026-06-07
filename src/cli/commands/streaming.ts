@@ -190,7 +190,6 @@ export async function runAgentTurn(
     let editRecoveryPath: string | undefined;
     let editRecoveryReasonCode: string | undefined;
     let editRecoveryReadSatisfied = false;
-    let pendingConfirmation = false;
     const toolSummaries: string[] = [];
     const visibleAssistantTexts = new Set<string>();
     const previousAssistantText = normalizeAssistantText(callbacks.getLastAssistantText());
@@ -328,9 +327,6 @@ export async function runAgentTurn(
         editRecoveryPath = path;
         editRecoveryReasonCode = typeof event.output === 'object' && event.output != null && 'reasonCode' in event.output && typeof event.output.reasonCode === 'string' ? event.output.reasonCode : undefined;
         editRecoveryReadSatisfied = false;
-      }
-      if (!ok && event.toolCall.toolName === 'bash' && typeof event.output === 'object' && event.output != null && 'needsConfirmation' in event.output && event.output.needsConfirmation === true) {
-        pendingConfirmation = true;
       }
       if (ok && ['listFiles', 'readFile'].includes(event.toolCall.toolName)) sawReadOnlyTool = true;
       if (ok && event.toolCall.toolName === 'readFile' && path && path === editRecoveryPath && !duplicateSkipped) {
@@ -627,7 +623,6 @@ export async function runAgentTurn(
       editFileFailed,
       editRecoveryPath,
       editRecoveryReasonCode,
-      pendingConfirmation,
     });
     let decision = decideCompletion(combinedAssistantText);
 

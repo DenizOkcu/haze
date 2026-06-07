@@ -5,8 +5,7 @@ export type ToolFailureReasonCode =
   | 'ignored_path'
   | 'existing_file_requires_overwrite'
   | 'invalid_line_range'
-  | 'io_error'
-  | 'destructive_command_requires_confirmation';
+  | 'io_error';
 
 export type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
 
@@ -39,7 +38,6 @@ export type StructuredToolFailure = {
   suggestedNextStep: string;
   recoveryTool?: string;
   recoveryInput?: unknown;
-  needsConfirmation?: boolean;
 };
 
 export function isObject(value: unknown): value is Record<string, unknown> {

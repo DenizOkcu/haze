@@ -10,14 +10,14 @@ const STANDARD_SKILL_REQUIREMENTS = `
 
 # Operating rules
 
-- Optimize for autonomous completion for professional users: keep permission checks minimal and stop only for concrete blockers or destructive actions.
+- Optimize for autonomous completion for expert users: do not ask for command confirmations; stop only for concrete blockers or necessary product decisions.
 - Always ground the work in actual tool output or file contents before producing the final answer.
 - Define the exact commands, files, or project state that count as input for this workflow.
 - Inspect large inputs incrementally. Prefer summary/list commands first, then targeted per-file reads or per-file diffs for the files most relevant to the goal.
 - If a command output is truncated, do not stop. Run narrower commands or read specific files to gather enough evidence for a useful answer.
 - If the primary expected input is empty, check the natural fallback inputs before stopping. For example, when reviewing a branch diff, also inspect staged and unstaged working-tree changes.
 - Only report "nothing to do" when every explicitly relevant input source has been checked and is empty.
-- Only call something a blocker when a concrete tool failure, missing dependency/permission, pending destructive confirmation, or ambiguous user requirement prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.
+- Only call something a blocker when a concrete tool failure, missing dependency/permission, or ambiguous user requirement prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.
 - Do not stop after status/summary commands when the workflow requires analysis; inspect the actual content to analyze.
 - In the final response, cite the concrete files, commands, or evidence used. Exact line numbers are helpful but must not be required when the available evidence supports file/function-level feedback.
 `;

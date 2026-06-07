@@ -32,7 +32,7 @@ export function compactModelMessages(
   }).filter(Boolean).join('\n');
   const summary = [
     'Compacted prior Haze conversation. Treat this as continuity context, not a new user request.',
-    'Preserve especially: current user goal and success condition; explicit user constraints/preferences/decisions; files created/changed/read; validation commands and pass/fail results; blockers or pending confirmations; exact next action if work was unfinished.',
+    'Preserve especially: current user goal and success condition; explicit user constraints/preferences/decisions; files created/changed/read; validation commands and pass/fail results; blockers or pending product decisions; exact next action if work was unfinished.',
     'Do not treat older tool outputs as current unless the recent conversation confirms they still apply.',
     options.instructions ? `User compaction instructions: ${options.instructions}` : undefined,
     '',

@@ -44,10 +44,6 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     const count = output.totalMatches as number;
     return count === 0 ? 'no matches' : `${count} match${count === 1 ? '' : 'es'}`;
   }
-  if (output?.needsConfirmation === true) {
-    const reasonCode = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
-    return `blocked pending confirmation${reasonCode}`;
-  }
   if (typeof output?.validationSummary === 'object' && output.validationSummary != null && 'summaryText' in output.validationSummary) {
     const summary = output.validationSummary as {summaryText?: unknown; suggestedNextStep?: unknown};
     const next = typeof summary.suggestedNextStep === 'string' ? `; next: ${summary.suggestedNextStep}` : '';
@@ -76,7 +72,6 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       }
       return 'completed';
     }
-    if (output.needsConfirmation === true) return `blocked pending confirmation: ${compact(output.error)}`;
     const reason = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
     return typeof output.error === 'string' ? `failed${reason}: ${compact(output.error)}` : `failed${reason}`;
   }
