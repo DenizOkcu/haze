@@ -47,7 +47,7 @@ On first run, create or choose a provider, then choose your first model:
 `/model` selects the model Haze should use. You can also set one directly:
 
 ```txt
-/model x-ai/grok-build-0.1
+/model anthropic/claude-sonnet-4.6
 /model local:llama3.1
 ```
 
@@ -57,7 +57,7 @@ Or use environment variables for any OpenAI-compatible endpoint:
 # e.g. OpenRouter, OpenAI, LM Studio, Ollama, or an OpenAI-compatible proxy
 export OPENAI_API_KEY=... # provider API key, if needed; local providers may not need one
 export OPENAI_BASE_URL=https://openrouter.ai/api/v1 # or http://localhost:1234/v1, http://localhost:11434/v1, ...
-export HAZE_MODEL=x-ai/grok-build-0.1 # or gpt-4.1, llama3.1, qwen2.5-coder, ...
+export HAZE_MODEL=anthropic/claude-sonnet-4.6 # or gpt-4.1, llama3.1, qwen2.5-coder, ...
 ```
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key.
