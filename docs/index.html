@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Haze — A tiny terminal fog machine for building software</title>
-  <meta name="description" content="A minimal AI agent CLI that gives an LLM a small set of tools, then gets out of the way. No ceremony. No framework. Just progress.">
-  <meta property="og:title" content="Haze — Tiny Spell, Useful Goblin">
-  <meta property="og:description" content="A pragmatic agentic CLI for building apps from the terminal.">
+  <meta name="description" content="A minimal AI agent CLI for expert terminal users. Transparent local tools, direct command execution, stronger validation feedback, and fewer permission-dialog vibes.">
+  <meta property="og:title" content="Haze 0.2.0 — Steadier Goblin Mode">
+  <meta property="og:description" content="A pragmatic agentic CLI for expert developers building from the terminal.">
   <meta property="og:type" content="website">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.85em' x='.12em' font-size='82' font-family='monospace'>h</text></svg>">
   <style>
@@ -699,7 +699,7 @@
         <a href="#skills" class="hide-mobile">Skills</a>
         <a href="#tools" class="hide-mobile">Tools</a>
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <a class="badge" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.1.1</a>
+        <a class="badge" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.2.0</a>
       </div>
     </div>
   </nav>
@@ -713,8 +713,8 @@
           Entirely yours.
         </h1>
         <p>
-          A minimal AI agent that gives an LLM a handful of tools,<br>
-          then gets out of the way.
+          A minimal AI agent for expert terminal users:<br>
+          transparent tools, direct action, honest validation.
         </p>
 
         <div class="install-box">
@@ -782,19 +782,19 @@
           <p class="section-label">// what it does</p>
           <h2 class="section-title">Seven tools. Focused subagents.<br>Infinite stubbornness.</h2>
           <p class="section-desc">
-            Haze doesn't try to be everything. It gives the model read, search, edit, line-replace, write, list, and bash — plus focused delegation when work can split cleanly.
+            Haze doesn't try to be everything. It gives the model read, search, edit, line-replace, write, list, and bash — plus validation summaries and focused delegation when work can split cleanly.
           </p>
         </div>
 
         <div class="features">
           <div class="feature reveal">
             <h3>Born in the terminal</h3>
-            <p>No web UI. No Electron. No Docker container that spawns other Docker containers. Haze lives in your terminal where code happens. Interactive TUI with streaming, syntax highlighting, and tool-call transparency. Watch it work. Keep your hands near the wheel.</p>
+            <p>No web UI. No Electron. No Docker container that spawns other Docker containers. Haze lives in your terminal where code happens. Interactive TUI with streaming, syntax highlighting, wrapped multi-line input, and tool-call transparency. Watch it work. Keep your hands near the wheel.</p>
           </div>
 
           <div class="feature reveal">
             <h3>Deliberately small toolset</h3>
-            <p>Read, grep, edit, replace lines, write, list, bash. That's it. No 47-tool sprawl. No tool that scaffolds a tool that generates a plan that plans to generate a plan. The model has a few transparent tricks. It's surprisingly effective.</p>
+            <p>Read, grep, edit, replace lines, write, list, bash. That's it. Bash results now include command classification, cwd, duration, timeout state, and validation summaries when Haze recognizes test/typecheck/lint/build output. Few tricks, useful evidence.</p>
           </div>
 
           <div class="feature reveal">
@@ -813,8 +813,8 @@
           </div>
 
           <div class="feature reveal">
-            <h3>Light guardrails</h3>
-            <p>File tools scoped to your workspace. Gitignore-aware by default. Bash mutations discouraged. Destructive actions require confirmation. Powerful enough to help, dumb enough to deserve supervision.</p>
+            <h3>Expert-oriented autonomy</h3>
+            <p>File tools scoped to your workspace. Gitignore-aware by default. Bash commands are classified and shown clearly, but Haze does not add confirmation gates. It assumes expert users know what they asked for. Powerful enough to help, dumb enough to deserve supervision.</p>
           </div>
 
           <div class="feature reveal">
@@ -899,7 +899,7 @@
           </div>
           <div class="tool">
             <div class="tool-name">bash</div>
-            <div class="tool-desc">Tests, builds, validation</div>
+            <div class="tool-desc">Shell workflows + validation summaries</div>
           </div>
         </div>
       </div>
@@ -940,7 +940,7 @@
         Built with misplaced confidence by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a> &middot;
         MIT License &middot;
         <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">File issues</a> &middot;
-        Security theatre completed.
+        Permission-dialog goblin dismissed.
       </p>
     </div>
   </footer>
@@ -990,7 +990,7 @@
         const line = document.createElement('div');
         line.className = 't-tool-line';
         const detail = tc.isBash
-          ? `exited with code ${tc.exit} in ${tc.time}`
+          ? `${tc.summary || `exited with code ${tc.exit}`} in ${tc.time}`
           : `completed in ${tc.time}`;
         const nameClass = tc.isBash ? 't-bash-cmd' : 't-tool-name';
         line.innerHTML = `<span class="t-check">✓</span> <span class="${nameClass}">${tc.name}</span> <span class="t-detail">${tc.args}</span> — <span class="t-detail">${detail}</span>`;
@@ -1057,6 +1057,7 @@
         { name: 'listFiles', args: '.', time: '0.6s' },
         { name: 'readFile', args: 'src/api/auth.ts', time: '0.07s' },
         { name: 'grep', args: '"eval|innerHTML|document.write" in src (*.ts)', time: '0.2s' },
+        { name: 'bash', args: 'npm test', time: '3.4s', isBash: true, exit: 1, summary: 'test failed: 2 diagnostics' },
         { name: 'subagent', args: '"inspect session handling"', time: '2.1s' },
         { name: 'readFile', args: 'src/middleware/session.ts', time: '0.06s' },
       ];
