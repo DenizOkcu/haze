@@ -3,6 +3,7 @@ import {promisify} from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {tool} from 'ai';
+import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
 import {walkDir} from '../utils/fs.js';
 import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
@@ -359,7 +360,7 @@ export const hazeTools = {
 
         let stdout = '';
         try {
-          const result = await execFile('rg', args, {cwd: workspaceRoot(), timeout: 30_000});
+          const result = await execFile(rgPath, args, {cwd: workspaceRoot(), timeout: 30_000});
           stdout = result.stdout;
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;

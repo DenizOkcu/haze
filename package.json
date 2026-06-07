@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pragmatic agentic CLI for building apps from the terminal.",
   "type": "module",
   "license": "MIT",
@@ -45,6 +45,7 @@
   "dependencies": {
     "@ai-sdk/openai": "3.0.67",
     "@inquirer/prompts": "8.5.2",
+    "@vscode/ripgrep": "1.18.0",
     "ai": "6.0.194",
     "cli-highlight": "2.1.11",
     "commander": "15.0.0",

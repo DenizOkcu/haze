@@ -9,7 +9,7 @@ Haze is a pragmatic, intentionally limited agentic CLI for building apps from th
 - Published as `@denizokcu/haze` (ESM package).
 - Core is a source-only ESM TypeScript project with a thin published `bin/` + `dist/`.
 - Self-documents its own agent tools and context-file mechanisms (see README).
-- Current version: 0.1.0 (see package.json for exact).
+- Current version: 0.1.1 (see package.json for exact).
 
 ## Common commands
 

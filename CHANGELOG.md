@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-06-07
+
+- Bundled ripgrep with `@vscode/ripgrep` and updated the `grep` tool to use the package-provided binary path, removing the requirement for users to install `rg` separately or expose it on `PATH`.
+- Updated release documentation and site copy for the 0.1.1 patch release.
+
 ## 0.1.0 - 2026-06-07
 
 - Added ripgrep-backed `grep` for fast workspace search with regex, glob, context-line, case-insensitive, and result-limit options.
