@@ -93,7 +93,7 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
   });
 }
 
-const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const IDLE_TIMEOUT_MS = 5 * 60_000;
 const MAIN_STEP_LIMIT = 40;
 const MAIN_TOOL_CALL_LIMIT = 40;
@@ -208,9 +208,13 @@ export async function runAgentTurn(
       return normalized.length > 0 && [...visibleAssistantTexts].some(previous => previous.startsWith(normalized) && previous !== normalized);
     };
     const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
-    const toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const toolDisplayItems: Array<{id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; hidden?: boolean}> = [];
+    let toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const INLINE_DIFF_LINE_LIMIT = 20;
+    type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
+    type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; hidden?: boolean; subItems?: Array<{name: string; summary: string; durationMs: number}>; diff?: ToolDiffLine[]; diffLineCount?: number};
+    const toolDisplayItems: Array<ToolDisplayItem> = [];
     let toolGroupStarted = false;
+    let toolGroupFinalized = false;
 
     function renderToolGroup(streaming: boolean) {
       const visibleItems = toolDisplayItems.filter(item => !item.hidden);
@@ -220,7 +224,7 @@ export async function runAgentTurn(
       const compactItems = !running && visibleItems.length > 12
         ? [...new Map([...failures, ...changes].map(item => [item.id, item])).values()]
         : visibleItems;
-      const grouped = new Map<string, {item: typeof compactItems[number]; count: number}>();
+      const grouped = new Map<string, {item: ToolDisplayItem; count: number}>();
       for (const item of compactItems) {
         const key = `${item.status}:${item.summary}:${item.result ?? ''}`;
         const current = grouped.get(key);
@@ -232,12 +236,28 @@ export async function runAgentTurn(
       const header = running || streaming
         ? 'Running tools'
         : `${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed${compactSuffix}`;
-      const lines = rows.map(({item, count}) => {
+      const lines: string[] = [];
+      for (const {item, count} of rows) {
         const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
         const countText = count > 1 ? ` ×${count}` : '';
         const result = item.status === 'running' ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
-        return `  ${icon} ${item.summary}${countText}${result}`;
-      });
+        lines.push(`  ${icon} ${item.summary}${countText}${result}`);
+        if (item.diff && item.diff.length > 0 && (item.diffLineCount ?? item.diff.length) <= INLINE_DIFF_LINE_LIMIT) {
+          for (const diffLine of item.diff) {
+            const lineNumber = diffLine.type === 'add' ? diffLine.newLine : diffLine.oldLine;
+            const marker = diffLine.type === 'add' ? '+' : diffLine.type === 'remove' ? '-' : ' ';
+            lines.push(`    ${String(lineNumber ?? '').padStart(5)} ${marker} ${diffLine.text}`);
+          }
+        } else if ((item.diffLineCount ?? 0) > INLINE_DIFF_LINE_LIMIT) {
+          lines.push(`          diff hidden (${item.diffLineCount} changed lines; run git diff to inspect)`);
+        }
+        if (item.subItems && item.subItems.length > 0) {
+          for (const sub of item.subItems) {
+            const subDuration = sub.durationMs > 1000 ? ` (${formatSeconds(sub.durationMs)})` : '';
+            lines.push(`    · ${sub.name} — ${sub.summary}${subDuration}`);
+          }
+        }
+      }
       return [header, ...lines].join('\n');
     }
 
@@ -249,9 +269,16 @@ export async function runAgentTurn(
       } else {
         callbacks.updateMessage(toolGroupId, {text, streaming});
       }
+      if (!streaming) toolGroupFinalized = true;
     }
 
     function recordToolStart(toolCall: {toolCallId: string; toolName: string; input: unknown}) {
+      if (toolGroupFinalized) {
+        toolDisplayItems.length = 0;
+        toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        toolGroupFinalized = false;
+        toolGroupStarted = false;
+      }
       callbacks.onEvent?.(agentEvent({type: 'tool_start', id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}));
       toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running'});
       updateToolGroup(true);
@@ -267,6 +294,21 @@ export async function runAgentTurn(
       item.result = toolResultSummary(event);
       item.durationMs = event.durationMs;
       item.hidden = isDuplicateSkippedOutput(event.output);
+      if (typeof event.output === 'object' && event.output != null) {
+        const output = event.output as {diff?: unknown; diffLineCount?: unknown};
+        if (typeof output.diffLineCount === 'number') item.diffLineCount = output.diffLineCount;
+        if (Array.isArray(output.diff)) item.diff = output.diff as ToolDiffLine[];
+      }
+      if (event.toolCall.toolName === 'subagent' && typeof event.output === 'object' && event.output != null) {
+        const out = event.output as Record<string, unknown>;
+        if (Array.isArray(out.toolCalls)) {
+          item.subItems = (out.toolCalls as Array<{name: string; summary: string; durationMs: number}>).map(tc => ({
+            name: tc.name,
+            summary: tc.summary,
+            durationMs: tc.durationMs,
+          }));
+        }
+      }
       updateToolGroup(toolDisplayItems.some(candidate => candidate.status === 'running'));
       const runningSubagents = toolDisplayItems.filter(i => i.status === 'running' && i.summary.startsWith('subagent')).length;
       if (runningSubagents === 0) callbacks.setBusyLabel?.('Haze is thinking');
@@ -414,6 +456,7 @@ export async function runAgentTurn(
     }
 
     let streamError: unknown;
+    let lastFinishReason: string | undefined;
     const result = streamText({
       model: activeModel,
       temperature: 0,
@@ -486,6 +529,7 @@ export async function runAgentTurn(
         return undefined;
       },
       onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {
+        lastFinishReason = finishReason;
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
       },
       onFinish(event) {
@@ -550,7 +594,22 @@ export async function runAgentTurn(
       throw streamError ?? error;
     }
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
-    const finalAssistantText = assistantDisplayText(assistantText);
+
+    if (lastFinishReason === 'length' && !sawToolCall && completionContinuationCount < maxCompletionContinuations) {
+      completionContinuationCount += 1;
+      callbacks.debugLog('output token limit reached, auto-continuing');
+      const continuation = await streamAssistantResponse(
+        completedConversation,
+        'output token limit reached',
+        'Your response was cut off because you hit the output token limit. Continue from where you left off — do not repeat what you already said, just pick up exactly where you stopped.',
+        true,
+      );
+      completedConversation = callbacks.getConversation();
+      if (continuation.text) {
+        assistantText += '\n' + continuation.text;
+      }
+    }
+    const combinedAssistantText = assistantDisplayText(assistantText);
     const decideCompletion = (text: string) => completionDecision({
       request: value,
       goal,
@@ -563,7 +622,7 @@ export async function runAgentTurn(
       editFileFailed,
       editRecoveryPath,
     });
-    let decision = decideCompletion(finalAssistantText);
+    let decision = decideCompletion(combinedAssistantText);
 
     async function runCompletionLoop(seedConversation: ModelMessage[], seedText: string) {
       let loopConversation = seedConversation;
@@ -594,7 +653,7 @@ export async function runAgentTurn(
       callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: visibleFinalAssistantText, hidden}));
       callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden});
       if (decision.needsActionContinuation || decision.needsValidationContinuation) {
-        await runCompletionLoop(completedConversation, finalAssistantText);
+        await runCompletionLoop(completedConversation, combinedAssistantText);
       } else if (sawToolCall && !textAfterTool) {
         const followUp = await streamAssistantResponse(completedConversation, 'tool use completed without follow-up text', noTextAfterToolPrompt(false), false);
         if (!followUp.text) {

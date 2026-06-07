@@ -102,6 +102,21 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
   const lines = text.split('\n');
   return <Box flexDirection="column">
     {lines.map((line, index) => {
+      const diffRow = /^(\s*\d+\s+)([+-])(.*)$/.exec(line);
+      if (diffRow) {
+        const [, prefix, marker, rest] = diffRow;
+        const isAdd = marker === '+';
+        return <Text key={`${index}-${line}`} color="white" backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>
+          <Text color={isAdd ? theme.success : theme.danger} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>{prefix}{marker}</Text>{rest}
+        </Text>;
+      }
+      const contextRow = /^(\s*\d+\s+)\s(.*)$/.exec(line);
+      if (contextRow) {
+        const [, prefix, rest] = contextRow;
+        return <Text key={`${index}-${line}`} color="white">
+          <Text color={theme.muted}>{prefix} </Text>{rest}
+        </Text>;
+      }
       const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
       if (!row) {
         return <Text key={`${index}-${line}`} color={theme.muted}>
@@ -804,7 +819,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           submitOnEmpty={mode === 'providerAddKey'}
           onHistoryAdd={persistInputHistory}
           onCancel={cancelThinking}
-          onEscape={closeInputList}
+          onEscape={() => {
+            if (busy) cancelThinking();
+            else closeInputList();
+          }}
           onSubmit={submit}
         />
       </Box>

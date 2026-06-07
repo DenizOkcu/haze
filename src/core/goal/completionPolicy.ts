@@ -5,6 +5,19 @@ export function looksIncomplete(text: string) {
   return /\b(incomplete|what remains|remains:|remaining:|next:|unfinished|not implemented|not created|no tests exist|created no docs|has not been|have not been|not yet|never executed|not executed|not run|cannot retry|cannot write|cannot validate|tool budget reached|tool slice reached)/i.test(text);
 }
 
+export function looksTruncated(text: string) {
+  const trimmed = text.trimEnd();
+  if (!trimmed) return false;
+  const lines = trimmed.split('\n');
+  const lastLine = lines[lines.length - 1].trim();
+  if (/^#{1,6}\s+\S/.test(lastLine)) return true;
+  if (/^(-{3,}|\*{3,}|_{3,})$/.test(lastLine)) return true;
+  if (trimmed.endsWith(':')) return true;
+  const fences = (trimmed.match(/```/g) ?? []).length;
+  if (fences % 2 !== 0) return true;
+  return false;
+}
+
 export function looksBlocked(text: string) {
   return /\b(blocked|blocker|needs user|need user|missing permission|permission denied|missing dependency|no practical validation|unable to validate|can't validate|cannot validate)\b/i.test(text);
 }
@@ -35,7 +48,7 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
   const likelyPlanOnlyRequest = isPlanOnlyRequest(input.request);
   const likelyActionRequest = isActionRequest(input.request);
   const likelyValidationRequest = isValidationRequest(input.request);
-  const assistantAdmitsIncomplete = looksIncomplete(input.assistantText);
+  const assistantAdmitsIncomplete = looksIncomplete(input.assistantText) || looksTruncated(input.assistantText);
   const assistantReportsBlocker = looksBlocked(input.assistantText);
   const requestCompletedByTools = input.mutatingToolSucceeded && input.validationToolSucceeded && !input.editRecoveryPath;
   const changedActionNeedsValidation = likelyActionRequest

@@ -47,11 +47,21 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
   if (typeof output?.code === 'number') return `exited with code ${output.code}`;
   if (typeof output?.status === 'string' && typeof output?.summary === 'string') {
     const summary = (output.summary as string).split('\n')[0] ?? '';
-    const preview = summary.length > 80 ? `${summary.slice(0, 80).trimEnd()}…` : summary;
-    return `${output.status as string}${preview ? `: ${preview}` : ''}`;
+    const preview = summary.length > 120 ? `${summary.slice(0, 120).trimEnd()}…` : summary;
+    const calls = typeof output.toolCallCount === 'number' ? output.toolCallCount : (output.toolCalls as unknown[])?.length ?? 0;
+    const duration = typeof output.durationMs === 'number' ? ` in ${(output.durationMs / 1000).toFixed(1)}s` : '';
+    const meta = calls > 0 ? ` (${calls} call${calls === 1 ? '' : 's'}${duration})` : '';
+    return `${output.status as string}${meta}: ${preview}`;
   }
   if (typeof output?.ok === 'boolean') {
-    if (output.ok) return 'completed';
+    if (output.ok) {
+      if (typeof output.addedLines === 'number' || typeof output.removedLines === 'number') {
+        const added = typeof output.addedLines === 'number' ? output.addedLines : 0;
+        const removed = typeof output.removedLines === 'number' ? output.removedLines : 0;
+        return `Added ${added} line${added === 1 ? '' : 's'}, removed ${removed} line${removed === 1 ? '' : 's'}`;
+      }
+      return 'completed';
+    }
     return typeof output.error === 'string' ? `failed: ${compact(output.error)}` : 'failed';
   }
   return 'completed';

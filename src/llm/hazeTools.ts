@@ -143,6 +143,43 @@ function structuredToolFailure(toolName: string, error: unknown, suggestedNextSt
   return {ok: false, toolName, path: pathForError, error: message, recoverable: true, suggestedNextStep};
 }
 
+const INLINE_DIFF_LINE_LIMIT = 20;
+
+type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
+
+function splitDiffLines(text: string) {
+  const lines = text.split(/\r?\n/);
+  if (text.endsWith('\n') || text.endsWith('\r\n')) lines.pop();
+  return lines;
+}
+
+function lineNumberAtOffset(text: string, offset: number) {
+  let line = 1;
+  for (let index = 0; index < offset; index++) {
+    if (text.charCodeAt(index) === 10) line += 1;
+  }
+  return line;
+}
+
+function replacementDiff(
+  oldText: string,
+  newText: string,
+  oldStartLine: number,
+  newStartLine: number,
+  context?: {before?: {oldLine: number; newLine: number; text: string}; after?: {oldLine: number; newLine: number; text: string}},
+): {diff: ToolDiffLine[]; addedLines: number; removedLines: number} {
+  const oldLines = splitDiffLines(oldText);
+  const newLines = splitDiffLines(newText);
+  const diff: ToolDiffLine[] = [];
+  if (context?.before) diff.push({type: 'context', ...context.before});
+  diff.push(
+    ...oldLines.map((text, index) => ({type: 'remove' as const, oldLine: oldStartLine + index, text})),
+    ...newLines.map((text, index) => ({type: 'add' as const, newLine: newStartLine + index, text})),
+  );
+  if (context?.after) diff.push({type: 'context', ...context.after});
+  return {diff, addedLines: newLines.length, removedLines: oldLines.length};
+}
+
 async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
   const ctx = hazeContext(context);
   if (!ctx) return execute();
@@ -321,16 +358,13 @@ export const hazeTools = {
         args.push('--', pattern, absolutePath);
 
         let stdout = '';
-        let stderr = '';
         try {
           const result = await execFile('rg', args, {cwd: workspaceRoot(), timeout: 30_000});
           stdout = result.stdout;
-          stderr = result.stderr;
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code === 1) {
             stdout = '';
-            stderr = '';
           } else {
             throw error;
           }
@@ -343,14 +377,12 @@ export const hazeTools = {
         const {text: output, truncated} = truncate(stdout);
         const lines = output.split('\n').filter(Boolean);
         const matches: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
-        let currentFile = '';
 
         for (const line of lines) {
           const match = line.match(/^(\S+?):(\d+)[-:](.*)$/);
           if (!match) continue;
           const [, file, lineStr, content] = match;
           if (file && lineStr && content !== undefined) {
-            currentFile = file;
             const isContext = line.includes('-');
             const relativePath = path.relative(workspaceRoot(), file);
             matches.push({file: relativePath, line: Number(lineStr), content, isContext});
@@ -386,14 +418,21 @@ export const hazeTools = {
         if (startLine > lines.length + 1) throw new Error(`startLine ${startLine} is beyond end of file (${lines.length} lines)`);
         const effectiveEndLine = !isAppend && endLine > lines.length ? lines.length : endLine;
         const replacementLines = content.length === 0 ? [] : content.split(/\r?\n/);
+        const removedText = isAppend ? '' : lines.slice(startLine - 1, effectiveEndLine).join('\n');
+        const beforeContext = startLine > 1 ? {oldLine: startLine - 1, newLine: startLine - 1, text: lines[startLine - 2] ?? ''} : undefined;
+        const afterContext = !isAppend && effectiveEndLine < lines.length
+          ? {oldLine: effectiveEndLine + 1, newLine: startLine + replacementLines.length, text: lines[effectiveEndLine] ?? ''}
+          : undefined;
         if (isAppend) {
           lines.push(...replacementLines);
         } else {
           lines.splice(startLine - 1, effectiveEndLine - startLine + 1, ...replacementLines);
         }
         const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
+        const {diff, addedLines, removedLines} = replacementDiff(removedText, content, startLine, startLine, {before: beforeContext, after: afterContext});
+        const diffLineCount = diff.length;
         await fs.writeFile(absolutePath, updated, 'utf8');
-        return {ok: true, path: filePath, startLine, endLine: effectiveEndLine, requestedEndLine: endLine, endLineClamped: effectiveEndLine !== endLine, replacementLines: replacementLines.length, appended: isAppend};
+        return {ok: true, path: filePath, startLine, endLine: effectiveEndLine, requestedEndLine: endLine, endLineClamped: effectiveEndLine !== endLine, replacementLines: replacementLines.length, appended: isAppend, addedLines, removedLines, diffLineCount, diff: diffLineCount <= INLINE_DIFF_LINE_LIMIT ? diff : undefined};
       } catch (error) {
         return structuredToolFailure('replaceLines', error, 'Read the file again for current line numbers, then retry replaceLines with a valid range.', filePath);
       }
@@ -462,8 +501,30 @@ export const hazeTools = {
         for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
           updated = updated.slice(0, range.start) + range.edit.newText + updated.slice(range.end);
         }
+        const originalLines = splitDiffLines(original);
+        let lineDelta = 0;
+        let addedLines = 0;
+        let removedLines = 0;
+        const diff: ToolDiffLine[] = [];
+        for (const range of ranges) {
+          const oldStartLine = lineNumberAtOffset(original, range.start);
+          const newStartLine = oldStartLine + lineDelta;
+          const oldLineCount = splitDiffLines(range.edit.oldText).length;
+          const newLineCount = splitDiffLines(range.edit.newText).length;
+          const beforeContext = oldStartLine > 1 ? {oldLine: oldStartLine - 1, newLine: newStartLine - 1, text: originalLines[oldStartLine - 2] ?? ''} : undefined;
+          const afterOldLine = oldStartLine + oldLineCount;
+          const afterContext = afterOldLine <= originalLines.length
+            ? {oldLine: afterOldLine, newLine: newStartLine + newLineCount, text: originalLines[afterOldLine - 1] ?? ''}
+            : undefined;
+          const rangeDiff = replacementDiff(range.edit.oldText, range.edit.newText, oldStartLine, newStartLine, {before: beforeContext, after: afterContext});
+          diff.push(...rangeDiff.diff);
+          addedLines += rangeDiff.addedLines;
+          removedLines += rangeDiff.removedLines;
+          lineDelta += rangeDiff.addedLines - rangeDiff.removedLines;
+        }
+        const diffLineCount = diff.length;
         await fs.writeFile(absolutePath, updated, 'utf8');
-        return {ok: true, path: filePath, edits: edits.length, approximateMatches: ranges.filter(range => range.approximate).length};
+        return {ok: true, path: filePath, edits: edits.length, approximateMatches: ranges.filter(range => range.approximate).length, addedLines, removedLines, diffLineCount, diff: diffLineCount <= INLINE_DIFF_LINE_LIMIT ? diff : undefined};
       } catch (error) {
         return structuredToolFailure('editFile', error, 'Read the file again, then retry with exact current text or use replaceLines with the latest line numbers.', filePath);
       }

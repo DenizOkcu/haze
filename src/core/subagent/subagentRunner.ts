@@ -4,24 +4,26 @@ import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
-const SUBAGENT_SYSTEM_PROMPT = `You are a focused subagent. Complete exactly the assigned task and return a concise summary.
+const SUBAGENT_SYSTEM_PROMPT = `You are a focused subagent. Complete the assigned task using all tools available to you, then return a clear summary.
 
 Rules:
-- Do exactly what is asked, nothing more.
-- Return a tight, factual summary of your findings or actions.
-- Do not modify files unless the task explicitly requires it.
-- Be precise. Include file paths, line numbers, and specific details.
-- If you cannot complete the task, explain why concisely.
-- After completing the task, summarize your findings immediately. Do not add commentary.`;
+- Use whatever tools you need. You have full access to file tools and bash.
+- If the task requires creating or modifying files, do it directly — do not ask for permission.
+- If a tool fails, read the file again and retry with the correct content.
+- After completing the task, summarize what you did, what files you created or changed, and any important findings.
+- If you cannot complete the task, explain exactly what blocked you and what you tried.
+- Your summary is all the parent agent will see. Be specific: include file paths, function names, and concrete results.`;
 
 const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'] as const;
 const STEP_LIMIT = 25;
 const MAX_SUMMARY = 4000;
+const TOOL_ONLY_LIMIT = 12;
 
 export interface SubagentResult {
   status: 'ok' | 'error' | 'timeout' | 'cancelled';
   summary: string;
   toolCalls: Array<{name: string; summary: string; durationMs: number}>;
+  toolCallCount: number;
   tokens: {in: number; out: number};
   durationMs: number;
   error?: string;
@@ -35,6 +37,15 @@ function toolSummary(output: unknown): string {
   if (o.ok === true) return 'completed';
   if (o.ok === false && typeof o.error === 'string') return `failed: ${o.error.slice(0, 120)}`;
   return 'completed';
+}
+
+function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
+  let count = 0;
+  for (const step of [...steps].reverse()) {
+    if (step.toolCalls.length === 0 || step.text.trim().length > 0) break;
+    count += 1;
+  }
+  return count;
 }
 
 export async function runSubagent(
@@ -61,6 +72,7 @@ export async function runSubagent(
   let tokensIn = 0;
   let tokensOut = 0;
   let lastStep = 0;
+  let totalToolCalls = 0;
 
   try {
     const result = streamText({
@@ -73,6 +85,19 @@ export async function runSubagent(
       stopWhen: stepCountIs(maxSteps),
       abortSignal: options.abortSignal,
       experimental_context: {inFlightToolCalls: new Map()},
+      prepareStep({steps}) {
+        const calls = steps.flatMap(step => step.toolCalls);
+        const consecutiveToolOnly = toolOnlyStepCount(steps);
+        if (consecutiveToolOnly >= TOOL_ONLY_LIMIT || calls.length >= maxSteps * 2) {
+          return {
+            toolChoice: 'none' as const,
+            messages: [
+              {role: 'user' as const, content: 'You have done enough tool work. Summarize what you found or did right now.'},
+            ],
+          };
+        }
+        return undefined;
+      },
       onStepFinish({stepNumber}) {
         lastStep = stepNumber;
       },
@@ -84,6 +109,7 @@ export async function runSubagent(
       },
       experimental_onToolCallFinish(event) {
         if (!event.toolCall) return;
+        totalToolCalls += 1;
         toolCallLog.push({
           name: event.toolCall.toolName,
           summary: toolSummary(event.output),
@@ -104,12 +130,13 @@ export async function runSubagent(
       : lastStep >= maxSteps ? 'timeout' as const
       : 'ok' as const;
 
-    return {status, summary, toolCalls: toolCallLog, tokens: {in: tokensIn, out: tokensOut}, durationMs};
+    return {status, summary, toolCalls: toolCallLog, toolCallCount: totalToolCalls, tokens: {in: tokensIn, out: tokensOut}, durationMs};
   } catch (error) {
     return {
       status: options.abortSignal?.aborted ? 'cancelled' as const : 'error' as const,
-      summary: '',
+      summary: error instanceof Error ? error.message : String(error),
       toolCalls: toolCallLog,
+      toolCallCount: totalToolCalls,
       tokens: {in: tokensIn, out: tokensOut},
       durationMs: performance.now() - start,
       error: error instanceof Error ? error.message : String(error),
@@ -122,10 +149,10 @@ export function createSubagentTool(options: {
   contextFiles: ContextFile[];
 }) {
   return tool({
-    description: 'Spawn a focused subagent with a fresh context to handle a specific task independently. Use for parallelizable work: when a request decomposes into independent subtasks, spawn multiple subagents in one step instead of doing them sequentially. The subagent has access to all file and shell tools by default. Returns a structured result with a summary the parent agent can use directly.',
+    description: 'Spawn subagents to run independent tasks in parallel. ONLY use when a request clearly decomposes into 2+ independent subtasks that can run concurrently — spawn all of them in one step. Do NOT use for single tasks, sequential work, or anything that benefits from conversation context; do those directly instead. Subagents have no conversation history and return a summary.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Clear, specific task for the subagent to complete.'),
-      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'])).optional().describe('Tools the subagent can use. Defaults to all tools. Restrict to a subset to limit the subagent\'s capabilities.'),
+      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'])).optional().describe('Tools the subagent can use. Defaults to all tools. Restrict to a subset only when the subagent should be read-only.'),
       maxSteps: z.number().int().positive().max(50).optional().describe('Maximum tool-call rounds. Default 25.'),
     }),
     execute: async ({task, tools, maxSteps}, context) => runSubagent(task, {
