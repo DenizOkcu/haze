@@ -9,7 +9,7 @@ Haze is a pragmatic, intentionally limited agentic CLI for building apps from th
 - Published as `@denizokcu/haze` (ESM package).
 - Core is a source-only ESM TypeScript project with a thin published `bin/` + `dist/`.
 - Self-documents its own agent tools and context-file mechanisms (see README).
-- Current version: 0.0.3 (see package.json for exact).
+- Current version: 0.1.0 (see package.json for exact).
 
 ## Common commands
 
@@ -55,7 +55,7 @@ Use `/init` (or the root `/init` command) to create or refresh this AGENTS.md fi
 - `src/` — primary source (TS/TSX)
   - `cli/` — Commander entrypoint (`index.ts`) and chat commands (`commands/chat.tsx` is the main interactive TUI loop; slash commands including `/skills ...` handled in `commands/commands.ts`; core agent turn/streaming/loop + goal integration in `commands/streaming.ts`; formatters and skills UI in sibling files).
   - `llm/` — AI client (`client.ts`), Haze's tool definitions (`hazeTools.ts`), system/init prompts (`systemPrompt.ts`, `initPrompt.ts`).
-  - `core/agent/` and `core/goal/` — Conversation compaction, agent event/error helpers, request intent classification, completion/continuation policy for agent loops, and goal observation for phase tracking.
+  - `core/agent/`, `core/goal/`, and `core/subagent/` — Conversation compaction, agent event/error helpers, request intent classification, completion/continuation policy for agent loops, goal observation for phase tracking, and focused subagent execution.
   - `skills/` — Skill loading from SKILL.md + YAML frontmatter (`SkillLoader.ts`), registry (`SkillRegistry.ts`), creation/builder from natural language (`builder/SkillBuilder.ts`), exposure as `skill_*` tools (`skillTools.ts`), types.
   - `config/` — paths, provider/model settings (JSON + env), persistent input history, context-file walker (loads AGENTS.md / CLAUDE.md walking up from cwd + ~/.haze/ copies).
   - `ui/` — reusable Ink/React components (TextInput, MarkdownText, etc.) + theme.
@@ -82,7 +82,7 @@ File tools are always restricted to the current workspace and are `.gitignore`-a
 - React components (Ink) only for the chat UI; keep core logic in plain TS.
 - Schemas → Zod (see `src/skills/manifestSchema.ts`).
 - YAML for skill manifests.
-- Add new agent tools via `src/llm/hazeTools.ts` + matching runner logic.
+- Add new agent tools via `src/llm/hazeTools.ts` + matching runner/display logic. Mutating file tools should return structured summaries; targeted edits should expose compact diff metadata only when small enough for the transcript.
 - Never check in secrets, `.env*`, or build artifacts.
 
 ## Tooling and package manager notes

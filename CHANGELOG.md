@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-06-07
+
+- Added ripgrep-backed `grep` for fast workspace search with regex, glob, context-line, case-insensitive, and result-limit options.
+- Added focused `subagent` delegation for independent parallel tasks with fresh context, step caps, concise summaries, tool-call metadata, and parent abort propagation.
+- Added compact inline diff display for successful `editFile` and `replaceLines` calls, including added/removed counts, colored additions/removals, one context line around small changes, and hidden summaries for large diffs.
+- Improved agent-loop completion handling for truncated model output and long-running tool loops.
+- Refined subagent prompting and parent transcript summaries to reduce noise and discourage single-task delegation.
+- Updated release documentation and roadmap state for the 0.1.0 foundation release.
+
 ## 0.0.3 - 2026-06-06
 
 - Added stable transcript rendering for long sessions, compact placeholders for large multiline pastes, and clearer goal/status display.

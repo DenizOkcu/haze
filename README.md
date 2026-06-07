@@ -2,11 +2,16 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.0.3
+## What's new in 0.1.0
 
-Haze 0.0.3 keeps long sessions calmer with stable transcript rendering, compact placeholders for large multiline pastes, and clearer goal/status display. Pasted text is still sent to the model with line breaks preserved.
+Haze 0.1.0 is the foundation release: the agent can now *find*, *delegate*, and *show its work* without turning your terminal into soup.
 
-Haze gives an AI model a small set of transparent local tools — read files, edit files, write files, list files, and run commands — then gets out of the way. Start with chat. Build your workflows as you work. Teach Haze with Markdown skills when a pattern repeats. Tiny spell, useful goblin.
+- `grep` gives the model fast, targeted codebase search with regex, globs, context lines, and `.gitignore` awareness — no more brute-force file spelunking.
+- Subagents let Haze fan out independent investigations into fresh contexts, then fold the result back into the main turn as a concise summary.
+- File edits now render compact, colorized inline diffs with one context line around the change; big diffs stay summarized so signal beats scrollback.
+- Long-turn handling is calmer: truncated model output and tool-heavy loops recover more gracefully.
+
+The result is a more capable agent loop while keeping the core small and inspectable. Haze gives an AI model transparent local tools — read, search, edit, write, list, and run commands — plus focused delegation when work can split safely. Tiny spell, sharper goblin.
 
 Haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.
 
@@ -72,7 +77,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-Haze will inspect, write files, run commands, and show compact tool activity inline. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
+Haze will inspect, search, write files, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
 
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
@@ -185,13 +190,20 @@ Haze exposes a deliberately small toolset:
 
 - `listFiles` — structured discovery, recursive with cursor pagination when needed.
 - `readFile` — read UTF-8 files with optional line ranges.
+- `grep` — ripgrep-backed regex search with path, glob, context-line, case, and result-limit controls.
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
 - `bash` — run tests, builds, git commands, and inspections.
 - `skill_*` — load Markdown skill instructions on demand.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. File-tool failures return structured recovery hints instead of mystery stack traces.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured recovery hints instead of mystery stack traces.
+
+## Subagents
+
+Subagents are a delegation feature, not another file operation. When a request clearly splits into independent parallel work, Haze can spin up focused agents with fresh context, let them inspect or act with their own capped tool loop, then fold their concise summaries back into the main conversation.
+
+Use them for parallel investigation across separate areas of a codebase. Do not use them for single sequential tasks where the main agent already has the best context.
 
 ## Context files
 

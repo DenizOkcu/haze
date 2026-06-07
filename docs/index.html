@@ -699,7 +699,7 @@
         <a href="#skills" class="hide-mobile">Skills</a>
         <a href="#tools" class="hide-mobile">Tools</a>
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <span class="badge">npm v0.0.3</span>
+        <a class="badge" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.1.0</a>
       </div>
     </div>
   </nav>
@@ -780,9 +780,9 @@
       <div class="container">
         <div class="center reveal">
           <p class="section-label">// what it does</p>
-          <h2 class="section-title">Six tools. One agent.<br>Infinite stubbornness.</h2>
+          <h2 class="section-title">Seven tools. Focused subagents.<br>Infinite stubbornness.</h2>
           <p class="section-desc">
-            Haze doesn't try to be everything. It gives the model read, write, edit, list, and bash — then watches it figure things out.
+            Haze doesn't try to be everything. It gives the model read, search, edit, line-replace, write, list, and bash — plus focused delegation when work can split cleanly.
           </p>
         </div>
 
@@ -794,12 +794,17 @@
 
           <div class="feature reveal">
             <h3>Deliberately small toolset</h3>
-            <p>Read, edit, write, list, bash. That's it. No 47-tool sprawl. No tool that scaffolds a tool that generates a plan that plans to generate a plan. The model has six tricks. It's surprisingly effective.</p>
+            <p>Read, grep, edit, replace lines, write, list, bash. That's it. No 47-tool sprawl. No tool that scaffolds a tool that generates a plan that plans to generate a plan. The model has a few transparent tricks. It's surprisingly effective.</p>
           </div>
 
           <div class="feature reveal">
             <h3>Markdown skills</h3>
             <p>If you do something for the second time, run <code>/create-skill</code> and have Haze turn it into a reusable Markdown workflow. Skills are plain files you can inspect, refine, and version. Tiny spell, useful goblin.</p>
+          </div>
+
+          <div class="feature reveal">
+            <h3>Focused subagents</h3>
+            <p>When work splits into independent tracks, Haze can delegate to fresh-context subagents and merge concise summaries back into the main turn. Parallel exploration without flooding the primary conversation.</p>
           </div>
 
           <div class="feature reveal">
@@ -861,7 +866,7 @@
       <div class="container">
         <div class="center reveal">
           <p class="section-label">// the toolbox</p>
-          <h2 class="section-title">Six tools. That's the whole list.</h2>
+          <h2 class="section-title">Seven built-in tools. That's the whole list.</h2>
           <p class="section-desc">
             No hidden tools. No surprise API calls. What you see is what the model gets.
           </p>
@@ -875,6 +880,10 @@
           <div class="tool">
             <div class="tool-name">readFile</div>
             <div class="tool-desc">Read any UTF-8 file</div>
+          </div>
+          <div class="tool">
+            <div class="tool-name">grep</div>
+            <div class="tool-desc">Regex search with context</div>
           </div>
           <div class="tool">
             <div class="tool-name">editFile</div>
@@ -1047,9 +1056,9 @@
       const reviewTools = [
         { name: 'listFiles', args: '.', time: '0.6s' },
         { name: 'readFile', args: 'src/api/auth.ts', time: '0.07s' },
-        { name: 'readFile', args: 'src/api/auth.ts ×2', time: '0.05s' },
+        { name: 'grep', args: '"eval|innerHTML|document.write" in src (*.ts)', time: '0.2s' },
+        { name: 'subagent', args: '"inspect session handling"', time: '2.1s' },
         { name: 'readFile', args: 'src/middleware/session.ts', time: '0.06s' },
-        { name: 'bash', args: '$ grep -r "eval\\|innerHTML\\|document.write" src/ --include="*.ts"', exit: '0', time: '0.2s', isBash: true },
       ];
       await addTools(reviewTools);
 

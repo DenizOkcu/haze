@@ -22,11 +22,11 @@ npm run lint         # Check code style
 
 ```
 src/
-  cli/          CLI entrypoint, chat UI, and in-app slash command handlers
-  llm/          AI model client, tools, and prompts
+  cli/          CLI entrypoint, chat UI, streaming loop, and slash commands
+  llm/          AI model client, built-in tools, and prompts
+  core/         Agent goal/completion logic and subagent runner
   skills/       Skill loading, registry, installer, and scaffold builder
-  tools/        Tool execution
-  config/       Settings, paths, context files
+  config/       Settings, paths, sessions, history, and context files
   ui/           React/Ink terminal UI components
   utils/        Shared utilities
 ```
@@ -55,10 +55,11 @@ Skill management commands also live here under `/skills ...`; do not add new top
 
 ## Adding a Tool
 
-1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function
-2. Add tool description to system prompt in `src/llm/systemPrompt.ts`
-3. Add display formatting in `src/cli/commands/formatters.ts`
-4. Add tests
+1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function.
+2. Add or update the tool description in `src/llm/systemPrompt.ts`.
+3. Add display formatting in `src/cli/commands/formatters.ts` and, if the result needs rich transcript rendering, in `src/cli/commands/streaming.ts` / `src/cli/commands/chat.tsx`.
+4. Keep mutating file tools workspace-scoped, `.gitignore`-aware, and structured in their success/failure output. For targeted edits, return compact added/removed counts and only small inline diffs.
+5. Add tests.
 
 ## Pull Requests
 
