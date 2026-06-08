@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {compact, toolCallSummary, toolResultSummary, formatSeconds} from '../../src/cli/commands/formatters.js';
+import {compact, toolCallSummary, toolResultSummary, formatSeconds, formatElapsedTime, formatElapsedTimeWhole} from '../../src/cli/commands/formatters.js';
 
 describe('compact', () => {
   it('returns short strings unchanged', () => {
@@ -103,5 +103,29 @@ describe('formatSeconds', () => {
 
   it('formats whole seconds', () => {
     expect(formatSeconds(3000)).toBe('3.0s');
+  });
+});
+
+describe('formatElapsedTime', () => {
+  it('formats response timers with one decimal second', () => {
+    expect(formatElapsedTime(1500)).toBe('1.5s');
+    expect(formatElapsedTime(3000)).toBe('3.0s');
+  });
+
+  it('keeps one decimal second for minute and hour durations', () => {
+    expect(formatElapsedTime(62_300)).toBe('1m 2.3s');
+    expect(formatElapsedTime(3_723_400)).toBe('1h 2m 3.4s');
+  });
+});
+
+describe('formatElapsedTimeWhole', () => {
+  it('formats running timers without decimal seconds', () => {
+    expect(formatElapsedTimeWhole(1500)).toBe('1s');
+    expect(formatElapsedTimeWhole(3000)).toBe('3s');
+  });
+
+  it('keeps whole seconds for minute and hour durations', () => {
+    expect(formatElapsedTimeWhole(62_300)).toBe('1m 2s');
+    expect(formatElapsedTimeWhole(3_723_400)).toBe('1h 2m 3s');
   });
 });

@@ -5,7 +5,7 @@ import {buildSystemPrompt} from '../../llm/systemPrompt.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
-import {compact, toolCallSummary, toolResultSummary, formatSeconds} from './formatters.js';
+import {compact, toolCallSummary, toolResultSummary, formatElapsedTime, formatElapsedTimeWhole, formatSeconds} from './formatters.js';
 import {isActionRequest, isPlanImplementationRequest, isPlanOnlyRequest, isValidationRequest} from '../../core/goal/requestClassifier.js';
 import {completionDecision, looksIncomplete, noTextAfterToolPrompt, postContinuationPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
@@ -13,7 +13,7 @@ import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {createSubagentTool} from '../../core/subagent/subagentRunner.js';
 
-export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean};
+export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number};
 
 function stableToolKey(toolCall: {toolName: string; input: unknown}) {
   return `${toolCall.toolName}:${JSON.stringify(toolCall.input)}`;
@@ -181,6 +181,7 @@ export async function runAgentTurn(
   callbacks.setAbortController?.(abortController);
   let turnStatus: 'complete' | 'aborted' | 'failed' = 'failed';
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopActiveTimers: () => void = () => undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => abortController.abort('Haze turn timed out after no model/tool activity.'), IDLE_TIMEOUT_MS);
@@ -213,6 +214,7 @@ export async function runAgentTurn(
     let currentAssistantId = `assistant-${Date.now()}`;
     let assistantStarted = false;
     let currentAssistantStarted = false;
+    let currentAssistantStartedAt = Date.now();
     let currentAssistantText = '';
     let assistantText = '';
     let toolEpoch = 0;
@@ -251,10 +253,26 @@ export async function runAgentTurn(
     let toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const INLINE_DIFF_LINE_LIMIT = 20;
     type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
-    type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; hidden?: boolean; subItems?: Array<{name: string; summary: string; durationMs: number}>; diff?: ToolDiffLine[]; diffLineCount?: number};
+    type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; startedAt: number; finishedAt?: number; hidden?: boolean; subItems?: Array<{name: string; summary: string; durationMs: number}>; diff?: ToolDiffLine[]; diffLineCount?: number};
     const toolDisplayItems: Array<ToolDisplayItem> = [];
     let toolGroupStarted = false;
     let toolGroupFinalized = false;
+    let toolTimer: ReturnType<typeof setInterval> | undefined;
+
+    function stopToolTimer() {
+      if (!toolTimer) return;
+      clearInterval(toolTimer);
+      toolTimer = undefined;
+    }
+
+    function startToolTimer() {
+      if (toolTimer) return;
+      toolTimer = setInterval(() => {
+        if (toolDisplayItems.some(item => item.status === 'running')) updateToolGroup(true);
+        else stopToolTimer();
+      }, 1000);
+    }
+    stopActiveTimers = stopToolTimer;
 
     function renderToolGroup(streaming: boolean) {
       const visibleItems = toolDisplayItems.filter(item => !item.hidden);
@@ -273,9 +291,13 @@ export async function runAgentTurn(
       }
       const rows = [...grouped.values()];
       const compactSuffix = !running && visibleItems.length > 12 ? ` · showing ${compactItems.length} important` : '';
+      const elapsedMs = visibleItems.length > 0
+        ? (running ? Date.now() : Math.max(...visibleItems.map(item => item.finishedAt ?? item.startedAt))) - Math.min(...visibleItems.map(item => item.startedAt))
+        : 0;
+      const elapsed = running || streaming ? formatElapsedTimeWhole(elapsedMs) : formatElapsedTime(elapsedMs);
       const header = running || streaming
-        ? 'Running tools'
-        : `${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed${compactSuffix}`;
+        ? `Running tools · ${elapsed}`
+        : `${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed · ${elapsed}${compactSuffix}`;
       const lines: string[] = [];
       for (const {item, count} of rows) {
         const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
@@ -293,7 +315,7 @@ export async function runAgentTurn(
         }
         if (item.subItems && item.subItems.length > 0) {
           for (const sub of item.subItems) {
-            const subDuration = sub.durationMs > 1000 ? ` (${formatSeconds(sub.durationMs)})` : '';
+            const subDuration = sub.durationMs > 1000 ? ` · ${formatSeconds(sub.durationMs)}` : '';
             lines.push(`    · ${sub.name} — ${sub.summary}${subDuration}`);
           }
         }
@@ -320,7 +342,8 @@ export async function runAgentTurn(
         toolGroupStarted = false;
       }
       callbacks.onEvent?.(agentEvent({type: 'tool_start', id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}));
-      toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running'});
+      toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running', startedAt: Date.now()});
+      startToolTimer();
       updateToolGroup(true);
       const runningSubagents = toolDisplayItems.filter(item => item.status === 'running' && item.summary.startsWith('subagent')).length;
       if (runningSubagents > 0) callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
@@ -333,6 +356,7 @@ export async function runAgentTurn(
       item.status = toolOutputOk(event.output, event.success) ? 'success' : 'error';
       item.result = toolResultSummary(event);
       item.durationMs = event.durationMs;
+      item.finishedAt = item.startedAt + event.durationMs;
       item.hidden = isDuplicateSkippedOutput(event.output);
       if (typeof event.output === 'object' && event.output != null) {
         const output = event.output as {diff?: unknown; diffLineCount?: unknown};
@@ -349,7 +373,9 @@ export async function runAgentTurn(
           }));
         }
       }
-      updateToolGroup(toolDisplayItems.some(candidate => candidate.status === 'running'));
+      const hasRunningTools = toolDisplayItems.some(candidate => candidate.status === 'running');
+      updateToolGroup(hasRunningTools);
+      if (!hasRunningTools) stopToolTimer();
       const runningSubagents = toolDisplayItems.filter(i => i.status === 'running' && i.summary.startsWith('subagent')).length;
       if (runningSubagents === 0) callbacks.setBusyLabel?.('Haze is thinking');
       else callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
@@ -389,7 +415,8 @@ export async function runAgentTurn(
     async function streamAssistantResponse(messages: ModelMessage[], reason: string, prompt: string, allowTools = false) {
       callbacks.debugLog(`requesting assistant ${allowTools ? 'continuation' : 'text'}: ${reason}`);
       const responseId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      let responseStarted = false;
+      const responseStarted = true;
+      const responseStartedAt = Date.now();
       let responseText = '';
       let continuationToolCalls = 0;
       let followUpStreamError: unknown;
@@ -470,20 +497,16 @@ export async function runAgentTurn(
             : `follow-up tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
         },
       });
+      callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
+      callbacks.addMessage({id: responseId, role: 'assistant', text: 'Awaiting response…', streaming: true, startedAt: responseStartedAt});
       for await (const rawDelta of followUp.textStream) {
         resetIdleTimer();
         const delta = sanitizeAssistantText(rawDelta);
         responseText += delta;
         const displayText = assistantDisplayText(responseText);
-        if ((!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) && !responseStarted) continue;
-        if (!responseStarted) {
-          responseStarted = true;
-          callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
-          callbacks.addMessage({id: responseId, role: 'assistant', text: displayText, streaming: true});
-        } else {
-          callbacks.onEvent?.(agentEvent({type: 'message_update', id: responseId, text: displayText}));
-          callbacks.updateMessage(responseId, {text: displayText});
-        }
+        if (!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) continue;
+        callbacks.onEvent?.(agentEvent({type: 'message_update', id: responseId, text: displayText}));
+        callbacks.updateMessage(responseId, {text: displayText});
       }
       try {
         await followUp.response;
@@ -496,7 +519,7 @@ export async function runAgentTurn(
       if (responseStarted) {
         if (!hidden) rememberVisibleAssistantText(visibleFinalText);
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: responseId, text: visibleFinalText, hidden}));
-        callbacks.updateMessage(responseId, {text: visibleFinalText, streaming: false, hidden});
+        callbacks.updateMessage(responseId, {text: visibleFinalText, streaming: false, hidden, finishedAt: Date.now()});
       }
       return {text: finalText, id: responseId, started: responseStarted};
     }
@@ -605,18 +628,22 @@ export async function runAgentTurn(
           : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
       }
     });
+    callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
+    callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Awaiting response…', streaming: true, startedAt: currentAssistantStartedAt});
+    assistantStarted = true;
+    currentAssistantStarted = true;
     for await (const rawDelta of result.textStream) {
       resetIdleTimer();
       const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
       if (currentAssistantStarted && currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
         const intermediateText = assistantDisplayText(currentAssistantText);
-        const hidden = intermediateText.length === 0 || isNonSubstantiveAssistantText(intermediateText) || isDuplicateVisibleAssistantText(intermediateText);
-        if (!hidden) rememberVisibleAssistantText(intermediateText);
+        const hidden = true;
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: intermediateText, hidden}));
-        callbacks.updateMessage(currentAssistantId, {text: intermediateText, streaming: false, hidden});
+        callbacks.updateMessage(currentAssistantId, {text: intermediateText, streaming: false, hidden, finishedAt: Date.now()});
         currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         currentAssistantStarted = false;
+        currentAssistantStartedAt = Date.now();
         currentAssistantText = '';
         currentAssistantToolEpoch = toolEpoch;
       }
@@ -629,7 +656,8 @@ export async function runAgentTurn(
         assistantStarted = true;
         currentAssistantStarted = true;
         callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
-        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: displayText, streaming: true});
+        currentAssistantStartedAt = Date.now();
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: displayText, streaming: true, startedAt: currentAssistantStartedAt});
       } else {
         callbacks.onEvent?.(agentEvent({type: 'message_update', id: currentAssistantId, text: displayText}));
         callbacks.updateMessage(currentAssistantId, {text: displayText});
@@ -702,7 +730,7 @@ export async function runAgentTurn(
       const hidden = visibleFinalAssistantText.length === 0 || isNonSubstantiveAssistantText(visibleFinalAssistantText) || isDuplicateVisibleAssistantText(visibleFinalAssistantText) || hidePreToolFragment;
       if (!hidden) rememberVisibleAssistantText(visibleFinalAssistantText);
       callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: visibleFinalAssistantText, hidden}));
-      callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden});
+      callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden, finishedAt: Date.now()});
       if (decision.needsActionContinuation || decision.needsValidationContinuation) {
         await runCompletionLoop(completedConversation, combinedAssistantText);
       } else if (sawToolCall && !textAfterTool) {
@@ -721,10 +749,10 @@ export async function runAgentTurn(
         const fallback = toolSummaries.length > 0
           ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`
           : 'Finished without a text response.';
-        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false});
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false, startedAt: currentAssistantStartedAt, finishedAt: Date.now()});
       }
     } else {
-      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false});
+      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false, startedAt: currentAssistantStartedAt, finishedAt: Date.now()});
     }
     goal.phase = 'done';
     goal.status = 'complete';
@@ -762,6 +790,7 @@ export async function runAgentTurn(
     }
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
+    stopActiveTimers();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status: turnStatus}));
     callbacks.setAbortController?.(null);
     callbacks.setBusy(false);

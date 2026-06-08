@@ -14,6 +14,7 @@ import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message} from './streaming.js';
+import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, type HazeSession} from '../../core/session/sessionStore.js';
@@ -119,17 +120,26 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
       }
       const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
       if (!row) {
+        const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(line);
         return <Text key={`${index}-${line}`} color={theme.muted}>
-          {index === 0 && streaming ? <><Spinner type="dots" /> </> : null}{line}
+          {index === 0 && streaming ? <><Spinner type="dots" /> </> : null}{timer ? timer[1] : line}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
         </Text>;
       }
       const [, indent, icon, toolName, rest] = row;
       const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;
+      const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(rest);
       return <Text key={`${index}-${line}`} color={theme.muted}>
-        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{rest}
+        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
       </Text>;
     })}
   </Box>;
+}
+
+function messageElapsedLabel(message: Message) {
+  if (message.startedAt == null) return '';
+  const end = message.finishedAt ?? (message.streaming ? Date.now() : message.startedAt);
+  const elapsed = end - message.startedAt;
+  return message.streaming ? formatElapsedTimeWhole(elapsed) : formatElapsedTime(elapsed);
 }
 
 function MessageView({message, width}: {message: Message; width: number}) {
@@ -143,8 +153,9 @@ function MessageView({message, width}: {message: Message; width: number}) {
   }
 
   return <Box flexDirection="column" marginBottom={1}>
-    <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>
-      {message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}
+    <Text>
+      <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
+      {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text>
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} />
@@ -206,14 +217,20 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
   const [activeGoalStatus, setActiveGoalStatus] = useState<string | undefined>();
-  const [sessionLabel, setSessionLabel] = useState<string | undefined>();
+  const [, setSessionLabel] = useState<string | undefined>();
   const [llmTokenEstimate, setLlmTokenEstimate] = useState({input: 0, output: 0});
+  const [, setTimerTick] = useState(0);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
+
+  useEffect(() => {
+    const timer = setInterval(() => setTimerTick(tick => tick + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
@@ -761,7 +778,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const allDisplayMessages = [...messages, ...liveMessages];
   const toolsUsed = toolCallCount(allDisplayMessages);
   const estimatedTokens = llmTokenEstimate.input > 0 || llmTokenEstimate.output > 0 ? llmTokenEstimate : estimateConversationTokens(allDisplayMessages);
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}${sessionLabel ? ` / ${sessionLabel}` : ''}`;
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
   const goalRequest = truncateWithEllipsis(rawGoalRequest ?? '', 120);
