@@ -5,6 +5,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {Mode} from './chat.js';
+import {clearTasks, generateTaskId, loadTasks, saveTasks} from '../../core/tasks/taskStorage.js';
 
 export type CommandContext = {
   settings: HazeSettings;
@@ -140,6 +141,79 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
   return 'handled';
 }
 
+const STATUS_ICON: Record<string, string> = {
+  pending: '○',
+  in_progress: '◐',
+  completed: '✓',
+};
+
+async function handleTasksCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
+  const parts = args.split(/\s+/).filter(Boolean);
+  const subcommand = parts[0]?.toLowerCase();
+
+  if (!subcommand || subcommand === 'help') {
+    const tasks = await loadTasks();
+    if (tasks.length === 0) {
+      ctx.addSystemMessage('No tasks. Add one with /tasks add <title>.');
+    } else {
+      const list = tasks.map((t, i) => `  ${STATUS_ICON[t.status] ?? '○'} ${i + 1}. ${t.title}`).join('\n');
+      ctx.addSystemMessage(`Tasks:\n${list}`);
+    }
+    return 'handled';
+  }
+
+  if (subcommand === 'add') {
+    const title = parts.slice(1).join(' ').trim();
+    if (!title) {
+      ctx.addSystemMessage('Usage: /tasks add <title>');
+      return 'handled';
+    }
+    const tasks = await loadTasks();
+    const now = new Date().toISOString();
+    tasks.push({id: generateTaskId(), title, status: 'pending', createdAt: now, updatedAt: now});
+    await saveTasks(tasks);
+    ctx.addSystemMessage(`Added: ${title}`);
+    return 'handled';
+  }
+
+  if (subcommand === 'remove' || subcommand === 'rm') {
+    const numStr = parts[1];
+    if (!numStr) {
+      ctx.addSystemMessage('Usage: /tasks remove <number>');
+      return 'handled';
+    }
+    const num = parseInt(numStr, 10);
+    if (isNaN(num) || num < 1) {
+      ctx.addSystemMessage('Provide a valid task number (e.g., /tasks remove 1).');
+      return 'handled';
+    }
+    const tasks = await loadTasks();
+    if (num > tasks.length) {
+      ctx.addSystemMessage(`Task ${num} not found. You have ${tasks.length} task(s).`);
+      return 'handled';
+    }
+    const removed = tasks.splice(num - 1, 1)[0]!;
+    await saveTasks(tasks);
+    ctx.addSystemMessage(`Removed: ${removed.title}`);
+    return 'handled';
+  }
+
+  if (subcommand === 'clear') {
+    await clearTasks();
+    ctx.addSystemMessage('All tasks cleared.');
+    return 'handled';
+  }
+
+  // Unknown subcommand → treat as task title
+  const title = args.trim();
+  const tasks = await loadTasks();
+  const now = new Date().toISOString();
+  tasks.push({id: generateTaskId(), title, status: 'pending', createdAt: now, updatedAt: now});
+  await saveTasks(tasks);
+  ctx.addSystemMessage(`Added: ${title}`);
+  return 'handled';
+}
+
 export async function handleSlashCommand(
   value: string,
   ctx: CommandContext
@@ -170,6 +244,10 @@ export async function handleSlashCommand(
       '  Resume the latest saved session for this workspace.',
       '/new',
       '  Start a fresh durable session.',
+      '/tasks',
+      '  Manage your task list. Subcommands: add <title>, remove <number>, clear.',
+      '/tasks',
+      '  Show current task list.',
       '/compact [instructions]',
       '  Summarize older model context and keep recent messages.',
       '/clear',
@@ -202,8 +280,13 @@ export async function handleSlashCommand(
   }
   if (value === '/clear') {
     ctx.clearConversation();
+    await clearTasks();
     ctx.addSystemMessage('Cleared. The void is productive.');
     return 'handled';
+  }
+  if (value === '/tasks' || value.startsWith('/tasks ')) {
+    const args = value.slice('/tasks'.length).trim();
+    return await handleTasksCommand(args, ctx);
   }
   if (value === '/settings') {
     const providers = configuredProviders(ctx.settings);

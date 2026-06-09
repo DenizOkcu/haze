@@ -132,6 +132,7 @@ export function TextInput({
   onHistoryAdd,
   onCancel,
   onEscape,
+  onToggleTasks,
   onSubmit
 }: {
   placeholder?: string;
@@ -146,6 +147,7 @@ export function TextInput({
   onHistoryAdd?: (value: string) => void;
   onCancel?: () => void;
   onEscape?: () => void;
+  onToggleTasks?: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -343,6 +345,11 @@ export function TextInput({
     }
 
     if (key.ctrl && input === 'c') return;
+
+    if (key.ctrl && input === 'o') {
+      onToggleTasks?.();
+      return;
+    }
 
     if (input) {
       replaceInput(cursor, cursor, input);

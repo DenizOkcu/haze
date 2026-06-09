@@ -33,6 +33,10 @@ export function toolCallSummary(toolName: string, input: unknown) {
     const taskPreview = data.task.length > 60 ? `${data.task.slice(0, 60).trimEnd()}…` : data.task;
     return `subagent "${taskPreview}"`;
   }
+  if (toolName === 'writeTasks') {
+    const tasks = Array.isArray(data?.tasks) ? data.tasks as {title?: string}[] : [];
+    return `writeTasks (${tasks.length} task${tasks.length === 1 ? '' : 's'})`;
+  }
   return `${toolName} ${compact(input)}`;
 }
 
@@ -64,6 +68,10 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     return `${output.status as string}${meta}: ${preview}`;
   }
   if (typeof output?.ok === 'boolean') {
+    // writeTasks result
+    if (output.ok && typeof output.summary === 'string') {
+      return compact(output.summary, 120);
+    }
     if (output.ok) {
       if (typeof output.addedLines === 'number' || typeof output.removedLines === 'number') {
         const added = typeof output.addedLines === 'number' ? output.addedLines : 0;

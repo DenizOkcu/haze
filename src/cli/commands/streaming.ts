@@ -161,6 +161,7 @@ export interface StreamCallbacks {
   onEvent?: AgentEventSink;
   compactConversation?: (instructions?: string) => boolean;
   recordTokenEstimate?: (tokens: {input: number; output: number}) => void;
+  onTasksChanged?: () => void;
 }
 
 export async function runAgentTurn(
@@ -372,6 +373,9 @@ export async function runAgentTurn(
             durationMs: tc.durationMs,
           }));
         }
+      }
+      if (event.toolCall.toolName === 'writeTasks' && event.success) {
+        callbacks.onTasksChanged?.();
       }
       const hasRunningTools = toolDisplayItems.some(candidate => candidate.status === 'running');
       updateToolGroup(hasRunningTools);

@@ -13,7 +13,7 @@ Core product shape:
 - Interactive terminal chat UI built with React + Ink.
 - LLM integration through the Vercel AI SDK and OpenAI-compatible providers (`@ai-sdk/openai`).
 - Transparent local tools for file discovery, reading, regex search, targeted edits, file creation, and bash execution.
-- Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, and Markdown skills.
+- Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, Markdown skills, and task tracking.
 - Minimal distribution model: source in `src/`, generated declarations/JS in `dist/`, thin published binary in `bin/haze.js`.
 
 Current package version is `0.2.0`; always verify against `package.json` before release work.
@@ -74,13 +74,14 @@ Notes:
   - `llm/` — model client, prompts, and tool definitions.
     - `client.ts` builds an OpenAI-compatible chat model from env vars or settings.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
-    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`.
+    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `writeTasks`.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
   - `core/agent/` — model-message compaction, agent event helpers, and retry/context-overflow error helpers.
   - `core/goal/` — request intent classification, session-goal phase tracking, and completion/continuation decisions.
   - `core/safety/bashClassifier.ts` — bash risk/trait classifier; classification is metadata, not a confirmation gate.
   - `core/validation/outputParser.ts` — parses common test/typecheck/lint/build output into compact validation summaries.
   - `core/session/sessionStore.ts` — durable JSONL session files under `~/.haze/sessions`, per-workspace hashed directory, snapshot restore.
+  - `core/tasks/taskStorage.ts` — workspace-local task list persisted to `.haze/tasks.json`.
   - `core/subagent/subagentRunner.ts` — `subagent` tool for independent parallel investigation/action with capped tool loops.
   - `skills/` — Markdown skill system.
     - `SkillLoader.ts` parses `SKILL.md` YAML frontmatter, validates names/descriptions, and loads relative referenced files (max 50k bytes each, no escaping skill dir).
@@ -95,6 +96,8 @@ Notes:
 - `bin/haze.js` — npm binary shim; keep it thin.
 - `dist/` — generated build output; never edit directly.
 - `docs/index.html` — generated/static documentation page included in the repo.
+- `.github/workflows/ci.yml` — GitHub Actions CI (Node 20 + 22: `npm ci`, typecheck, test, build).
+- `calc-app/`, `haiku/` — non-project sample/fixture directories; not part of the published package.
 - Root metadata: `package.json`, `package-lock.json`, `tsconfig.json`, `eslint.config.js`, `vitest.config.ts`, README, CHANGELOG, CONTRIBUTING, LICENSE.
 
 ## Runtime behavior and important contracts
@@ -120,6 +123,7 @@ Built-in tools in `src/llm/hazeTools.ts` are intentionally small and structured:
 - `replaceLines` — 1-based inclusive line range replacement; useful when exact text is ambiguous or stale.
 - `writeFile` — creates files and parents; refuses to overwrite existing files unless `overwriteExisting=true`.
 - `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, output truncation, and validation summaries when recognized.
+- `writeTasks` — full-replacement task list for tracking multi-step work. Model passes the complete list every call; IDs and timestamps are generated server-side. Persists to `.haze/tasks.json` in the workspace.
 
 Tool constraints:
 
@@ -128,6 +132,15 @@ Tool constraints:
 - `node_modules` and `.git` are skipped by directory walking.
 - Tool output is truncated at 50k chars.
 - Repeated read-only calls are deduplicated when no mutation occurred; after failed mutations, the model is forced toward a fresh read before retrying.
+
+### Task tracking
+
+- Tasks are stored in `.haze/tasks.json` in the workspace (workspace-local, gitignored with the rest of `.haze/`).
+- The `writeTasks` tool uses full-replacement semantics: every call sends the complete list, replacing whatever existed before.
+- Server-side ID generation prevents ID collisions and hallucinated IDs.
+- `/tasks` slash command provides user-facing management: `add`, `remove <n>`, `clear`, and bare text treated as `add`.
+- `/clear` also clears tasks.
+- Types and storage live in `src/core/tasks/taskStorage.ts`; the tool is in `src/llm/hazeTools.ts`.
 
 ### Sessions, context, and compaction
 

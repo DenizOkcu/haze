@@ -6,6 +6,8 @@ import {tool} from 'ai';
 import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
 import {walkDir} from '../utils/fs.js';
+import {generateTaskId, saveTasks} from '../core/tasks/taskStorage.js';
+import type {Task, TaskStatus} from '../core/tasks/taskStorage.js';
 import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
 import {classifyBashCommand, isValidationClassification} from '../core/safety/bashClassifier.js';
 import {parseValidationOutput} from '../core/validation/outputParser.js';
@@ -291,6 +293,12 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   }
 }
 
+const STATUS_ICON: Record<TaskStatus, string> = {
+  pending: '○',
+  in_progress: '◐',
+  completed: '✓',
+};
+
 export const hazeTools = {
   listFiles: tool({
     description: 'List files and directories in the current workspace. Prefer this over bash ls/find for discovering project structure.',
@@ -557,6 +565,44 @@ export const hazeTools = {
         return structuredToolFailure('editFile', error, 'Read the file again, then retry with exact current text or use replaceLines with the latest line numbers.', filePath);
       }
     }),
+  }),
+
+  writeTasks: tool({
+    description: 'Create or replace your task list for multi-step work (3+ steps). Pass the COMPLETE list every time — this REPLACES the entire list. Mark one task in_progress, then completed. Keep at most one in_progress. Leave completed tasks when done — do not clear the list automatically.',
+    inputSchema: z.object({
+      tasks: z.array(z.object({
+        title: z.string().max(200).describe('Short task description'),
+        status: z.enum(['pending', 'in_progress', 'completed']).optional().describe('Task status (defaults to pending)'),
+      })).describe('Complete task list. Replaces any existing tasks. Pass an empty array to clear.'),
+    }),
+    execute: async ({tasks: inputTasks}) => {
+      if (!Array.isArray(inputTasks)) {
+        return {ok: false, error: 'Tasks must be an array. Pass an empty array to clear the list.'};
+      }
+      for (let i = 0; i < inputTasks.length; i++) {
+        const title = inputTasks[i]?.title?.trim();
+        if (!title) return {ok: false, error: `Task ${i + 1}: title cannot be empty.`};
+        if (title.length > 200) return {ok: false, error: `Task ${i + 1}: title is too long (max 200 characters).`};
+      }
+      const now = new Date().toISOString();
+      const tasks: Task[] = inputTasks.map((input: {title: string; status?: TaskStatus}) => ({
+        id: generateTaskId(),
+        title: input.title.trim(),
+        status: input.status ?? 'pending',
+        createdAt: now,
+        updatedAt: now,
+      }));
+      await saveTasks(tasks);
+      if (tasks.length === 0) return {ok: true, taskCount: 0, summary: 'Task list cleared.'};
+      const counts = {
+        pending: tasks.filter(t => t.status === 'pending').length,
+        in_progress: tasks.filter(t => t.status === 'in_progress').length,
+        completed: tasks.filter(t => t.status === 'completed').length,
+      };
+      const list = tasks.map(t => `  ${STATUS_ICON[t.status]} ${t.title}`).join('\n');
+      const summary = `Tasks (${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed):\n${list}`;
+      return {ok: true, taskCount: tasks.length, summary};
+    },
   }),
 
   bash: tool({

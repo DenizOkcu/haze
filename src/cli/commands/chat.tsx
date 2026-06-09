@@ -6,6 +6,8 @@ import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
+import {loadTasks as loadTasksFromStore} from '../../core/tasks/taskStorage.js';
+import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders, DEFAULT_PROVIDER_NAME, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {Header} from '../../ui/components/Header.js';
@@ -60,11 +62,6 @@ function formatTokenCount(tokens: number) {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}m`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1).replace(/\.0$/, '')}k`;
   return String(tokens);
-}
-
-function truncateWithEllipsis(text: string, maxLength: number) {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength).trimEnd()}…`;
 }
 
 function displayMessagesFromConversation(conversation: ModelMessage[]): Message[] {
@@ -189,6 +186,52 @@ function startupProviderInfo(settings: HazeSettings) {
   ].join('\n');
 }
 
+const TASK_STATUS_ICON: Record<TaskStatus, string> = {
+  pending: '\u25CB',
+  in_progress: '\u25D0',
+  completed: '\u2713',
+};
+
+function taskStatusColor(status: TaskStatus): string {
+  switch (status) {
+    case 'completed': return theme.success;
+    case 'in_progress': return theme.warning;
+    default: return theme.muted;
+  }
+}
+
+const MAX_VISIBLE_TASKS = 5;
+
+function TaskBar({tasks, width, expanded, padding}: {tasks: Task[]; width: number; expanded: boolean; padding: number}) {
+  const maxTitleWidth = Math.max(10, width - 6);
+  const inProgress = tasks.filter(t => t.status === 'in_progress');
+  const pending = tasks.filter(t => t.status === 'pending');
+  const completed = tasks.filter(t => t.status === 'completed');
+  const limit = expanded ? tasks.length : MAX_VISIBLE_TASKS;
+  const ordered: Task[] = [];
+  for (const t of inProgress) { if (ordered.length < limit) ordered.push(t); }
+  for (const t of pending) { if (ordered.length < limit) ordered.push(t); }
+  for (let i = completed.length - 1; i >= 0 && ordered.length < limit; i--) {
+    ordered.push(completed[i]!);
+  }
+  const counts = `${inProgress.length > 0 ? `${inProgress.length} active` : ''}${pending.length > 0 ? `${inProgress.length > 0 ? ', ' : ''}${pending.length} pending` : ''}${completed.length > 0 ? `${inProgress.length + pending.length > 0 ? ', ' : ''}${completed.length} done` : ''}`;
+  return (
+    <Box flexDirection="column" flexShrink={0}>
+      {padding > 0 && Array.from({length: padding}, (_, i) => <Text key={`pad-${i}`}>{' '}</Text>)}
+      <Text><Text color={theme.purple} bold>Tasks</Text>{counts ? <Text color={theme.muted}> ({counts})</Text> : null}{tasks.length > MAX_VISIBLE_TASKS ? <Text color={theme.muted} dimColor> · ctrl+o {expanded ? 'collapse' : 'expand'}</Text> : null}</Text>
+      {ordered.map(task => {
+        const title = task.title.length > maxTitleWidth ? task.title.slice(0, maxTitleWidth - 1) + '\u2026' : task.title;
+        return (
+          <Text key={task.id} wrap="truncate-end">
+            <Text color={taskStatusColor(task.status)}>{TASK_STATUS_ICON[task.status]} </Text>
+            <Text color={task.status === 'completed' ? theme.muted : 'white'}>{title}</Text>
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -218,6 +261,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
   const [activeGoalStatus, setActiveGoalStatus] = useState<string | undefined>();
+  const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
+  const [tasksExpanded, setTasksExpanded] = useState(false);
+  const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [, setSessionLabel] = useState<string | undefined>();
   const [llmTokenEstimate, setLlmTokenEstimate] = useState({input: 0, output: 0});
   const [, setTimerTick] = useState(0);
@@ -253,6 +299,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     readInputHistory().then(setInputHistory).catch(() => undefined);
     readContextFiles().then(setContextFiles).catch(() => undefined);
     refreshSkills().catch(() => undefined);
+    loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
     const branchTimer = setInterval(() => {
       currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
     }, 3000);
@@ -834,6 +881,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       if (value === '/create-skill' || value.startsWith('/create-skill ') || value === '/skill create' || value.startsWith('/skill create ') || value === '/skills create' || value.startsWith('/skills create ') || value.startsWith('/remove-skill ') || value.startsWith('/skill remove ') || value.startsWith('/skills remove ')) {
         await refreshSkills().catch(() => undefined);
       }
+      if (value.startsWith('/tasks') || value === '/clear') {
+        loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
+      }
       return;
     }
 
@@ -906,6 +956,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         const session = sessionRef.current;
         if (session) void appendSessionEntry(session, {type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)}).catch(() => undefined);
       },
+      onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
     });
   }
 
@@ -956,9 +1007,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const estimatedTokens = llmTokenEstimate.input > 0 || llmTokenEstimate.output > 0 ? llmTokenEstimate : estimateConversationTokens(allDisplayMessages);
   const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
-  const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
-  const goalRequest = truncateWithEllipsis(rawGoalRequest ?? '', 120);
-  const goalStatusText = goalStatusParts.join(' · ');
+  // Goal tracking is internal; display removed in favor of task bar
+  void goalText;
   const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
@@ -1004,9 +1054,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {busy && <Box flexShrink={0} marginBottom={1}>
       <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
     </Box>}
-    {goalText && <Box flexShrink={0}>
-      <Text wrap="truncate-end"><Text color={theme.blue} bold>Goal:</Text><Text color="white"> {goalRequest}</Text>{goalStatusText ? <Text color={theme.orange}> · {goalStatusText}</Text> : null}</Text>
-    </Box>}
+    {visibleTasks.length > 0 && <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput
@@ -1020,6 +1068,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           submitOnEmpty={mode === 'providerAddKey'}
           width={Math.max(20, width - 4)}
           onHistoryAdd={persistInputHistory}
+          onToggleTasks={() => {
+            if (!tasksExpanded) {
+              setTaskBarPadding(0);
+              setTasksExpanded(true);
+            } else {
+              const expandedRows = visibleTasks.length + 1;
+              const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
+              setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
+              setTasksExpanded(false);
+            }
+          }}
           onCancel={cancelThinking}
           onEscape={() => {
             if (busy) cancelThinking();
