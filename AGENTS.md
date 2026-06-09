@@ -16,7 +16,7 @@ Core product shape:
 - Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, Markdown skills, and task tracking.
 - Minimal distribution model: source in `src/`, generated declarations/JS in `dist/`, thin published binary in `bin/haze.js`.
 
-Current package version is `0.2.0`; always verify against `package.json` before release work.
+Current package version is `0.3.0`; always verify against `package.json` before release work.
 
 ## Common commands
 

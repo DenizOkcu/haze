@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-06-10
+
+- Redesigned docs site with cleaner layout, improved typography, better mobile responsiveness, scroll-reveal animations, skip-link accessibility, and refreshed content structure.
+- Moved the task bar above the activity spinner so in-progress and pending tasks are visible during active agent turns.
+- Tasks are now automatically cleared when starting or exiting a session, preventing stale task state across sessions.
+- Renamed internal `TaskBar` component to `TaskBarContent` for clarity.
+
 ## 0.2.0 - 2026-06-07
 
 - Improved coding-loop reliability with stronger continuation behavior after failed edits, failed validation, missing validation, tool-budget interruptions, and incomplete assistant responses.

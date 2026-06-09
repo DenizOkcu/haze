@@ -2,17 +2,21 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.2.0
+## What's new in 0.3.0
 
-Haze 0.2.0 is a reliability release for the everyday coding loop: inspect, edit, validate, and report what happened without getting timid or noisy.
+Haze 0.3.0 polishes the experience around sessions and the docs site.
 
-- The agent loop is more persistent after failed edits, failed validation, missing validation, and tool-heavy turns. Haze now pushes toward a concrete final status instead of stopping at a vague recap.
-- Bash execution now includes command classification, working directory, duration, timeout state, and parsed validation summaries for common test/typecheck/lint/build output.
-- File-tool failures carry structured reason codes and recovery hints, making exact-edit failures easier for the model to repair with a fresh read and targeted retry.
-- The system and subagent prompts now assume expert users: relevant commands should run directly, including mutating shell workflows, while blockers are reserved for concrete tool failures or real ambiguity.
-- The chat input wraps across multiple visible lines and supports vertical cursor movement, which makes longer prompts and pasted context easier to edit.
+- The docs site has been redesigned with a cleaner layout, improved typography, better mobile responsiveness, scroll-reveal animations, and accessibility improvements.
+- The task bar now appears above the activity spinner so in-progress and pending tasks are always visible during active agent turns.
+- Tasks are automatically cleared when starting or exiting a session, preventing stale task state from leaking across conversations.
 
-The result is a sharper supervised coding loop while keeping the core small and inspectable. Haze gives an AI model transparent local tools — read, search, edit, write, list, and run commands — plus focused delegation when work can split safely. Tiny spell, steadier goblin.
+Previous releases:
+
+- **0.2.0** — Reliability release: stronger continuation after failed edits and validation, structured bash classification, parsed validation summaries, multi-line chat input with vertical cursor movement.
+- **0.1.0** — Bundled ripgrep, subagent delegation, inline diff display.
+- **0.0.3** — Durable sessions, context compaction, provider management.
+- **0.0.2** — Markdown skills, autocomplete, listFiles pagination.
+- **0.0.1** — Initial release.
 
 Haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.
 

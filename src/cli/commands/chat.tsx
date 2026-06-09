@@ -6,7 +6,7 @@ import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
-import {loadTasks as loadTasksFromStore} from '../../core/tasks/taskStorage.js';
+import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders, DEFAULT_PROVIDER_NAME, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
@@ -202,7 +202,7 @@ function taskStatusColor(status: TaskStatus): string {
 
 const MAX_VISIBLE_TASKS = 5;
 
-function TaskBar({tasks, width, expanded, padding}: {tasks: Task[]; width: number; expanded: boolean; padding: number}) {
+function TaskBarContent({tasks, width, expanded, padding}: {tasks: Task[]; width: number; expanded: boolean; padding: number}) {
   const maxTitleWidth = Math.max(10, width - 6);
   const inProgress = tasks.filter(t => t.status === 'in_progress');
   const pending = tasks.filter(t => t.status === 'pending');
@@ -1051,10 +1051,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       <Text color={theme.muted}>Queued follow-ups:</Text>
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} dimColor>  {index + 1}. {item}</Text>)}
     </Box>}
-    {busy && <Box flexShrink={0} marginBottom={1}>
+    {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
+      <TaskBarContent tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
+    </Box>}
+    {busy && <Box flexShrink={0}>
       <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
     </Box>}
-    {visibleTasks.length > 0 && <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput
@@ -1104,6 +1106,8 @@ export async function chatCommand(options: ChatOptions = {}) {
   if (process.stdout.isTTY) {
     process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
   }
+  await clearTasksFromStore().catch(() => undefined);
   const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} noSession={options.noSession} />);
   await app.waitUntilExit();
+  await clearTasksFromStore().catch(() => undefined);
 }
