@@ -207,7 +207,7 @@ export function TextInput({
       const suggestionValue = suggestionMode === 'always' ? suggestion.value : suggestion.value.slice(1);
       return suggestionValue.toLowerCase().includes(suggestionQuery) || suggestion.description?.toLowerCase().includes(suggestionQuery);
     })
-    .slice(0, 8);
+    .slice(0, 20);
   const activeSuggestionIndex = Math.min(selectedSuggestionIndex, Math.max(0, filteredSuggestions.length - 1));
   const activeSuggestion = filteredSuggestions[activeSuggestionIndex];
   const displayValue = mask ? '•'.repeat(value.length) : compactPasteBlocksForDisplay(value, pasteBlocks);

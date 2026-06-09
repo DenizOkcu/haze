@@ -46,7 +46,7 @@ async function skillOverview(): Promise<string> {
   const skills = [...registry.skills.values()];
   const installed = skills.length === 0
     ? ['Installed skills:', '- None yet. Create one with /create-skill <description>.']
-    : ['Installed skills:', ...skills.map(s => `- /${s.name} — ${s.description}`)];
+    : ['Installed skills:', ...skills.map(s => `- /${s.name} - ${s.description}`)];
   return `${skillHelp()}\n\n${installed.join('\n')}`;
 }
 
@@ -76,7 +76,7 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
     const skills = [...registry.skills.values()];
     ctx.addSystemMessage(skills.length === 0
       ? 'No installed skills found. Create one with /create-skill <description>.'
-      : ['Installed skills:', ...skills.map(s => `- /${s.name} — ${s.description}`)].join('\n'));
+      : ['Installed skills:', ...skills.map(s => `- /${s.name} - ${s.description}`)].join('\n'));
     return 'handled';
   }
 
@@ -151,7 +151,7 @@ export async function handleSlashCommand(
       '/help',
       '  Show all available slash commands and what they do.',
       '/provider',
-      '  Choose a provider, then use it or add models; choose add provider at the bottom to create one.',
+      '  Choose a provider, then use it, add/remove models, set API key, or remove it.',
       '/model',
       '  Choose a model from all configured providers.',
       '/model <name-or-provider:name>',
@@ -221,7 +221,7 @@ export async function handleSlashCommand(
   if (value === '/provider') {
     ctx.setModelProviderFilter?.(undefined);
     ctx.setMode('provider');
-    ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose “add provider” at the bottom to add a new provider.');
+    ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.');
     return 'handled';
   }
   if (value === '/model') {
@@ -232,7 +232,7 @@ export async function handleSlashCommand(
   }
   if (value === '/model list') {
     const providers = configuredProviders(ctx.settings);
-    ctx.addSystemMessage(['Configured models:', ...providers.flatMap(provider => provider.models.map(model => `- ${modelSelector(provider, model)} — ${provider.name}`))].join('\n'));
+    ctx.addSystemMessage(['Configured models:', ...providers.flatMap(provider => provider.models.map(model => `- ${modelSelector(provider, model)} - ${provider.name}`))].join('\n'));
     return 'handled';
   }
   if (value.startsWith('/model ')) {

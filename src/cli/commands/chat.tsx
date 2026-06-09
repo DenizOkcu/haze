@@ -16,12 +16,13 @@ import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message} from './streaming.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
+import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
 import {createSessionGoal, formatGoalStatus} from '../../core/goal/sessionGoal.js';
 
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove';
 
 interface ChatOptions {
   debug?: boolean;
@@ -377,10 +378,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   function closeInputList() {
-    if (mode === 'provider' || mode === 'providerAction' || mode === 'model') {
+    if (mode !== 'chat') {
       setMode('chat');
       setModelProviderFilter(undefined);
       setSelectedProviderName(undefined);
+      setProviderDraft({});
     }
   }
 
@@ -391,14 +393,36 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         description: `${provider.url} · ${provider.models.length} model${provider.models.length === 1 ? '' : 's'}`,
         kind: 'provider' as const,
       })),
-      {value: 'add provider', description: 'Add a new OpenAI-compatible provider', kind: 'provider' as const},
+      {value: 'add provider', description: 'Add a new provider (presets available)', kind: 'provider' as const},
     ];
   }
 
   function providerActionSuggestions(): TextInputSuggestion[] {
+    const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
     return [
       {value: 'use provider', description: 'Set this provider and choose a model', kind: 'provider' as const},
-      {value: 'add models', description: 'Append comma-separated model names to this provider', kind: 'provider' as const},
+      {value: 'add models', description: 'Append comma-separated model names', kind: 'provider' as const},
+      {value: 'set API key', description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const},
+      ...(provider?.models?.length ? [{value: 'remove models', description: 'Remove models from this provider', kind: 'provider' as const}] : []),
+      {value: 'remove provider', description: 'Delete this provider from settings', kind: 'provider' as const},
+    ];
+  }
+
+  function presetSuggestions(): TextInputSuggestion[] {
+    const cloudPresets = PROVIDER_PRESETS.filter(p => p.category === 'cloud');
+    const localPresets = PROVIDER_PRESETS.filter(p => p.category === 'local');
+    return [
+      ...cloudPresets.map(preset => ({
+        value: preset.id,
+        description: `${preset.baseUrl}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
+        kind: 'provider' as const,
+      })),
+      ...localPresets.map(preset => ({
+        value: preset.id,
+        description: `${preset.baseUrl} · local, no API key needed`,
+        kind: 'provider' as const,
+      })),
+      {value: 'custom', description: 'Enter provider name, URL, and API key manually', kind: 'provider' as const},
     ];
   }
 
@@ -414,8 +438,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   async function selectProvider(providerName: string) {
     if (providerName === 'add provider') {
       setProviderDraft({});
-      setMode('providerAddName');
-      setMessages(m => [...m, {role: 'system', text: 'Provider name? Example: openrouter, local, lmstudio.'}]);
+      setMode('providerAddPreset');
+      setMessages(m => [...m, {role: 'system', text: 'Choose a provider preset, or select "custom" to enter details manually.'}]);
       return;
     }
     const provider = findProvider(settings, providerName);
@@ -427,6 +451,43 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setSelectedProviderName(provider.name);
     setMode('providerAction');
     setMessages(m => [...m, {role: 'system', text: `${provider.name}: choose an action.`}]);
+  }
+
+  async function selectPreset(presetId: string) {
+    if (presetId === 'custom') {
+      setProviderDraft({});
+      setMode('providerAddName');
+      setMessages(m => [...m, {role: 'system', text: 'Provider name? Example: openrouter, local, lmstudio.'}]);
+      return;
+    }
+
+    const preset = findPreset(presetId);
+    if (!preset) {
+      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
+      return;
+    }
+
+    // Check if a provider with this name already exists
+    const existingName = settings.providers?.some(p => p.name === preset.name) ? preset.id : preset.name;
+    const nameConflict = settings.providers?.some(p => p.name === existingName);
+    if (nameConflict) {
+      setMessages(m => [...m, {role: 'system', text: `Provider ${existingName} already exists. Use /provider to manage existing providers.`}]);
+      setMode('chat');
+      setProviderDraft({});
+      return;
+    }
+
+    setProviderDraft({name: existingName, url: preset.baseUrl});
+
+    if (preset.needsApiKey) {
+      setMode('providerAddKey');
+      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`}]);
+    } else {
+      // Local/keyless: skip API key, go straight to models
+      setMode('providerAddModels');
+      const hint = preset.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
+      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl}) — no API key needed.\nComma-separated model names?${hint}`}]);
+    }
   }
 
   async function useProvider(providerName: string) {
@@ -450,6 +511,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMode('provider');
       return;
     }
+    const provider = findProvider(settings, selectedProviderName);
+    if (!provider) {
+      setMessages(m => [...m, {role: 'system', text: `Provider ${selectedProviderName} not found.`}]);
+      setMode('chat');
+      setSelectedProviderName(undefined);
+      return;
+    }
     if (action === 'use provider') {
       await useProvider(selectedProviderName);
       return;
@@ -457,6 +525,21 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     if (action === 'add models') {
       setMode('providerAppendModels');
       setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to add to ${selectedProviderName}?`}]);
+      return;
+    }
+    if (action === 'set API key') {
+      setMode('providerSetKey');
+      setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedProviderName}? (current: ${provider.key ? 'saved' : 'not set'})`}]);
+      return;
+    }
+    if (action === 'remove models') {
+      setMode('providerRemoveModels');
+      setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to remove from ${selectedProviderName}?\nCurrent models: ${provider.models.join(', ')}`}]);
+      return;
+    }
+    if (action === 'remove provider') {
+      setMode('providerConfirmRemove');
+      setMessages(m => [...m, {role: 'system', text: `Remove provider ${selectedProviderName}? Type "yes" to confirm. Esc to cancel.`}]);
       return;
     }
     setMessages(m => [...m, {role: 'system', text: `Unknown provider action: ${action}`}]);
@@ -539,6 +622,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
+    if (mode === 'providerAddPreset') {
+      await selectPreset(value);
+      return;
+    }
+
     if (mode === 'model') {
       await selectModel(value);
       return;
@@ -587,6 +675,88 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
     if (mode === 'providerAppendModels') {
       await appendModelsToProvider(value);
+      return;
+    }
+
+    if (mode === 'providerSetKey') {
+      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
+      if (!provider) {
+        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+        setMode('chat');
+        return;
+      }
+      const key = value.trim();
+      if (!key) {
+        setMessages(m => [...m, {role: 'system', text: 'API key cannot be empty. Esc to cancel.'}]);
+        return;
+      }
+      const updated = {...provider, key};
+      const next = await updateSettings({providers: upsertProvider(settings, updated)});
+      setSettings(next);
+      setSelectedProviderName(undefined);
+      setMode('chat');
+      setMessages(m => [...m, {role: 'system', text: `API key updated for ${provider.name}.`}]);
+      return;
+    }
+
+    if (mode === 'providerRemoveModels') {
+      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
+      if (!provider) {
+        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+        setMode('chat');
+        return;
+      }
+      const toRemove = value.split(',').map(m => m.trim()).filter(Boolean);
+      if (toRemove.length === 0) {
+        setMessages(m => [...m, {role: 'system', text: 'Enter at least one model name. Esc to cancel.'}]);
+        return;
+      }
+      const remaining = provider.models.filter(m => !toRemove.includes(m));
+      if (remaining.length === 0) {
+        setMessages(m => [...m, {role: 'system', text: 'A provider must have at least one model. Remove the provider instead.'}]);
+        return;
+      }
+      const removed = provider.models.filter(m => toRemove.includes(m));
+      const notFound = toRemove.filter(m => !provider.models.includes(m));
+      const updated = {...provider, models: remaining};
+      const wasActive = settings.model && provider.models.includes(settings.model) && !remaining.includes(settings.model);
+      const next = await updateSettings({
+        providers: upsertProvider(settings, updated),
+        ...(wasActive ? {model: remaining[0]} : {}),
+      });
+      setSettings(next);
+      setSelectedProviderName(undefined);
+      setMode('chat');
+      const parts = [`Removed ${removed.join(', ')} from ${provider.name}.`];
+      if (notFound.length) parts.push(`Not found: ${notFound.join(', ')}.`);
+      if (wasActive) parts.push(`Active model updated to ${remaining[0]}.`);
+      setMessages(m => [...m, {role: 'system', text: parts.join(' ')}]);
+      return;
+    }
+
+    if (mode === 'providerConfirmRemove') {
+      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
+      if (!provider) {
+        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+        setMode('chat');
+        return;
+      }
+      if (value.trim().toLowerCase() !== 'yes') {
+        setMessages(m => [...m, {role: 'system', text: 'Cancelled. Provider not removed.'}]);
+        setSelectedProviderName(undefined);
+        setMode('chat');
+        return;
+      }
+      const providers = configuredProviders(settings).filter(p => p.name !== selectedProviderName);
+      const wasActiveProvider = settings.provider === selectedProviderName || (!settings.provider && configuredProviders(settings)[0]?.name === selectedProviderName);
+      const next = await updateSettings({
+        providers,
+        ...(wasActiveProvider ? {provider: providers[0]?.name, model: providers[0]?.models[0]} : {}),
+      });
+      setSettings(next);
+      setSelectedProviderName(undefined);
+      setMode('chat');
+      setMessages(m => [...m, {role: 'system', text: `Removed provider ${provider.name}.${wasActiveProvider ? ` Switched to ${providers[0]?.name ?? 'no provider'}.` : ''}`}]);
       return;
     }
 
@@ -747,17 +917,23 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     ? 'Choose provider'
     : mode === 'providerAction'
       ? 'Choose provider action'
+      : mode === 'providerAddPreset'
+        ? 'Choose a provider preset or custom'
       : mode === 'model'
         ? 'Choose model'
         : mode === 'providerAddName'
           ? 'Provider name'
           : mode === 'providerAddUrl'
             ? 'https://example.com/v1'
-            : mode === 'providerAddKey'
+            : mode === 'providerAddKey' || mode === 'providerSetKey'
               ? 'API key, or blank for local'
               : mode === 'providerAddModels' || mode === 'providerAppendModels'
                 ? 'model-a, model-b'
-                : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
+                : mode === 'providerRemoveModels'
+                  ? 'model-a, model-b'
+                  : mode === 'providerConfirmRemove'
+                    ? 'Type "yes" to confirm'
+                    : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
   const activeModelName = `${activeSelection.provider.name}:${process.env.HAZE_MODEL ?? activeSelection.model}`;
   const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey ?? activeSelection.provider.key) || activeSelection.provider.name !== DEFAULT_PROVIDER_NAME;
   const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model ?? activeSelection.model);
@@ -783,7 +959,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [rawGoalRequest, ...goalStatusParts] = goalText?.split(' · ') ?? [];
   const goalRequest = truncateWithEllipsis(rawGoalRequest ?? '', 120);
   const goalStatusText = goalStatusParts.join(' · ');
-  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
+  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
@@ -836,11 +1012,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         <TextInput
           placeholder={placeholder}
           disabled={busy && mode !== 'chat'}
-          mask={mode === 'providerAddKey'}
+          mask={mode === 'providerAddKey' || mode === 'providerSetKey'}
           historyItems={inputHistory}
           recordHistory={mode === 'chat'}
           suggestions={inputSuggestions}
-          suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'model' ? 'always' : 'slash'}
+          suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'providerAddPreset' || mode === 'model' ? 'always' : 'slash'}
           submitOnEmpty={mode === 'providerAddKey'}
           width={Math.max(20, width - 4)}
           onHistoryAdd={persistInputHistory}
