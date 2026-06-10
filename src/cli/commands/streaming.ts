@@ -1,4 +1,6 @@
 import {stepCountIs, streamText, type ModelMessage} from 'ai';
+import type {LlmLog} from '../../core/log/llmLog.js';
+import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {model} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {buildSystemPrompt} from '../../llm/systemPrompt.js';
@@ -112,6 +114,27 @@ function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
 }
 
+export interface TokenUsage {
+  /** Precise input tokens from the provider (undefined if provider doesn't report). */
+  inputTokens: number | undefined;
+  /** Precise output tokens from the provider (undefined if provider doesn't report). */
+  outputTokens: number | undefined;
+  /** Estimated system prompt tokens. */
+  systemPrompt: number;
+  /** Estimated message history tokens. */
+  messages: number;
+  /** Estimated tool schema tokens. */
+  toolSchemas: number;
+  /** Estimated output tokens (from response messages). */
+  outputEstimate: number;
+  /** Cached input tokens (if provider reports). */
+  cacheReadTokens: number;
+  /** Cache write tokens (if provider reports). */
+  cacheWriteTokens: number;
+  /** Reasoning tokens (if provider reports). */
+  reasoningTokens: number;
+}
+
 function estimateModelMessageTokens(messages: ModelMessage[]) {
   return estimateTokens(JSON.stringify(messages));
 }
@@ -121,12 +144,16 @@ function estimateToolSchemaTokens(tools: Record<string, unknown>) {
   return estimateTokens(names.join('\n')) + names.length * 250;
 }
 
-function estimateLlmInputTokens(input: {system: string; messages: ModelMessage[]; tools?: Record<string, unknown>}) {
-  return estimateTokens(input.system) + estimateModelMessageTokens(input.messages) + (input.tools ? estimateToolSchemaTokens(input.tools) : 0);
+function estimateInputBreakdown(input: {system: string; messages: ModelMessage[]; tools?: Record<string, unknown>}) {
+  return {
+    systemPrompt: estimateTokens(input.system),
+    messages: estimateModelMessageTokens(input.messages),
+    toolSchemas: input.tools ? estimateToolSchemaTokens(input.tools) : 0,
+  };
 }
 
-function estimateLlmOutputTokens(messages: ModelMessage[]) {
-  return estimateModelMessageTokens(messages);
+function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
+  if (log) void logAppend(log, entry).catch(() => undefined);
 }
 
 function subagentTokenEstimate(output: unknown) {
@@ -137,13 +164,14 @@ function subagentTokenEstimate(output: unknown) {
   return input > 0 || outputTokens > 0 ? {input, output: outputTokens} : undefined;
 }
 
-function usageTokenEstimate(event: unknown, fallback: {input: number; output: number}) {
-  const usage = typeof event === 'object' && event != null && 'usage' in event
-    ? (event as {usage?: {inputTokens?: unknown; outputTokens?: unknown}}).usage
-    : undefined;
-  const input = typeof usage?.inputTokens === 'number' ? usage.inputTokens : fallback.input;
-  const output = typeof usage?.outputTokens === 'number' ? usage.outputTokens : fallback.output;
-  return {input, output};
+function extractUsage(event: {usage?: {inputTokens?: number; outputTokens?: number; inputTokenDetails?: {cacheReadTokens?: number; cacheWriteTokens?: number}; outputTokenDetails?: {reasoningTokens?: number}}}) {
+  return {
+    inputTokens: event.usage?.inputTokens,
+    outputTokens: event.usage?.outputTokens,
+    cacheReadTokens: event.usage?.inputTokenDetails?.cacheReadTokens ?? 0,
+    cacheWriteTokens: event.usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
+    reasoningTokens: event.usage?.outputTokenDetails?.reasoningTokens ?? 0,
+  };
 }
 
 export interface StreamCallbacks {
@@ -160,8 +188,9 @@ export interface StreamCallbacks {
   setGoalStatus?: (status: string | undefined) => void;
   onEvent?: AgentEventSink;
   compactConversation?: (instructions?: string) => boolean;
-  recordTokenEstimate?: (tokens: {input: number; output: number}) => void;
+  recordTokenUsage?: (usage: TokenUsage) => void;
   onTasksChanged?: () => void;
+  log?: LlmLog;
 }
 
 export async function runAgentTurn(
@@ -429,7 +458,8 @@ export async function runAgentTurn(
         {role: 'user', content: prompt},
       ];
       const followUpSystemPrompt = buildSystemPrompt(contextFiles);
-      const followUpInputEstimate = estimateLlmInputTokens({system: followUpSystemPrompt, messages: continuationMessages, tools: availableTools});
+      const followUpInputBreakdown = estimateInputBreakdown({system: followUpSystemPrompt, messages: continuationMessages, tools: availableTools});
+      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: `continuation:${reason}`, system: followUpSystemPrompt, messages: continuationMessages, tools: Object.keys(availableTools)});
       const followUp = streamText({
         model: activeModel,
         maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
@@ -477,7 +507,18 @@ export async function runAgentTurn(
           callbacks.debugLog(`stream error: ${error instanceof Error ? error.message : String(error)}`);
         },
         onFinish(event) {
-          callbacks.recordTokenEstimate?.(usageTokenEstimate(event, {input: followUpInputEstimate, output: estimateLlmOutputTokens(event.response.messages)}));
+          const providerUsage = extractUsage(event);
+          callbacks.recordTokenUsage?.({
+            inputTokens: providerUsage.inputTokens,
+            outputTokens: providerUsage.outputTokens,
+            systemPrompt: followUpInputBreakdown.systemPrompt,
+            messages: followUpInputBreakdown.messages,
+            toolSchemas: followUpInputBreakdown.toolSchemas,
+            outputEstimate: estimateTokens(JSON.stringify(event.response.messages)),
+            cacheReadTokens: providerUsage.cacheReadTokens,
+            cacheWriteTokens: providerUsage.cacheWriteTokens,
+            reasoningTokens: providerUsage.reasoningTokens,
+          });
           callbacks.setConversation([...continuationMessages, ...event.response.messages]);
           callbacks.debugLog(`conversation updated to ${continuationMessages.length + event.response.messages.length} messages after follow-up`);
         },
@@ -485,13 +526,15 @@ export async function runAgentTurn(
           sawToolCall = true;
           recordToolStart(toolCall);
           resetIdleTimer();
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_call', stream: `continuation:${reason}`, toolCall: {id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}});
           callbacks.debugLog(`follow-up tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
         },
         experimental_onToolCallFinish(event) {
           resetIdleTimer();
           recordToolFinish(event);
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: `continuation:${reason}`, toolResult: {id: event.toolCall.toolCallId, name: event.toolCall.toolName, success: event.success, output: event.output, error: event.error, durationMs: event.durationMs}});
           const nestedTokens = subagentTokenEstimate(event.output);
-          if (nestedTokens) callbacks.recordTokenEstimate?.(nestedTokens);
+          if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
           const summary = toolResultSummary(event);
           toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
           recordToolDisplayFinish(event);
@@ -531,7 +574,8 @@ export async function runAgentTurn(
     let streamError: unknown;
     let lastFinishReason: string | undefined;
     const mainSystemPrompt = buildSystemPrompt(contextFiles);
-    const mainInputEstimate = estimateLlmInputTokens({system: mainSystemPrompt, messages: requestMessages, tools: availableTools});
+    const mainInputBreakdown = estimateInputBreakdown({system: mainSystemPrompt, messages: requestMessages, tools: availableTools});
+    logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: mainSystemPrompt, messages: requestMessages, tools: Object.keys(availableTools)});
     const result = streamText({
       model: activeModel,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
@@ -602,12 +646,29 @@ export async function runAgentTurn(
         if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
         return undefined;
       },
-      onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason}) {
+      onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage}) {
         lastFinishReason = finishReason;
-        callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
+        const stepInputTokens = usage?.inputTokens;
+        const stepOutputTokens = usage?.outputTokens;
+        const stepCacheRead = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
+        const stepCacheWrite = usage?.inputTokenDetails?.cacheWriteTokens ?? 0;
+        const stepReasoning = usage?.outputTokenDetails?.reasoningTokens ?? 0;
+        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepInputTokens, outputTokens: stepOutputTokens, cacheReadTokens: stepCacheRead || undefined, cacheWriteTokens: stepCacheWrite || undefined, reasoningTokens: stepReasoning || undefined}});
+        callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}; usage=${stepInputTokens != null ? `in=${stepInputTokens} out=${stepOutputTokens}` : 'not reported'}${stepCacheRead ? ` cached=${stepCacheRead}` : ''}${stepCacheWrite ? ` cache_write=${stepCacheWrite}` : ''}${stepReasoning ? ` reasoning=${stepReasoning}` : ''}`);
       },
       onFinish(event) {
-        callbacks.recordTokenEstimate?.(usageTokenEstimate(event, {input: mainInputEstimate, output: estimateLlmOutputTokens(event.response.messages)}));
+        const providerUsage = extractUsage(event);
+        callbacks.recordTokenUsage?.({
+          inputTokens: providerUsage.inputTokens,
+          outputTokens: providerUsage.outputTokens,
+          systemPrompt: mainInputBreakdown.systemPrompt,
+          messages: mainInputBreakdown.messages,
+          toolSchemas: mainInputBreakdown.toolSchemas,
+          outputEstimate: estimateTokens(JSON.stringify(event.response.messages)),
+          cacheReadTokens: providerUsage.cacheReadTokens,
+          cacheWriteTokens: providerUsage.cacheWriteTokens,
+          reasoningTokens: providerUsage.reasoningTokens,
+        });
         const nextConversation = [...requestMessages, ...event.response.messages];
         callbacks.setConversation(nextConversation);
         callbacks.debugLog(`conversation updated to ${nextConversation.length} messages`);
@@ -616,14 +677,16 @@ export async function runAgentTurn(
         sawToolCall = true;
         recordToolStart(toolCall);
         resetIdleTimer();
+        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_call', stream: 'main', toolCall: {id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}});
         callbacks.debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
       },
       experimental_onToolCallFinish(event) {
         resetIdleTimer();
         const summary = toolResultSummary(event);
         recordToolFinish(event);
+        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: event.toolCall.toolCallId, name: event.toolCall.toolName, success: event.success, output: event.output, error: event.error, durationMs: event.durationMs}});
         const nestedTokens = subagentTokenEstimate(event.output);
-        if (nestedTokens) callbacks.recordTokenEstimate?.(nestedTokens);
+        if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
         recordToolDisplayFinish(event);
         if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;

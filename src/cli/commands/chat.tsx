@@ -15,7 +15,8 @@ import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
-import {runAgentTurn, type Message} from './streaming.js';
+import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
+import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
@@ -253,6 +254,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const lastAssistantTextRef = useRef('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<HazeSession | undefined>(undefined);
+  const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
@@ -265,7 +267,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [, setSessionLabel] = useState<string | undefined>();
-  const [llmTokenEstimate, setLlmTokenEstimate] = useState({input: 0, output: 0});
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
   const [, setTimerTick] = useState(0);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
@@ -330,6 +332,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setDebugLogs(current => [...current.slice(-7), line]);
   }
 
+  async function startNewLog() {
+    if (llmLogRef.current) {
+      await endLlmLog(llmLogRef.current).catch(() => undefined);
+    }
+    const log = await createLlmLog();
+    llmLogRef.current = log;
+    return log;
+  }
+
   async function startNewSession(message = 'Started a new session.') {
     if (noSession) {
       sessionRef.current = undefined;
@@ -338,7 +349,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     const session = await createSession({hazeVersion: version});
     sessionRef.current = session;
-    setLlmTokenEstimate({input: 0, output: 0});
+    setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+    await startNewLog();
     setSessionLabel(session.id);
     setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
   }
@@ -357,8 +369,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setSessionLabel(session.id);
         setLiveMessagesState(() => []);
         const restoredMessages = displayMessagesFromConversation(conversation);
-        setLlmTokenEstimate(estimateConversationTokens(restoredMessages));
+        setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: estimateConversationTokens(restoredMessages).input, toolSchemas: 0, outputEstimate: estimateConversationTokens(restoredMessages).output, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
         setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...restoredMessages]);
+        await startNewLog();
         return;
       }
     }
@@ -368,9 +381,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   function clearConversation() {
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
-    setLlmTokenEstimate({input: 0, output: 0});
+    setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
+    void startNewLog();
     const session = sessionRef.current;
     if (session) void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'clear', text: 'Conversation cleared'}).catch(() => undefined);
   }
@@ -949,14 +963,25 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setAbortController: controller => { abortControllerRef.current = controller; },
       setGoalStatus: setActiveGoalStatus,
       compactConversation,
-      recordTokenEstimate: tokens => {
-        setLlmTokenEstimate(current => ({input: current.input + tokens.input, output: current.output + tokens.output}));
+      recordTokenUsage: usage => {
+        setTokenUsage(current => ({
+          inputTokens: (current.inputTokens ?? 0) + (usage.inputTokens ?? 0) || usage.inputTokens,
+          outputTokens: (current.outputTokens ?? 0) + (usage.outputTokens ?? 0) || usage.outputTokens,
+          systemPrompt: current.systemPrompt + usage.systemPrompt,
+          messages: current.messages + usage.messages,
+          toolSchemas: current.toolSchemas + usage.toolSchemas,
+          outputEstimate: current.outputEstimate + usage.outputEstimate,
+          cacheReadTokens: current.cacheReadTokens + usage.cacheReadTokens,
+          cacheWriteTokens: current.cacheWriteTokens + usage.cacheWriteTokens,
+          reasoningTokens: current.reasoningTokens + usage.reasoningTokens,
+        }));
       },
       onEvent: event => {
         const session = sessionRef.current;
         if (session) void appendSessionEntry(session, {type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)}).catch(() => undefined);
       },
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
+      log: llmLogRef.current,
     });
   }
 
@@ -1004,8 +1029,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
   const allDisplayMessages = [...messages, ...liveMessages];
   const toolsUsed = toolCallCount(allDisplayMessages);
-  const estimatedTokens = llmTokenEstimate.input > 0 || llmTokenEstimate.output > 0 ? llmTokenEstimate : estimateConversationTokens(allDisplayMessages);
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ↑ ~${formatTokenCount(estimatedTokens.input)} ↓ ~${formatTokenCount(estimatedTokens.output)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+  const fallbackTokens = estimateConversationTokens(allDisplayMessages);
+  const effectiveInput = tokenUsage.inputTokens ?? (fallbackTokens.input || 0);
+  const effectiveOutput = tokenUsage.outputTokens ?? (fallbackTokens.output || 0);
+  const precise = tokenUsage.inputTokens != null;
+  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${precise ? '' : '~'}↑${formatTokenCount(effectiveInput)} ${precise ? '' : '~'}↓${formatTokenCount(effectiveOutput)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+  const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   // Goal tracking is internal; display removed in favor of task bar
   void goalText;
@@ -1090,6 +1119,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         />
       </Box>
     </Box>
+    {debug && hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
+      <Text color={theme.muted} bold>Token usage {precise ? '(precise)' : '(estimated)'}</Text>
+      <Text color={theme.muted}>  in={formatTokenCount(effectiveInput)} out={formatTokenCount(effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
+      <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>
+    </Box>}
     <Box flexShrink={0} justifyContent="space-between">
       <Box flexDirection="column" flexShrink={1} minWidth={0}>
         <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>

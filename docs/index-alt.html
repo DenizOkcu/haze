@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Haze — terminal AI coding agent</title>
+  <meta name="description" content="A small terminal AI coding agent with visible tools, local context, and direct validation.">
+  <meta property="og:title" content="Haze — terminal AI coding agent">
+  <meta property="og:description" content="A small terminal AI coding agent with visible tools, local context, and direct validation.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.85em' x='.12em' font-size='82' font-family='monospace'>h</text></svg>">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #fafaf9;
+      --bg-warm: #f5f0eb;
+      --surface: #ffffff;
+      --surface-raised: #ffffff;
+      --text: #1a1a1a;
+      --text-secondary: #525252;
+      --text-tertiary: #a3a3a3;
+      --border: #e5e2de;
+      --border-light: #f0ede8;
+      --accent: #7c3aed;
+      --accent-light: #ede9fe;
+      --accent-muted: #a78bfa;
+      --green: #059669;
+      --green-light: #d1fae5;
+      --red: #dc2626;
+      --red-light: #fee2e2;
+      --yellow: #d97706;
+      --yellow-light: #fef3c7;
+      --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .skip-link {
+      position: absolute;
+      top: -100%;
+      left: 16px;
+      padding: 10px 18px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 0 0 8px 8px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      z-index: 100;
+      transition: top 0.2s ease;
+    }
+    .skip-link:focus { top: 0; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .container {
+      width: min(1120px, calc(100% - 48px));
+      margin: 0 auto;
+    }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(250, 250, 249, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-light);
+    }
+    nav .container {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--accent) !important;
+      background: var(--accent-light);
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .nav-pill:hover {
+      background: #ddd6fe !important;
+      border-color: var(--accent-muted);
+    }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 96px 0 80px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .hero-left { display: flex; flex-direction: column; gap: 28px; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: var(--accent-light);
+      color: var(--accent);
+      border-radius: 999px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      width: fit-content;
+    }
+
+    h1 {
+      font-size: clamp(36px, 5.5vw, 56px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      font-weight: 700;
+      color: var(--text);
+    }
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .sub {
+      font-size: 18px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+      max-width: 480px;
+    }
+
+    .install-row {
+      display: flex;
+      align-items: stretch;
+      width: fit-content;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--surface);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .install-row code {
+      padding: 12px 16px;
+      font-family: var(--mono);
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    .install-row .dollar { color: var(--text-tertiary); }
+    .copy-btn {
+      border: 0;
+      border-left: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-secondary);
+      padding: 0 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { background: var(--accent-light); color: var(--accent); }
+    .copy-btn:active { transform: scale(0.97); }
+    .copy-btn.copied { background: var(--green-light); color: var(--green); }
+
+    .hero-meta {
+      display: flex;
+      gap: 20px;
+      color: var(--text-tertiary);
+      font: 13px var(--mono);
+    }
+
+    /* ── Terminal ── */
+    .terminal-wrap {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0f0f14;
+      box-shadow:
+        0 24px 80px rgba(0,0,0,0.12),
+        0 0 0 1px rgba(0,0,0,0.04);
+      color: #e4e4e7;
+    }
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: #16161d;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .terminal-dot.r { background: #ef4444; }
+    .terminal-dot.y { background: #eab308; }
+    .terminal-dot.g { background: #22c55e; }
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: #71717a;
+    }
+    .terminal-body {
+      padding: 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.8;
+      min-height: 280px;
+      max-height: 320px;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    .terminal-body::-webkit-scrollbar { display: none; }
+    .terminal-body .prompt { color: #34d399; }
+    .terminal-body .cmd { color: #f4f4f5; }
+    .terminal-body .output { color: #a1a1aa; }
+    .terminal-body .purple { color: #a78bfa; }
+    .terminal-body .warning { color: #fbbf24; }
+    .terminal-body .success { color: #34d399; }
+    .terminal-body .danger { color: #fb7185; }
+    .terminal-body .dim { opacity: 0.5; }
+
+    .cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #a78bfa;
+      vertical-align: middle;
+      margin-left: 2px;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .t-label { font-weight: 600; color: #f4f4f5; }
+    .t-label-you { color: #a78bfa; }
+    .t-count { color: #71717a; font-size: 12px; }
+    .t-tool-line {
+      padding-left: 8px;
+      color: #a1a1aa;
+      font-size: 12px;
+      line-height: 1.8;
+      opacity: 0;
+      animation: toolFadeIn 0.3s ease forwards;
+    }
+    .t-check { color: #34d399; }
+    .t-tool-name { color: #c4b5fd; }
+    .t-bash-cmd { color: #c4b5fd; }
+    .t-detail { color: #71717a; }
+    .t-spinner { color: #a78bfa; margin-top: 8px; }
+    .t-response { margin-top: 6px; line-height: 1.7; }
+    .t-input-wrap {
+      margin: 0;
+      padding: 10px 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 13px;
+      background: #16161d;
+    }
+    .t-input-prompt { color: #a78bfa; margin-right: 6px; white-space: nowrap; }
+    .t-input-text { color: #f4f4f5; }
+    @keyframes toolFadeIn {
+      from { opacity: 0; transform: translateY(3px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .t-status {
+      padding: 8px 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: #71717a;
+      background: #12121a;
+    }
+    .t-status-row { display: flex; justify-content: space-between; }
+    .t-branch { color: #34d399; }
+    .t-status-counts { margin-top: 2px; opacity: 0.6; }
+
+    /* ── Sections ── */
+    section { padding: 80px 0; }
+
+    .kicker {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    h2 {
+      font-size: clamp(28px, 3.5vw, 40px);
+      line-height: 1.1;
+      letter-spacing: -0.035em;
+      font-weight: 700;
+      max-width: 760px;
+    }
+    .copy {
+      margin-top: 16px;
+      color: var(--text-secondary);
+      font-size: 17px;
+      line-height: 1.6;
+      max-width: 600px;
+    }
+    .copy code {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Feature list (opencode-style "What is X") ── */
+    .feature-list {
+      list-style: none;
+      margin-top: 40px;
+      max-width: 760px;
+      border-top: 1px solid var(--border);
+    }
+    .feature-list li {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 32px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+    .feature-list strong {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .feature-list code {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .docs-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 32px;
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      transition: gap 0.15s;
+    }
+    .docs-link:hover { gap: 10px; }
+
+    /* ── Privacy ── */
+    #privacy { border-top: 1px solid var(--border-light); }
+
+    /* ── FAQ ── */
+    #faq { border-top: 1px solid var(--border-light); }
+    .faq-list {
+      list-style: none;
+      margin-top: 32px;
+      max-width: 760px;
+      border-top: 1px solid var(--border);
+    }
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+    }
+    .faq-item details summary {
+      cursor: pointer;
+      padding: 22px 0;
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--text);
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      transition: color 0.15s;
+    }
+    .faq-item details summary:hover { color: var(--accent); }
+    .faq-item details summary::-webkit-details-marker { display: none; }
+    .faq-item details summary::after {
+      content: '+';
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 400;
+      color: var(--accent);
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .faq-item details[open] summary::after { content: '\2212'; }
+    .faq-answer {
+      padding: 0 0 22px;
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.7;
+      max-width: 640px;
+    }
+    .faq-answer code {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+
+    /* ── Skills callout (replaces Zen CTA) ── */
+    .skills-card {
+      padding: 48px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .skills-card h3 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin: 4px 0 16px;
+      line-height: 1.2;
+    }
+    .skills-card > p {
+      color: var(--text-secondary);
+      font-size: 16px;
+      line-height: 1.65;
+      margin-bottom: 24px;
+    }
+    .skills-card > p code {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--accent);
+      background: var(--accent-light);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .skill-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .skill-tag {
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 6px 14px;
+      background: var(--accent-light);
+      color: var(--accent);
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* ── First run ── */
+    #first-run { border-top: 1px solid var(--border-light); text-align: center; }
+    .start-wrap { max-width: 640px; margin: 0 auto; }
+    .start-wrap h2 { margin: 0 auto; }
+    .start-wrap .copy { margin-left: auto; margin-right: auto; }
+
+    /* ── Footer (expanded) ── */
+    footer {
+      border-top: 1px solid var(--border-light);
+      padding: 64px 0 24px;
+      color: var(--text-secondary);
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: start;
+      padding-bottom: 48px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .footer-tag {
+      margin-top: 12px;
+      color: var(--text-tertiary);
+      font-size: 14px;
+      max-width: 260px;
+    }
+    .footer-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+    }
+    .footer-cols h4 {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 16px;
+      font-family: var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .footer-cols a {
+      display: block;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      margin-bottom: 10px;
+      transition: color 0.15s;
+    }
+    .footer-cols a:hover { color: var(--accent); }
+    .footer-base {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 24px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+    .footer-base a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-base a:hover { color: var(--accent); }
+
+    /* ── Scroll reveal ── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+      .cursor { animation: none; opacity: 1; }
+      .reveal { opacity: 1; transform: none; transition: none; }
+      .t-tool-line { animation: none; opacity: 1; transform: none; }
+      html { scroll-behavior: auto; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 900px) {
+      .hero {
+        grid-template-columns: 1fr;
+        gap: 40px;
+        padding: 64px 0 56px;
+      }
+      .hero-left { align-items: center; text-align: center; }
+      .sub { max-width: 100%; }
+      .install-row { width: 100%; }
+      .install-row code { flex: 1; justify-content: center; }
+      .hero-meta { justify-content: center; }
+      .terminal-wrap { max-width: 100%; }
+      .feature-list li { grid-template-columns: 180px 1fr; gap: 24px; }
+      .footer-grid { grid-template-columns: 1fr; gap: 40px; }
+      .skills-card { padding: 36px 28px; }
+    }
+
+    @media (max-width: 560px) {
+      .container { width: calc(100% - 32px); }
+      .nav-links .hide-small { display: none; }
+      .feature-list li { grid-template-columns: 1fr; gap: 4px; }
+      .install-row { flex-direction: column; }
+      .copy-btn { border-left: 0; border-top: 1px solid var(--border); padding: 12px; }
+      .hero-meta { flex-direction: column; gap: 4px; }
+      .footer-cols { grid-template-columns: 1fr; }
+      .footer-base { flex-direction: column; gap: 8px; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <nav>
+    <div class="container">
+      <a class="logo" href="#">haze<span>.</span></a>
+      <div class="nav-links">
+        <a class="hide-small" href="#what">Shape</a>
+        <a class="hide-small" href="#in-practice">Tools</a>
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a class="nav-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="main">
+    <div class="container">
+      <header class="hero">
+        <div class="hero-left">
+          <div class="tag">terminal ai coding agent</div>
+          <h1>A small agentic coding tool<br><em>for the terminal.</em></h1>
+          <p class="sub">haze reads, edits, searches, writes, and runs commands. Every call is visible. Try it in a repo.</p>
+          <div class="install-row" aria-label="Install command">
+            <code><span class="dollar">$</span> npm i -g @denizokcu/haze</code>
+            <button class="copy-btn" id="copy-btn" onclick="copyInstall()">Copy</button>
+          </div>
+          <div class="hero-meta">
+            <span>visible calls</span>
+            <span>workspace file tools</span>
+            <span>direct validation</span>
+          </div>
+        </div>
+
+        <div class="terminal-wrap" role="region" aria-label="Animated terminal demonstration">
+          <div class="terminal-bar">
+            <span class="terminal-dot r"></span>
+            <span class="terminal-dot y"></span>
+            <span class="terminal-dot g"></span>
+            <span class="terminal-title">haze</span>
+          </div>
+          <div class="terminal-body" id="terminal-body"></div>
+          <div class="t-input-wrap" id="input-field">
+            <span class="t-input-prompt" aria-hidden="true">&#x203A;</span>
+            <span class="t-input-text" id="input-text"></span>
+          </div>
+          <div class="t-status" id="status-bar">
+            <div class="t-status-row">
+              <span>~/project <span class="t-branch">(main)</span></span>
+              <span>configured model</span>
+            </div>
+            <div class="t-status-counts">8 messages / 5 tool calls / 0 skills</div>
+          </div>
+        </div>
+      </header>
+    </div>
+  </main>
+
+  <section id="what" class="reveal">
+    <div class="container">
+      <p class="kicker">shape</p>
+      <h2>Everything is plain and inspectable.</h2>
+      <p class="copy">Project instructions are files. Skills are Markdown. Sessions are resumable. Diffs are still your problem.</p>
+      <ul class="feature-list">
+        <li>
+          <strong>Does</strong>
+          <span>Runs in your terminal. Keeps file tools in the workspace. Runs bash and summarizes checks.</span>
+        </li>
+        <li>
+          <strong>Context files</strong>
+          <span>Reads <code>AGENTS.md</code> and <code>CLAUDE.md</code> as project instructions.</span>
+        </li>
+        <li>
+          <strong>Sessions</strong>
+          <span>Supports resumable sessions, compaction, and continuing work in the current repo.</span>
+        </li>
+        <li>
+          <strong>Skills</strong>
+          <span>Skills are Markdown. Use them for procedures you do more than once.</span>
+        </li>
+        <li>
+          <strong>Subagents</strong>
+          <span>Supports subagents for separate investigations when parallel work actually helps.</span>
+        </li>
+        <li>
+          <strong>Does not</strong>
+          <span>Hide tool calls. Ship a dashboard. Add popup rituals. Pretend to be magic. Make you watch a product tour.</span>
+        </li>
+      </ul>
+      <a class="docs-link" href="https://github.com/DenizOkcu/haze#readme" target="_blank" rel="noopener">Read the docs <span aria-hidden="true">&rarr;</span></a>
+    </div>
+  </section>
+
+  <section id="in-practice" class="reveal">
+    <div class="container">
+      <p class="kicker">tools</p>
+      <h2>Seven tools. Clear output.</h2>
+      <p class="copy">Enough to let the model work. Small enough to see what it did.</p>
+      <ul class="feature-list">
+        <li>
+          <strong>Read</strong>
+          <span>Read files from the current workspace with line ranges when needed.</span>
+        </li>
+        <li>
+          <strong>Search</strong>
+          <span>Search the repo with ripgrep-backed patterns instead of reading files one by one.</span>
+        </li>
+        <li>
+          <strong>Edit</strong>
+          <span>Use targeted replacements or line-range edits for existing files.</span>
+        </li>
+        <li>
+          <strong>Write</strong>
+          <span>Create files when the task needs new source, tests, docs, or skills.</span>
+        </li>
+        <li>
+          <strong>Bash</strong>
+          <span>Run commands, tests, typechecks, builds, and summarize recognized validation output.</span>
+        </li>
+        <li>
+          <strong>List</strong>
+          <span>Inspect the project tree without falling back to shell discovery for everything.</span>
+        </li>
+        <li>
+          <strong>Replace lines</strong>
+          <span>Use line ranges when exact text edits are ambiguous.</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="privacy" class="reveal">
+    <div class="container">
+      <p class="kicker">does not</p>
+      <p class="copy">Haze does not hide tool calls, ship a dashboard, add popup rituals, pretend to be magic, or make you watch a product tour.</p>
+    </div>
+  </section>
+
+  <section id="faq" class="reveal">
+    <div class="container">
+      <p class="kicker">faq</p>
+      <h2>Common questions.</h2>
+      <ul class="faq-list">
+        <li class="faq-item">
+          <details>
+            <summary>What is Haze?</summary>
+            <div class="faq-answer">
+              <p>Haze is a small agentic coding tool for the terminal. It reads, edits, searches, writes, and runs commands. Every call is visible.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>How do I install and run Haze?</summary>
+            <div class="faq-answer">
+              <p>Install with <code>npm i -g @denizokcu/haze</code>, then <code>cd</code> into a repo and run <code>haze</code>. Ask for one change. If the result is useful, keep going.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>Do I need a paid AI subscription to use Haze?</summary>
+            <div class="faq-answer">
+              <p>No. Haze is the tool. You still configure the model provider you want to use.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>Can I use Haze with my existing AI provider?</summary>
+            <div class="faq-answer">
+              <p>Yes. Haze uses OpenAI-compatible providers. Configure one in settings or environment variables, then switch in-session with <code>/provider</code> and <code>/model</code>.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>Is Haze terminal-only?</summary>
+            <div class="faq-answer">
+              <p>Yes, by design. Haze is a CLI tool. There is no desktop app or IDE extension. The terminal is the product.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>How much does Haze cost?</summary>
+            <div class="faq-answer">
+              <p>Haze is free and MIT-licensed. Model usage depends on the provider you configure.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>What about my code and privacy?</summary>
+            <div class="faq-answer">
+              <p>Haze uses local files and local session state. Prompt context goes to the model provider you configure.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>Is Haze open source?</summary>
+            <div class="faq-answer">
+              <p>Yes. Haze is an MIT-licensed TypeScript package published as <code>@denizokcu/haze</code>.</p>
+            </div>
+          </details>
+        </li>
+        <li class="faq-item">
+          <details>
+            <summary>What are Markdown skills?</summary>
+            <div class="faq-answer">
+              <p>Skills are Markdown. Use them for instructions you want to reuse instead of retyping.</p>
+            </div>
+          </details>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="skills-cta" class="reveal">
+    <div class="container">
+      <div class="skills-card">
+        <p class="kicker">skills</p>
+        <h3>Skills are Markdown.</h3>
+        <p>Put repeatable instructions in a skill instead of a long prompt. Haze loads the skill when you need that procedure again.</p>
+        <div class="skill-tags">
+          <span class="skill-tag">security review</span>
+          <span class="skill-tag">schema migration</span>
+          <span class="skill-tag">release prep</span>
+          <span class="skill-tag">code audit</span>
+          <span class="skill-tag">multi-package refactor</span>
+          <span class="skill-tag">dependency upgrade</span>
+        </div>
+        <a class="docs-link" href="https://github.com/DenizOkcu/haze/tree/main/examples/skills" target="_blank" rel="noopener">See example skills <span aria-hidden="true">&rarr;</span></a>
+      </div>
+    </div>
+  </section>
+
+  <section id="first-run" class="reveal">
+    <div class="container start-wrap">
+      <p class="kicker">install</p>
+      <h2>Install it and ask for one change.</h2>
+      <p class="copy">If the result is useful, keep going. If not, you lost one command.</p>
+      <div class="install-row" aria-label="Install command" style="margin:32px auto 0;">
+        <code><span class="dollar">$</span> npm i -g @denizokcu/haze</code>
+        <button class="copy-btn" onclick="copyInstall()">Copy</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <a class="logo" href="#">haze<span>.</span></a>
+          <p class="footer-tag">A small terminal AI coding agent with visible tools, local context, and direct validation.</p>
+        </div>
+        <div class="footer-cols">
+          <div>
+            <h4>Project</h4>
+            <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+            <a href="https://github.com/DenizOkcu/haze/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+          </div>
+          <div>
+            <h4>Learn</h4>
+            <a href="https://github.com/DenizOkcu/haze#readme" target="_blank" rel="noopener">README</a>
+            <a href="https://github.com/DenizOkcu/haze/tree/main/examples/skills" target="_blank" rel="noopener">Example skills</a>
+            <a href="https://github.com/DenizOkcu/haze/tree/main/docs" target="_blank" rel="noopener">Architecture</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-base">
+        <span>&copy; 2026 <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. MIT licensed.</span>
+        <span>v0.2.0</span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const termBody = document.getElementById('terminal-body');
+    const inputText = document.getElementById('input-text');
+
+    function wait(ms) {
+      return new Promise(r => setTimeout(r, reducedMotion ? Math.min(ms, 50) : ms));
+    }
+
+    async function typeInto(el, text, speed) {
+      if (reducedMotion) { el.textContent = text; return; }
+      for (const ch of text) {
+        el.textContent += ch;
+        await wait(speed);
+        if (Math.random() < 0.07) await wait(speed * 5);
+      }
+    }
+
+    function scrollBottom() {
+      termBody.scrollTop = termBody.scrollHeight;
+    }
+
+    async function addYouLine(text) {
+      inputText.textContent = '';
+      await wait(150);
+      const label = document.createElement('div');
+      label.innerHTML = '<span class="t-label t-label-you">You</span>';
+      termBody.appendChild(label);
+      const line = document.createElement('div');
+      line.textContent = text;
+      termBody.appendChild(line);
+      scrollBottom();
+    }
+
+    async function addTools(calls) {
+      const header = document.createElement('div');
+      header.style.marginTop = '10px';
+      header.innerHTML = `<span class="t-label">Tool</span>  <span class="t-count">Tools: ${calls.length} calls</span>`;
+      termBody.appendChild(header);
+      await wait(250);
+
+      for (const tc of calls) {
+        const line = document.createElement('div');
+        line.className = 't-tool-line';
+        const detail = tc.isBash
+          ? `${tc.summary || `exited with code ${tc.exit}`} in ${tc.time}`
+          : `completed in ${tc.time}`;
+        const nameClass = tc.isBash ? 't-bash-cmd' : 't-tool-name';
+        line.innerHTML = `<span class="t-check">✓</span> <span class="${nameClass}">${tc.name}</span> <span class="t-detail">${tc.args}</span> — <span class="t-detail">${detail}</span>`;
+        termBody.appendChild(line);
+        scrollBottom();
+        await wait(180 + Math.random() * 140);
+      }
+    }
+
+    async function spin(duration) {
+      const el = document.createElement('div');
+      el.className = 't-spinner';
+      termBody.appendChild(el);
+      scrollBottom();
+      const chars = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+      let i = 0;
+      const iv = setInterval(() => {
+        i = (i + 1) % chars.length;
+        el.textContent = chars[i] + ' Haze is thinking... · esc to interrupt';
+      }, 80);
+      await wait(duration);
+      clearInterval(iv);
+      el.remove();
+      await wait(200);
+    }
+
+    async function runTerminal() {
+      await wait(300);
+      await typeInto(inputText, '/create-skill strict security review with repro steps', 32);
+      await wait(400);
+
+      await addYouLine('/create-skill strict security review with repro steps');
+      await wait(500);
+
+      await addTools([
+        { name: 'writeFile', args: '~/.haze/skills/security-reviewer/SKILL.md', time: '0.04s' },
+      ]);
+      await wait(300);
+      await spin(1200);
+
+      const resp1 = document.createElement('div');
+      resp1.className = 't-response';
+      resp1.textContent = 'Created skill /security-reviewer. It will preserve severity criteria, evidence format, and validation commands for future reviews.';
+      termBody.appendChild(resp1);
+      scrollBottom();
+      await wait(800);
+
+      termBody.appendChild(document.createElement('div'));
+      scrollBottom();
+      await wait(400);
+
+      await typeInto(inputText, '/security-reviewer', 36);
+      await wait(400);
+
+      await addYouLine('/security-reviewer');
+      await wait(500);
+
+      await addTools([
+        { name: 'listFiles', args: '.', time: '0.6s' },
+        { name: 'readFile', args: 'src/api/auth.ts', time: '0.07s' },
+        { name: 'grep', args: '"eval|innerHTML|document.write" in src (*.ts)', time: '0.2s' },
+        { name: 'bash', args: 'npm test -- --runInBand', time: '3.4s', isBash: true, exit: 1, summary: 'test failed: 2 diagnostics' },
+        { name: 'subagent', args: '"trace auth boundary assumptions"', time: '2.1s' },
+        { name: 'readFile', args: 'src/middleware/session.ts', time: '0.06s' },
+      ]);
+
+      await spin(1600);
+
+      const findings = [
+        { html: '<span style="color:#fbbf24;font-weight:600">Security Review — 5 findings, 2 require code changes.</span>' },
+        { html: '' },
+        { html: '<span style="color:#fb7185">● CRITICAL</span> <span style="color:#f4f4f5">auth.ts:42</span> — Static admin credential reachable from the production login path. Repro: POST /login with the default secret succeeds without identity-provider validation.' },
+        { html: '<span style="color:#fb7185">● HIGH</span> <span style="color:#f4f4f5">auth.ts:89</span> — SQL string interpolation on user-controlled email. Replace with the existing parameterized query helper; add a regression case for quote payloads.' },
+        { html: '<span style="color:#fbbf24">● MED</span>  <span style="color:#f4f4f5">session.ts:18</span> — Cookie lacks Secure and SameSite policy in the non-local branch. Tighten defaults and keep the localhost exception explicit.' },
+        { html: '<span style="color:#fbbf24">● MED</span>  <span style="color:#f4f4f5">api/users.ts:53</span> — HTML sink accepts unsanitized display names. Existing test coverage misses the render path; add an escaping assertion.' },
+        { html: '<span style="color:#34d399">● LOW</span>  <span style="color:#f4f4f5">auth.ts:7</span> — No rate-limit hook around password auth. Not exploitable alone, but it weakens the boundary under credential stuffing.' },
+        { html: '' },
+        { html: '<span style="color:#a1a1aa">Next: patch auth.ts/session.ts, add focused tests, rerun npm test -- --runInBand, then summarize the changes and residual risk.</span>' },
+      ];
+
+      for (const f of findings) {
+        const line = document.createElement('div');
+        line.className = 't-response';
+        if (f.html) {
+          line.innerHTML = f.html;
+          line.style.lineHeight = '1.7';
+        }
+        termBody.appendChild(line);
+        scrollBottom();
+        await wait(600 + Math.random() * 300);
+      }
+
+      await wait(1400);
+      termBody.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    setTimeout(runTerminal, 800);
+
+    function copyInstall() {
+      navigator.clipboard.writeText('npm i -g @denizokcu/haze');
+      document.querySelectorAll('.copy-btn').forEach(btn => {
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 1600);
+      });
+    }
+
+    const revealEls = document.querySelectorAll('.reveal');
+    const revealObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          revealObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+    revealEls.forEach(el => revealObserver.observe(el));
+  </script>
+</body>
+</html>
