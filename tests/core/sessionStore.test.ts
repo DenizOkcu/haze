@@ -3,7 +3,8 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
-import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation} from '../../src/core/session/sessionStore.js';
+import {createWorkState} from '../../src/core/agent/workState.js';
+import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation, restoreWorkState} from '../../src/core/session/sessionStore.js';
 
 describe('sessionStore', () => {
   let tmp: string;
@@ -45,6 +46,16 @@ describe('sessionStore', () => {
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: first});
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: latest});
     await expect(restoreConversation(session)).resolves.toEqual(latest);
+  });
+
+  it('restores the latest structured work-state snapshot', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const first = createWorkState('old goal', 'implementation', ['old']);
+    const latest = createWorkState('current goal', 'implementation', ['tests pass']);
+    latest.nextAction = 'Run npm test.';
+    await appendSessionEntry(session, {type: 'work_state_snapshot', at: '1', state: first});
+    await appendSessionEntry(session, {type: 'work_state_snapshot', at: '2', state: latest});
+    await expect(restoreWorkState(session)).resolves.toEqual(latest);
   });
 
   it('returns the latest session for a cwd', async () => {

@@ -1,9 +1,9 @@
 import {stepCountIs, streamText, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
-import {model} from '../../llm/client.js';
+import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {hazeTools} from '../../llm/hazeTools.js';
-import {buildSystemPrompt} from '../../llm/systemPrompt.js';
+import {buildSystemPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
@@ -14,6 +14,10 @@ import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../c
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {createSubagentTool} from '../../core/subagent/subagentRunner.js';
+import {contextBreakdown, effectiveNonCachedInput, estimateValueTokens} from '../../core/agent/contextBudget.js';
+import {compactToolHistory, stripSyntheticControls, toolRequestSettings, withSyntheticControl} from '../../core/agent/requestAssembly.js';
+import {compactModelMessages} from '../../core/agent/compaction.js';
+import {workStatePrompt, type WorkState} from '../../core/agent/workState.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number};
 
@@ -97,21 +101,18 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const IDLE_TIMEOUT_MS = 5 * 60_000;
-const MAIN_STEP_LIMIT = 40;
-const MAIN_TOOL_CALL_LIMIT = 40;
-const MAIN_TOOL_ONLY_STEP_LIMIT = 12;
-const FOLLOW_UP_STEP_LIMIT = 30;
-const FOLLOW_UP_TOOL_CALL_LIMIT = 30;
-const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 10;
-const COMPLETION_CONTINUATION_LIMIT = 30;
+const MAIN_STEP_LIMIT = 16;
+const MAIN_TOOL_CALL_LIMIT = 12;
+const MAIN_TOOL_ONLY_STEP_LIMIT = 8;
+const FOLLOW_UP_STEP_LIMIT = 16;
+const FOLLOW_UP_TOOL_CALL_LIMIT = 12;
+const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 8;
+const COMPLETION_CONTINUATION_LIMIT = 12;
+const ACTIVE_CONTEXT_TOKEN_BUDGET = 40_000;
 
 function toolOutputOk(output: unknown, success: boolean) {
   if (!success) return false;
   return !(typeof output === 'object' && output != null && 'ok' in output && (output as {ok?: unknown}).ok === false);
-}
-
-function estimateTokens(text: string) {
-  return Math.ceil(text.length / 4);
 }
 
 export interface TokenUsage {
@@ -131,24 +132,24 @@ export interface TokenUsage {
   cacheReadTokens: number;
   /** Cache write tokens (if provider reports). */
   cacheWriteTokens: number;
+  /** Provider-reported input tokens that were not served from cache. */
+  noCacheTokens: number;
   /** Reasoning tokens (if provider reports). */
   reasoningTokens: number;
+  /** Estimated complete logical request size. */
+  logicalInputEstimate: number;
+  /** Provider input minus cache reads, when provider usage is available. */
+  effectiveNonCachedInput: number | undefined;
 }
 
-function estimateModelMessageTokens(messages: ModelMessage[]) {
-  return estimateTokens(JSON.stringify(messages));
-}
-
-function estimateToolSchemaTokens(tools: Record<string, unknown>) {
-  const names = Object.keys(tools);
-  return estimateTokens(names.join('\n')) + names.length * 250;
-}
-
-function estimateInputBreakdown(input: {system: string; messages: ModelMessage[]; tools?: Record<string, unknown>}) {
+function estimateInputBreakdown(input: {system: string; contextFiles: ContextFile[]; messages: ModelMessage[]; tools?: Record<string, unknown>}) {
+  const breakdown = contextBreakdown(input);
   return {
-    systemPrompt: estimateTokens(input.system),
-    messages: estimateModelMessageTokens(input.messages),
-    toolSchemas: input.tools ? estimateToolSchemaTokens(input.tools) : 0,
+    breakdown,
+    systemPrompt: breakdown.system,
+    messages: Object.values(breakdown.messagesByRole).reduce((sum, value) => sum + value, 0),
+    toolSchemas: breakdown.toolSchemas.reduce((sum, value) => sum + value.tokens, 0),
+    logicalInputEstimate: breakdown.logicalInputEstimate,
   };
 }
 
@@ -165,11 +166,16 @@ function subagentTokenEstimate(output: unknown) {
 }
 
 function extractUsage(event: {usage?: {inputTokens?: number; outputTokens?: number; inputTokenDetails?: {cacheReadTokens?: number; cacheWriteTokens?: number}; outputTokenDetails?: {reasoningTokens?: number}}}) {
+  const cacheReadTokens = event.usage?.inputTokenDetails?.cacheReadTokens ?? 0;
+  const reportedNoCache = 'noCacheTokens' in (event.usage?.inputTokenDetails ?? {})
+    ? (event.usage?.inputTokenDetails as {noCacheTokens?: number}).noCacheTokens
+    : undefined;
   return {
     inputTokens: event.usage?.inputTokens,
     outputTokens: event.usage?.outputTokens,
-    cacheReadTokens: event.usage?.inputTokenDetails?.cacheReadTokens ?? 0,
+    cacheReadTokens,
     cacheWriteTokens: event.usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
+    noCacheTokens: reportedNoCache ?? effectiveNonCachedInput(event.usage?.inputTokens, cacheReadTokens) ?? 0,
     reasoningTokens: event.usage?.outputTokenDetails?.reasoningTokens ?? 0,
   };
 }
@@ -189,6 +195,7 @@ export interface StreamCallbacks {
   onEvent?: AgentEventSink;
   compactConversation?: (instructions?: string) => boolean;
   recordTokenUsage?: (usage: TokenUsage) => void;
+  setWorkState?: (state: WorkState) => void;
   onTasksChanged?: () => void;
   log?: LlmLog;
 }
@@ -201,6 +208,7 @@ export async function runAgentTurn(
   retryAttempt = 0,
   retryingExistingRequest = false,
   contextOverflowRecovered = false,
+  session?: PromptSession,
 ): Promise<void> {
   const displayVal = displayValue ?? value;
   const userMessage: Message = {role: 'user', text: displayVal};
@@ -218,28 +226,34 @@ export async function runAgentTurn(
   };
 
   try {
-    const m = await model();
-    if (!m) {
+    const runtime = await modelWithConfig(session ? {cwd: session.cwd} : undefined);
+    if (!runtime.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
       return;
     }
-    const activeModel = m;
+    const activeModel = runtime.model;
+    const providerSettings = providerRequestSettings(runtime.config);
     const skillRegistry = await loadSkillRegistry();
-    const subagentTool = createSubagentTool({model: activeModel, contextFiles});
+    const subagentTool = createSubagentTool({model: activeModel, contextFiles, session});
     const availableTools = {...hazeTools, subagent: subagentTool, ...buildSkillTools(skillRegistry)};
     const goal = createSessionGoal(value);
+    callbacks.setWorkState?.(goal.workState);
     callbacks.setGoalStatus?.(formatGoalStatus(goal));
     const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
     const likelyPlanImplementationRequest = isPlanImplementationRequest(value);
     const likelyActionRequest = isActionRequest(value);
     const likelyValidationRequest = isValidationRequest(value);
     const planImplementationGuidance = 'Haze internal guidance for implementing plan files. The original user request remains authoritative. First identify the concrete required checklist items and compare them with the current files. Do not edit source or tests when the required behavior is already present. Implement the smallest clearly required phase or required items, skip optional/design-question items unless explicitly requested, add tests rather than exploratory one-off scripts where possible, prefer file tools for source changes, run validation once after code/test edits, then update plan status with file tools if requested. Do not call unresolved optional scope a blocker.';
-    const requestMessages: ModelMessage[] = retryingExistingRequest
-      ? callbacks.getConversation()
-      : likelyPlanImplementationRequest
-        ? [...callbacks.getConversation(), {role: 'user', content: value}, {role: 'user', content: planImplementationGuidance}]
-        : [...callbacks.getConversation(), {role: 'user', content: value}];
-    callbacks.setConversation(requestMessages);
+    const durableRequestMessages: ModelMessage[] = retryingExistingRequest
+      ? stripSyntheticControls(callbacks.getConversation())
+      : [...stripSyntheticControls(callbacks.getConversation()), {role: 'user', content: value}];
+    let requestMessages = likelyPlanImplementationRequest
+      ? withSyntheticControl(durableRequestMessages, planImplementationGuidance)
+      : durableRequestMessages;
+    if (estimateValueTokens(requestMessages) > ACTIVE_CONTEXT_TOKEN_BUDGET) {
+      requestMessages = compactModelMessages(requestMessages, {tokenBudget: ACTIVE_CONTEXT_TOKEN_BUDGET, workState: goal.workState}).messages;
+    }
+    callbacks.setConversation(stripSyntheticControls(requestMessages));
     resetIdleTimer();
     let currentAssistantId = `assistant-${Date.now()}`;
     let assistantStarted = false;
@@ -419,6 +433,7 @@ export async function runAgentTurn(
       const duplicateSkipped = isDuplicateSkippedOutput(event.output);
       const ok = toolOutputOk(event.output, event.success);
       observeGoalToolEvent(goal, {...event.toolCall, success: ok, output: event.output, duplicateSkipped});
+      callbacks.setWorkState?.(goal.workState);
       callbacks.setGoalStatus?.(formatGoalStatus(goal));
       if (!ok && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolCall.toolName)) {
         editFileFailed = true;
@@ -453,20 +468,22 @@ export async function runAgentTurn(
       let responseText = '';
       let continuationToolCalls = 0;
       let followUpStreamError: unknown;
-      const continuationMessages: ModelMessage[] = [
-        ...messages,
-        {role: 'user', content: prompt},
-      ];
-      const followUpSystemPrompt = buildSystemPrompt(contextFiles);
-      const followUpInputBreakdown = estimateInputBreakdown({system: followUpSystemPrompt, messages: continuationMessages, tools: availableTools});
-      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: `continuation:${reason}`, system: followUpSystemPrompt, messages: continuationMessages, tools: Object.keys(availableTools)});
+      const prunedMessages = compactToolHistory(stripSyntheticControls(messages)).messages;
+      const compactedMessages = estimateValueTokens(prunedMessages) > ACTIVE_CONTEXT_TOKEN_BUDGET
+        ? compactModelMessages(prunedMessages, {tokenBudget: ACTIVE_CONTEXT_TOKEN_BUDGET, workState: goal.workState}).messages
+        : prunedMessages;
+      const continuationMessages = withSyntheticControl(compactedMessages, `${prompt}\n\n${workStatePrompt(goal.workState)}`);
+      const followUpSystemPrompt = buildSystemPrompt(contextFiles, session);
+      const followUpTools = allowTools ? availableTools : undefined;
+      const followUpInputBreakdown = estimateInputBreakdown({system: followUpSystemPrompt, contextFiles, messages: continuationMessages, tools: followUpTools});
+      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: `continuation:${reason}`, system: followUpSystemPrompt, messages: continuationMessages, tools: followUpTools ? Object.keys(followUpTools) : [], context: followUpInputBreakdown.breakdown});
       const followUp = streamText({
         model: activeModel,
         maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
         system: followUpSystemPrompt,
         messages: continuationMessages,
-        tools: availableTools,
-        toolChoice: allowTools ? 'auto' : 'none',
+        ...toolRequestSettings(availableTools, allowTools),
+        ...providerSettings,
         stopWhen: stepCountIs(FOLLOW_UP_STEP_LIMIT),
         abortSignal: abortController.signal,
         experimental_context: toolExecutionContext,
@@ -475,28 +492,19 @@ export async function runAgentTurn(
           if (continuationToolCalls >= FOLLOW_UP_TOOL_CALL_LIMIT || toolOnlyStepCount(steps) >= FOLLOW_UP_TOOL_ONLY_STEP_LIMIT) {
             return {
               toolChoice: 'none',
-              messages: [
-                ...messages,
-                {role: 'user' as const, content: toolLoopBudgetPrompt()},
-              ],
+              messages: withSyntheticControl(messages, toolLoopBudgetPrompt()),
             };
           }
           if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
             return {
               toolChoice: 'none',
-              messages: [
-                ...messages,
-                {role: 'user' as const, content: 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'},
-              ],
+              messages: withSyntheticControl(messages, 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'),
             };
           }
           if (editRecoveryPath && !editRecoveryReadSatisfied) {
             return {
               activeTools: ['readFile'] as Array<keyof typeof availableTools>,
-              messages: [
-                ...messages,
-                {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
-              ],
+              messages: withSyntheticControl(messages, `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`),
             };
           }
           if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
@@ -514,13 +522,17 @@ export async function runAgentTurn(
             systemPrompt: followUpInputBreakdown.systemPrompt,
             messages: followUpInputBreakdown.messages,
             toolSchemas: followUpInputBreakdown.toolSchemas,
-            outputEstimate: estimateTokens(JSON.stringify(event.response.messages)),
+            outputEstimate: estimateValueTokens(event.response.messages),
             cacheReadTokens: providerUsage.cacheReadTokens,
             cacheWriteTokens: providerUsage.cacheWriteTokens,
+            noCacheTokens: providerUsage.noCacheTokens,
             reasoningTokens: providerUsage.reasoningTokens,
+            logicalInputEstimate: followUpInputBreakdown.logicalInputEstimate,
+            effectiveNonCachedInput: effectiveNonCachedInput(providerUsage.inputTokens, providerUsage.cacheReadTokens),
           });
-          callbacks.setConversation([...continuationMessages, ...event.response.messages]);
-          callbacks.debugLog(`conversation updated to ${continuationMessages.length + event.response.messages.length} messages after follow-up`);
+          const nextConversation = [...stripSyntheticControls(compactedMessages), ...event.response.messages];
+          callbacks.setConversation(nextConversation);
+          callbacks.debugLog(`conversation updated to ${nextConversation.length} messages after follow-up`);
         },
         experimental_onToolCallStart({toolCall}) {
           sawToolCall = true;
@@ -534,7 +546,7 @@ export async function runAgentTurn(
           recordToolFinish(event);
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: `continuation:${reason}`, toolResult: {id: event.toolCall.toolCallId, name: event.toolCall.toolName, success: event.success, output: event.output, error: event.error, durationMs: event.durationMs}});
           const nestedTokens = subagentTokenEstimate(event.output);
-          if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+          if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input});
           const summary = toolResultSummary(event);
           toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
           recordToolDisplayFinish(event);
@@ -573,15 +585,16 @@ export async function runAgentTurn(
 
     let streamError: unknown;
     let lastFinishReason: string | undefined;
-    const mainSystemPrompt = buildSystemPrompt(contextFiles);
-    const mainInputBreakdown = estimateInputBreakdown({system: mainSystemPrompt, messages: requestMessages, tools: availableTools});
-    logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: mainSystemPrompt, messages: requestMessages, tools: Object.keys(availableTools)});
+    const mainSystemPrompt = buildSystemPrompt(contextFiles, session);
+    const mainInputBreakdown = estimateInputBreakdown({system: mainSystemPrompt, contextFiles, messages: requestMessages, tools: availableTools});
+    logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: mainSystemPrompt, messages: requestMessages, tools: Object.keys(availableTools), context: mainInputBreakdown.breakdown});
     const result = streamText({
       model: activeModel,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
       system: mainSystemPrompt,
       messages: requestMessages,
       tools: availableTools,
+      ...providerSettings,
       stopWhen: stepCountIs(MAIN_STEP_LIMIT),
       abortSignal: abortController.signal,
       experimental_context: toolExecutionContext,
@@ -598,19 +611,13 @@ export async function runAgentTurn(
         if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
           return {
             toolChoice: 'none',
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'},
-            ],
+            messages: withSyntheticControl(messages, 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'),
           };
         }
         if (editRecoveryPath && !editRecoveryReadSatisfied) {
           return {
             activeTools: ['readFile'] as Array<keyof typeof availableTools>,
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`},
-            ],
+            messages: withSyntheticControl(messages, `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`),
           };
         }
         if (repeatedToolCall) {
@@ -618,29 +625,20 @@ export async function runAgentTurn(
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
           return {
             activeTools,
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool. If this is an action request and no file change has been made yet, continue with edit/write tools rather than summarizing.`},
-            ],
+            messages: withSyntheticControl(messages, `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool. If this is an action request and no file change has been made yet, continue with edit/write tools rather than summarizing.`),
           };
         }
         if (likelyActionRequest && !mutatingToolSucceeded && consecutiveToolOnlySteps >= 3 && toolCalls.length < MAIN_TOOL_CALL_LIMIT) {
           callbacks.debugLog('nudging action request toward mutation after read-only steps');
           return {
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: 'You have inspected enough for now. This is an action request; make the requested change with editFile, replaceLines, or writeFile instead of saying tools are unavailable or summarizing.'},
-            ],
+            messages: withSyntheticControl(messages, 'You have inspected enough for now. This is an action request; make the requested change with editFile, replaceLines, or writeFile instead of saying tools are unavailable or summarizing.'),
           };
         }
         if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || consecutiveToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
           return {
             toolChoice: 'none',
-            messages: [
-              ...messages,
-              {role: 'user' as const, content: toolLoopBudgetPrompt()},
-            ],
+            messages: withSyntheticControl(messages, toolLoopBudgetPrompt()),
           };
         }
         if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
@@ -653,7 +651,7 @@ export async function runAgentTurn(
         const stepCacheRead = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
         const stepCacheWrite = usage?.inputTokenDetails?.cacheWriteTokens ?? 0;
         const stepReasoning = usage?.outputTokenDetails?.reasoningTokens ?? 0;
-        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepInputTokens, outputTokens: stepOutputTokens, cacheReadTokens: stepCacheRead || undefined, cacheWriteTokens: stepCacheWrite || undefined, reasoningTokens: stepReasoning || undefined}});
+        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepInputTokens, outputTokens: stepOutputTokens, cacheReadTokens: stepCacheRead || undefined, cacheWriteTokens: stepCacheWrite || undefined, noCacheTokens: effectiveNonCachedInput(stepInputTokens, stepCacheRead), reasoningTokens: stepReasoning || undefined}});
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}; usage=${stepInputTokens != null ? `in=${stepInputTokens} out=${stepOutputTokens}` : 'not reported'}${stepCacheRead ? ` cached=${stepCacheRead}` : ''}${stepCacheWrite ? ` cache_write=${stepCacheWrite}` : ''}${stepReasoning ? ` reasoning=${stepReasoning}` : ''}`);
       },
       onFinish(event) {
@@ -664,12 +662,15 @@ export async function runAgentTurn(
           systemPrompt: mainInputBreakdown.systemPrompt,
           messages: mainInputBreakdown.messages,
           toolSchemas: mainInputBreakdown.toolSchemas,
-          outputEstimate: estimateTokens(JSON.stringify(event.response.messages)),
+          outputEstimate: estimateValueTokens(event.response.messages),
           cacheReadTokens: providerUsage.cacheReadTokens,
           cacheWriteTokens: providerUsage.cacheWriteTokens,
+          noCacheTokens: providerUsage.noCacheTokens,
           reasoningTokens: providerUsage.reasoningTokens,
+          logicalInputEstimate: mainInputBreakdown.logicalInputEstimate,
+          effectiveNonCachedInput: effectiveNonCachedInput(providerUsage.inputTokens, providerUsage.cacheReadTokens),
         });
-        const nextConversation = [...requestMessages, ...event.response.messages];
+        const nextConversation = [...stripSyntheticControls(requestMessages), ...event.response.messages];
         callbacks.setConversation(nextConversation);
         callbacks.debugLog(`conversation updated to ${nextConversation.length} messages`);
       },
@@ -686,7 +687,7 @@ export async function runAgentTurn(
         recordToolFinish(event);
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: event.toolCall.toolCallId, name: event.toolCall.toolName, success: event.success, output: event.output, error: event.error, durationMs: event.durationMs}});
         const nestedTokens = subagentTokenEstimate(event.output);
-        if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+        if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input});
         toolSummaries.push(`${event.toolCall.toolName}: ${summary}`);
         recordToolDisplayFinish(event);
         if (!isDuplicateSkippedOutput(event.output)) toolEpoch += 1;
@@ -733,7 +734,7 @@ export async function runAgentTurn(
     let completedConversation = callbacks.getConversation();
     try {
       const response = await result.response;
-      completedConversation = [...requestMessages, ...response.messages];
+      completedConversation = [...stripSyntheticControls(requestMessages), ...response.messages];
       callbacks.setConversation(completedConversation);
     } catch (error) {
       throw streamError ?? error;
@@ -773,14 +774,21 @@ export async function runAgentTurn(
     async function runCompletionLoop(seedConversation: ModelMessage[], seedText: string) {
       let loopConversation = seedConversation;
       let latestText = seedText;
+      let noProgressSlices = 0;
       while ((decision.needsActionContinuation || decision.needsValidationContinuation) && completionContinuationCount < maxCompletionContinuations) {
         completionContinuationCount += 1;
+        const revisionBefore = goal.workState.revision;
         const prompt = decision.continuationPrompt
           ?? (looksIncomplete(latestText) ? postContinuationPrompt() : 'Continue the same user goal until it is complete, blocked by a concrete issue, or needs a user decision. Focus on the concrete blocker, not a generic plan.');
         const continuation = await streamAssistantResponse(loopConversation, `completion gate ${completionContinuationCount}`, prompt, true);
         loopConversation = callbacks.getConversation();
         if (continuation.text) latestText = continuation.text;
         decision = decideCompletion(latestText);
+        noProgressSlices = goal.workState.revision === revisionBefore ? noProgressSlices + 1 : 0;
+        if (noProgressSlices >= 2) break;
+      }
+      if ((decision.needsActionContinuation || decision.needsValidationContinuation) && noProgressSlices >= 2) {
+        callbacks.addMessage({role: 'assistant', text: 'Status: partial. Two continuation slices made no tool progress; the latest work state and blocker evidence were preserved.'});
       }
       if ((decision.needsActionContinuation || decision.needsValidationContinuation) && completionContinuationCount >= maxCompletionContinuations) {
         callbacks.addMessage({role: 'assistant', text: 'Stopped after the autonomous safety limit. The current goal may still need work; ask me to continue and I will resume from the latest tool results.'});
@@ -838,7 +846,7 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-          await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true);
+          await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session);
           return;
         }
         callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
@@ -850,7 +858,7 @@ export async function runAgentTurn(
         callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
         await abortableDelay(delay, abortController.signal);
         if (abortController.signal.aborted) return;
-        await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered);
+        await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session);
         return;
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});

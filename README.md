@@ -151,7 +151,7 @@ Installed skills appear as slash commands like:
 /code-review-diff-main
 ```
 
-They are also exposed to the model as `skill_*` tools. The skill does not execute code; it gives Haze a workflow to follow.
+They are also available through one `skill` catalog tool. Haze loads one workflow body first and fetches large references only when needed. Skills provide instructions; they do not execute code.
 
 This is the trick: do normal work, notice friction, create a skill, keep going. Your workflow adapts instead of asking you to adapt to the tool. Rude, but in a good way.
 
@@ -194,15 +194,17 @@ haze --no-session  # run without durable session storage
 Haze exposes a deliberately small toolset:
 
 - `listFiles` — structured discovery, recursive with cursor pagination when needed.
-- `readFile` — read UTF-8 files with optional line ranges.
-- `grep` — ripgrep-backed regex search with path, glob, context-line, case, and result-limit controls.
+- `readFile` — read numbered UTF-8 lines in bounded pages, with `nextOffset` when more remain.
+- `grep` — structured ripgrep search with a true global result cap.
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
-- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with command classification metadata.
-- `skill_*` — load Markdown skill instructions on demand.
+- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with compact validation output.
+- `readToolOutput` — page through full output omitted from an oversized tool result.
+- `writeTasks` — replace the task list at meaningful phase changes.
+- `skill` — load one installed Markdown workflow or one of its references.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints instead of mystery stack traces. Bash validation commands can return parsed summaries with failed files, failed tests, diagnostics, and suggested next steps.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints. Large bash output is kept behind an in-memory handle so later model calls carry only a bounded head/tail or validation summary.
 
 ## Subagents
 
@@ -212,7 +214,9 @@ Use them for parallel investigation across separate areas of a codebase. Do not 
 
 ## Context files
 
-Haze saves durable workspace sessions in `~/.haze/sessions`. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context while keeping recent messages.
+Haze saves durable workspace sessions in `~/.haze/sessions`. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+
+Long turns use bounded tool slices. Older successful tool results are compacted while failures and recent evidence remain verbatim, synthetic Haze control nudges are not persisted as user requests, and token-pressure compaction preserves the structured work state.
 
 Haze loads project instructions from:
 
@@ -241,7 +245,10 @@ npm run typecheck
 npm test
 npm run lint
 npm run build
+npm run context:report
 ```
+
+`npm run context:report` prints estimated system, project-context, and tool-schema tokens without reading `~/.haze`. Pass explicit context-file paths, or use `npm run context:report -- --trace tests/fixtures/agent-traces/long-workflow.json` for offline trace accounting.
 
 Package check:
 

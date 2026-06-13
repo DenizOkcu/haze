@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {ModelMessage} from 'ai';
+import type {ContextBreakdown} from '../agent/contextBudget.js';
 
 export interface LlmLogEntry {
   /** ISO timestamp. */
@@ -18,6 +19,8 @@ export interface LlmLogEntry {
   messages?: ModelMessage[];
   /** Tool names available (request entries only). */
   tools?: string[];
+  /** Size-only request composition metrics. */
+  context?: ContextBreakdown;
   /** Model response text. */
   text?: string;
   /** Finish reason from the model. */
@@ -28,7 +31,10 @@ export interface LlmLogEntry {
     outputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
+    noCacheTokens?: number;
     reasoningTokens?: number;
+    logicalInputEstimate?: number;
+    effectiveNonCachedInput?: number;
   };
   /** Tool call details. */
   toolCall?: {

@@ -3,11 +3,13 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
+import type {WorkState} from '../agent/workState.js';
 
 export type SessionEntry =
   | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string}
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
+  | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string};
 
 export interface HazeSession {
@@ -74,6 +76,12 @@ export async function restoreConversation(session: HazeSession): Promise<ModelMe
   const entries = await readSessionEntries(session);
   const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'conversation_snapshot'}> => entry.type === 'conversation_snapshot');
   return snapshots.at(-1)?.messages ?? [];
+}
+
+export async function restoreWorkState(session: HazeSession): Promise<WorkState | undefined> {
+  const entries = await readSessionEntries(session);
+  const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'work_state_snapshot'}> => entry.type === 'work_state_snapshot');
+  return snapshots.at(-1)?.state;
 }
 
 export function formatSession(session: HazeSession) {

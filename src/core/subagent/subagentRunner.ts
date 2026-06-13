@@ -1,22 +1,10 @@
 import {streamText, stepCountIs, tool, type ToolSet} from 'ai';
 import {z} from 'zod';
-import {buildSystemPrompt} from '../../llm/systemPrompt.js';
+import {buildSubagentPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
-const SUBAGENT_SYSTEM_PROMPT = `You are a focused subagent for a professional developer workflow. Complete the assigned task autonomously using the available tools, then return a clear summary.
-
-Rules:
-- Use whatever tools you need within the assigned scope. You have full access to file tools and bash.
-- If the task requires creating or modifying files, do it directly with file tools or an efficient non-destructive shell command; do not ask for permission for ordinary edits.
-- Assume expert users understand what they asked for. Do not ask for command confirmations; run relevant commands directly.
-- Destructive and ordinary professional workflows should proceed without extra ceremony when they are relevant to the assigned task.
-- If a file edit tool fails, read the exact file again and retry once with current content or line numbers.
-- After completing the task, summarize what you did, what files you created or changed, validation run, and important findings.
-- If you cannot complete the task, explain exactly what blocked you and what you tried.
-- Your summary is all the parent agent will see. Be specific: include file paths, function names, command results, and concrete next steps.`;
-
-const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'] as const;
+const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile'] as const;
 const STEP_LIMIT = 25;
 const MAX_SUMMARY = 4000;
 const TOOL_ONLY_LIMIT = 12;
@@ -58,6 +46,7 @@ export async function runSubagent(
     allowedTools?: readonly string[];
     maxSteps?: number;
     abortSignal?: AbortSignal;
+    session?: PromptSession;
   },
 ): Promise<SubagentResult> {
   const start = performance.now();
@@ -80,7 +69,7 @@ export async function runSubagent(
     const result = streamText({
       model: options.model,
       maxOutputTokens: 4096,
-      system: `${SUBAGENT_SYSTEM_PROMPT}\n\n${buildSystemPrompt(options.contextFiles)}`,
+      system: buildSubagentPrompt(options.contextFiles, options.session),
       messages: [{role: 'user' as const, content: task}],
       tools: scopedTools,
       stopWhen: stepCountIs(maxSteps),
@@ -148,12 +137,13 @@ export async function runSubagent(
 export function createSubagentTool(options: {
   model: Parameters<typeof streamText>[0]['model'];
   contextFiles: ContextFile[];
+  session?: PromptSession;
 }) {
   return tool({
     description: 'Spawn subagents to run independent tasks in parallel. ONLY use when a request clearly decomposes into 2+ independent subtasks that can run concurrently — spawn all of them in one step. Do NOT use for single tasks, sequential work, or anything that benefits from conversation context; do those directly instead. Subagents have no conversation history and return a summary.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Clear, specific task for the subagent to complete.'),
-      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'editFile', 'replaceLines', 'writeFile'])).optional().describe('Tools the subagent can use. Defaults to all tools. Restrict to a subset only when the subagent should be read-only.'),
+      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile'])).optional().describe('Tools the subagent can use. Defaults to all tools.'),
       maxSteps: z.number().int().positive().max(50).optional().describe('Maximum tool-call rounds. Default 25.'),
     }),
     execute: async ({task, tools, maxSteps}, context) => runSubagent(task, {
@@ -162,6 +152,7 @@ export function createSubagentTool(options: {
       allowedTools: tools,
       maxSteps,
       abortSignal: context.abortSignal,
+      session: options.session,
     }),
   });
 }

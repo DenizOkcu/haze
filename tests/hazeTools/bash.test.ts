@@ -52,4 +52,13 @@ describe('bash tool safety', () => {
     const result = await bash('node --check public/app.js');
     expect(result.ok).toBe(true);
   });
+
+  it('stores oversized output behind a retrievable handle', async () => {
+    const result = await bash("node -e \"process.stdout.write('x'.repeat(20000))\"");
+    expect(result.stdout.truncated).toBe(true);
+    expect(result.stdout.handle).toMatch(/^output-/);
+    const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000}, {abortSignal: undefined});
+    expect(page.content).toHaveLength(1000);
+    expect(page.nextOffset).toBe(1000);
+  });
 });

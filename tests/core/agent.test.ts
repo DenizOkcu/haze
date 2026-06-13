@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
 import {compactModelMessages, modelMessageText} from '../../src/core/agent/compaction.js';
+import {createWorkState} from '../../src/core/agent/workState.js';
 import {isContextOverflowError, isRetryableModelError} from '../../src/core/agent/errors.js';
 
 function msg(role: 'user' | 'assistant' | 'system', content: string): ModelMessage {
@@ -42,9 +43,39 @@ describe('agent compaction', () => {
     expect(result.summary).toContain('keep validation details');
   });
 
+  it('uses the token budget for the recent tail and preserves structured work state', () => {
+    const state = createWorkState('finish the implementation', 'implementation', ['tests pass']);
+    state.files.push({path: 'src/index.ts', action: 'modified'});
+    state.nextAction = 'Run npm test.';
+    const messages = [
+      msg('user', 'old '.repeat(200)),
+      msg('assistant', 'middle '.repeat(200)),
+      msg('user', 'recent request'),
+      msg('assistant', 'recent answer'),
+    ];
+    const result = compactModelMessages(messages, {tokenBudget: 20, workState: state});
+    expect(result.compacted).toBe(true);
+    expect(result.keptCount).toBeGreaterThan(0);
+    expect(result.messages.at(-1)).toEqual(messages.at(-1));
+    expect(result.summary).toContain('<work_state>');
+    expect(result.summary).toContain('src/index.ts');
+    expect(result.summary).toContain('Run npm test.');
+  });
+
   it('extracts text from array content safely', () => {
     const message = {role: 'user', content: [{type: 'text', text: 'hello'}, {type: 'image', image: 'ignored'}]} as unknown as ModelMessage;
     expect(modelMessageText(message)).toBe('hello');
+  });
+
+  it('does not split a retained tool result from its preceding tool call', () => {
+    const messages = [
+      msg('user', 'old request '.repeat(100)),
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'call-1', toolName: 'readFile', input: {path: 'a.ts'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'call-1', toolName: 'readFile', output: {type: 'json', value: {ok: true}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactModelMessages(messages, {tokenBudget: 20});
+    expect(result.compacted).toBe(true);
+    expect(result.messages.slice(1)).toEqual(messages.slice(1));
   });
 });
 

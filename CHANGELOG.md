@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added request-level context accounting, cache/no-cache usage metrics, a debug token breakdown, and an offline `context:report` command.
+- Bounded `readFile`, structured and globally capped `grep`, and compacted large bash output behind paginated `readToolOutput` handles.
+- Added structured `WorkState` snapshots, token-aware compaction, conservative old-tool-result pruning, bounded continuation slices, and no-progress termination for long agent workflows.
+- Made Haze control nudges ephemeral, omitted tool schemas from text-only follow-ups, and replaced duplicated subagent prompting with a concise dedicated prompt.
+- Consolidated installed workflows into one progressive `skill` catalog tool and added provider capability-gated cache keys, sticky session hints, and low-verbosity options.
+- Shortened the model operating contract and final-response guidance while preserving edit recovery, validation evidence, and blocked/partial reporting.
+
 ## 0.3.0 - 2026-06-10
 
 - Redesigned docs site with cleaner layout, improved typography, better mobile responsiveness, scroll-reveal animations, skip-link accessibility, and refreshed content structure.

@@ -2,6 +2,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
+import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/contextFiles.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {Mode} from './chat.js';
@@ -373,14 +374,29 @@ export async function handleSlashCommand(
   if (value === '/settings') {
     const providers = configuredProviders(ctx.settings);
     const activeProvider = providers.find(provider => provider.name === ctx.settings.provider) ?? providers[0];
-    ctx.addSystemMessage([
+    const contextDiagnostics = contextFileDiagnostics(ctx.contextFiles);
+    const contextTokens = contextDiagnostics.reduce((sum, file) => sum + file.estimatedTokens, 0);
+    const summary = summarizeContextDiagnostics(ctx.contextFiles);
+    const notes: string[] = [];
+    if (summary.exceedsBudget === true && summary.windowSize) {
+      const sharePct = Math.round((summary.budgetShare ?? 0) * 100);
+      const thresholdPct = Math.round(summary.budgetThreshold * 100);
+      notes.push(`project context exceeds ${thresholdPct}% budget (${sharePct}% of ${Math.round(summary.windowSize / 1000)}k window)`);
+    }
+    if (summary.duplicateGroups.length > 0) {
+      const duplicateTotal = summary.duplicateFileCount;
+      notes.push(`${summary.duplicateGroups.length} duplicate group${summary.duplicateGroups.length === 1 ? '' : 's'} (${duplicateTotal} file${duplicateTotal === 1 ? '' : 's'} with identical content)`);
+    }
+    const lines = [
       `Provider: ${activeProvider?.name ?? 'not configured'}`,
       `Model: ${ctx.settings.model ?? 'not set'}`,
       `Base URL: ${activeProvider?.url ?? ctx.settings.baseURL ?? 'not configured'}`,
       `API key: ${activeProvider && providerHasKey(ctx.settings, activeProvider) ? 'saved' : 'missing'}`,
       `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
-      `Context files: ${ctx.contextFiles.length ? ctx.contextFiles.map(file => file.path).join(', ') : 'none'}`,
-    ].join(' | '));
+      `Context files: ${ctx.contextFiles.length ? `${ctx.contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
+    ];
+    if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);
+    ctx.addSystemMessage(lines.join(' | '));
     return 'handled';
   }
   if (value === '/provider') {

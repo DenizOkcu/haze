@@ -2,7 +2,7 @@
 
 Project-specific instructions for Haze (and other coding agents) working in this repository.
 
-Last comprehensive analysis: 2026-06-08.
+Last comprehensive analysis: 2026-06-13.
 
 ## Project overview
 
@@ -36,6 +36,7 @@ npm test               # vitest run
 npm run test:watch     # vitest watch mode
 npm run lint           # eslint src/
 npm run lint:fix       # eslint src/ --fix
+npm run context:report # estimated prompt/tool/context token breakdown
 
 # Build / package
 npm run clean          # remove dist/
@@ -69,14 +70,14 @@ Notes:
     - `paths.ts` defines `~/.haze` and global skills directory.
     - `settings.ts` reads/writes `~/.haze/settings.json` and preserves legacy OpenRouter settings.
     - `providers.ts` resolves active provider/model, provider defaults, model selectors, saved keys.
-    - `contextFiles.ts` loads `~/.haze/AGENTS.md`, `~/.haze/CLAUDE.md`, then ancestor `AGENTS.md`/`CLAUDE.md` files from filesystem root to cwd; each file is capped at 20k chars.
+    - `contextFiles.ts` loads `~/.haze/AGENTS.md`, `~/.haze/CLAUDE.md`, then ancestor `AGENTS.md`/`CLAUDE.md` files from filesystem root to cwd; each file is capped at 20k chars and has size/hash diagnostics.
     - `inputHistory.ts` persists input history under `~/.haze/history`.
   - `llm/` — model client, prompts, and tool definitions.
     - `client.ts` builds an OpenAI-compatible chat model from env vars or settings.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
-    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `writeTasks`.
+    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `writeTasks`.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
-  - `core/agent/` — model-message compaction, agent event helpers, and retry/context-overflow error helpers.
+  - `core/agent/` — context accounting, request assembly, bounded tool-output storage, structured work state, model-message compaction, agent events, and retry/context-overflow helpers.
   - `core/goal/` — request intent classification, session-goal phase tracking, and completion/continuation decisions.
   - `core/safety/bashClassifier.ts` — bash risk/trait classifier; classification is metadata, not a confirmation gate.
   - `core/validation/outputParser.ts` — parses common test/typecheck/lint/build output into compact validation summaries.
@@ -86,7 +87,7 @@ Notes:
   - `skills/` — Markdown skill system.
     - `SkillLoader.ts` parses `SKILL.md` YAML frontmatter, validates names/descriptions, and loads relative referenced files (max 50k bytes each, no escaping skill dir).
     - `SkillRegistry.ts` loads global skills from `~/.haze/skills`.
-    - `skillTools.ts` exposes each skill as a `skill_*` tool returning instructions and references.
+    - `skillTools.ts` exposes one `skill` catalog tool; it returns instructions first and one referenced file only on demand.
     - `builder/SkillBuilder.ts` creates skills from natural-language descriptions, using a model when configured and a deterministic fallback otherwise.
     - `types.ts` defines loaded skill and registry types.
   - `ui/` — reusable Ink components (`Header`, `TextInput`, `MarkdownText`, `ErrorView`) and `theme.ts`.
@@ -117,12 +118,13 @@ Notes:
 Built-in tools in `src/llm/hazeTools.ts` are intentionally small and structured:
 
 - `listFiles` — workspace-confined listing, recursive option, cursor pagination, `.gitignore` aware.
-- `readFile` — UTF-8 file read with optional 1-based line offset/limit; returns line-numbered text.
-- `grep` — ripgrep-backed regex search using `@vscode/ripgrep`, optional path/glob/context/case/max matches.
+- `readFile` — bounded UTF-8 read with optional 1-based offset/limit; returns one numbered `content` field plus pagination metadata.
+- `grep` — ripgrep-backed structured regex search with optional path/glob/context/case and a global match cap.
 - `editFile` — unique text replacements; tolerates readFile line-number prefixes and trailing-whitespace-only differences only when still unique; multiple replacements for one file should be in one call.
 - `replaceLines` — 1-based inclusive line range replacement; useful when exact text is ambiguous or stale.
 - `writeFile` — creates files and parents; refuses to overwrite existing files unless `overwriteExisting=true`.
-- `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, output truncation, and validation summaries when recognized.
+- `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, compact validation summaries, and retrievable handles for oversized output.
+- `readToolOutput` — retrieves an omitted output page by process-scoped handle; handles are cleared for new sessions.
 - `writeTasks` — full-replacement task list for tracking multi-step work. Model passes the complete list every call; IDs and timestamps are generated server-side. Persists to `.haze/tasks.json` in the workspace.
 
 Tool constraints:
@@ -130,7 +132,7 @@ Tool constraints:
 - File tools are restricted to `process.cwd()` via `resolveWorkspacePath`.
 - File tools respect `.gitignore` by default; use `allowIgnored`/`includeIgnored` only when explicitly needed.
 - `node_modules` and `.git` are skipped by directory walking.
-- Tool output is truncated at 50k chars.
+- Direct file output is capped at 50k chars; command output is compacted near 12k chars and remains retrievable by handle.
 - Repeated read-only calls are deduplicated when no mutation occurred; after failed mutations, the model is forced toward a fresh read before retrying.
 
 ### Task tracking
@@ -145,9 +147,11 @@ Tool constraints:
 ### Sessions, context, and compaction
 
 - Durable sessions are JSONL files under `~/.haze/sessions/<cwd-hash>/<session-id>.jsonl`.
-- Sessions store headers, UI messages, conversation snapshots, and events.
-- `haze --continue` and `/resume` restore the latest saved conversation snapshot for the workspace.
-- `/compact [instructions]` uses `core/agent/compaction.ts` to summarize older model context while keeping recent messages.
+- Sessions store headers, UI messages, conversation snapshots, structured work-state snapshots, and events.
+- `haze --continue` and `/resume` restore the latest conversation and work-state snapshots for the workspace.
+- `/compact [instructions]` uses token-aware compaction and embeds exact structured work state with the recent message window.
+- Runtime control nudges use `<haze_control>` messages for one request only and must not be persisted as user conversation.
+- Older successful tool results may be reduced to protocol-safe summaries; recent results and failures remain verbatim.
 - Context files are loaded at startup and on refresh; root `AGENTS.md` is injected into the system prompt, so keep this file accurate and concise enough to fit context.
 
 ### Skills
@@ -158,7 +162,7 @@ Tool constraints:
 - Skill bodies are instructions only; they do not execute code by themselves.
 - Relative references in a skill body are loaded if they are Markdown links or plain file-looking paths; references must remain inside the skill directory and be <=50k bytes.
 - Slash commands include `/create-skill`, `/list-skills`, `/skill-info`, `/validate-skill`, `/remove-skill <name> --yes`; legacy `/skill ...` and `/skills ...` aliases still exist.
-- Skill tools are named `skill_<sanitized-name>` and return the skill body plus referenced content.
+- The model-facing `skill` tool takes an exact skill name. It returns the body and reference paths first; a later call can load one reference.
 
 ### Subagents
 

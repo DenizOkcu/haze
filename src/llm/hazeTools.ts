@@ -12,8 +12,12 @@ import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../uti
 import {classifyBashCommand, isValidationClassification} from '../core/safety/bashClassifier.js';
 import {parseValidationOutput} from '../core/validation/outputParser.js';
 import type {ToolDiffLine, ToolFailureReasonCode} from './toolResultTypes.js';
+import {readToolOutput as readStoredToolOutput, storeToolOutput} from '../core/agent/toolOutputStore.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
+const DEFAULT_READ_LINES = 300;
+const COMPACT_COMMAND_CHARS = 12_000;
+const SHORT_VALIDATION_CHARS = 2_000;
 const execFile = promisify(execFileCallback);
 
 async function isGitIgnored(absolutePath: string) {
@@ -49,17 +53,17 @@ async function assertNotIgnored(absolutePath: string, inputPath: string, allowIg
   }
 }
 
-function truncate(text: string, maxChars = MAX_OUTPUT_CHARS) {
+function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS) {
   if (text.length <= maxChars) return {text, truncated: false};
+  const handle = storeToolOutput(text);
+  const headChars = Math.floor(maxChars * 0.4);
+  const tailChars = maxChars - headChars;
   return {
-    text: text.slice(0, maxChars),
+    text: `${text.slice(0, headChars)}\n\n[... ${text.length - maxChars} characters omitted; use readToolOutput with handle ${handle} ...]\n\n${text.slice(-tailChars)}`,
     truncated: true,
     omittedChars: text.length - maxChars,
+    handle,
   };
-}
-
-function numberLines(lines: string[], startLine: number) {
-  return lines.map((line, index) => `${String(startLine + index).padStart(4, ' ')} | ${line}`).join('\n');
 }
 
 function stripLineNumberPrefixes(text: string) {
@@ -293,21 +297,15 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   }
 }
 
-const STATUS_ICON: Record<TaskStatus, string> = {
-  pending: '○',
-  in_progress: '◐',
-  completed: '✓',
-};
-
 export const hazeTools = {
   listFiles: tool({
-    description: 'List files and directories in the current workspace. Prefer this over bash ls/find for discovering project structure.',
+    description: 'List workspace files/directories with pagination. Prefer this to bash for discovery.',
     inputSchema: z.object({
       path: z.string().default('.').describe('Directory path relative to the current workspace'),
       recursive: z.boolean().default(false).describe('Whether to list files recursively'),
       maxEntries: z.number().int().positive().max(500).default(100).describe('Maximum number of entries to return'),
       cursor: z.string().optional().describe('Pagination cursor from a previous listFiles result. Continue after that entry.'),
-      includeIgnored: z.boolean().default(false).describe('Include files ignored by .gitignore. Use only when explicitly needed.'),
+      includeIgnored: z.boolean().default(false).describe('Include .gitignored paths only when needed'),
     }),
     execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context, async () => {
       try {
@@ -340,12 +338,12 @@ export const hazeTools = {
   }),
 
   readFile: tool({
-    description: 'Read a UTF-8 text file from the current workspace. Supports optional 1-based line offset and line limit.',
+    description: 'Read numbered lines from a UTF-8 workspace file. Defaults to 300 lines and returns nextOffset when more remain.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       offset: z.number().int().positive().optional().describe('1-based line number to start reading from'),
-      limit: z.number().int().positive().max(2000).optional().describe('Maximum number of lines to return'),
-      allowIgnored: z.boolean().default(false).describe('Read the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
+      limit: z.number().int().positive().max(2000).optional().describe('Maximum lines to return; defaults to 300'),
+      allowIgnored: z.boolean().default(false).describe('Read a .gitignored file only when needed'),
     }),
     execute: async ({path: filePath, offset, limit, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, allowIgnored}, context, async () => {
       try {
@@ -354,16 +352,35 @@ export const hazeTools = {
         const content = await fs.readFile(absolutePath, 'utf8');
         const lines = content.split(/\r?\n/);
         const start = offset == null ? 0 : offset - 1;
-        const end = limit == null ? lines.length : start + limit;
-        const selectedLines = lines.slice(start, end);
-        const selected = selectedLines.join('\n');
+        const requestedEnd = Math.min(lines.length, start + (limit ?? DEFAULT_READ_LINES));
+        const selectedLines = lines.slice(start, requestedEnd);
+        const numberedLines: string[] = [];
+        let includedLines = 0;
+        let lineTruncated = false;
+        for (const [index, line] of selectedLines.entries()) {
+          const prefix = `${String(start + index + 1).padStart(4, ' ')} | `;
+          const remaining = MAX_OUTPUT_CHARS - numberedLines.join('\n').length - (numberedLines.length > 0 ? 1 : 0);
+          if (remaining <= prefix.length) break;
+          if (prefix.length + line.length > remaining) {
+            numberedLines.push(`${prefix}${line.slice(0, Math.max(0, remaining - prefix.length - 26))}[line content truncated]`);
+            includedLines += 1;
+            lineTruncated = true;
+            break;
+          }
+          numberedLines.push(`${prefix}${line}`);
+          includedLines += 1;
+        }
+        const endLine = start + includedLines;
+        const hasMore = endLine < lines.length;
         return {
           path: filePath,
           startLine: start + 1,
-          endLine: Math.min(end, lines.length),
+          endLine,
           totalLines: lines.length,
-          lineNumberedText: numberLines(selectedLines, start + 1),
-          ...truncate(selected),
+          content: numberedLines.join('\n'),
+          nextOffset: hasMore ? endLine + 1 : undefined,
+          truncated: hasMore || lineTruncated,
+          lineTruncated,
         };
       } catch (error) {
         return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);
@@ -372,20 +389,20 @@ export const hazeTools = {
   }),
 
   grep: tool({
-    description: 'Search file contents with a regex pattern using ripgrep. Use this to find symbol definitions, usages, string literals, import paths, and code patterns across the workspace. Much faster and more targeted than reading files one by one with readFile. Respects .gitignore by default.',
+    description: 'Regex search workspace files with structured, globally capped results. Prefer this to reading files one by one.',
     inputSchema: z.object({
-      pattern: z.string().min(1).describe('Regex pattern to search for (PCRE-compatible). Examples: "function handleClick", "import.*from.*react", "class UserService", "TODO|FIXME"'),
-      path: z.string().default('.').describe('Directory or file path to search in, relative to the workspace. Narrow this to focus results.'),
-      glob: z.string().optional().describe('File glob filter. Examples: "*.ts", "*.{js,jsx}", "src/**/*.py". Narrows search to matching files.'),
-      contextLines: z.number().int().nonnegative().max(5).default(2).describe('Number of context lines before and after each match (0-5). Use 0 for compact output, 2-3 for understanding surrounding code.'),
-      maxMatches: z.number().int().positive().max(200).default(50).describe('Maximum number of matches to return. Increase for broad searches, decrease for focused lookups.'),
-      caseInsensitive: z.boolean().default(false).describe('Case-insensitive matching. Useful for symbol names that may vary in casing.'),
+      pattern: z.string().min(1).describe('Regex pattern'),
+      path: z.string().default('.').describe('Workspace-relative file or directory'),
+      glob: z.string().optional().describe('Optional file glob, e.g. "*.ts"'),
+      contextLines: z.number().int().nonnegative().max(5).default(2).describe('Context lines before/after each match'),
+      maxMatches: z.number().int().positive().max(200).default(50).describe('Global match limit'),
+      caseInsensitive: z.boolean().default(false).describe('Ignore case'),
     }),
     execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context, async () => {
       try {
         const absolutePath = resolveWorkspacePath(searchPath);
         const args = [
-          '--no-heading', '--line-number', '--color=never',
+          '--json', '--color=never',
           '--max-count', String(maxMatches),
           '--context', String(contextLines),
         ];
@@ -410,22 +427,61 @@ export const hazeTools = {
           return {pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches: [], totalMatches: 0, truncated: false};
         }
 
-        const {text: output, truncated} = truncate(stdout);
-        const lines = output.split('\n').filter(Boolean);
+        const lines = stdout.split('\n').filter(Boolean);
         const matches: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
-
+        let totalMatches = 0;
+        let returnedMatches = 0;
+        let omittedMatches = 0;
+        let pendingContext: Array<{file: string; line: number; content: string; isContext: true}> = [];
+        let retainFollowingContext = false;
         for (const line of lines) {
-          const match = line.match(/^(\S+?):(\d+)[-:](.*)$/);
-          if (!match) continue;
-          const [, file, lineStr, content] = match;
-          if (file && lineStr && content !== undefined) {
-            const isContext = line.includes('-');
-            const relativePath = path.relative(workspaceRoot(), file);
-            matches.push({file: relativePath, line: Number(lineStr), content, isContext});
+          let event: {type?: string; data?: {path?: {text?: string}; line_number?: number; lines?: {text?: string}}};
+          try { event = JSON.parse(line) as typeof event; } catch { continue; }
+          if (event.type === 'begin' || event.type === 'end') {
+            pendingContext = [];
+            retainFollowingContext = false;
+            continue;
           }
+          if (event.type !== 'match' && event.type !== 'context') continue;
+          const file = event.data?.path?.text;
+          const lineNumber = event.data?.line_number;
+          const content = event.data?.lines?.text?.replace(/\r?\n$/, '');
+          if (!file || lineNumber == null || content == null) continue;
+          const item = {file: path.relative(workspaceRoot(), file), line: lineNumber, content};
+          if (event.type === 'context') {
+            if (retainFollowingContext) {
+              matches.push({...item, isContext: true});
+              continue;
+            }
+            pendingContext.push({...item, isContext: true});
+            if (pendingContext.length > contextLines) pendingContext.shift();
+            continue;
+          }
+          totalMatches += 1;
+          if (returnedMatches >= maxMatches) {
+            omittedMatches += 1;
+            pendingContext = [];
+            retainFollowingContext = false;
+            continue;
+          }
+          matches.push(...pendingContext, {...item, isContext: false});
+          returnedMatches += 1;
+          pendingContext = [];
+          retainFollowingContext = true;
         }
 
-        return {pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches, totalMatches: matches.filter(m => !m.isContext).length, truncated};
+        return {
+          pattern,
+          path: searchPath,
+          glob: glob ?? null,
+          caseInsensitive,
+          matches,
+          totalMatches,
+          returnedMatches,
+          omittedMatches,
+          truncated: omittedMatches > 0,
+          suggestion: omittedMatches > 0 ? 'Narrow the path, glob, or pattern to inspect omitted matches.' : undefined,
+        };
       } catch (error) {
         return structuredToolFailure('grep', error, 'Check that the search path exists and the pattern is valid regex. Try a narrower path or simpler pattern.', searchPath);
       }
@@ -433,7 +489,7 @@ export const hazeTools = {
   }),
 
   replaceLines: tool({
-    description: 'Replace a 1-based inclusive line range in an existing UTF-8 text file. Prefer this after reading a file when exact editFile replacements are ambiguous or fail. If endLine is slightly beyond EOF, it is clamped to the current last line.',
+    description: 'Replace a 1-based inclusive line range. Use after readFile when exact editFile text is ambiguous or stale.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       startLine: z.number().int().positive().describe('First 1-based line number to replace'),
@@ -476,12 +532,12 @@ export const hazeTools = {
   }),
 
   writeFile: tool({
-    description: 'Create a UTF-8 text file in the current workspace. For existing files, prefer editFile/replaceLines; set overwriteExisting=true only for an intentional complete rewrite.',
+    description: 'Create a UTF-8 file. Existing files require explicit full-rewrite approval.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       content: z.string().describe('Complete file contents to write'),
-      overwriteExisting: z.boolean().default(false).describe('Required to overwrite an existing file. Prefer editFile or replaceLines for existing files unless a complete rewrite is intentional.'),
-      allowIgnored: z.boolean().default(false).describe('Write the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
+      overwriteExisting: z.boolean().default(false).describe('Approve intentional full rewrite of an existing file'),
+      allowIgnored: z.boolean().default(false).describe('Write a .gitignored file only when needed'),
     }),
     execute: async ({path: filePath, content, overwriteExisting, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, allowIgnored}, context, async () => {
       try {
@@ -506,14 +562,14 @@ export const hazeTools = {
   }),
 
   editFile: tool({
-    description: 'Edit a text file using unique replacements. Each oldText should match the current file; line-number prefixes from readFile output and trailing-whitespace-only differences are tolerated when the match is still unique. Put multiple edits to the same file in one call. If this fails because text is missing or not unique, read the file again and use replaceLines.',
+    description: 'Apply unique text replacements. Batch same-file edits; reread and use replaceLines if matching fails.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       edits: z.array(z.object({
         oldText: z.string().min(1).describe('Exact text to replace; must appear exactly once'),
         newText: z.string().describe('Replacement text'),
       })).min(1).describe('One or more non-overlapping exact replacements'),
-      allowIgnored: z.boolean().default(false).describe('Edit the file even if it is ignored by .gitignore. Use only when explicitly needed.'),
+      allowIgnored: z.boolean().default(false).describe('Edit a .gitignored file only when needed'),
     }),
     execute: async ({path: filePath, edits, allowIgnored}, context) => runDedupedTool('editFile', {path: filePath, edits, allowIgnored}, context, async () => {
       try {
@@ -568,7 +624,7 @@ export const hazeTools = {
   }),
 
   writeTasks: tool({
-    description: 'Create or replace your task list for multi-step work (3+ steps). Pass the COMPLETE list every time — this REPLACES the entire list. Mark one task in_progress, then completed. Keep at most one in_progress. Leave completed tasks when done — do not clear the list automatically.',
+    description: 'Replace the task list for substantial work. Update at meaningful phase changes, blockers, and completion; pass the complete list.',
     inputSchema: z.object({
       tasks: z.array(z.object({
         title: z.string().max(200).describe('Short task description'),
@@ -599,14 +655,25 @@ export const hazeTools = {
         in_progress: tasks.filter(t => t.status === 'in_progress').length,
         completed: tasks.filter(t => t.status === 'completed').length,
       };
-      const list = tasks.map(t => `  ${STATUS_ICON[t.status]} ${t.title}`).join('\n');
-      const summary = `Tasks (${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed):\n${list}`;
-      return {ok: true, taskCount: tasks.length, summary};
+      return {ok: true, taskCount: tasks.length, counts, summary: `Tasks: ${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed.`};
+    },
+  }),
+
+  readToolOutput: tool({
+    description: 'Read another page of oversized output previously returned by a tool handle.',
+    inputSchema: z.object({
+      handle: z.string().min(1).describe('Output handle from a prior tool result'),
+      offset: z.number().int().nonnegative().default(0).describe('Character offset to start reading'),
+      limit: z.number().int().positive().max(20_000).default(12_000).describe('Maximum characters to return'),
+    }),
+    execute: async ({handle, offset, limit}) => {
+      const page = readStoredToolOutput(handle, offset, limit);
+      return page ?? {ok: false, error: `Unknown or expired tool output handle: ${handle}`};
     },
   }),
 
   bash: tool({
-    description: 'Run a bash command in the current workspace. Use for tests, builds, validation, and inspection. Do not use bash to edit files; use file tools instead unless the user explicitly requested a shell mutation.',
+    description: 'Run workspace tests, builds, validation, or inspection. Use file tools for edits.',
     inputSchema: z.object({
       command: z.string().min(1).describe('Command to execute with bash -lc'),
       timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
@@ -637,11 +704,12 @@ export const hazeTools = {
           settled = true;
           clearTimeout(timer);
           context.abortSignal?.removeEventListener('abort', abort);
-          const truncatedStdout = truncate(stdout);
-          const truncatedStderr = truncate(stderr);
           const validationSummary = isValidationClassification(classification)
-            ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: truncatedStdout.truncated, stderrTruncated: truncatedStderr.truncated, classification})
+            ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: stdout.length > COMPACT_COMMAND_CHARS, stderrTruncated: stderr.length > COMPACT_COMMAND_CHARS, classification})
             : undefined;
+          const validationPassed = validationSummary?.status === 'passed';
+          const stdoutResult = compactStoredOutput(stdout, validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS);
+          const stderrResult = compactStoredOutput(stderr, validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS);
           resolve({
             ok: code === 0 && !timedOut,
             code,
@@ -650,8 +718,8 @@ export const hazeTools = {
             classification,
             durationMs: Date.now() - startedAt,
             timedOut,
-            stdout: truncatedStdout,
-            stderr: truncatedStderr,
+            stdout: stdoutResult,
+            stderr: stderrResult,
             validationSummary,
           });
         });

@@ -1,4 +1,5 @@
 import {classifyRequestIntent, type RequestIntent} from './requestClassifier.js';
+import {createWorkState, observeWorkToolEvent, type WorkState} from '../agent/workState.js';
 
 export type SessionGoalStatus = 'active' | 'needs-user' | 'blocked' | 'complete' | 'aborted';
 export type ValidationStatus = 'pending' | 'passed' | 'failed';
@@ -15,6 +16,7 @@ export interface SessionGoal {
   phase: 'starting' | 'inspecting' | 'editing' | 'validating' | 'summarizing' | 'done';
   blocker?: string;
   lastProgressAt: number;
+  workState: WorkState;
 }
 
 export interface GoalToolEvent {
@@ -58,27 +60,32 @@ export function createSessionGoal(request: string, now = Date.now()): SessionGoa
           ? ['Answer the user using current project context when needed']
           : ['Inspect the relevant files', 'Make the requested change when needed', 'Validate the change when practical', 'Summarize only current-task changes and validation'];
 
+  const successCriteria = criteria;
   return {
     id: `goal-${now}-${Math.random().toString(36).slice(2)}`,
     originalUserRequest: request,
     normalizedIntent: intent,
-    successCriteria: criteria,
+    successCriteria,
     constraints: [],
     touchedFiles: [],
     validationCommands: [],
     status: 'active',
     phase: 'starting',
     lastProgressAt: now,
+    workState: createWorkState(request, intent, successCriteria),
   };
 }
 
 export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, now = Date.now()) {
   if (event.duplicateSkipped) return goal;
+  observeWorkToolEvent(goal.workState, event);
 
   if (event.success && ['listFiles', 'readFile'].includes(event.toolName)) {
     goal.phase = goal.phase === 'editing' || goal.phase === 'validating' ? goal.phase : 'inspecting';
     goal.lastProgressAt = now;
   }
+
+  goal.workState.phase = goal.phase;
 
   if (['editFile', 'replaceLines', 'writeFile'].includes(event.toolName)) {
     const path = inputPath(event.input);
@@ -90,6 +97,8 @@ export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, no
       goal.blocker = `File edit failed${path ? ` for ${path}` : ''}; recovery read is required before retry.`;
     }
   }
+
+  goal.workState.phase = goal.phase;
 
   if (event.toolName === 'bash') {
     const command = bashCommand(event.input);
@@ -104,6 +113,8 @@ export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, no
       if (!ok) goal.blocker = `Validation command failed: ${command}`;
     }
   }
+
+  goal.workState.phase = goal.phase;
 
   return goal;
 }

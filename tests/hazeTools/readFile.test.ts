@@ -31,16 +31,18 @@ describe('readFile tool', () => {
     expect(result.startLine).toBe(1);
     expect(result.endLine).toBe(4);
     expect(result.totalLines).toBe(4); // trailing newline adds empty line
-    expect(result.lineNumberedText).toContain('line1');
-    expect(result.lineNumberedText).toContain('line3');
+    expect(result.content).toContain('line1');
+    expect(result.content).toContain('line3');
+    expect(result).not.toHaveProperty('text');
+    expect(result).not.toHaveProperty('lineNumberedText');
   });
 
   it('reads from offset', async () => {
     await fs.writeFile(path.join(tmp, 'test.txt'), 'a\nb\nc\nd\ne\n');
     const result = await readFile({path: 'test.txt', offset: 3});
     expect(result.startLine).toBe(3);
-    expect(result.lineNumberedText).toContain('c');
-    expect(result.lineNumberedText).not.toContain('a');
+    expect(result.content).toContain('c');
+    expect(result.content).not.toContain('a');
   });
 
   it('reads with limit', async () => {
@@ -48,17 +50,34 @@ describe('readFile tool', () => {
     const result = await readFile({path: 'test.txt', offset: 2, limit: 2});
     expect(result.startLine).toBe(2);
     expect(result.endLine).toBe(3);
-    expect(result.lineNumberedText).toContain('b');
-    expect(result.lineNumberedText).toContain('c');
-    expect(result.lineNumberedText).not.toContain('a');
-    expect(result.lineNumberedText).not.toContain('d');
+    expect(result.content).toContain('b');
+    expect(result.content).toContain('c');
+    expect(result.content).not.toContain('a');
+    expect(result.content).not.toContain('d');
   });
 
   it('includes line numbers in output', async () => {
     await fs.writeFile(path.join(tmp, 'test.txt'), 'hello\nworld\n');
     const result = await readFile({path: 'test.txt'});
-    expect(result.lineNumberedText).toMatch(/1.*hello/);
-    expect(result.lineNumberedText).toMatch(/2.*world/);
+    expect(result.content).toMatch(/1.*hello/);
+    expect(result.content).toMatch(/2.*world/);
+  });
+
+  it('defaults to a bounded page and returns the next offset', async () => {
+    await fs.writeFile(path.join(tmp, 'large.txt'), Array.from({length: 350}, (_, index) => `line-${index + 1}`).join('\n'));
+    const result = await readFile({path: 'large.txt'});
+    expect(result.endLine).toBe(300);
+    expect(result.nextOffset).toBe(301);
+    expect(result.truncated).toBe(true);
+    expect(result.content).toContain('line-300');
+    expect(result.content).not.toContain('line-301');
+  });
+
+  it('caps very long numbered output', async () => {
+    await fs.writeFile(path.join(tmp, 'long.txt'), 'x'.repeat(60_000));
+    const result = await readFile({path: 'long.txt'});
+    expect(result.content.length).toBeLessThanOrEqual(50_000);
+    expect(result.lineTruncated).toBe(true);
   });
 
   it('returns structured failure for nonexistent file', async () => {

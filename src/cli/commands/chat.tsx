@@ -21,9 +21,11 @@ import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
-import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, type HazeSession} from '../../core/session/sessionStore.js';
+import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
 import {createSessionGoal, formatGoalStatus} from '../../core/goal/sessionGoal.js';
+import type {WorkState} from '../../core/agent/workState.js';
+import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 
 export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove';
 
@@ -35,6 +37,7 @@ interface ChatOptions {
 }
 
 const execFile = promisify(execFileCallback);
+const EMPTY_TOKEN_USAGE: TokenUsage = {inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: undefined};
 
 async function currentBranchName() {
   try {
@@ -254,6 +257,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const lastAssistantTextRef = useRef('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<HazeSession | undefined>(undefined);
+  const sessionStartRef = useRef<Date>(new Date());
+  const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
@@ -267,7 +272,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [, setSessionLabel] = useState<string | undefined>();
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [, setTimerTick] = useState(0);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
@@ -342,6 +347,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function startNewSession(message = 'Started a new session.') {
+    clearToolOutputs();
+    workStateRef.current = undefined;
+    sessionStartRef.current = new Date();
     if (noSession) {
       sessionRef.current = undefined;
       setSessionLabel('session off');
@@ -349,7 +357,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     const session = await createSession({hazeVersion: version});
     sessionRef.current = session;
-    setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+    setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
     setSessionLabel(session.id);
     setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
@@ -365,11 +373,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       if (session) {
         const conversation = await restoreConversation(session);
         sessionRef.current = session;
+        sessionStartRef.current = new Date();
         conversationRef.current = conversation;
         setSessionLabel(session.id);
         setLiveMessagesState(() => []);
         const restoredMessages = displayMessagesFromConversation(conversation);
-        setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: estimateConversationTokens(restoredMessages).input, toolSchemas: 0, outputEstimate: estimateConversationTokens(restoredMessages).output, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+        setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
+        workStateRef.current = await restoreWorkState(session);
         setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...restoredMessages]);
         await startNewLog();
         return;
@@ -379,9 +389,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   function clearConversation() {
+    clearToolOutputs();
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
-    setTokenUsage({inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+    setTokenUsage({...EMPTY_TOKEN_USAGE});
+    workStateRef.current = undefined;
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
     void startNewLog();
@@ -390,7 +402,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   function compactConversation(instructions?: string) {
-    const result = compactModelMessages(conversationRef.current, {instructions});
+    const result = compactModelMessages(conversationRef.current, {instructions, tokenBudget: 40_000, workState: workStateRef.current});
     if (!result.compacted) {
       setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
       return false;
@@ -412,9 +424,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     const conversation = await restoreConversation(session);
+    clearToolOutputs();
     sessionRef.current = session;
     conversationRef.current = conversation;
+    workStateRef.current = await restoreWorkState(session);
     setSessionLabel(session.id);
+    setTokenUsage({...EMPTY_TOKEN_USAGE});
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
   }
@@ -824,7 +839,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     const invokedSkill = skillInvocation(value);
     if (invokedSkill) {
       const argumentText = invokedSkill.args ? `\nUser-provided skill arguments: ${invokedSkill.args}` : '';
-      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.skill.name}" skill. Call skill_${invokedSkill.skill.name.replace(/[^a-zA-Z0-9_]/g, '_')} and follow its returned instructions.${argumentText}`, value);
+      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.skill.name}" skill. Call skill with name="${invokedSkill.skill.name}" and follow its returned instructions.${argumentText}`, value);
       return;
     }
 
@@ -962,6 +977,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setLastAssistantText: text => { lastAssistantTextRef.current = text; },
       setAbortController: controller => { abortControllerRef.current = controller; },
       setGoalStatus: setActiveGoalStatus,
+      setWorkState: state => {
+        workStateRef.current = state;
+        const session = sessionRef.current;
+        if (session) void appendSessionEntry(session, {type: 'work_state_snapshot', at: new Date().toISOString(), state}).catch(() => undefined);
+      },
       compactConversation,
       recordTokenUsage: usage => {
         setTokenUsage(current => ({
@@ -973,7 +993,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           outputEstimate: current.outputEstimate + usage.outputEstimate,
           cacheReadTokens: current.cacheReadTokens + usage.cacheReadTokens,
           cacheWriteTokens: current.cacheWriteTokens + usage.cacheWriteTokens,
+          noCacheTokens: current.noCacheTokens + usage.noCacheTokens,
           reasoningTokens: current.reasoningTokens + usage.reasoningTokens,
+          logicalInputEstimate: current.logicalInputEstimate + usage.logicalInputEstimate,
+          effectiveNonCachedInput: (current.effectiveNonCachedInput ?? 0) + (usage.effectiveNonCachedInput ?? 0) || usage.effectiveNonCachedInput,
         }));
       },
       onEvent: event => {
@@ -982,7 +1005,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       log: llmLogRef.current,
-    });
+    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()});
   }
 
   const visible = messages.filter(message => !message.hidden);
@@ -1121,7 +1144,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     </Box>
     {debug && hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
       <Text color={theme.muted} bold>Token usage {precise ? '(precise)' : '(estimated)'}</Text>
-      <Text color={theme.muted}>  in={formatTokenCount(effectiveInput)} out={formatTokenCount(effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
+      <Text color={theme.muted}>  in={formatTokenCount(effectiveInput)} out={formatTokenCount(effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
+      <Text color={theme.muted}>  logical={formatTokenCount(tokenUsage.logicalInputEstimate)}{tokenUsage.effectiveNonCachedInput != null ? ` effective_non_cached=${formatTokenCount(tokenUsage.effectiveNonCachedInput)}` : ''}</Text>
       <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>
     </Box>}
     <Box flexShrink={0} justifyContent="space-between">

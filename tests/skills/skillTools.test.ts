@@ -1,25 +1,29 @@
 import {describe, expect, it} from 'vitest';
-import {buildSkillTools, internals} from '../../src/skills/skillTools.js';
+import {buildSkillTools} from '../../src/skills/skillTools.js';
 import type {SkillRegistry} from '../../src/skills/types.js';
 
-describe('skill tools', () => {
-  it('creates safe tool names', () => {
-    expect(internals.toolNameForSkill('commit-changes')).toBe('skill_commit_changes');
-  });
-
-  it('builds one tool per loaded skill', async () => {
+describe('buildSkillTools', () => {
+  it('uses one catalog tool and loads references progressively', async () => {
     const registry: SkillRegistry = {skills: new Map([['test-skill', {
+      name: 'test-skill',
+      description: 'Use when testing.',
+      body: 'Follow this workflow.',
       dir: '/tmp/test-skill',
       path: '/tmp/test-skill/SKILL.md',
-      name: 'test-skill',
-      description: 'Use when testing',
-      body: 'Do testing things.',
-      references: [{path: 'examples/a.md', absolutePath: '/tmp/test-skill/examples/a.md', content: 'Example'}],
       source: 'global',
+      references: [{path: 'references/details.md', absolutePath: '/tmp/test-skill/references/details.md', content: 'Details'}],
     }]])};
     const tools = buildSkillTools(registry);
-    expect(Object.keys(tools)).toEqual(['skill_test_skill']);
-    const result = await tools.skill_test_skill.execute?.({reason: 'needed'}, {toolCallId: '1', messages: []} as never);
-    expect(result).toMatchObject({name: 'test-skill', instructions: 'Do testing things.'});
+    expect(Object.keys(tools)).toEqual(['skill']);
+    const instructions = await tools.skill?.execute?.({name: 'test-skill'}, {toolCallId: '1', messages: []} as never) as Record<string, unknown>;
+    expect(instructions.instructions).toBe('Follow this workflow.');
+    expect(instructions.references).toEqual(['references/details.md']);
+    expect(instructions).not.toHaveProperty('content');
+    const reference = await tools.skill?.execute?.({name: 'test-skill', reference: 'references/details.md'}, {toolCallId: '2', messages: []} as never) as {reference: {content: string}};
+    expect(reference.reference.content).toBe('Details');
+  });
+
+  it('returns no tool for an empty registry', () => {
+    expect(buildSkillTools({skills: new Map()})).toEqual({});
   });
 });
