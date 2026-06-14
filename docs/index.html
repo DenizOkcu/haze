@@ -3,1118 +3,1595 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Haze — A tiny terminal fog machine for building software</title>
-  <meta name="description" content="A minimal AI agent CLI for expert terminal users. Transparent local tools, direct command execution, stronger validation feedback, and fewer permission-dialog vibes.">
-  <meta property="og:title" content="Haze 0.2.0 — Steadier Goblin Mode">
-  <meta property="og:description" content="A pragmatic agentic CLI for expert developers building from the terminal.">
+  <title>haze — a terminal agent for AI experts</title>
+  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent local tools, direct command execution, parsed validation feedback. Bring your own model.">
+  <meta property="og:title" content="haze">
+  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, verify. No web UI, no permission gates, no surprise API calls.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.85em' x='.12em' font-size='82' font-family='monospace'>h</text></svg>">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
   <style>
-    @import 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap';
+    @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Big+Shoulders+Display:wght@500;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap');
 
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --purple: #a78bfa;
-      --deep-purple: #6d28d9;
-      --violet: #8b5cf6;
-      --bg: #0a0a0f;
-      --surface: #12111d;
-      --surface-2: #1a1729;
-      --text: #e2e0eb;
-      --muted: #7c7a8a;
-      --danger: #fb7185;
-      --success: #34d399;
-      --warning: #fbbf24;
-      --code-bg: #1f1633;
-      --font-mono: 'JetBrains Mono', monospace;
-      --font-sans: 'Inter', -apple-system, sans-serif;
+      /* haze CLI palette — purple-tinted dark */
+      --bg: oklch(0.165 0.010 295);
+      --bg-ruled: oklch(0.135 0.012 295);
+      --bg-surface: oklch(0.205 0.015 295);
+      --bg-elevated: oklch(0.240 0.018 295);
+      --bg-quote: oklch(0.17 0.038 295);
+
+      /* Ink + neutrals on dark (slight purple tint) */
+      --ink: oklch(0.945 0.005 295);
+      --ink-2: oklch(0.780 0.008 295);
+      --ink-3: oklch(0.665 0.012 295);
+      --ink-on-invert: oklch(0.165 0.010 295);
+
+      /* haze purple accent — #a78bfa translated to OKLCH */
+      --accent: oklch(0.70 0.140 295);          /* decoration: corners, glows */
+      --accent-ink: oklch(0.735 0.135 295);     /* text on dark bg */
+      --accent-ink-deep: oklch(0.82 0.105 295); /* hover state (brighter) */
+      --accent-tint: oklch(0.275 0.060 295);
+
+      /* Validation — haze neon (#39ff14 / #fb7185) */
+      --ok: oklch(0.83 0.220 145);
+      --bad: oklch(0.74 0.170 15);
+      --tool: oklch(0.70 0.150 250);        /* tool role label (#60a5fa) */
+
+      /* Lines on dark (purple-tinted) */
+      --rule: oklch(0.320 0.018 295);
+      --rule-strong: oklch(0.420 0.024 295);
+      --rule-ink: oklch(0.510 0.028 295);
+
+      /* Soft glow material for accent emphasis */
+      --glow-accent: 0 0 0 1px oklch(0.70 0.140 295 / 0.30), 0 0 32px oklch(0.70 0.140 295 / 0.20);
+      --glow-soft: 0 1px 0 0 oklch(1 0 0 / 0.04), 0 8px 24px oklch(0 0 0 / 0.35);
+
+      /* Type */
+      --font-display: 'Big Shoulders Display', 'Archivo Narrow', 'Impact', sans-serif;
+      --font-sans: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+      --font-courier: 'Courier Prime', 'Courier New', 'Courier', monospace;
+
+      /* Radii — softer, terminal-app register */
+      --radius-sm: 5px;
+      --radius-md: 9px;
+      --radius-lg: 13px;
+      --radius-pill: 999px;
+
+      /* Modular scale ~1.25 */
+      --t-hero: clamp(3rem, 7vw, 5.5rem);
+      --t-section: clamp(2.25rem, 4.4vw, 3.5rem);
+      --t-prose-head: clamp(1.6rem, 2.2vw, 2rem);
+      --t-lead: clamp(1.05rem, 1.15vw, 1.18rem);
+      --t-body: 1rem;
+      --t-small: 0.875rem;
+      --t-tiny: 0.75rem;
     }
 
-    html { scroll-behavior: smooth; }
+    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+
+    section[id], main[id] { scroll-margin-top: 80px; }
 
     body {
       background: var(--bg);
-      color: var(--text);
+      color: var(--ink);
       font-family: var(--font-sans);
+      font-weight: 450;
+      font-size: 16px;
       line-height: 1.6;
-      overflow-x: hidden;
+      letter-spacing: 0.005em;
       -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+      font-feature-settings: 'kern' 1, 'liga' 1, 'ss01' 1;
     }
 
-    /* Fog effect */
-    .fog {
+    ::selection { background: var(--accent); color: var(--bg); }
+
+    :focus-visible {
+      outline: 2px solid var(--accent-ink);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+
+    a { color: inherit; }
+
+    /* ===== Layout primitives ===== */
+    .container {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 32px;
+      position: relative;
+    }
+    .container-prose {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 0 32px;
+      position: relative;
+    }
+
+    section { padding: clamp(72px, 9vw, 120px) 0; position: relative; }
+
+    /* Graph paper grid overlay (subtle purple-tinted grid on dark) */
+    body::before {
+      content: '';
       position: fixed;
       inset: 0;
       pointer-events: none;
       z-index: 0;
-      overflow: hidden;
+      background-image:
+        linear-gradient(to right, oklch(0.62 0.020 295 / 0.06) 1px, transparent 1px),
+        linear-gradient(to bottom, oklch(0.62 0.020 295 / 0.06) 1px, transparent 1px);
+      background-size: 32px 32px;
     }
+    body > * { position: relative; z-index: 1; }
 
-    .fog::before, .fog::after {
+    /* ===== Skip link ===== */
+    .skip-link {
+      position: absolute;
+      top: -100px;
+      left: 16px;
+      background: var(--accent-ink);
+      color: var(--bg-surface);
+      padding: 10px 16px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 13px;
+      text-decoration: none;
+      z-index: 1000;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .skip-link:focus { top: 16px; }
+
+    /* ===== Header ===== */
+    .head {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 2px solid var(--rule-ink);
+    }
+    .head::after {
       content: '';
       position: absolute;
-      width: 200%;
-      height: 200%;
-      top: -50%;
-      left: -50%;
-      background: radial-gradient(ellipse at 30% 20%, rgba(167, 139, 250, 0.04) 0%, transparent 60%),
-                  radial-gradient(ellipse at 70% 60%, rgba(109, 40, 217, 0.03) 0%, transparent 50%);
-      animation: drift 20s ease-in-out infinite alternate;
+      left: 0; right: 0; bottom: -7px;
+      height: 1px;
+      background: var(--rule-ink);
     }
-
-    .fog::after {
-      background: radial-gradient(ellipse at 60% 80%, rgba(139, 92, 246, 0.03) 0%, transparent 50%),
-                  radial-gradient(ellipse at 20% 40%, rgba(167, 139, 250, 0.02) 0%, transparent 60%);
-      animation: drift 25s ease-in-out infinite alternate-reverse;
-    }
-
-    @keyframes drift {
-      0% { transform: translate(0, 0) rotate(0deg); }
-      100% { transform: translate(-5%, 3%) rotate(2deg); }
-    }
-
-    /* Layout */
-    .container {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 0 24px;
-      position: relative;
-      z-index: 1;
-    }
-
-    section {
-      padding: 68px 0;
-    }
-
-    /* Nav */
-    nav {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      background: rgba(10, 10, 15, 0.8);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid rgba(167, 139, 250, 0.08);
-    }
-
-    nav .container {
-      display: flex;
-      justify-content: space-between;
+    .head-inner {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
       align-items: center;
-      height: 56px;
+      gap: 32px;
+      height: 64px;
     }
-
-    nav .logo {
-      font-family: var(--font-mono);
+    .head-brand {
+      font-family: var(--font-courier);
       font-weight: 700;
-      font-size: 18px;
-      color: var(--purple);
+      font-size: 26px;
+      letter-spacing: 0.04em;
+      color: var(--ink);
       text-decoration: none;
-    }
-
-    nav .links {
-      display: flex;
-      gap: 24px;
-      align-items: center;
-    }
-
-    nav a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 14px;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-
-    nav a:hover { color: var(--text); }
-
-    .badge {
+      line-height: 1;
       display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(167, 139, 250, 0.1);
-      border: 1px solid rgba(167, 139, 250, 0.2);
-      color: var(--purple);
+      align-items: baseline;
+      gap: 4px;
+    }
+    .head-brand .dot { color: var(--accent-ink); font-size: 1.1em; line-height: 1; transform: translateY(1px); }
+    .head-meta {
       font-family: var(--font-mono);
-      font-size: 12px;
-      padding: 4px 10px;
-      border-radius: 100px;
-      font-weight: 500;
+      font-size: 11px;
+      color: var(--ink-3);
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
     }
-
-    /* Hero */
-    .hero {
-      padding: 160px 0 80px;
-      text-align: center;
+    .head-meta span { display: inline-flex; align-items: baseline; gap: 6px; }
+    .head-meta span::before {
+      content: '';
+      width: 4px; height: 4px;
+      background: var(--accent);
+      display: inline-block;
+      transform: translateY(-1px);
     }
-
-    .hero h1 {
-      font-size: clamp(40px, 7vw, 64px);
-      font-weight: 700;
-      line-height: 1.1;
-      letter-spacing: -0.02em;
-      margin-bottom: 20px;
-    }
-
-    .hero h1 .fog-word {
-      background: linear-gradient(135deg, var(--purple), var(--violet), var(--deep-purple));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .hero p {
-      font-size: 18px;
-      color: var(--muted);
-      max-width: 480px;
-      margin: 0 auto 20px;
-      line-height: 1.7;
-    }
-
-    .hero .subtitle {
-      font-family: var(--font-mono);
-      font-size: 14px;
-      color: var(--purple);
-      margin-bottom: 12px;
-      opacity: 0.8;
-    }
-
-    /* Terminal */
-    .terminal {
-      background: var(--surface);
-      border: 1px solid rgba(167, 139, 250, 0.12);
-      border-radius: 12px;
-      overflow: hidden;
-      text-align: left;
-      max-width: 640px;
-      margin: 0 auto;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(167, 139, 250, 0.05);
-    }
-
-    .terminal-bar {
+    .head-nav {
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 12px 16px;
-      background: var(--surface-2);
-      border-bottom: 1px solid rgba(167, 139, 250, 0.08);
     }
-
-    .terminal-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .terminal-dot.r { background: var(--danger); }
-    .terminal-dot.y { background: var(--warning); }
-    .terminal-dot.g { background: var(--success); }
-
-    .terminal-title {
-      flex: 1;
-      text-align: center;
+    .head-stamp {
       font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    .terminal-body {
-      padding: 20px;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.8;
-      min-height: 280px;
-      max-height: 320px;
-      overflow-y: auto;
-      scrollbar-width: none;
-    }
-    .terminal-body::-webkit-scrollbar { display: none; }
-
-    .terminal-body .prompt { color: var(--success); }
-    .terminal-body .cmd { color: var(--text); }
-    .terminal-body .output { color: var(--muted); }
-    .terminal-body .purple { color: var(--purple); }
-    .terminal-body .warning { color: var(--warning); }
-    .terminal-body .success { color: var(--success); }
-    .terminal-body .danger { color: var(--danger); }
-    .terminal-body .dim { opacity: 0.5; }
-
-    .cursor {
-      display: inline-block;
-      width: 8px;
-      height: 16px;
-      background: var(--purple);
-      vertical-align: middle;
-      margin-left: 2px;
-      animation: blink 1s step-end infinite;
-    }
-
-    @keyframes blink {
-      50% { opacity: 0; }
-    }
-
-    /* Install */
-    .install-box {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      margin: 24px auto 40px;
-      max-width: 480px;
-    }
-
-    .install-box code {
-      flex: 1;
-      background: var(--code-bg);
-      border: 1px solid rgba(167, 139, 250, 0.15);
-      padding: 14px 20px;
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 14px;
-      color: var(--text);
-      display: block;
-    }
-
-    .install-box code .dollar { color: var(--muted); }
-
-    .copy-btn {
-      background: rgba(167, 139, 250, 0.1);
-      border: 1px solid rgba(167, 139, 250, 0.2);
-      color: var(--purple);
-      padding: 14px 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-family: var(--font-mono);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
-      transition: all 0.2s;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      padding: 7px 13px;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-sm);
+      color: var(--ink);
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .head-stamp:hover {
+      background: var(--bg-elevated);
+      color: var(--ink);
+      border-color: var(--ink-3);
+    }
+    .head-stamp.accent { border-color: var(--accent-ink); color: var(--accent-ink); }
+    .head-stamp.accent:hover { background: var(--accent-ink); color: var(--bg); border-color: var(--accent-ink); }
+
+    /* ===== Section primitives ===== */
+    .sec-marker {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 28px;
+      padding-top: 16px;
+      border-top: 2px solid var(--rule-ink);
+    }
+    .sec-marker .code {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: 1.1rem;
+      letter-spacing: 0.04em;
+      color: var(--accent-ink);
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .sec-marker .label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink-3);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .sec-marker .spacer {
+      flex: 1;
+      height: 1px;
+      background: var(--rule);
+      transform: translateY(-3px);
+    }
+
+    .sec-headline {
+      font-family: var(--font-display);
+      font-weight: 800;
+      font-size: var(--t-section);
+      line-height: 0.95;
+      letter-spacing: 0.005em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 20px;
+      max-width: 18ch;
+      text-wrap: balance;
+    }
+    .sec-headline .em { color: var(--accent-ink); }
+    .sec-headline .soft { color: var(--ink-3); font-weight: 700; }
+
+    .sec-sub {
+      font-size: var(--t-lead);
+      line-height: 1.5;
+      color: var(--ink-2);
+      max-width: 56ch;
+      margin-bottom: 56px;
+      font-weight: 500;
+    }
+    .sec-sub code, p code {
+      font-family: var(--font-mono);
+      font-size: 0.92em;
+      color: var(--ink);
+      font-weight: 500;
+      background: var(--bg-elevated);
+      padding: 2px 7px;
+      border: 1px solid var(--rule);
+      border-radius: var(--radius-sm);
+      letter-spacing: -0.005em;
       white-space: nowrap;
     }
-
-    .copy-btn:hover {
-      background: rgba(167, 139, 250, 0.2);
-      border-color: rgba(167, 139, 250, 0.4);
-    }
-
-    /* Features */
-    .features {
-      display: grid;
-      gap: 2px;
-    }
-
-    .feature {
-      padding: 32px;
-      background: var(--surface);
-      border: 1px solid rgba(167, 139, 250, 0.06);
-      border-radius: 8px;
-    }
-
-    .feature .icon {
-      font-size: 24px;
-      margin-bottom: 12px;
-      display: block;
-    }
-
-    .feature h3 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: var(--text);
-    }
-
-    .feature p {
-      font-size: 14px;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    .feature code {
-      background: var(--code-bg);
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--warning);
-    }
-
-    .start-card {
-      max-width: 760px;
-      margin: 32px auto 0;
-      padding: 24px;
-      background: var(--surface);
-      border: 1px solid rgba(167, 139, 250, 0.08);
-      border-radius: 10px;
-    }
-
-    .start-steps {
-      display: grid;
-      gap: 10px;
-      margin: 0 0 18px;
-      padding: 0;
-      list-style: none;
-    }
-
-    .start-steps li {
-      display: grid;
-      grid-template-columns: 28px minmax(180px, max-content) 1fr;
-      gap: 12px;
-      align-items: baseline;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    .start-num, .start-cmd {
-      font-family: var(--font-mono);
-    }
-
-    .start-num {
-      color: var(--purple);
-    }
-
-    .start-cmd {
-      color: var(--warning);
-      background: var(--code-bg);
-      padding: 3px 7px;
-      border-radius: 4px;
-      width: fit-content;
-    }
-
-    .start-text {
-      color: var(--text);
-      font-weight: 600;
-    }
-
-    .start-note {
-      margin: 0;
-      padding-top: 16px;
-      border-top: 1px solid rgba(167, 139, 250, 0.08);
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    .start-note code, .start-steps code {
-      color: var(--warning);
-      font-family: var(--font-mono);
-    }
-
-    @media (max-width: 700px) {
-      .start-steps li {
-        grid-template-columns: 24px 1fr;
-      }
-      .start-steps li span:last-child {
-        grid-column: 2;
-      }
-    }
-
-    /* Section headers */
-    .section-label {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--purple);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 12px;
-    }
-
-    .section-title {
-      font-size: clamp(28px, 4vw, 36px);
+    .sec-sub code.cmd {
+      color: var(--accent-ink);
       font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 16px;
-      line-height: 1.2;
+      background: var(--accent-tint);
+      border-color: oklch(0.38 0.060 295);
     }
+    .install .eyebrow-stamp { justify-content: center; }
 
-    .section-desc {
-      font-size: 16px;
-      color: var(--muted);
-      max-width: 500px;
-      line-height: 1.7;
-      margin-bottom: 48px;
-    }
-
-    .center { text-align: center; }
-    .center .section-desc { margin-left: auto; margin-right: auto; }
-
-    /* Skills section */
-    .skills-visual {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      max-width: 560px;
-      margin: 0 auto;
-    }
-
-    .skill-card {
-      background: var(--surface);
-      border: 1px solid rgba(167, 139, 250, 0.08);
-      border-radius: 8px;
-      padding: 20px;
-      transition: border-color 0.2s;
-    }
-
-    .skill-card:hover {
-      border-color: rgba(167, 139, 250, 0.3);
-    }
-
-    .skill-card .slash {
+    .eyebrow-stamp {
       font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--purple);
-      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-ink);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .eyebrow-stamp::before {
+      content: '';
+      width: 24px;
+      height: 2px;
+      background: var(--accent);
+      display: inline-block;
     }
 
-    .skill-card .desc {
-      font-size: 13px;
-      color: var(--muted);
+    /* ===== Hero / Title block ===== */
+    .hero {
+      padding-top: clamp(56px, 7vw, 96px);
+      padding-bottom: clamp(72px, 9vw, 120px);
+      border-bottom: 2px solid var(--rule-ink);
     }
-
-    /* Tools grid */
-    .tools-grid {
+    .hero-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 2px;
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: 56px;
+      align-items: start;
     }
-
-    .tool {
-      padding: 20px;
-      background: var(--surface);
-      border: 1px solid rgba(167, 139, 250, 0.06);
-      border-radius: 8px;
-      text-align: center;
-    }
-
-    .tool .tool-name {
+    .hero-eyebrow {
       font-family: var(--font-mono);
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--purple);
-      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent-ink);
+      margin-bottom: 28px;
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
     }
-
-    .tool .tool-desc {
-      font-size: 12px;
-      color: var(--muted);
+    .hero-eyebrow::before,
+    .hero-eyebrow::after {
+      content: '';
+      height: 2px;
+      background: var(--accent);
+      width: 40px;
+      display: inline-block;
     }
+    .hero-eyebrow::after { flex: 1; max-width: 200px; }
 
-    /* Philosophy */
-    .quote {
-      font-size: clamp(24px, 4vw, 32px);
-      font-weight: 300;
-      line-height: 1.4;
-      text-align: center;
-      max-width: 520px;
-      margin: 0 auto;
-      color: var(--text);
+    .hero-h1 {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: var(--t-hero);
+      line-height: 0.88;
+      letter-spacing: 0.005em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 28px;
+      text-wrap: balance;
     }
+    .hero-h1 .em { color: var(--accent-ink); display: block; }
+    .hero-h1 .em-fill { color: var(--ink-on-invert); background: var(--accent-ink); }
+    .hero-h1 .punct { color: var(--accent-ink); }
 
-    .quote em {
-      font-style: normal;
-      color: var(--purple);
+    .hero-sub {
+      font-size: var(--t-lead);
+      line-height: 1.55;
+      color: var(--ink-2);
+      max-width: 44ch;
+      margin-bottom: 36px;
       font-weight: 500;
     }
 
-    .attribution {
-      text-align: center;
+    .hero-install {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      max-width: 460px;
+      margin-bottom: 32px;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+      box-shadow: var(--glow-soft);
+      overflow: hidden;
+    }
+    .hero-install-code {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink);
+      background: transparent;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+      overflow-x: auto;
+      letter-spacing: -0.005em;
+    }
+    .hero-install-code .dollar { color: var(--accent-ink); font-weight: 700; }
+    .hero-copy {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--ink);
+      background: var(--bg-elevated);
+      border: none;
+      border-left: 1px solid var(--rule-ink);
+      padding: 0 18px;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .hero-copy:hover { background: var(--accent-ink); color: var(--bg); }
+    .hero-copy.copied { background: var(--accent-ink); color: var(--bg); }
+
+    .hero-ctas {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 13px 22px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-md);
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary {
+      background: var(--accent-ink);
+      color: var(--bg);
+      border-color: var(--accent-ink);
+    }
+    .btn-primary:hover {
+      background: var(--accent-ink-deep);
+      border-color: var(--accent-ink-deep);
+      color: var(--bg);
+      box-shadow: 0 0 0 1px oklch(0.70 0.140 295 / 0.40), 0 0 28px oklch(0.70 0.140 295 / 0.22);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--ink);
+    }
+    .btn-ghost:hover { background: var(--bg-elevated); color: var(--ink); border-color: var(--ink-3); }
+
+    /* Hero terminal title — wordmark above the terminal */
+    .hero-term-title {
+      font-family: var(--font-courier);
+      font-weight: 700;
+      font-size: var(--t-hero);
+      line-height: 0.88;
+      letter-spacing: 0.005em;
+      color: var(--ink);
+      text-align: right;
+      margin-top: calc(11px * 1.6 + 28px);
+      margin-bottom: 14px;
+    }
+
+    /* Hero terminal — real haze session preview */
+    .term {
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      box-shadow: var(--glow-soft);
+      font-family: var(--font-courier);
+      overflow: hidden;
+    }
+    .term-head {
+      background: var(--bg-elevated);
+      color: var(--ink-2);
+      padding: 11px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--rule-ink);
+    }
+    .term-dots {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .term-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ink-3);
+      display: inline-block;
+    }
+    .term-dot.accent { background: var(--accent); }
+    .term-head-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+      margin-left: 4px;
+    }
+    .term-head-title .path {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ink-2);
+    }
+    .term-head-title .path .brand { color: var(--accent-ink); }
+    .term-head-title .path .cwd { color: var(--ink-2); }
+    .term-head-branch {
+      color: var(--accent-ink);
+      flex-shrink: 0;
+      font-weight: 700;
+    }
+    .term-body {
+      padding: 22px 24px 20px;
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+    .term-label {
+      font-family: var(--font-courier);
+      font-weight: 700;
+      font-size: 0.90rem;
+      color: var(--ink);
+      line-height: 1;
+      margin-top: 14px;
+    }
+    .term-label.haze { color: var(--accent-ink); }
+    .term-label-meta { color: var(--ink-3); font-weight: 500; }
+
+    .term-user {
+      background: var(--bg-quote);
+      padding: 10px 14px 12px;
+      border-radius: var(--radius-sm);
+      margin-top: 14px;
+    }
+    .term > .term-body > .term-user:first-child { margin-top: 0; }
+    .term-user-label {
+      display: block;
+      color: var(--ok);
+      font-weight: 700;
+      font-size: 11.5px;
+    }
+    .term-prompt {
+      color: var(--ink);
+      margin-top: 5px;
+      font-weight: 500;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .term-tool-head {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--ink-3);
+      border-bottom: 1px solid var(--rule);
+      padding-bottom: 7px;
       margin-top: 16px;
+      margin-bottom: 6px;
+    }
+    .term-tool-head .term-tool-label { color: var(--tool); font-weight: 700; font-size: 13px; }
+    .term-tool {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      font-size: 11.5px;
+      padding: 2px 0;
+      flex-wrap: wrap;
+    }
+    .term-tool .check {
+      color: var(--ok);
+      font-weight: 700;
+      width: 12px;
+      flex-shrink: 0;
+    }
+    .term-tool .name { color: var(--accent-ink); font-weight: 600; }
+    .term-tool .args { color: var(--ink-2); }
+    .term-tool .detail {
+      color: var(--ink-3);
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .term-validation {
+      color: var(--ok);
+      font-size: 11.5px;
+      font-weight: 500;
+      margin-top: 6px;
+      padding-left: 22px;
+    }
+    .term-response {
+      color: var(--ink);
+      margin-top: 5px;
+      line-height: 1.55;
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+    .term-status {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg-elevated);
+      border-top: 1px solid var(--rule-ink);
+      font-size: 10.5px;
+      color: var(--ink-2);
+      letter-spacing: 0.04em;
+      flex-wrap: wrap;
+    }
+    .term-status .model { color: var(--ink-2); font-weight: 500; }
+    .term-status .stat { color: var(--ink-2); }
+
+    /* ===== §01 Operation (quickstart) ===== */
+    .op-list {
+      list-style: none;
+      max-width: 760px;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+    }
+    .op-list li {
+      display: grid;
+      grid-template-columns: 72px minmax(220px, 280px) 1fr;
+      gap: 24px;
+      align-items: center;
+      padding: 20px 24px;
+      border-top: 1px solid var(--rule);
+    }
+    .op-list li:first-child { border-top: none; }
+    .op-num {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: 1.7rem;
+      color: var(--accent-ink);
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+    .op-cmd {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--ink);
+      word-break: break-all;
+    }
+    .op-cmd .dollar { color: var(--accent-ink); margin-right: 6px; }
+    .op-cmd .dim { color: var(--ink-3); }
+    .op-text {
+      color: var(--ink-2);
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1.45;
+    }
+    .op-note {
+      margin-top: 32px;
+      padding: 18px 22px;
+      background: var(--accent-tint);
+      border: 1px solid oklch(0.38 0.060 295);
+      border-radius: var(--radius-md);
       font-family: var(--font-mono);
       font-size: 13px;
-      color: var(--muted);
+      color: var(--ink);
+      max-width: 760px;
+      line-height: 1.6;
+      font-weight: 500;
     }
-
-    /* CTA */
-    .cta {
-      text-align: center;
-      padding: 104px 0 68px;
-    }
-
-    .cta h2 {
-      font-size: clamp(28px, 5vw, 40px);
+    .op-note::before {
+      content: 'NOTE / ';
+      color: var(--accent-ink);
       font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 12px;
+      letter-spacing: 0.10em;
+    }
+    .op-note strong { color: var(--accent-ink); font-weight: 700; }
+
+    /* ===== §02 Field behavior (terminal specimen) ===== */
+    .field {
+      background: var(--bg-ruled);
+      border-top: 2px solid var(--rule-ink);
+      border-bottom: 2px solid var(--rule-ink);
+    }
+    .field-prose {
+      max-width: 660px;
+      margin-bottom: 44px;
+    }
+    .field-prose p {
+      color: var(--ink-2);
+      font-size: var(--t-lead);
+      line-height: 1.55;
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+    .field-prose strong { color: var(--ink); font-weight: 700; }
+
+    .specimen {
+      background: var(--bg-surface);
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--glow-soft);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.7;
+      overflow: hidden;
+    }
+    .specimen-head {
+      background: var(--bg-elevated);
+      color: var(--ink-2);
+      padding: 11px 18px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--rule-ink);
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .specimen-head .corner {
+      width: 8px; height: 8px;
+      background: var(--accent);
+      display: inline-block;
+    }
+    .specimen-body { padding: 22px 24px 18px; overflow-x: auto; }
+    .spec-row {
+      display: flex;
+      gap: 14px;
+      align-items: baseline;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .spec-row:first-child { margin-top: 0; }
+    .spec-row .check { color: var(--ok); font-weight: 700; }
+    .spec-row .name { color: var(--ink); font-weight: 600; }
+    .spec-row .args { color: var(--ink-2); }
+    .spec-row .detail {
+      color: var(--ink-3);
+      margin-left: auto;
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+    .spec-diff {
+      padding-left: 28px;
+      font-size: 12px;
+      line-height: 1.7;
+      margin: 6px 0;
+    }
+    .spec-diff .add { color: var(--ok); display: block; }
+    .spec-diff .rem { color: var(--bad); display: block; }
+    .spec-validation {
+      padding-left: 28px;
+      color: var(--ok);
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    .spec-footer {
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px dashed var(--rule);
+      color: var(--ink-3);
+      font-size: 11.5px;
+      font-weight: 500;
     }
 
-    .cta p {
-      color: var(--muted);
-      margin-bottom: 32px;
-      font-size: 16px;
+    /* ===== §03 Components (parts diagram) ===== */
+    .components {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+    }
+    .comp-group {
+      padding: 24px 28px;
+      border-right: 1px solid var(--rule);
+    }
+    .comp-group:last-child { border-right: none; }
+    .comp-group-head {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--rule-ink);
+    }
+    .comp-group-name {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: 1.35rem;
+      color: var(--ink);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .comp-group-code {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--accent-ink);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      margin-left: auto;
+    }
+    .comp-item {
+      display: grid;
+      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+      gap: 8px 16px;
+      padding: 11px 0;
+      border-top: 1px dashed var(--rule);
+      align-items: baseline;
+    }
+    .comp-item:first-of-type { border-top: none; padding-top: 4px; }
+    .comp-item-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      grid-column: 1 / -1;
+      flex-wrap: wrap;
+    }
+    .comp-name {
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--accent-ink);
+    }
+    .comp-part {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink-3);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .comp-desc {
+      grid-column: 1 / -1;
+      color: var(--ink-2);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.45;
+      margin-top: 2px;
     }
 
-    .cta-buttons {
+    /* ===== §04 Serviceable procedures (skills) ===== */
+    .skills-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 0;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+    }
+    .skills-spec {
+      padding: 0;
+      border-right: 1px solid var(--rule);
+      overflow: hidden;
+    }
+    .skills-spec-head {
+      background: var(--bg-elevated);
+      color: var(--ink-2);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 11px 18px;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--rule-ink);
+    }
+    .skills-spec-head .corner { width: 8px; height: 8px; background: var(--accent); display: inline-block; }
+    .skills-spec pre {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.75;
+      color: var(--ink);
+      padding: 22px 24px;
+      overflow-x: auto;
+      font-weight: 500;
+    }
+    .skills-spec .meta { color: var(--ink-3); }
+    .skills-spec .key { color: var(--accent-ink); font-weight: 600; }
+    .skills-spec .h { color: var(--ink); font-weight: 700; }
+
+    .skills-list-block {
+      padding: 28px 28px;
+      display: flex;
+      flex-direction: column;
+    }
+    .skills-list-head {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      justify-content: space-between;
+    }
+    .skills-list { list-style: none; }
+    .skills-list li {
+      padding: 14px 0;
+      border-bottom: 1px dashed var(--rule);
+      font-family: var(--font-mono);
+    }
+    .skills-list li:last-child { border-bottom: none; }
+    .skills-list .cmd { color: var(--accent-ink); font-size: 14px; font-weight: 600; }
+    .skills-list .desc {
+      display: block;
+      color: var(--ink-2);
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      font-weight: 500;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+    .skills-cta {
+      margin-top: auto;
+      padding-top: 22px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-3);
+      line-height: 1.55;
+    }
+    .skills-cta .cmd { color: var(--accent-ink); font-weight: 700; }
+
+    /* ===== §05 Compatibility (spec table) ===== */
+    .compat-table {
+      width: 100%;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+    }
+    .compat-table thead th {
+      background: var(--bg-elevated);
+      color: var(--ink-2);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 12px 18px;
+      text-align: left;
+      border: none;
+      border-bottom: 1px solid var(--rule-ink);
+    }
+    .compat-table thead th:last-child { text-align: right; }
+    .compat-table tbody td {
+      padding: 13px 18px;
+      border-top: 1px solid var(--rule);
+      color: var(--ink);
+      font-weight: 500;
+    }
+    .compat-table tbody tr:nth-child(even) { background: var(--bg); }
+    .compat-table tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-lg); }
+    .compat-table tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-lg); }
+    .compat-table tbody td:first-child { font-weight: 600; }
+    .compat-table tbody td:nth-child(2) { color: var(--ink-3); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .compat-table tbody td:last-child { text-align: right; color: var(--ok); font-weight: 600; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+    /* ===== §06 Install CTA ===== */
+    .install {
+      padding: clamp(96px, 11vw, 144px) 0;
+      text-align: center;
+    }
+    .install-mark {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: var(--t-section);
+      line-height: 0.92;
+      letter-spacing: 0.01em;
+      text-transform: uppercase;
+      color: var(--ink);
+      margin-bottom: 14px;
+    }
+    .install-mark .em { color: var(--accent-ink); }
+    .install-sub {
+      color: var(--ink-2);
+      font-size: var(--t-lead);
+      font-weight: 500;
+      margin-bottom: 36px;
+    }
+    .install-cmd {
+      display: inline-flex;
+      align-items: stretch;
+      max-width: 100%;
+      margin: 0 auto 32px;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+      box-shadow: var(--glow-soft);
+      overflow: hidden;
+    }
+    .install-cmd code {
+      font-family: var(--font-mono);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink);
+      background: transparent;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      white-space: nowrap;
+      overflow-x: auto;
+      letter-spacing: -0.005em;
+    }
+    .install-cmd code .dollar { color: var(--accent-ink); font-weight: 700; }
+    .install-cmd button {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--ink);
+      background: var(--bg-elevated);
+      border: none;
+      border-left: 1px solid var(--rule-ink);
+      padding: 0 18px;
+      cursor: pointer;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .install-cmd button:hover { background: var(--accent-ink); color: var(--bg); }
+    .install-cmd button.copied { background: var(--accent-ink); color: var(--bg); }
+    .install-btns {
       display: flex;
       gap: 12px;
       justify-content: center;
       flex-wrap: wrap;
     }
 
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 24px;
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 500;
-      text-decoration: none;
-      transition: all 0.2s;
-    }
-
-    .btn-primary {
-      background: var(--purple);
-      color: var(--bg);
-    }
-
-    .btn-primary:hover {
-      background: #b99dfd;
-      box-shadow: 0 4px 24px rgba(167, 139, 250, 0.3);
-    }
-
-    .btn-ghost {
-      background: transparent;
-      border: 1px solid rgba(167, 139, 250, 0.2);
-      color: var(--purple);
-    }
-
-    .btn-ghost:hover {
-      border-color: rgba(167, 139, 250, 0.5);
-      background: rgba(167, 139, 250, 0.05);
-    }
-
-    /* Footer */
+    /* ===== Footer ===== */
     footer {
-      border-top: 1px solid rgba(167, 139, 250, 0.06);
-      padding: 40px 0;
-      text-align: center;
+      border-top: 2px solid var(--rule-ink);
+      background: var(--bg-surface);
+      padding: 36px 0;
     }
-
-    footer p {
-      font-size: 13px;
-      color: var(--muted);
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: start;
+      gap: 32px;
     }
-
-    footer a {
-      color: var(--purple);
-      text-decoration: none;
-    }
-
-    footer a:hover { text-decoration: underline; }
-
-    /* Divider */
-    .divider {
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.15), transparent);
-    }
-
-    /* Responsive */
-    @media (max-width: 600px) {
-      .hero { padding: 120px 0 60px; }
-      section { padding: 52px 0; }
-      .skills-visual { grid-template-columns: 1fr; }
-      .install-box { flex-direction: column; }
-      nav .links { gap: 16px; }
-      nav .links .hide-mobile { display: none; }
-    }
-
-    /* Scroll reveal */
-    .reveal {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
-
-    .reveal.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    /* Terminal animation elements */
-    .t-label { font-weight: 600; color: var(--text); }
-    .t-label-you { color: var(--purple); }
-    .t-count { color: var(--muted); font-size: 12px; }
-    .t-tool-line {
-      padding-left: 8px;
-      color: var(--muted);
+    .footer-colophon {
+      font-family: var(--font-mono);
       font-size: 12px;
-      line-height: 1.8;
-      opacity: 0;
-      animation: toolFadeIn 0.3s ease forwards;
+      color: var(--ink-2);
+      line-height: 1.7;
+      font-weight: 500;
     }
-    .t-check { color: var(--success); }
-    .t-tool-name { color: #c4b5fd; }
-    .t-bash-cmd { color: #c4b5fd; }
-    .t-detail { color: var(--muted); }
-    .t-spinner { color: var(--purple); margin-top: 8px; }
-    .t-response { margin-top: 6px; line-height: 1.7; }
-    .t-status {
-      padding: 10px 20px;
-      border-top: 1px solid rgba(167, 139, 250, 0.08);
+    .footer-colophon .label {
+      color: var(--ink-3);
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      font-size: 10.5px;
+      font-weight: 700;
+    }
+    .footer-colophon .accent { color: var(--accent-ink); font-weight: 700; }
+    .footer-colophon a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+    .footer-colophon a:hover { color: var(--accent-ink); text-decoration-color: var(--accent-ink); }
+    .footer-set { margin-top: 6px; }
+    .footer-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .footer-links a {
       font-family: var(--font-mono);
       font-size: 11px;
-      color: var(--muted);
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      padding: 7px 13px;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-sm);
+      color: var(--ink);
+      text-decoration: none;
+      transition: background 0.15s ease, color 0.15s ease;
     }
-    .t-status-row { display: flex; justify-content: space-between; }
-    .t-branch { color: var(--success); }
-    .t-status-counts { margin-top: 2px; opacity: 0.6; }
-    .t-input-wrap {
-      margin: 8px 16px 12px;
-      padding: 8px 12px;
-      border: 1px solid var(--violet);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      opacity: 1;
+    .footer-links a:hover { background: var(--bg-elevated); color: var(--ink); border-color: var(--ink-3); }
+
+    /* ===== Motion ===== */
+    .js .reveal {
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1), transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .t-input-prompt {
-      color: var(--purple);
-      margin-right: 6px;
-      white-space: nowrap;
+    .js .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .js .reveal { opacity: 1; transform: none; transition: none; }
+      .btn, .head-stamp, .hero-copy, .install-cmd button, .footer-links a { transition: none; }
     }
-    .t-input-text {
-      color: var(--text);
+
+    /* ===== Responsive ===== */
+    @media (max-width: 980px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+      .hero-term { max-width: 560px; }
+      .components { grid-template-columns: 1fr; }
+      .comp-group { border-right: none; border-bottom: 1px solid var(--rule); }
+      .comp-group:last-child { border-bottom: none; }
+      .skills-grid { grid-template-columns: 1fr; }
+      .skills-spec { border-right: none; border-bottom: 1px solid var(--rule); }
+      .head-meta { display: none; }
     }
-    @keyframes toolFadeIn {
-      from { opacity: 0; transform: translateY(3px); }
-      to { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 640px) {
+      section { padding: clamp(56px, 12vw, 80px) 0; }
+      .container, .container-prose { padding: 0 20px; }
+      .hero { padding-top: 48px; padding-bottom: 64px; }
+      .hero-install { margin-left: auto; margin-right: auto; }
+      .head-inner { gap: 12px; }
+      .head-stamp { padding: 6px 10px; font-size: 10.5px; }
+      .op-list li {
+        grid-template-columns: 52px 1fr;
+        gap: 12px 16px;
+        padding: 18px 18px;
+      }
+      .op-list li .op-text { grid-column: 1 / -1; padding-top: 4px; }
+      .op-num { font-size: 1.4rem; }
+      .compat-table tbody td,
+      .compat-table thead th { padding: 11px 12px; font-size: 12px; }
+      .compat-table tbody td:nth-child(2) { font-size: 11px; }
+      .install-cmd { flex-direction: column; width: 100%; max-width: 360px; }
+      .install-cmd button { padding: 12px 18px; border-left: none; border-top: 2px solid var(--rule-ink); }
+      .footer-grid { grid-template-columns: 1fr; }
+      .footer-links { justify-content: flex-start; }
+      .spec-row .detail { margin-left: 0; flex-basis: 100%; padding-left: 14px; }
+    }
+
+    /* Print: keep the datasheet aesthetic on paper */
+    @media print {
+      body::before { display: none; }
+      .head, footer { break-inside: avoid; }
+      section { break-inside: avoid; padding: 24px 0; }
     }
   </style>
 </head>
 <body>
+  <a href="#main" class="skip-link">Skip to content</a>
 
-  <div class="fog"></div>
-
-  <nav>
-    <div class="container">
-      <a href="#" class="logo">~ haze</a>
-      <div class="links">
-        <a href="#getting-started" class="hide-mobile">Start</a>
-        <a href="#features" class="hide-mobile">Features</a>
-        <a href="#skills" class="hide-mobile">Skills</a>
-        <a href="#tools" class="hide-mobile">Tools</a>
-        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <a class="badge" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.2.0</a>
+  <header class="head">
+    <div class="container head-inner">
+      <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <div class="head-meta" aria-hidden="true">
+        <span>HAZE-CLI-001</span>
+        <span>REV 0.3.0</span>
+        <span>MIT</span>
       </div>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.3.0</a>
+      </nav>
     </div>
-  </nav>
+  </header>
 
-  <main>
-    <!-- Hero -->
-    <section class="hero">
+  <main id="main">
+
+    <!-- ===== TITLE BLOCK / HERO ===== -->
+    <section class="hero" id="start">
       <div class="container">
-        <h1>
-          <span class="fog-word">Barely a <code style="font-family: var(--font-mono); font-size: 0.85em; background: var(--code-bg); border: 1px solid rgba(167, 139, 250, 0.15); padding: 2px 10px; border-radius: 6px; -webkit-text-fill-color: var(--purple);">haze</code>.</span><br>
-          Entirely yours.
-        </h1>
-        <p>
-          A minimal AI agent for expert terminal users:<br>
-          transparent tools, direct action, honest validation.
-        </p>
-
-        <div class="install-box">
-          <code><span class="dollar">$ </span>npm i -g @denizokcu/haze</code>
-          <button class="copy-btn" id="copy-btn" onclick="copyInstall()">copy</button>
-        </div>
-
-        <div class="terminal" id="terminal">
-          <div class="terminal-bar">
-            <span class="terminal-dot r"></span>
-            <span class="terminal-dot y"></span>
-            <span class="terminal-dot g"></span>
-            <span class="terminal-title">haze</span>
-          </div>
-          <div class="terminal-body" id="terminal-body"></div>
-          <div class="t-input-wrap" id="input-field">
-            <span class="t-input-prompt">›</span>
-            <span class="t-input-text" id="input-text"></span>
-          </div>
-          <div class="t-status" id="status-bar">
-            <div class="t-status-row">
-              <span>~/calc-app <span class="t-branch">(main)</span></span>
-              <span>anthropic/claude-sonnet-4.6</span>
+        <div class="hero-grid">
+          <div class="hero-text reveal">
+            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.3.0</div>
+            <h1 class="hero-h1">
+              A CLI agent for Experts
+              <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
+            </h1>
+            <p class="hero-sub">
+              Agentic workflows for people who know what they're doing. Minimal system prompt, minimal bias. Seven tools. Do something twice, make it a skill.
+            </p>
+            <div class="hero-install">
+              <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
+              <button class="hero-copy" id="copy-btn" type="button" aria-label="Copy install command">Copy</button>
             </div>
-            <div class="t-status-counts">8 messages / 5 tool calls / 0 skills</div>
+            <div class="hero-ctas">
+              <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">GitHub</a>
+              <a href="#operation" class="btn btn-ghost">Operation</a>
+            </div>
           </div>
+
+          <aside class="hero-term reveal" aria-label="haze session preview">
+            <div class="hero-term-title" aria-hidden="true">haze</div>
+            <div class="term">
+              <div class="term-head">
+                <span class="term-dots" aria-hidden="true">
+                  <span class="term-dot"></span>
+                  <span class="term-dot"></span>
+                  <span class="term-dot accent"></span>
+                </span>
+                <span class="term-head-title"><span class="path"><span class="brand">haze</span><span class="cwd"> · ~/calc-app</span></span></span>
+                <span class="term-head-branch">main</span>
+              </div>
+              <div class="term-body">
+                <div class="term-user">
+                  <span class="term-user-label">You asked</span>
+                  <div class="term-prompt">stop hand-rolling the pad helper</div>
+                </div>
+
+                <div class="term-tool-head"><span class="term-tool-label">Tool</span> · 4 calls · 1 change · 4.8s</div>
+                <div class="term-tool">
+                  <span class="check">✓</span><span class="name">listFiles</span><span class="args">.</span><span class="detail">0.6s</span>
+                </div>
+                <div class="term-tool">
+                  <span class="check">✓</span><span class="name">readFile</span><span class="args">package.json</span><span class="detail">0.05s</span>
+                </div>
+                <div class="term-tool">
+                  <span class="check">✓</span><span class="name">editFile</span><span class="args">package.json</span><span class="detail">+1 −0 in 0.04s</span>
+                </div>
+                <div class="term-tool">
+                  <span class="check">✓</span><span class="name">bash</span><span class="args">npm install &amp;&amp; npm test</span><span class="detail">exited 0 in 4.1s</span>
+                </div>
+                <div class="term-validation">validation: 4 passed, 0 failed</div>
+
+                <div class="term-label haze">haze<span class="term-label-meta"> · 4.8s</span></div>
+                <div class="term-response">Added left-pad@1.3.0 to dependencies. npm install pulled 1,247 transitive packages. Tests still pass. We've learned nothing as an industry.</div>
+              </div>
+              <div class="term-status">
+                <span class="model">anthropic/claude-sonnet-4.6</span>
+                <span class="stat">3 files · 4.8s</span>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
     </section>
 
-    <div class="divider"></div>
+    <!-- ===== §01 OPERATION ===== -->
+    <section id="operation">
+      <div class="container-prose">
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§01</span>
+            <span class="label">Operation</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Three commands.</h2>
+          <p class="sec-sub">haze starts intentionally small. Install it, point it at an OpenAI-compatible endpoint, and pick a model.</p>
+        </div>
+        <ol class="op-list reveal">
+          <li>
+            <span class="op-num">01</span>
+            <span class="op-cmd"><span class="dollar">$</span>npm i -g @denizokcu/haze</span>
+            <span class="op-text">Install globally from npm.</span>
+          </li>
+          <li>
+            <span class="op-num">02</span>
+            <span class="op-cmd">haze</span>
+            <span class="op-text">Open haze from a project directory.</span>
+          </li>
+          <li>
+            <span class="op-num">03</span>
+            <span class="op-cmd">/provider<span class="dim"> then </span>/model</span>
+            <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
+          </li>
+        </ol>
+        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is meant to be grown with the model through <strong>/create-skill "your description"</strong>.</p>
+      </div>
+    </section>
 
-    <!-- Getting started -->
-    <section id="getting-started">
+    <!-- ===== §02 FIELD BEHAVIOR ===== -->
+    <section class="field" id="field-behavior">
       <div class="container">
-        <div class="center reveal">
-          <p class="section-label">// getting started</p>
-          <h2 class="section-title">Install. Add a provider.<br>Pick a model.</h2>
-          <p class="section-desc">
-            Haze starts intentionally small. First give it an OpenAI-compatible provider, then select the model it should use.
-          </p>
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§02</span>
+            <span class="label">Field behavior</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Watch it work.</h2>
+          <div class="field-prose">
+            <p>Tool calls are grouped into per-turn activity blocks.<br><strong>haze has no permission gates, intentionally.</strong></p>
+            <p>Skills are handed over to the model.<br><strong>The LLM decides when to use a skill.</strong></p>
+            <p>Skills are tools written by you.<br><strong>Create a skill if you have to do it multiple times.</strong></p>
+            <p>Failures return structured reason codes with recovery hints to the model.<br><strong>Not apologies.</strong></p>
+          </div>
         </div>
-
-        <div class="start-card reveal">
-          <ol class="start-steps">
-            <li><span class="start-num">01</span><span class="start-cmd">$ haze</span><span>Open Haze from a project directory after installing.</span></li>
-            <li><span class="start-num">02</span><span class="start-cmd">/provider</span><span>Add any OpenAI-compatible endpoint — e.g. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy — with URL, optional key, and models.</span></li>
-            <li><span class="start-num">03</span><span class="start-cmd">/model</span><span>Pick the first model, or set one directly like <code>/model local:llama3.1</code>.</span></li>
-            <li><span class="start-num">04</span><span class="start-text">Start chatting</span><span>Ask Haze to inspect, edit, run commands, or explain the project.</span></li>
-            <li><span class="start-num">05</span><span class="start-cmd">/create-skill</span><span>If you do something for the second time, ask Haze to build a Markdown skill for it; find it later in <code>~/.haze/skills</code>.</span></li>
-          </ol>
-          <p class="start-note">
-            That's the core on purpose. Anything more specific is meant to be created with the LLM through skills.
-          </p>
+        <div class="specimen reveal" aria-label="Example tool block">
+          <div class="specimen-head">
+            <span>Calibration printout — one turn</span>
+            <span class="corner" aria-hidden="true"></span>
+          </div>
+          <div class="specimen-body">
+            <div class="spec-row">
+              <span class="check">+</span><span class="name">editFile</span><span class="args">src/config.ts</span><span class="detail">+3 −1 in 0.08s</span>
+            </div>
+            <div class="spec-diff">
+              <span class="add">+ if (!process.env.DATABASE_URL) throw new Error('required');</span>
+              <span class="rem">− // TODO: validate environment</span>
+            </div>
+            <div class="spec-row">
+              <span class="check">+</span><span class="name">bash</span><span class="args">npm run typecheck</span><span class="detail">mutating, exited 0 in 1.8s</span>
+            </div>
+            <div class="spec-validation">validation: 0 diagnostics, 12 files checked</div>
+            <div class="spec-row">
+              <span class="check">+</span><span class="name">bash</span><span class="args">npm test</span><span class="detail">validation, exited 0 in 2.4s</span>
+            </div>
+            <div class="spec-validation">validation: 38 passed, 0 failed</div>
+            <div class="spec-footer">3 tool calls, all succeeded. Compaction preserved failure evidence.</div>
+          </div>
         </div>
       </div>
     </section>
 
-    <div class="divider"></div>
-
-    <!-- Features -->
-    <section id="features">
+    <!-- ===== §03 COMPONENTS ===== -->
+    <section id="components">
       <div class="container">
-        <div class="center reveal">
-          <p class="section-label">// what it does</p>
-          <h2 class="section-title">Seven tools. Focused subagents.<br>Infinite stubbornness.</h2>
-          <p class="section-desc">
-            Haze doesn't try to be everything. It gives the model read, search, edit, line-replace, write, list, and bash — plus validation summaries and focused delegation when work can split cleanly.
-          </p>
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§03</span>
+            <span class="label">Components</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">The components.</h2>
+          <p class="sec-sub">No hidden tools. What you see is what the model gets. Nothing phones home.</p>
         </div>
-
-        <div class="features">
-          <div class="feature reveal">
-            <h3>Born in the terminal</h3>
-            <p>No web UI. No Electron. No Docker container that spawns other Docker containers. Haze lives in your terminal where code happens. Interactive TUI with streaming, syntax highlighting, wrapped multi-line input, and tool-call transparency. Watch it work. Keep your hands near the wheel.</p>
+        <div class="components reveal">
+          <div class="comp-group">
+            <div class="comp-group-head">
+              <span class="comp-group-name">Read</span>
+              <span class="comp-group-code">HAZE-R · 3</span>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">listFiles</span>
+                <span class="comp-part">HAZE-R-001</span>
+              </div>
+              <p class="comp-desc">Recursive project discovery with cursor pagination.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">readFile</span>
+                <span class="comp-part">HAZE-R-002</span>
+              </div>
+              <p class="comp-desc">Bounded, numbered UTF-8 reads with nextOffset paging.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">grep</span>
+                <span class="comp-part">HAZE-R-003</span>
+              </div>
+              <p class="comp-desc">Bundled ripgrep search with a true global result cap.</p>
+            </div>
           </div>
 
-          <div class="feature reveal">
-            <h3>Deliberately small toolset</h3>
-            <p>Read, grep, edit, replace lines, write, list, bash. That's it. Bash results now include command classification, cwd, duration, timeout state, and validation summaries when Haze recognizes test/typecheck/lint/build output. Few tricks, useful evidence.</p>
+          <div class="comp-group">
+            <div class="comp-group-head">
+              <span class="comp-group-name">Write</span>
+              <span class="comp-group-code">HAZE-W · 3</span>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">editFile</span>
+                <span class="comp-part">HAZE-W-001</span>
+              </div>
+              <p class="comp-desc">Unique text replacements with line-prefix tolerance and recovery hints.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">replaceLines</span>
+                <span class="comp-part">HAZE-W-002</span>
+              </div>
+              <p class="comp-desc">Line-range edits with EOF clamping for slightly-oversized ranges.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">writeFile</span>
+                <span class="comp-part">HAZE-W-003</span>
+              </div>
+              <p class="comp-desc">Create files and parent directories.</p>
+            </div>
           </div>
 
-          <div class="feature reveal">
-            <h3>Markdown skills</h3>
-            <p>If you do something for the second time, run <code>/create-skill</code> and have Haze turn it into a reusable Markdown workflow. Skills are plain files you can inspect, refine, and version. Tiny spell, useful goblin.</p>
-          </div>
-
-          <div class="feature reveal">
-            <h3>Focused subagents</h3>
-            <p>When work splits into independent tracks, Haze can delegate to fresh-context subagents and merge concise summaries back into the main turn. Parallel exploration without flooding the primary conversation.</p>
-          </div>
-
-          <div class="feature reveal">
-            <h3>Context-aware</h3>
-            <p>Reads <code>AGENTS.md</code> and <code>CLAUDE.md</code> from your project and home directory. Durable sessions can be resumed with <code>haze --continue</code>, and <code>/compact</code> keeps long chats manageable. Rude, but in a good way.</p>
-          </div>
-
-          <div class="feature reveal">
-            <h3>Expert-oriented autonomy</h3>
-            <p>File tools scoped to your workspace. Gitignore-aware by default. Bash commands are classified and shown clearly, but Haze does not add confirmation gates. It assumes expert users know what they asked for. Powerful enough to help, dumb enough to deserve supervision.</p>
-          </div>
-
-          <div class="feature reveal">
-            <h3>Bring your own model</h3>
-            <p>Works with any OpenAI-compatible API via <code>/provider</code>, <code>/model</code>, or environment variables. Sonnet, GPT, DeepSeek, your weird local llama — if it speaks the protocol, Haze speaks to it. Default: <code>anthropic/claude-sonnet-4.6</code>.</p>
+          <div class="comp-group">
+            <div class="comp-group-head">
+              <span class="comp-group-name">Shell</span>
+              <span class="comp-group-code">HAZE-S · 1</span>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">bash</span>
+                <span class="comp-part">HAZE-S-001</span>
+              </div>
+              <p class="comp-desc">Run commands with classification, cwd, duration, and parsed validation.</p>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <div class="divider"></div>
-
-    <!-- Skills -->
+    <!-- ===== §04 SERVICEABLE PROCEDURES (skills) ===== -->
     <section id="skills">
       <div class="container">
-        <div class="center reveal">
-          <p class="section-label">// the magic system</p>
-          <h2 class="section-title">Skills grow while you work.</h2>
-          <p class="section-desc">
-            Hit friction? Create a skill. Keep going. The most adaptive workflow is the one you shape as you go.
-          </p>
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§04</span>
+            <span class="label">Serviceable procedures</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Procedures grow<br><span class="soft">while you work.</span></h2>
+          <p class="sec-sub">Hit friction, describe it, get a Markdown workflow you can refine and version. Skills become slash commands.</p>
         </div>
+        <div class="skills-grid reveal">
+          <div class="skills-spec">
+            <div class="skills-spec-head">
+              <span>~/.haze/skills/code-review/SKILL.md</span>
+              <span class="corner" aria-hidden="true"></span>
+            </div>
+<pre><span class="meta">---</span>
+<span class="key">name</span>: code-review
+<span class="key">description</span>: Review the diff between
+  the current branch and main.
+<span class="meta">---</span>
 
-        <div class="skills-visual reveal">
-          <div class="skill-card">
-            <div class="slash">/create-skill</div>
-            <div class="desc">Describe what you want. Haze writes the Markdown. You refine it. Done.</div>
+<span class="h"># Role</span>
+You are a focused code reviewer.
+
+<span class="h"># Procedure</span>
+Inspect branch state, changed files,
+staged and unstaged diffs. Review
+incrementally, then summarize.
+
+<span class="h"># Output template</span>
+<span class="meta">## Summary</span>
+- scope and result
+<span class="meta">## Findings</span>
+- prioritized findings</pre>
           </div>
-          <div class="skill-card">
-            <div class="slash">/deploy-check</div>
-            <div class="desc">Your custom skill, a slash command now. Lint, test, build, check. One invocation.</div>
-          </div>
-          <div class="skill-card">
-            <div class="slash">/review</div>
-            <div class="desc">Teach it your review standards. It remembers next time. Every time.</div>
-          </div>
-          <div class="skill-card">
-            <div class="slash">~/.haze/skills/</div>
-            <div class="desc">Skills created by <code>/create-skill</code> live here as plain Markdown. Inspect, edit, delete, or version them.</div>
+          <div class="skills-list-block">
+            <div class="skills-list-head">
+              <span>Procedure index</span>
+              <span>· /create-skill</span>
+            </div>
+            <ul class="skills-list">
+              <li>
+                <span class="cmd">/code-review</span>
+                <span class="desc">Review current branch against main.</span>
+              </li>
+              <li>
+                <span class="cmd">/deploy-check</span>
+                <span class="desc">Lint, test, build, verify in one call.</span>
+              </li>
+              <li>
+                <span class="cmd">/release-prep</span>
+                <span class="desc">Clean commits from uncommitted changes.</span>
+              </li>
+              <li>
+                <span class="cmd">/security-review</span>
+                <span class="desc">Audit auth, secrets, and injection surface.</span>
+              </li>
+            </ul>
+            <p class="skills-cta">
+              Describe what you want in plain language. haze writes the Markdown. You refine it. <span class="cmd">/create-skill &lt;description&gt;</span>
+            </p>
           </div>
         </div>
       </div>
     </section>
 
-    <div class="divider"></div>
-
-    <!-- Tools -->
-    <section id="tools">
+    <!-- ===== §05 COMPATIBILITY ===== -->
+    <section id="compatibility">
       <div class="container">
-        <div class="center reveal">
-          <p class="section-label">// the toolbox</p>
-          <h2 class="section-title">Seven built-in tools. That's the whole list.</h2>
-          <p class="section-desc">
-            No hidden tools. No surprise API calls. What you see is what the model gets.
-          </p>
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§05</span>
+            <span class="label">Compatibility</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Bring your<br>own model.</h2>
+          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure via <code class="cmd">/provider</code>, <code class="cmd">/model</code>, or environment variables. Your key, your bill.</p>
         </div>
-
-        <div class="tools-grid reveal">
-          <div class="tool">
-            <div class="tool-name">listFiles</div>
-            <div class="tool-desc">Discover project structure</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">readFile</div>
-            <div class="tool-desc">Read any UTF-8 file</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">grep</div>
-            <div class="tool-desc">Regex search with context</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">editFile</div>
-            <div class="tool-desc">Exact text replacements</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">replaceLines</div>
-            <div class="tool-desc">Line-range edits</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">writeFile</div>
-            <div class="tool-desc">Create new files</div>
-          </div>
-          <div class="tool">
-            <div class="tool-name">bash</div>
-            <div class="tool-desc">Shell workflows + validation summaries</div>
-          </div>
-        </div>
+        <table class="compat-table reveal" aria-label="Supported providers">
+          <thead>
+            <tr>
+              <th scope="col">Provider</th>
+              <th scope="col">Type</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>OpenAI</td><td>Hosted</td><td>Supported</td></tr>
+            <tr><td>Anthropic</td><td>via OpenRouter</td><td>Supported</td></tr>
+            <tr><td>Google</td><td>via OpenRouter</td><td>Supported</td></tr>
+            <tr><td>Mistral AI</td><td>Hosted</td><td>Supported</td></tr>
+            <tr><td>Meta</td><td>via OpenRouter</td><td>Supported</td></tr>
+            <tr><td>Ollama</td><td>Local</td><td>Supported</td></tr>
+            <tr><td>LM Studio</td><td>Local</td><td>Supported</td></tr>
+            <tr><td>OpenRouter</td><td>Aggregator</td><td>Supported</td></tr>
+            <tr><td>Groq</td><td>Hosted</td><td>Supported</td></tr>
+            <tr><td>Any OpenAI-compatible proxy</td><td>Custom</td><td>Supported</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-    <div class="divider"></div>
-
-    <!-- Philosophy -->
-    <section>
-      <div class="container">
-        <div class="center reveal">
-          <p class="quote">
-            "The most adaptive workflow is the one <em>you shape as you go</em>."
-          </p>
-          <p class="attribution">— The Haze Manifesto, probably</p>
-        </div>
-      </div>
-    </section>
-
-    <div class="divider"></div>
-
-    <!-- CTA -->
-    <section class="cta">
+    <!-- ===== §08 INSTALL ===== -->
+    <section class="install" id="install">
       <div class="container reveal">
-        <h2>Stop reading. Start haze.</h2>
-        <p>It's free, it's MIT-licensed, and it won't judge your code.<br>(The model might, but that's between you two.)</p>
-        <div class="cta-buttons">
-          <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">View on GitHub</a>
-          <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="btn btn-ghost">npm package</a>
+        <div class="eyebrow-stamp">§06 · INSTALL</div>
+        <h2 class="install-mark">Install <span class="em">haze</span>.</h2>
+        <p class="install-sub">MIT-licensed. Open source. No contact-sales button.</p>
+        <div class="install-cmd">
+          <code><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
+          <button id="copy-btn-cta" type="button" aria-label="Copy install command">Copy</button>
+        </div>
+        <div class="install-btns">
+          <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">GitHub</a>
+          <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="btn btn-ghost">npm</a>
         </div>
       </div>
     </section>
   </main>
 
   <footer>
-    <div class="container">
-      <p>
-        Built with misplaced confidence by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a> &middot;
-        MIT License &middot;
-        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">File issues</a> &middot;
-        Permission-dialog goblin dismissed.
-      </p>
+    <div class="container footer-grid">
+      <div class="footer-colophon">
+        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.3.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
+        <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/DenizOkcu/haze/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+      </nav>
     </div>
   </footer>
 
   <script>
-    const termBody = document.getElementById('terminal-body');
-    const statusBar = document.getElementById('status-bar');
-    const inputField = document.getElementById('input-field');
-    const inputText = document.getElementById('input-text');
+    document.documentElement.classList.add('js');
 
-    function wait(ms) {
-      return new Promise(r => setTimeout(r, ms));
+    function copyInstall(btn) {
+      navigator.clipboard.writeText('npm i -g @denizokcu/haze').then(function () {
+        var prev = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(function () { btn.textContent = prev; btn.classList.remove('copied'); }, 1800);
+      }).catch(function () {});
     }
+    document.getElementById('copy-btn').addEventListener('click', function () { copyInstall(this); });
+    document.getElementById('copy-btn-cta').addEventListener('click', function () { copyInstall(this); });
 
-    async function typeInto(el, text, speed) {
-      for (const ch of text) {
-        el.textContent += ch;
-        await wait(speed);
-        if (Math.random() < 0.07) await wait(speed * 5);
-      }
-    }
-
-    function scrollBottom() {
-      termBody.scrollTop = termBody.scrollHeight;
-    }
-
-    async function addYouLine(text) {
-      inputText.textContent = '';
-      await wait(150);
-      const label = document.createElement('div');
-      label.innerHTML = '<span class="t-label t-label-you">You</span>';
-      termBody.appendChild(label);
-      const line = document.createElement('div');
-      line.textContent = text;
-      termBody.appendChild(line);
-      scrollBottom();
-    }
-
-    async function addTools(calls) {
-      const header = document.createElement('div');
-      header.style.marginTop = '10px';
-      header.innerHTML = `<span class="t-label">Tool</span>  <span class="t-count">Tools: ${calls.length} calls</span>`;
-      termBody.appendChild(header);
-      await wait(250);
-
-      for (const tc of calls) {
-        const line = document.createElement('div');
-        line.className = 't-tool-line';
-        const detail = tc.isBash
-          ? `${tc.summary || `exited with code ${tc.exit}`} in ${tc.time}`
-          : `completed in ${tc.time}`;
-        const nameClass = tc.isBash ? 't-bash-cmd' : 't-tool-name';
-        line.innerHTML = `<span class="t-check">✓</span> <span class="${nameClass}">${tc.name}</span> <span class="t-detail">${tc.args}</span> — <span class="t-detail">${detail}</span>`;
-        termBody.appendChild(line);
-        scrollBottom();
-        await wait(180 + Math.random() * 140);
-      }
-    }
-
-    async function spin(duration) {
-      const el = document.createElement('div');
-      el.className = 't-spinner';
-      termBody.appendChild(el);
-      scrollBottom();
-      const chars = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
-      let i = 0;
-      const iv = setInterval(() => {
-        i = (i + 1) % chars.length;
-        el.textContent = chars[i] + ' Haze is thinking... · esc to interrupt';
-      }, 80);
-      await wait(duration);
-      clearInterval(iv);
-      el.remove();
-      await wait(200);
-    }
-
-    async function runTerminal() {
-      // === TURN 1: Create a skill ===
-      await wait(300);
-      await typeInto(inputText, '/create-skill you are a security reviewer', 32);
-      await wait(400);
-
-      await addYouLine('/create-skill you are a security reviewer');
-      await wait(500);
-
-      const skillTools = [
-        { name: 'writeFile', args: '~/.haze/skills/security-reviewer/SKILL.md', time: '0.04s' },
-      ];
-      await addTools(skillTools);
-      await wait(300);
-
-      await spin(1200);
-
-      const resp1 = document.createElement('div');
-      resp1.className = 't-response';
-      resp1.textContent = 'Created skill /security-reviewer. Try /security-reviewer when you\'re ready to feel something.';
-      termBody.appendChild(resp1);
-      scrollBottom();
-      await wait(800);
-
-      // Spacer
-      termBody.appendChild(document.createElement('div'));
-      scrollBottom();
-      await wait(400);
-
-      // === TURN 2: Use the skill ===
-      await typeInto(inputText, '/security-reviewer', 36);
-      await wait(400);
-
-      await addYouLine('/security-reviewer');
-      await wait(500);
-
-      const reviewTools = [
-        { name: 'listFiles', args: '.', time: '0.6s' },
-        { name: 'readFile', args: 'src/api/auth.ts', time: '0.07s' },
-        { name: 'grep', args: '"eval|innerHTML|document.write" in src (*.ts)', time: '0.2s' },
-        { name: 'bash', args: 'npm test', time: '3.4s', isBash: true, exit: 1, summary: 'test failed: 2 diagnostics' },
-        { name: 'subagent', args: '"inspect session handling"', time: '2.1s' },
-        { name: 'readFile', args: 'src/middleware/session.ts', time: '0.06s' },
-      ];
-      await addTools(reviewTools);
-
-      await spin(1600);
-
-      // Security review — lines appear one by one
-      const findings = [
-        { html: '<span style="color:var(--warning);font-weight:600">Security Review — 7 findings. Yes, seven.</span>' },
-        { html: '' },
-        { html: '<span style="color:var(--danger)">● CRITICAL</span> <span style="color:var(--text)">auth.ts:42</span> — Admin password is "admin123". This is not a placeholder. Someone deployed this on a Friday.' },
-        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">auth.ts:89</span> — SQL injection via user input. Bob from accounting could DROP TABLE the entire database. Bob would.' },
-        { html: '<span style="color:var(--danger)">● HIGH</span> <span style="color:var(--text)">.env</span> — API keys committed to git. Pushed straight to main. The commit message was "fixed stuff".' },
-        { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">session.ts:18</span> — No HTTPS. Everything sent in plain text over HTTP. Very retro. Very 1997.' },
-        { html: '<span style="color:var(--warning)">● MED</span>  <span style="color:var(--text)">api/users.ts:53</span> — eval() on user input. ChatGPT really said "this looks good" and we just went with it huh.' },
-        { html: '<span style="color:var(--success)">● LOW</span>  <span style="color:var(--text)">auth.ts:7</span> — No rate limiting. A determined toddler could brute-force this login.' },
-        { html: '<span style="color:var(--success)">● LOW</span>  <span style="color:var(--text)">package.json</span> — Depends on "left-pad". We\'ve learned nothing as an industry.' },
-        { html: '' },
-        { html: '<span style="color:var(--muted)">Verdict: Ship it and pray, or fix it and sleep. Your call.</span>' },
-      ];
-
-      for (const f of findings) {
-        const line = document.createElement('div');
-        line.className = 't-response';
-        if (f.html) {
-          line.innerHTML = f.html;
-          line.style.lineHeight = '1.7';
-        }
-        termBody.appendChild(line);
-        scrollBottom();
-        await wait(600 + Math.random() * 300);
-      }
-
-      await wait(1400);
-      termBody.scrollTo({top: 0, behavior: 'smooth'});
-    }
-
-    setTimeout(runTerminal, 800);
-
-    function copyInstall() {
-      navigator.clipboard.writeText('npm i -g @denizokcu/haze');
-      const btn = document.getElementById('copy-btn');
-      btn.textContent = 'copied!';
-      setTimeout(() => { btn.textContent = 'copy'; }, 2000);
-    }
-
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(e => {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
         if (e.isIntersecting) {
           e.target.classList.add('visible');
           observer.unobserve(e.target);
         }
       });
-    }, { threshold: 0.1 });
+    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
 
-    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    document.querySelectorAll('.reveal').forEach(function (el) { observer.observe(el); });
   </script>
 </body>
 </html>
