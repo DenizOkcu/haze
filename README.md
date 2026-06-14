@@ -2,16 +2,19 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.3.0
+## What's new in 0.4.0
 
-Haze 0.3.0 polishes the experience around sessions and the docs site.
+Haze 0.4.0 reworks skill creation and simplifies the command surface.
 
-- The docs site has been redesigned with a cleaner layout, improved typography, better mobile responsiveness, scroll-reveal animations, and accessibility improvements.
-- The task bar now appears above the activity spinner so in-progress and pending tasks are always visible during active agent turns.
-- Tasks are automatically cleared when starting or exiting a session, preventing stale task state from leaking across conversations.
+- **3-step skill wizard.** `/create-skill` is now an interactive wizard: name the skill, optionally give it a role, then describe what it does. The model writes the Markdown body. Your typed name and role are used verbatim — no LLM rename.
+- **Language-agnostic intent extraction.** Skill descriptions are interpreted by the model in any language. `"crée une compétence qui vérifie le style du code"` produces a skill that vérifies code style, not a skill about creating one.
+- **Tasks are model-managed.** The `/tasks` slash command is gone. The model tracks multi-step work via the `writeTasks` tool — you talk, it plans. `/clear` still wipes tasks as part of clearing the conversation.
+- **Leaner command surface.** Removed `/list-skills` (folded into `/skills`), the `/skill X` legacy subcommand forms, and the `/tasks rm` alias. Each operation now has exactly one way to be invoked.
+- **Docs site additions.** New §02 segment frames skill creation as the native superpower with copy-pasteable recipe cards; new §07 commands index lists all 16 commands grouped by category. §04 "Serviceable procedures" was removed and sections renumbered sequentially.
 
 Previous releases:
 
+- **0.3.0** — Docs site redesign, task bar moves above the activity spinner, tasks auto-clear between sessions.
 - **0.2.0** — Reliability release: stronger continuation after failed edits and validation, structured bash classification, parsed validation summaries, multi-line chat input with vertical cursor movement.
 - **0.1.0** — Bundled ripgrep, subagent delegation, inline diff display.
 - **0.0.3** — Durable sessions, context compaction, provider management.
@@ -72,7 +75,7 @@ export HAZE_MODEL=anthropic/claude-sonnet-4.6 # or gpt-4.1, llama3.1, qwen2.5-co
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key.
 
-Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill <description>`. If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
+Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill` (a 3-step wizard: name, role, description). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
 ## Get productive immediately
 
@@ -90,9 +93,10 @@ Useful starters:
 
 ```txt
 /init
-/create-skill review my current branch against main like a senior engineer
-/create-skill prepare clean git commits from my uncommitted changes
-/create-skill implement small features with tests and a concise summary
+/create-skill   # then the wizard asks for name, role, and a description like:
+                # "review my current branch against main like a senior engineer"
+                # "prepare clean git commits from my uncommitted changes"
+                # "implement small features with tests and a concise summary"
 ```
 
 `/init` creates or updates `AGENTS.md` so future sessions understand the project.
@@ -104,7 +108,9 @@ Skills are Markdown workflows that Haze creates with `/create-skill` and stores 
 If you do something for the second time, build a skill for it:
 
 ```txt
-/create-skill review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
+/create-skill
+# Wizard: name=branch-diff-review, role="Senior engineer reviewing diffs",
+#         description="review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS"
 ```
 
 Haze uses the model to create the skill file for you:
@@ -172,8 +178,7 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /clear
 /exit
 
-/create-skill <description>
-/list-skills
+/create-skill
 /skill-info <name>
 /validate-skill <name-or-dir>
 /remove-skill <name> --yes

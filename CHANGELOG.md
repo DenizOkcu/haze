@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-06-15
+
+### Skills
+
+- Replaced single-shot `/create-skill <description>` with a 3-step interactive wizard: name → optional role → description. The user-supplied name and role are used verbatim — the model no longer renames them.
+- Added language-agnostic intent extraction. Skill descriptions are interpreted by the model in any language, replacing the previous English-only regex strip. `"crée une compétence qui vérifie le style du code"` now produces a skill that vérifies code style, not a skill about creating something.
+- Added `toSkillDirName` for kebab-casing user-typed skill names without stop-word stripping (so `"create a skill"` stays `create-a-skill`, not `skill`).
+
+### Commands
+
+- Removed the `/tasks` slash command. Tasks are now managed exclusively by the model via the `writeTasks` tool — `/clear` still wipes them as a side effect of clearing the conversation.
+- Removed the `/list-skills` alias; `/skills` now shows the overview and the installed list.
+- Removed the `/skill <subcommand>` and `/skills <subcommand>` legacy routing forms. Each skill operation now has exactly one user-facing form: `/skills`, `/create-skill`, `/skill-info`, `/validate-skill`, `/remove-skill`.
+- Removed the `/tasks rm` alias for `/tasks remove`.
+- Refactored `handleSkillCommand` from stringly-typed `value` parsing to a typed `SkillSubcommand` union argument.
+
+### Docs site
+
+- Added §02 "Native skill creation" segment that frames the 3-step wizard as the haze superpower, with a live transcript of the wizard prompts, superpower bullets, and copy-pasteable recipe cards for `/code-review`, `/deploy-check`, `/release-prep`, `/security-review`.
+- Added §07 "Commands index" — a categorized reference of all 16 slash commands plus the `/<skill-name>` dynamic invocations.
+- Removed §04 "Serviceable procedures" (folded into §02).
+- Renumbered sections sequentially (§01 Operation → §02 Native skill creation → §03 Field behavior → §04 Components → §05 Compatibility → §06 Install → §07 Commands index).
+- Fixed §01 layout: switched from `.container-prose` (narrow, visually centered) to `.container` so it aligns with every other section.
+- Updated all `/create-skill <description>` references to reflect the wizard.
+
+### Internal
+
 - Added request-level context accounting, cache/no-cache usage metrics, a debug token breakdown, and an offline `context:report` command.
 - Bounded `readFile`, structured and globally capped `grep`, and compacted large bash output behind paginated `readToolOutput` handles.
 - Added structured `WorkState` snapshots, token-aware compaction, conservative old-tool-result pruning, bounded continuation slices, and no-progress termination for long agent workflows.

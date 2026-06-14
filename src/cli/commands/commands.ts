@@ -6,7 +6,7 @@ import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/
 import type {HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {Mode} from './chat.js';
-import {clearTasks, generateTaskId, loadTasks, saveTasks} from '../../core/tasks/taskStorage.js';
+import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
 
 export type CommandContext = {
@@ -30,10 +30,8 @@ export type CommandResult = 'handled' | 'unhandled' | 'exit';
 function skillHelp() {
   return [
     'Skill commands:',
-    '/create-skill <description>',
-    '  Create a Markdown skill in ~/.haze/skills.',
-    '/list-skills',
-    '  List installed skills.',
+    '/create-skill',
+    '  Launch the 3-step skill wizard (name -> role -> description). Creates a Markdown skill in ~/.haze/skills.',
     '/skill-info <name>',
     '  Show a skill description and path.',
     '/validate-skill <name-or-dir>',
@@ -48,43 +46,28 @@ async function skillOverview(): Promise<string> {
   const registry = await loadSkillRegistry();
   const skills = [...registry.skills.values()];
   const installed = skills.length === 0
-    ? ['Installed skills:', '- None yet. Create one with /create-skill <description>.']
+    ? ['Installed skills:', '- None yet. Create one with /create-skill.']
     : ['Installed skills:', ...skills.map(s => `- /${s.name} - ${s.description}`)];
   return `${skillHelp()}\n\n${installed.join('\n')}`;
 }
 
-async function handleSkillCommand(value: string, ctx: CommandContext): Promise<CommandResult> {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  const subcommand = parts[1];
-  if (!subcommand || subcommand === 'help') {
+type SkillSubcommand = 'help' | 'create' | 'info' | 'validate' | 'remove';
+
+async function handleSkillCommand(sub: SkillSubcommand, args: string, ctx: CommandContext): Promise<CommandResult> {
+  if (sub === 'help') {
     ctx.addSystemMessage(await skillOverview());
     return 'handled';
   }
 
-  if (subcommand === 'create') {
-    const description = parts.slice(2).join(' ');
-    if (!description) {
-      ctx.addSystemMessage('Usage: /create-skill <description>');
-      return 'handled';
-    }
-    const {createSkill} = await import('../../skills/builder/SkillBuilder.js');
-    const result = await createSkill(description);
-    ctx.addSystemMessage(`Created skill ${result.name} at ${result.file}. Invoke it with /${result.name}. Edit SKILL.md to refine its workflow.`);
+  if (sub === 'create') {
+    // Inline args are intentionally ignored — the wizard is the only path.
+    ctx.setMode('skillCreateName');
+    ctx.addSystemMessage('Skill wizard — step 1/3: Name the skill (kebab-case, e.g. security-review). ESC cancels.');
     return 'handled';
   }
 
-  if (subcommand === 'list') {
-    const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
-    const registry = await loadSkillRegistry();
-    const skills = [...registry.skills.values()];
-    ctx.addSystemMessage(skills.length === 0
-      ? 'No installed skills found. Create one with /create-skill <description>.'
-      : ['Installed skills:', ...skills.map(s => `- /${s.name} - ${s.description}`)].join('\n'));
-    return 'handled';
-  }
-
-  if (subcommand === 'info') {
-    const name = parts[2];
+  if (sub === 'info') {
+    const name = args.trim();
     if (!name) {
       ctx.addSystemMessage('Usage: /skill-info <name>');
       return 'handled';
@@ -106,8 +89,8 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
     return 'handled';
   }
 
-  if (subcommand === 'validate') {
-    const target = parts[2];
+  if (sub === 'validate') {
+    const target = args.trim();
     if (!target) {
       ctx.addSystemMessage('Usage: /validate-skill <name-or-dir>');
       return 'handled';
@@ -121,8 +104,9 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
     return 'handled';
   }
 
-  if (subcommand === 'remove') {
-    const name = parts[2];
+  if (sub === 'remove') {
+    const parts = args.split(/\s+/).filter(Boolean);
+    const name = parts[0];
     if (!name || !parts.includes('--yes')) {
       ctx.addSystemMessage('Usage: /remove-skill <name> --yes');
       return 'handled';
@@ -139,80 +123,6 @@ async function handleSkillCommand(value: string, ctx: CommandContext): Promise<C
     return 'handled';
   }
 
-  ctx.addSystemMessage(`Unknown skill command: ${parts[0]} ${subcommand}\n\n${skillHelp()}`);
-  return 'handled';
-}
-
-const STATUS_ICON: Record<string, string> = {
-  pending: '○',
-  in_progress: '◐',
-  completed: '✓',
-};
-
-async function handleTasksCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
-  const parts = args.split(/\s+/).filter(Boolean);
-  const subcommand = parts[0]?.toLowerCase();
-
-  if (!subcommand || subcommand === 'help') {
-    const tasks = await loadTasks();
-    if (tasks.length === 0) {
-      ctx.addSystemMessage('No tasks. Add one with /tasks add <title>.');
-    } else {
-      const list = tasks.map((t, i) => `  ${STATUS_ICON[t.status] ?? '○'} ${i + 1}. ${t.title}`).join('\n');
-      ctx.addSystemMessage(`Tasks:\n${list}`);
-    }
-    return 'handled';
-  }
-
-  if (subcommand === 'add') {
-    const title = parts.slice(1).join(' ').trim();
-    if (!title) {
-      ctx.addSystemMessage('Usage: /tasks add <title>');
-      return 'handled';
-    }
-    const tasks = await loadTasks();
-    const now = new Date().toISOString();
-    tasks.push({id: generateTaskId(), title, status: 'pending', createdAt: now, updatedAt: now});
-    await saveTasks(tasks);
-    ctx.addSystemMessage(`Added: ${title}`);
-    return 'handled';
-  }
-
-  if (subcommand === 'remove' || subcommand === 'rm') {
-    const numStr = parts[1];
-    if (!numStr) {
-      ctx.addSystemMessage('Usage: /tasks remove <number>');
-      return 'handled';
-    }
-    const num = parseInt(numStr, 10);
-    if (isNaN(num) || num < 1) {
-      ctx.addSystemMessage('Provide a valid task number (e.g., /tasks remove 1).');
-      return 'handled';
-    }
-    const tasks = await loadTasks();
-    if (num > tasks.length) {
-      ctx.addSystemMessage(`Task ${num} not found. You have ${tasks.length} task(s).`);
-      return 'handled';
-    }
-    const removed = tasks.splice(num - 1, 1)[0]!;
-    await saveTasks(tasks);
-    ctx.addSystemMessage(`Removed: ${removed.title}`);
-    return 'handled';
-  }
-
-  if (subcommand === 'clear') {
-    await clearTasks();
-    ctx.addSystemMessage('All tasks cleared.');
-    return 'handled';
-  }
-
-  // Unknown subcommand → treat as task title
-  const title = args.trim();
-  const tasks = await loadTasks();
-  const now = new Date().toISOString();
-  tasks.push({id: generateTaskId(), title, status: 'pending', createdAt: now, updatedAt: now});
-  await saveTasks(tasks);
-  ctx.addSystemMessage(`Added: ${title}`);
   return 'handled';
 }
 
@@ -307,8 +217,8 @@ export async function handleSlashCommand(
       '  Set a model directly. Selecting a model also sets its provider.',
       '/settings',
       '  Show the configured provider, model, API key status, and loaded context files.',
-      '/create-skill <description>',
-      '  Create a reusable Markdown workflow from how you work.',
+      '/create-skill',
+      '  Launch the 3-step skill wizard (name, role, description).',
       '/skills',
       '  Show Markdown skill commands and installed skill slash commands.',
       '/init',
@@ -319,10 +229,6 @@ export async function handleSlashCommand(
       '  Resume the latest saved session for this workspace.',
       '/new',
       '  Start a fresh durable session.',
-      '/tasks',
-      '  Manage your task list. Subcommands: add <title>, remove <number>, clear.',
-      '/tasks',
-      '  Show current task list.',
       '/logs',
       '  List recent log files with sizes and dates.',
       '/logs <id>',
@@ -362,10 +268,6 @@ export async function handleSlashCommand(
     await clearTasks();
     ctx.addSystemMessage('Cleared. The void is productive.');
     return 'handled';
-  }
-  if (value === '/tasks' || value.startsWith('/tasks ')) {
-    const args = value.slice('/tasks'.length).trim();
-    return await handleTasksCommand(args, ctx);
   }
   if (value === '/logs' || value.startsWith('/logs ')) {
     const args = value.slice('/logs'.length).trim();
@@ -439,16 +341,11 @@ export async function handleSlashCommand(
     await ctx.refreshContextFiles();
     return 'handled';
   }
-  if (value === '/skills') return await handleSkillCommand('/skill help', ctx);
-  if (value === '/list-skills') return await handleSkillCommand('/skill list', ctx);
-  if (value === '/create-skill' || value.startsWith('/create-skill ')) return await handleSkillCommand(`/skill create${value.slice('/create-skill'.length)}`, ctx);
-  if (value === '/skill-info' || value.startsWith('/skill-info ')) return await handleSkillCommand(`/skill info${value.slice('/skill-info'.length)}`, ctx);
-  if (value === '/validate-skill' || value.startsWith('/validate-skill ')) return await handleSkillCommand(`/skill validate${value.slice('/validate-skill'.length)}`, ctx);
-  if (value === '/remove-skill' || value.startsWith('/remove-skill ')) return await handleSkillCommand(`/skill remove${value.slice('/remove-skill'.length)}`, ctx);
-  if (value === '/skill' || value.startsWith('/skill ') || value.startsWith('/skills ')) {
-    const normalized = value.replace(/^\/skills\b/, '/skill');
-    return await handleSkillCommand(normalized, ctx);
-  }
+  if (value === '/skills') return await handleSkillCommand('help', '', ctx);
+  if (value === '/create-skill' || value.startsWith('/create-skill ')) return await handleSkillCommand('create', '', ctx);
+  if (value === '/skill-info' || value.startsWith('/skill-info ')) return await handleSkillCommand('info', value.slice('/skill-info '.length), ctx);
+  if (value === '/validate-skill' || value.startsWith('/validate-skill ')) return await handleSkillCommand('validate', value.slice('/validate-skill '.length), ctx);
+  if (value === '/remove-skill' || value.startsWith('/remove-skill ')) return await handleSkillCommand('remove', value.slice('/remove-skill '.length), ctx);
   if (value.startsWith('/')) {
     ctx.addSystemMessage(`Unknown command: ${value}. Bold start.`);
     return 'handled';

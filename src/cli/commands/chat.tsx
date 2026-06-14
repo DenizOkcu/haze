@@ -19,15 +19,15 @@ import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
+import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
-import {createSessionGoal, formatGoalStatus} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skillCreateName' | 'skillCreateRole' | 'skillCreateDescription';
 
 interface ChatOptions {
   debug?: boolean;
@@ -280,6 +280,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
+  const [skillCreateDraft, setSkillCreateDraft] = useState<{name?: string; role?: string}>({});
 
   useEffect(() => {
     const timer = setInterval(() => setTimerTick(tick => tick + 1), 1000);
@@ -459,6 +460,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setModelProviderFilter(undefined);
       setSelectedProviderName(undefined);
       setProviderDraft({});
+      setSkillCreateDraft({});
     }
   }
 
@@ -682,9 +684,77 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setMessages(m => [...m, {role: 'system', text: `Added provider ${provider.name}. Choose a model.`}]);
   }
 
+  async function captureSkillName(value: string) {
+    const dirName = toSkillDirName(value);
+    if (!dirName) {
+      setMessages(m => [...m, {role: 'system', text: 'Skill name must contain at least one letter or number. Try again, or press ESC to cancel.'}]);
+      return;
+    }
+    const registry = await loadSkillRegistry();
+    if (registry.skills.has(dirName)) {
+      setMessages(m => [...m, {role: 'system', text: `A skill named "${dirName}" already exists. Pick another name, or press ESC to cancel.`}]);
+      return;
+    }
+    setSkillCreateDraft(d => ({...d, name: dirName}));
+    setMode('skillCreateRole');
+    setMessages(m => [...m, {role: 'system', text: `Skill wizard — step 2/3: Role for "${dirName}". Describe who the skill should be (optional — press Enter to skip, ESC to cancel).`}]);
+  }
+
+  function captureSkillRole(value: string) {
+    const role = value.trim();
+    setSkillCreateDraft(d => ({...d, ...(role ? {role} : {})}));
+    setMode('skillCreateDescription');
+    setMessages(m => [...m, {role: 'system', text: `Skill wizard — step 3/3: Describe what the skill should do. This is the work the LLM will expand into the skill body.`}]);
+  }
+
+  async function captureSkillDescription(value: string) {
+    const description = value.trim();
+    if (!description) {
+      setMessages(m => [...m, {role: 'system', text: 'Description is required. Try again, or press ESC to cancel.'}]);
+      return;
+    }
+    const name = skillCreateDraft.name;
+    if (!name) {
+      setMode('chat');
+      setSkillCreateDraft({});
+      setMessages(m => [...m, {role: 'system', text: 'Skill wizard lost the name. Start over with /create-skill.'}]);
+      return;
+    }
+    setMode('chat');
+    setBusyLabel('Creating skill');
+    setBusy(true);
+    try {
+      const result = await createSkill({name, role: skillCreateDraft.role, description});
+      setMessages(m => [...m, {role: 'system', text: `Created skill ${result.name} at ${result.file}. Invoke it with /${result.name}. Edit SKILL.md to refine its workflow.`}]);
+      await refreshSkills();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
+    } finally {
+      setSkillCreateDraft({});
+      setBusy(false);
+      setBusyLabel('Haze is thinking');
+    }
+  }
+
   async function submit(value: string) {
     if (busy) {
       if (mode === 'chat') queueFollowUp(value);
+      return;
+    }
+
+    if (mode === 'skillCreateName') {
+      await captureSkillName(value);
+      return;
+    }
+
+    if (mode === 'skillCreateRole') {
+      captureSkillRole(value);
+      return;
+    }
+
+    if (mode === 'skillCreateDescription') {
+      await captureSkillDescription(value);
       return;
     }
 
@@ -843,16 +913,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    const isSkillCreate = /^\/create-skill(?:\s|$)/.test(value) || /^\/skills? create(?:\s|$)/.test(value);
-    const skillCreateGoal = isSkillCreate ? createSessionGoal(value) : undefined;
-    if (skillCreateGoal) {
-      setDebugLogs([]);
-      setMessages(m => [...m, {role: 'user', text: value}]);
-      const session = sessionRef.current;
-      if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: 'user', text: value}).catch(() => undefined);
-      setActiveGoalStatus(formatGoalStatus(skillCreateGoal));
-    }
-
     const ctx: CommandContext = {
       settings,
       contextFiles,
@@ -879,38 +939,19 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
     };
     let result;
-    if (isSkillCreate) {
-      setBusyLabel('Creating skill');
-      setBusy(true);
-    }
     try {
       result = await handleSlashCommand(value, ctx);
     } catch (error) {
-      if (skillCreateGoal) {
-        skillCreateGoal.status = 'blocked';
-        skillCreateGoal.blocker = error instanceof Error ? error.message : String(error);
-        setActiveGoalStatus(formatGoalStatus(skillCreateGoal));
-      }
       const text = error instanceof Error ? error.message : String(error);
-      setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
+      setMessages(m => [...m, {role: 'system', text: `Command failed: ${text}`}]);
       return;
-    } finally {
-      if (isSkillCreate) {
-        if (skillCreateGoal?.status === 'active') {
-          skillCreateGoal.phase = 'done';
-          skillCreateGoal.status = 'complete';
-          setActiveGoalStatus(undefined);
-        }
-        setBusy(false);
-        setBusyLabel('Haze is thinking');
-      }
     }
     if (result === 'exit') return exit();
     if (result === 'handled') {
-      if (value === '/create-skill' || value.startsWith('/create-skill ') || value === '/skill create' || value.startsWith('/skill create ') || value === '/skills create' || value.startsWith('/skills create ') || value.startsWith('/remove-skill ') || value.startsWith('/skill remove ') || value.startsWith('/skills remove ')) {
+      if (value.startsWith('/remove-skill ')) {
         await refreshSkills().catch(() => undefined);
       }
-      if (value.startsWith('/tasks') || value === '/clear') {
+      if (value === '/clear') {
         loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
       }
       return;
@@ -1032,7 +1073,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
                   ? 'model-a, model-b'
                   : mode === 'providerConfirmRemove'
                     ? 'Type "yes" to confirm'
-                    : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
+                    : mode === 'skillCreateName'
+                      ? 'Skill name (kebab-case, e.g. security-review)'
+                      : mode === 'skillCreateRole'
+                        ? 'Role (optional — Enter to skip)'
+                        : mode === 'skillCreateDescription'
+                          ? 'Describe what the skill should do'
+                          : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
   const activeModelName = `${activeSelection.provider.name}:${process.env.HAZE_MODEL ?? activeSelection.model}`;
   const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey ?? activeSelection.provider.key) || activeSelection.provider.name !== DEFAULT_PROVIDER_NAME;
   const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model ?? activeSelection.model);
@@ -1041,7 +1088,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       'A minimal LLM harness for growing your own workflows while you work.',
       '',
       'Start with simple chat, then teach Haze your habits with skills:',
-      '/create-skill review my branch against main  — tiny spell, useful goblin.',
+      '/create-skill  — three-step skill wizard (name, role, description).',
       '',
       'The most adaptive workflow is the one you shape as you go.',
       '',
@@ -1066,8 +1113,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
-    {value: '/create-skill ', description: 'Create a Markdown skill', kind: 'command'},
-    {value: '/list-skills', description: 'List installed skills', kind: 'command'},
+    {value: '/create-skill ', description: 'Launch the skill wizard', kind: 'command'},
     {value: '/skill-info ', description: 'Show details for a skill', kind: 'command'},
     {value: '/validate-skill ', description: 'Validate a skill', kind: 'command'},
     {value: '/remove-skill ', description: 'Remove a skill with --yes', kind: 'command'},
@@ -1119,7 +1165,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           recordHistory={mode === 'chat'}
           suggestions={inputSuggestions}
           suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'providerAddPreset' || mode === 'model' ? 'always' : 'slash'}
-          submitOnEmpty={mode === 'providerAddKey'}
+          submitOnEmpty={mode === 'providerAddKey' || mode === 'skillCreateRole'}
           width={Math.max(20, width - 4)}
           onHistoryAdd={persistInputHistory}
           onToggleTasks={() => {

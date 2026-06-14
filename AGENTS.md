@@ -16,7 +16,7 @@ Core product shape:
 - Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, Markdown skills, and task tracking.
 - Minimal distribution model: source in `src/`, generated declarations/JS in `dist/`, thin published binary in `bin/haze.js`.
 
-Current package version is `0.3.0`; always verify against `package.json` before release work.
+Current package version is `0.4.0`; always verify against `package.json` before release work.
 
 ## Common commands
 
@@ -140,7 +140,7 @@ Tool constraints:
 - Tasks are stored in `.haze/tasks.json` in the workspace (workspace-local, gitignored with the rest of `.haze/`).
 - The `writeTasks` tool uses full-replacement semantics: every call sends the complete list, replacing whatever existed before.
 - Server-side ID generation prevents ID collisions and hallucinated IDs.
-- `/tasks` slash command provides user-facing management: `add`, `remove <n>`, `clear`, and bare text treated as `add`.
+- Tasks are managed by the LLM via the `writeTasks` tool; there is no user-facing slash command.
 - `/clear` also clears tasks.
 - Types and storage live in `src/core/tasks/taskStorage.ts`; the tool is in `src/llm/hazeTools.ts`.
 
@@ -161,7 +161,7 @@ Tool constraints:
   - `description` — non-empty, ideally starts with “Use when ...”.
 - Skill bodies are instructions only; they do not execute code by themselves.
 - Relative references in a skill body are loaded if they are Markdown links or plain file-looking paths; references must remain inside the skill directory and be <=50k bytes.
-- Slash commands include `/create-skill`, `/list-skills`, `/skill-info`, `/validate-skill`, `/remove-skill <name> --yes`; legacy `/skill ...` and `/skills ...` aliases still exist.
+- Slash commands include `/create-skill`, `/skills`, `/skill-info`, `/validate-skill`, `/remove-skill <name> --yes`.
 - The model-facing `skill` tool takes an exact skill name. It returns the body and reference paths first; a later call can load one reference.
 
 ### Subagents

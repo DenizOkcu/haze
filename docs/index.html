@@ -702,7 +702,147 @@
     }
     .op-note strong { color: var(--accent-ink); font-weight: 700; }
 
-    /* ===== §02 Field behavior (terminal specimen) ===== */
+    /* ===== §02 Native skill creation (superpower) ===== */
+    .skill-create {
+      background: var(--bg-ruled);
+      border-top: 2px solid var(--rule-ink);
+      border-bottom: 2px solid var(--rule-ink);
+    }
+    .skill-create .sec-sub code.cmd,
+    .skill-create code.cmd {
+      font-family: var(--font-mono);
+      font-size: 0.94em;
+      color: var(--accent-ink);
+      font-weight: 600;
+    }
+    .skill-create .sec-sub { max-width: 760px; }
+    .skill-create-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+      gap: 0;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+      margin-bottom: 36px;
+    }
+    .skill-wizard { border-right: 1px solid var(--rule); }
+    .skill-wizard-head {
+      background: var(--bg-elevated);
+      color: var(--ink-2);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 11px 18px;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--rule-ink);
+    }
+    .skill-wizard-head .corner { width: 8px; height: 8px; background: var(--accent); display: inline-block; }
+    .skill-wizard-body { padding: 18px 22px; }
+    .wiz-row {
+      display: grid;
+      grid-template-columns: 170px 1fr;
+      gap: 16px;
+      padding: 10px 0;
+      border-bottom: 1px dashed var(--rule);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      align-items: baseline;
+    }
+    .wiz-row:last-of-type { border-bottom: none; }
+    .wiz-cmd { color: var(--accent-ink); font-weight: 700; }
+    .wiz-note { color: var(--ink-3); font-size: 12px; }
+    .wiz-step {
+      color: var(--ink-3);
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .wiz-in { color: var(--ink); font-weight: 500; word-break: break-word; }
+    .wiz-in .prompt { color: var(--accent-ink); margin-right: 6px; font-weight: 700; }
+    .wiz-result {
+      margin-top: 14px;
+      padding: 12px 14px;
+      background: var(--accent-tint);
+      border: 1px solid oklch(0.38 0.060 295);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    .wiz-result .path { color: var(--ink-2); }
+    .wiz-result .cmd { color: var(--accent-ink); font-weight: 700; }
+    .superpower { padding: 28px 28px; }
+    .superpower p {
+      color: var(--ink-2);
+      font-size: var(--t-lead);
+      line-height: 1.55;
+      margin-bottom: 18px;
+      font-weight: 500;
+    }
+    .superpower p:last-child { margin-bottom: 0; }
+    .superpower strong { color: var(--accent-ink); font-weight: 700; }
+    .recipes-head {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      justify-content: space-between;
+    }
+    .recipe-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .recipe-card {
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-md);
+      background: var(--bg-surface);
+      padding: 22px 22px 20px;
+      box-shadow: var(--glow-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .recipe-name {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-ink);
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--rule);
+    }
+    .recipe-row {
+      display: grid;
+      grid-template-columns: 96px 1fr;
+      gap: 14px;
+      font-size: 13.5px;
+      line-height: 1.5;
+    }
+    .recipe-row .k {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      padding-top: 2px;
+    }
+    .recipe-row .v { color: var(--ink); font-weight: 500; }
+
+    /* ===== §03 Field behavior (terminal specimen) ===== */
     .field {
       background: var(--bg-ruled);
       border-top: 2px solid var(--rule-ink);
@@ -791,7 +931,7 @@
       font-weight: 500;
     }
 
-    /* ===== §03 Components (parts diagram) ===== */
+    /* ===== §04 Components (parts diagram) ===== */
     .components {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -871,94 +1011,6 @@
       line-height: 1.45;
       margin-top: 2px;
     }
-
-    /* ===== §04 Serviceable procedures (skills) ===== */
-    .skills-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-      gap: 0;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      overflow: hidden;
-      box-shadow: var(--glow-soft);
-    }
-    .skills-spec {
-      padding: 0;
-      border-right: 1px solid var(--rule);
-      overflow: hidden;
-    }
-    .skills-spec-head {
-      background: var(--bg-elevated);
-      color: var(--ink-2);
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      padding: 11px 18px;
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--rule-ink);
-    }
-    .skills-spec-head .corner { width: 8px; height: 8px; background: var(--accent); display: inline-block; }
-    .skills-spec pre {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.75;
-      color: var(--ink);
-      padding: 22px 24px;
-      overflow-x: auto;
-      font-weight: 500;
-    }
-    .skills-spec .meta { color: var(--ink-3); }
-    .skills-spec .key { color: var(--accent-ink); font-weight: 600; }
-    .skills-spec .h { color: var(--ink); font-weight: 700; }
-
-    .skills-list-block {
-      padding: 28px 28px;
-      display: flex;
-      flex-direction: column;
-    }
-    .skills-list-head {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-      margin-bottom: 18px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--rule);
-      display: flex;
-      justify-content: space-between;
-    }
-    .skills-list { list-style: none; }
-    .skills-list li {
-      padding: 14px 0;
-      border-bottom: 1px dashed var(--rule);
-      font-family: var(--font-mono);
-    }
-    .skills-list li:last-child { border-bottom: none; }
-    .skills-list .cmd { color: var(--accent-ink); font-size: 14px; font-weight: 600; }
-    .skills-list .desc {
-      display: block;
-      color: var(--ink-2);
-      font-family: var(--font-sans);
-      font-size: 13.5px;
-      font-weight: 500;
-      margin-top: 4px;
-      line-height: 1.4;
-    }
-    .skills-cta {
-      margin-top: auto;
-      padding-top: 22px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-3);
-      line-height: 1.55;
-    }
-    .skills-cta .cmd { color: var(--accent-ink); font-weight: 700; }
 
     /* ===== §05 Compatibility (spec table) ===== */
     .compat-table {
@@ -1070,6 +1122,70 @@
       flex-wrap: wrap;
     }
 
+    /* ===== §07 Commands index ===== */
+    .cmd-table {
+      width: 100%;
+      border: 1px solid var(--rule-ink);
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      box-shadow: var(--glow-soft);
+      font-family: var(--font-mono);
+      font-size: 13.5px;
+    }
+    .cmd-table tr.cmd-cat td {
+      background: var(--bg-elevated);
+      color: var(--accent-ink);
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      padding: 11px 18px;
+      border-top: 1px solid var(--rule-ink);
+      border-bottom: 1px solid var(--rule-ink);
+    }
+    .cmd-table tr.cmd-cat:first-child td { border-top: none; }
+    .cmd-table tbody td {
+      padding: 11px 18px;
+      border-top: 1px solid var(--rule);
+      color: var(--ink);
+      font-weight: 500;
+      vertical-align: top;
+    }
+    .cmd-table .cmd-c {
+      width: 290px;
+      color: var(--accent-ink);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .cmd-table .cmd-c code {
+      font-family: var(--font-mono);
+      color: inherit;
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: inherit;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .cmd-table .cmd-d {
+      color: var(--ink-2);
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      font-weight: 500;
+      line-height: 1.45;
+    }
+    .cmd-footnote {
+      margin-top: 22px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-3);
+      line-height: 1.55;
+    }
+    .cmd-footnote strong { color: var(--accent-ink); font-weight: 700; }
+
     /* ===== Footer ===== */
     footer {
       border-top: 2px solid var(--rule-ink);
@@ -1141,8 +1257,9 @@
       .components { grid-template-columns: 1fr; }
       .comp-group { border-right: none; border-bottom: 1px solid var(--rule); }
       .comp-group:last-child { border-bottom: none; }
-      .skills-grid { grid-template-columns: 1fr; }
-      .skills-spec { border-right: none; border-bottom: 1px solid var(--rule); }
+      .skill-create-grid { grid-template-columns: 1fr; }
+      .skill-wizard { border-right: none; border-bottom: 1px solid var(--rule); }
+      .recipe-grid { grid-template-columns: 1fr; }
       .head-meta { display: none; }
     }
 
@@ -1160,6 +1277,13 @@
       }
       .op-list li .op-text { grid-column: 1 / -1; padding-top: 4px; }
       .op-num { font-size: 1.4rem; }
+      .wiz-row { grid-template-columns: 1fr; gap: 4px; }
+      .recipe-row { grid-template-columns: 1fr; gap: 4px; }
+      .cmd-table .cmd-c { width: auto; white-space: normal; }
+      .cmd-table .cmd-c,
+      .cmd-table .cmd-d { display: block; padding: 2px 18px; }
+      .cmd-table .cmd-c { padding-top: 10px; }
+      .cmd-table .cmd-d { padding-bottom: 10px; }
       .compat-table tbody td,
       .compat-table thead th { padding: 11px 12px; font-size: 12px; }
       .compat-table tbody td:nth-child(2) { font-size: 11px; }
@@ -1186,12 +1310,12 @@
       <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
       <div class="head-meta" aria-hidden="true">
         <span>HAZE-CLI-001</span>
-        <span>REV 0.3.0</span>
+        <span>REV 0.4.0</span>
         <span>MIT</span>
       </div>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.3.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.4.0</a>
       </nav>
     </div>
   </header>
@@ -1203,7 +1327,7 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.3.0</div>
+            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.4.0</div>
             <h1 class="hero-h1">
               A CLI agent for Experts
               <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
@@ -1269,7 +1393,7 @@
 
     <!-- ===== §01 OPERATION ===== -->
     <section id="operation">
-      <div class="container-prose">
+      <div class="container">
         <div class="reveal">
           <div class="sec-marker">
             <span class="code">§01</span>
@@ -1296,16 +1420,95 @@
             <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
           </li>
         </ol>
-        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is meant to be grown with the model through <strong>/create-skill "your description"</strong>.</p>
+        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is grown with the model through <strong>/create-skill</strong> — the three-step wizard below.</p>
       </div>
     </section>
 
-    <!-- ===== §02 FIELD BEHAVIOR ===== -->
-    <section class="field" id="field-behavior">
+    <!-- ===== §02 NATIVE SKILL CREATION ===== -->
+    <section id="skill-creation" class="skill-create">
       <div class="container">
         <div class="reveal">
           <div class="sec-marker">
             <span class="code">§02</span>
+            <span class="label">Native skill creation</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Skills, grown<br><span class="em">inside haze.</span></h2>
+          <p class="sec-sub">Run <code class="cmd">/create-skill</code> from the chat. Three prompts — name, role, description. The model writes the Markdown. The skill becomes a slash command on equal footing with the built-ins. <strong>This is the superpower.</strong> No plugin runtime, no schema file, no second binary.</p>
+        </div>
+
+        <div class="skill-create-grid reveal">
+          <div class="skill-wizard">
+            <div class="skill-wizard-head">
+              <span>3-step wizard — live in the chat</span>
+              <span class="corner" aria-hidden="true"></span>
+            </div>
+            <div class="skill-wizard-body">
+              <div class="wiz-row">
+                <span class="wiz-cmd">/create-skill</span>
+                <span class="wiz-note">launches the wizard from any haze session</span>
+              </div>
+              <div class="wiz-row">
+                <span class="wiz-step">step 1/3 · name</span>
+                <span class="wiz-in"><span class="prompt">›</span> code-review</span>
+              </div>
+              <div class="wiz-row">
+                <span class="wiz-step">step 2/3 · role</span>
+                <span class="wiz-in"><span class="prompt">›</span> You are a focused code reviewer.</span>
+              </div>
+              <div class="wiz-row">
+                <span class="wiz-step">step 3/3 · description</span>
+                <span class="wiz-in"><span class="prompt">›</span> Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS.</span>
+              </div>
+              <div class="wiz-result">created at <span class="path">~/.haze/skills/code-review/SKILL.md</span> · invoke with <span class="cmd">/code-review</span></div>
+            </div>
+          </div>
+          <div class="superpower">
+            <p>You define skills in plain Markdown, right from the chat.<br><strong>No plugin. No second binary. No YAML to memorize.</strong></p>
+            <p>The model invokes a skill naturally during conversation in plain language — no command to type, no menu to open.<br><strong>Your workflow gets guided and stays expectable.</strong></p>
+            <p>Heavy lifting moves into the skill.<br><strong>The conversation itself stays simple and minimal. KISS.</strong></p>
+          </div>
+        </div>
+
+        <div class="recipes reveal">
+          <div class="recipes-head">
+            <span>Try these — run /create-skill and type them in</span>
+            <span>· /create-skill</span>
+          </div>
+          <div class="recipe-grid">
+            <article class="recipe-card">
+              <div class="recipe-name">/code-review</div>
+              <div class="recipe-row"><span class="k">role</span><span class="v">You are a focused code reviewer.</span></div>
+              <div class="recipe-row"><span class="k">description</span><span class="v">Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS.</span></div>
+            </article>
+            <article class="recipe-card">
+              <div class="recipe-name">/deploy-check</div>
+              <div class="recipe-row"><span class="k">role</span><span class="v">You are a release-readiness verifier.</span></div>
+              <div class="recipe-row"><span class="k">description</span><span class="v">Run lint, typecheck, tests, and build in one call. Report each step pass/fail with the exact failing output; do not stop at the first failure.</span></div>
+            </article>
+            <article class="recipe-card">
+              <div class="recipe-name">/release-prep</div>
+              <div class="recipe-row"><span class="k">role</span><span class="v">You are a commit-crafting assistant.</span></div>
+              <div class="recipe-row"><span class="k">description</span><span class="v">Inspect uncommitted changes, group them into clean conventional commits, and write the commit messages. Do not commit; show me the proposed commands.</span></div>
+            </article>
+            <article class="recipe-card">
+              <div class="recipe-name">/security-review</div>
+              <div class="recipe-row"><span class="k">role</span><span class="v">You are an application security auditor.</span></div>
+              <div class="recipe-row"><span class="k">description</span><span class="v">Audit auth flows, secret handling, and injection surface (SQL, command, XSS, SSRF) in the current branch diff. Cite file:line for every finding with severity.</span></div>
+            </article>
+          </div>
+        </div>
+
+        <p class="op-note reveal">Prefer to be explicit? Skills are also first-class slash commands — type <strong>/code-review</strong> in the chat and the model loads it on the spot.</p>
+      </div>
+    </section>
+
+    <!-- ===== §03 FIELD BEHAVIOR ===== -->
+    <section class="field" id="field-behavior">
+      <div class="container">
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§03</span>
             <span class="label">Field behavior</span>
             <span class="spacer"></span>
           </div>
@@ -1344,12 +1547,12 @@
       </div>
     </section>
 
-    <!-- ===== §03 COMPONENTS ===== -->
+    <!-- ===== §04 COMPONENTS ===== -->
     <section id="components">
       <div class="container">
         <div class="reveal">
           <div class="sec-marker">
-            <span class="code">§03</span>
+            <span class="code">§04</span>
             <span class="label">Components</span>
             <span class="spacer"></span>
           </div>
@@ -1430,75 +1633,6 @@
       </div>
     </section>
 
-    <!-- ===== §04 SERVICEABLE PROCEDURES (skills) ===== -->
-    <section id="skills">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§04</span>
-            <span class="label">Serviceable procedures</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Procedures grow<br><span class="soft">while you work.</span></h2>
-          <p class="sec-sub">Hit friction, describe it, get a Markdown workflow you can refine and version. Skills become slash commands.</p>
-        </div>
-        <div class="skills-grid reveal">
-          <div class="skills-spec">
-            <div class="skills-spec-head">
-              <span>~/.haze/skills/code-review/SKILL.md</span>
-              <span class="corner" aria-hidden="true"></span>
-            </div>
-<pre><span class="meta">---</span>
-<span class="key">name</span>: code-review
-<span class="key">description</span>: Review the diff between
-  the current branch and main.
-<span class="meta">---</span>
-
-<span class="h"># Role</span>
-You are a focused code reviewer.
-
-<span class="h"># Procedure</span>
-Inspect branch state, changed files,
-staged and unstaged diffs. Review
-incrementally, then summarize.
-
-<span class="h"># Output template</span>
-<span class="meta">## Summary</span>
-- scope and result
-<span class="meta">## Findings</span>
-- prioritized findings</pre>
-          </div>
-          <div class="skills-list-block">
-            <div class="skills-list-head">
-              <span>Procedure index</span>
-              <span>· /create-skill</span>
-            </div>
-            <ul class="skills-list">
-              <li>
-                <span class="cmd">/code-review</span>
-                <span class="desc">Review current branch against main.</span>
-              </li>
-              <li>
-                <span class="cmd">/deploy-check</span>
-                <span class="desc">Lint, test, build, verify in one call.</span>
-              </li>
-              <li>
-                <span class="cmd">/release-prep</span>
-                <span class="desc">Clean commits from uncommitted changes.</span>
-              </li>
-              <li>
-                <span class="cmd">/security-review</span>
-                <span class="desc">Audit auth, secrets, and injection surface.</span>
-              </li>
-            </ul>
-            <p class="skills-cta">
-              Describe what you want in plain language. haze writes the Markdown. You refine it. <span class="cmd">/create-skill &lt;description&gt;</span>
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- ===== §05 COMPATIBILITY ===== -->
     <section id="compatibility">
       <div class="container">
@@ -1535,7 +1669,7 @@ incrementally, then summarize.
       </div>
     </section>
 
-    <!-- ===== §08 INSTALL ===== -->
+    <!-- ===== §06 INSTALL ===== -->
     <section class="install" id="install">
       <div class="container reveal">
         <div class="eyebrow-stamp">§06 · INSTALL</div>
@@ -1551,12 +1685,123 @@ incrementally, then summarize.
         </div>
       </div>
     </section>
+
+    <!-- ===== §07 COMMANDS INDEX ===== -->
+    <section id="commands" class="commands-index">
+      <div class="container">
+        <div class="reveal">
+          <div class="sec-marker">
+            <span class="code">§07</span>
+            <span class="label">Commands index</span>
+            <span class="spacer"></span>
+          </div>
+          <h2 class="sec-headline">Every command,<br><span class="em">all at once.</span></h2>
+          <p class="sec-sub">Sixteen slash commands plus installed-skill invocations. Tasks are managed by the model via the <code class="cmd">writeTasks</code> tool — no command for them.</p>
+        </div>
+
+        <table class="cmd-table reveal" aria-label="Haze slash commands">
+          <tbody>
+            <tr class="cmd-cat"><td colspan="2">Agent &amp; Session</td></tr>
+            <tr>
+              <td class="cmd-c"><code>/help</code></td>
+              <td class="cmd-d">Show all slash commands.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/exit</code>, <code>/quit</code></td>
+              <td class="cmd-d">Exit haze.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/clear</code></td>
+              <td class="cmd-d">Clear conversation history and the task list.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/new</code></td>
+              <td class="cmd-d">Start a fresh durable session for this workspace.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/resume</code></td>
+              <td class="cmd-d">Resume the latest saved session.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/session</code></td>
+              <td class="cmd-d">Show the current durable session file.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/compact [instructions]</code></td>
+              <td class="cmd-d">Summarize older model context; keep recent messages.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/init</code></td>
+              <td class="cmd-d">Create or update <code>AGENTS.md</code> project instructions.</td>
+            </tr>
+
+            <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
+            <tr>
+              <td class="cmd-c"><code>/provider</code></td>
+              <td class="cmd-d">Choose a provider; add/remove models, set API key, or remove it.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/model</code></td>
+              <td class="cmd-d">Choose a model from all configured providers.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/model &lt;name-or-provider:name&gt;</code></td>
+              <td class="cmd-d">Set a model directly. Also sets its provider.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/model list</code></td>
+              <td class="cmd-d">List all configured models.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/settings</code></td>
+              <td class="cmd-d">Show provider, model, API key status, and loaded context files.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/logs [id]</code></td>
+              <td class="cmd-d">List recent LLM logs, or summarize one by id.</td>
+            </tr>
+
+            <tr class="cmd-cat"><td colspan="2">Skills</td></tr>
+            <tr>
+              <td class="cmd-c"><code>/skills</code></td>
+              <td class="cmd-d">Show skill commands and installed skills.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/create-skill</code></td>
+              <td class="cmd-d">Launch the 3-step skill wizard (name, role, description).</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/skill-info &lt;name&gt;</code></td>
+              <td class="cmd-d">Show a skill description, references count, and path.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/validate-skill &lt;name-or-dir&gt;</code></td>
+              <td class="cmd-d">Validate a skill directory containing SKILL.md.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/remove-skill &lt;name&gt; --yes</code></td>
+              <td class="cmd-d">Remove an installed skill. <code>--yes</code> required because it deletes files.</td>
+            </tr>
+
+            <tr class="cmd-cat"><td colspan="2">Dynamic</td></tr>
+            <tr>
+              <td class="cmd-c"><code>/&lt;skill-name&gt;</code></td>
+              <td class="cmd-d">Invoke any installed skill directly — e.g. <code>/code-review</code>. The model can also invoke skills on its own.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="cmd-footnote reveal">
+          <strong>NOTE /</strong> Skills trigger naturally during chat in plain language, or explicitly as <code>/&lt;skill-name&gt;</code>. The model picks when they fit — you don't have to memorize anything.
+        </p>
+      </div>
+    </section>
   </main>
 
   <footer>
     <div class="container footer-grid">
       <div class="footer-colophon">
-        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.3.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
+        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.4.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
         <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
       </div>
       <nav class="footer-links" aria-label="Footer">

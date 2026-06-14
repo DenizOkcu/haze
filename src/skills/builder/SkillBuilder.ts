@@ -62,6 +62,7 @@ Every skill you create must include, in this order:
 - Evidence rule: require final answers to be grounded in actual inspected content, but do not require exhaustive citations.
 
 Infer the user's intent from their wording and make that intent explicit in the Focused prompt. A good focused prompt states what the skill should accomplish, not just what commands it should run.
+Users often phrase skill requests with meta-framing like "create a skill that...", "make me a skill for...", "build a ... skill", or the equivalent in any language. Strip that framing. The skill must perform the underlying intent end-to-end; it must not be a skill whose job is to "create" or "build" the thing the user named. Example: "create a security review skill" means the skill IS a security reviewer, not a skill that creates security reviewers.
 Favor skills that a small or slower model can follow in one pass. The model should be able to finish with a concise response after a small number of tool calls.
 Avoid fragile skills that stop after one empty command or one truncated command, but do not over-correct by requiring exhaustive inspection. Encode only common, necessary fallbacks.
 For diff/review skills, keep the default path simple: get status/stat/name-only, inspect unstaged and staged diffs if present, and if no changes or target exist, return a short no-changes response. Use targeted per-file diffs only when the full diff is too large or truncated.
@@ -69,10 +70,11 @@ Do not require exact line citations for every finding in generated skills; requi
 `;
 
 type GeneratedSkillFile = {path: string; content: string};
-type GeneratedSkill = {name: string; files: GeneratedSkillFile[]};
+type GeneratedSkill = {name: string; intent: string; files: GeneratedSkillFile[]};
 
 const generatedSkillSchema = z.object({
   name: z.string().min(1).describe('Meaningful kebab-case skill name with 2-4 words'),
+  intent: z.string().min(1).describe('The underlying purpose the skill performs, with any "create a skill" / "make me a skill" framing stripped away. States what the skill DOES, in the same language the user used. Example: input "create a security review skill" -> intent "security review".'),
   files: z.array(z.object({
     path: z.string().min(1).describe('Relative file path inside the skill directory'),
     content: z.string().describe('Complete file content'),
@@ -80,7 +82,7 @@ const generatedSkillSchema = z.object({
 });
 
 const SKILL_NAME_STOP_WORDS = new Set([
-  'a', 'an', 'the', 'to', 'for', 'with', 'and', 'or', 'of', 'in', 'on', 'my', 'our', 'me', 'i', 'from', 'against', 'as', 'by', 'into', 'using', 'use', 'when', 'asks', 'ask',
+  'a', 'an', 'the', 'to', 'for', 'with', 'and', 'or', 'of', 'in', 'on', 'my', 'our', 'me', 'i', 'from', 'against', 'as', 'by', 'into', 'using', 'use', 'when', 'asks', 'ask', 'skill', 'skills',
 ]);
 
 const SKILL_NAME_TRAILING_FILLER_WORDS = new Set([
@@ -97,17 +99,40 @@ export function slug(s: string) {
   return words.join('-');
 }
 
+/**
+ * Coerce a user-typed skill name into a directory-safe kebab-case slug.
+ * Unlike slug(), this preserves every word the user typed (no stop-word stripping)
+ * so explicit names like "create a skill" come through as "create-a-skill", not "skill".
+ * Returns '' when the input collapses to nothing usable.
+ */
+export function toSkillDirName(raw: string): string {
+  const collapsed = raw.trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const stripped = collapsed.replace(/[^a-z0-9-]/g, '');
+  const trimmed = stripped.replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
+  return trimmed;
+}
+
+export type CreateSkillInput = {
+  name: string;
+  role?: string;
+  description: string;
+};
+
 function yamlString(value: string) {
   return JSON.stringify(value);
 }
 
-function fallbackSkill(description: string): GeneratedSkill {
-  const name = slug(description);
+const DEFAULT_SKILL_ROLE = 'You are a focused, practical assistant for this workflow.';
+
+function fallbackSkill(input: CreateSkillInput): GeneratedSkill {
+  const name = input.name;
+  const role = input.role?.trim() || DEFAULT_SKILL_ROLE;
   return {
     name,
+    intent: input.description,
     files: [{
       path: 'SKILL.md',
-      content: `---\nname: ${name}\ndescription: ${yamlString(`Use when the user asks: ${description}`)}\n---\n\n# Role\n\nYou are a focused, practical assistant for this workflow.\n\n# Focused prompt\n\nAccomplish the user's intended outcome with the smallest reliable workflow: ${description}\n\n# Inputs to inspect\n\nIdentify the concrete commands, files, diffs, logs, or project state needed for this workflow. Inspect actual content, not only summaries.\n\n# Procedure\n\n1. Confirm the relevant project state.\n2. Inspect the primary input for the workflow.\n3. If the primary input is empty, unavailable, or truncated, inspect natural fallback inputs or narrower targeted inputs before stopping.\n4. For large inputs, inspect summaries first, then targeted files, sections, or commands most relevant to the goal.\n5. Perform the requested analysis or implementation using the inspected evidence.\n6. Produce the final answer using the output template below.\n\n# Stop conditions\n\nOnly say there is nothing to do after every relevant input source has been checked and is empty.\n\n# Blocker policy\n\nOnly stop as blocked for a concrete tool failure, missing permission, unavailable dependency, or ambiguous requirement that prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.\n\n# Output template\n\n## Summary\n- <one-to-three bullets with the result>\n\n## Actions or findings\n- <concrete actions taken or findings discovered>\n\n## Evidence inspected\n- <commands, files, diffs, or outputs used>\n\n## Next step\n- <recommended next action, or "None" if complete>\n${STANDARD_SKILL_REQUIREMENTS}\n# References\n\nAdd relative file references here if this skill needs examples, templates, or supporting docs.\n`,
+      content: `---\nname: ${name}\ndescription: ${yamlString(`Use when the user asks: ${input.description}`)}\n---\n\n# Role\n\n${role}\n\n# Focused prompt\n\nAccomplish the user's intended outcome with the smallest reliable workflow: ${input.description}\n\n# Inputs to inspect\n\nIdentify the concrete commands, files, diffs, logs, or project state needed for this workflow. Inspect actual content, not only summaries.\n\n# Procedure\n\n1. Confirm the relevant project state.\n2. Inspect the primary input for the workflow.\n3. If the primary input is empty, unavailable, or truncated, inspect natural fallback inputs or narrower targeted inputs before stopping.\n4. For large inputs, inspect summaries first, then targeted files, sections, or commands most relevant to the goal.\n5. Perform the requested analysis or implementation using the inspected evidence.\n6. Produce the final answer using the output template below.\n\n# Stop conditions\n\nOnly say there is nothing to do after every relevant input source has been checked and is empty.\n\n# Blocker policy\n\nOnly stop as blocked for a concrete tool failure, missing permission, unavailable dependency, or ambiguous requirement that prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.\n\n# Output template\n\n## Summary\n- <one-to-three bullets with the result>\n\n## Actions or findings\n- <concrete actions taken or findings discovered>\n\n## Evidence inspected\n- <commands, files, diffs, or outputs used>\n\n## Next step\n- <recommended next action, or "None" if complete>\n${STANDARD_SKILL_REQUIREMENTS}\n# References\n\nAdd relative file references here if this skill needs examples, templates, or supporting docs.\n`,
     }],
   };
 }
@@ -141,18 +166,19 @@ function extractJson(text: string) {
 function parseGeneratedSkill(text: string, description: string): GeneratedSkill {
   const parsed = JSON.parse(extractJson(text)) as Partial<GeneratedSkill>;
   const name = typeof parsed.name === 'string' && parsed.name.trim() ? slug(parsed.name) : slug(description);
+  const intent = typeof parsed.intent === 'string' && parsed.intent.trim() ? parsed.intent.trim() : description;
   const files = Array.isArray(parsed.files) ? parsed.files.filter((file): file is GeneratedSkillFile => {
     return typeof file === 'object' && file != null && typeof file.path === 'string' && typeof file.content === 'string';
   }) : [];
   if (!files.some(file => file.path === 'SKILL.md')) throw new Error('Generated skill did not include SKILL.md');
-  return {name, files};
+  return {name, intent, files};
 }
 
-async function descriptionFromSkillSummary(description: string, finalName: string, files: GeneratedSkillFile[]) {
+async function descriptionFromSkillSummary(intent: string, finalName: string, files: GeneratedSkillFile[]) {
   const skillMd = files.find(file => file.path === 'SKILL.md')?.content;
-  if (!skillMd) return normalizeSkillDescription(`the user asks: ${description}`);
+  if (!skillMd) return normalizeSkillDescription(`the user asks: ${intent}`);
   const activeModel = await model();
-  if (!activeModel) return normalizeSkillDescription(`the user asks: ${description}`);
+  if (!activeModel) return normalizeSkillDescription(`the user asks: ${intent}`);
   const result = await generateObject({
     model: activeModel,
     schema: z.object({description: z.string().min(1).describe('Final Use when description that tells an LLM when to invoke this skill')}),
@@ -161,7 +187,7 @@ async function descriptionFromSkillSummary(description: string, finalName: strin
     prompt: [
       'Write the final Haze skill frontmatter description after reading the entire generated SKILL.md.',
       '',
-      `Original user request: ${description}`,
+      `Skill purpose (intent): ${intent}`,
       `Final skill name: ${finalName}`,
       '',
       'Description rules:',
@@ -176,37 +202,7 @@ async function descriptionFromSkillSummary(description: string, finalName: strin
       skillMd,
     ].join('\n'),
   });
-  return normalizeSkillDescription(result.object.description || `the user asks: ${description}`);
-}
-
-async function nameFromSkillSummary(description: string, generatedName: string, files: GeneratedSkillFile[]) {
-  const skillMd = files.find(file => file.path === 'SKILL.md')?.content;
-  if (!skillMd) return slug(generatedName || description);
-  const activeModel = await model();
-  if (!activeModel) return slug(generatedName || description);
-  const result = await generateObject({
-    model: activeModel,
-    schema: z.object({name: z.string().min(1).describe('Final meaningful 2-4 word kebab-case skill name')}),
-    schemaName: 'GeneratedHazeSkillName',
-    schemaDescription: 'A final skill name chosen from the complete generated SKILL.md.',
-    prompt: [
-      'Choose the final Haze skill directory name after reading the entire generated SKILL.md.',
-      '',
-      `Original user request: ${description}`,
-      `Draft/generated name: ${generatedName}`,
-      '',
-      'Naming rules:',
-      '- Return 2-4 meaningful words in kebab-case.',
-      '- The name must summarize the whole skill workflow, not just copy the first words of the request.',
-      '- Do not include a loose trailing word from a cut-off sentence. Bad: commit-current-changes-write. Good: commit-current-changes.',
-      '- Prefer nouns that convey the outcome, such as review, commit, release-notes, migration, validation, or triage.',
-      '- Avoid vague words like helper, workflow, custom-skill, write, create, make, or do unless they are essential to the meaning.',
-      '',
-      'Generated SKILL.md:',
-      skillMd,
-    ].join('\n'),
-  });
-  return slug(result.object.name || generatedName || description);
+  return normalizeSkillDescription(result.object.description || `the user asks: ${intent}`);
 }
 
 function assertSafeGeneratedFile(filePath: string) {
@@ -217,9 +213,10 @@ function assertSafeGeneratedFile(filePath: string) {
   return normalized;
 }
 
-async function generateSkill(description: string): Promise<GeneratedSkill> {
+async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
   const activeModel = await model();
   if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before using /create-skill.');
+  const role = input.role?.trim() || DEFAULT_SKILL_ROLE;
   const result = await generateObject({
     model: activeModel,
     system: SKILL_CREATOR_SKILL,
@@ -227,17 +224,27 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
     schemaName: 'GeneratedHazeSkill',
     schemaDescription: 'A generated Haze Markdown skill and optional referenced files.',
     prompt: [
-      'Create a Haze skill from this user description:',
-      description,
+      'A user is creating a Haze skill via a 3-step wizard. They have already chosen the NAME and the ROLE; you do NOT choose those.',
       '',
-      'Rules:',
+      `User-chosen skill name (use VERBATIM in frontmatter, do not rename): ${input.name}`,
+      `User-chosen Role text (paste VERBATIM into the # Role section): ${role}`,
+      `Skill description (the work the skill should do): ${input.description}`,
+      '',
+      'Step 1 — Extract the intent from the description.',
+      'The description may contain meta-framing in ANY language: phrases like "create a skill that...", "make me a skill for...", "build a ... skill", or the equivalent verbs and nouns in any other language. Strip that framing and capture what the skill should actually DO. Put the result in the `intent` field, in the same language the user used.',
+      '- "create a security review skill" -> intent: "security review"',
+      '- "make me a skill that finds TODOs" -> intent: "finds TODOs"',
+      '- "crée une compétence qui vérifie le style du code" -> intent: "vérifie le style du code"',
+      'The intent must describe the work the skill performs, not the act of creating a skill. If the description already states the purpose cleanly (e.g. "review code"), copy it through unchanged.',
+      '',
+      'Step 2 — Build the skill around the intent, not the framing.',
+      `- The skill name in frontmatter MUST be exactly: ${input.name} — do not invent a different name.`,
+      `- The # Role section MUST contain exactly this text (do not rephrase): ${role}`,
+      '- The skill MUST perform the intent end-to-end. It must NOT be a skill whose job is to "create" or "build" the thing the user named.',
+      '- Bad: for intent "security review", the Role says "You create a security reviewer." Good: the Role says "You are a security reviewer" and the skill actually performs security review.',
       '- SKILL.md must include frontmatter with name and description.',
-      '- The skill name must be 2-4 meaningful words in kebab-case and convey the workflow intent, for example "branch-diff-review" or "release-notes-draft".',
-      '- Pick the name as if it were written after summarizing the complete SKILL.md, not by truncating the first words of the request.',
-      '- Do not include loose trailing words from cut-off sentences. Bad: "commit-current-changes-write". Good: "commit-current-changes".',
-      '- Avoid vague names like "helper", "workflow", or "custom-skill" unless paired with a specific domain word.',
       '- The frontmatter description must start with "Use when".',
-      '- Infer the user intent from the description and make it explicit in the Focused prompt.',
+      '- Make the intent explicit in the Focused prompt.',
       '- The body must start with these headings immediately after frontmatter: Role, Focused prompt.',
       '- The body must then include these headings: Inputs to inspect, Procedure, Fallbacks, Stop conditions, Blocker policy, Output template.',
       '- The Focused prompt must describe the desired outcome and definition of success, not just restate the trigger.',
@@ -255,47 +262,51 @@ async function generateSkill(description: string): Promise<GeneratedSkill> {
     ].join('\n'),
   });
   const generated = result.object;
-  const draftName = slug(generated.name || description);
-  const finalName = await nameFromSkillSummary(description, draftName, generated.files).catch(() => draftName);
-  const finalDescription = await descriptionFromSkillSummary(description, finalName, generated.files).catch(() => normalizeSkillDescription(`the user asks: ${description}`));
+  const intent = generated.intent?.trim() || input.description;
+  // The user already named the skill — use it verbatim, do NOT run nameFromSkillSummary.
+  const finalName = input.name;
+  const finalDescription = await descriptionFromSkillSummary(intent, finalName, generated.files).catch(() => normalizeSkillDescription(`the user asks: ${intent}`));
   const files = generated.files.map(file => file.path === 'SKILL.md' ? {...file, content: withSkillDescription(file.content, finalDescription)} : file);
-  return {name: finalName, files};
+  return {name: finalName, intent, files};
 }
 
-export async function createSkill(description: string) {
-  const generated = await generateSkill(description).catch(error => {
+export async function createSkill(input: CreateSkillInput) {
+  const name = toSkillDirName(input.name);
+  if (!name) throw new Error('Skill name must contain at least one letter or number.');
+  const normalizedInput: CreateSkillInput = {...input, name, role: input.role?.trim() || undefined};
+  const generated = await generateSkill(normalizedInput).catch(error => {
     const message = error instanceof Error ? error.message : String(error);
     if (message.startsWith('No model provider configured.')) throw error instanceof Error ? error : new Error(message);
-    return fallbackSkill(description);
+    return fallbackSkill(normalizedInput);
   });
-  const name = generated.name || fallbackSkill(description).name;
-  const dir = path.join(GLOBAL_SKILLS_DIR, name);
+  const finalName = generated.name || name;
+  const dir = path.join(GLOBAL_SKILLS_DIR, finalName);
   const skillFile = path.join(dir, 'SKILL.md');
   await fs.ensureDir(dir);
-  if (await fs.pathExists(skillFile)) throw new Error(`Skill already exists: ${name}`);
+  if (await fs.pathExists(skillFile)) throw new Error(`Skill already exists: ${finalName}`);
 
   for (const generatedFile of generated.files) {
     const safePath = assertSafeGeneratedFile(generatedFile.path);
     const absolutePath = path.join(dir, safePath);
     await fs.ensureDir(path.dirname(absolutePath));
-    const content = safePath === 'SKILL.md' ? withSkillName(withStandardRequirements(generatedFile.content), name) : generatedFile.content;
+    const content = safePath === 'SKILL.md' ? withSkillName(withStandardRequirements(generatedFile.content), finalName) : generatedFile.content;
     await fs.writeFile(absolutePath, content, 'utf8');
   }
 
   if (!(await fs.pathExists(skillFile))) {
-    const fallback = fallbackSkill(description);
+    const fallback = fallbackSkill(normalizedInput);
     await fs.writeFile(skillFile, fallback.files[0]!.content, 'utf8');
   }
 
   const loaded = await loadSkill(dir, 'global');
   if (!loaded) throw new Error('Generated skill is missing SKILL.md');
-  if (loaded.name !== name) {
+  if (loaded.name !== finalName) {
     const nextDir = path.join(GLOBAL_SKILLS_DIR, loaded.name);
     if (await fs.pathExists(nextDir)) throw new Error(`Skill already exists: ${loaded.name}`);
     await fs.move(dir, nextDir);
     return {name: loaded.name, dir: nextDir, file: path.join(nextDir, 'SKILL.md')};
   }
-  return {name, dir, file: skillFile};
+  return {name: finalName, dir, file: skillFile};
 }
 
-export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements, withSkillName, withSkillDescription, normalizeSkillDescription};
+export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements, withSkillName, withSkillDescription, normalizeSkillDescription, toSkillDirName};
