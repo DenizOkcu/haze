@@ -102,7 +102,7 @@ export function completionDecision(input: CompletionPolicyInput): CompletionDeci
 }
 
 export function toolLoopBudgetPrompt() {
-  return 'Tool slice reached for this model step. Do not output XML, JSON tool-call syntax, <tool_call> blocks, or function-call markup. If the current request is complete, answer with the final status template using only current-turn changes and validation evidence. If incomplete, state the single next concrete unfinished action so Haze can continue autonomously in a fresh tool slice. Do not claim tools are unavailable, recap unrelated earlier tasks, or provide a generic remains list.';
+  return 'Tool slice reached for this model step — tools are no longer callable in this turn. Stop attempting to describe or announce tool calls (e.g. "Let me install", "Now I\'ll run", "Let me X"); those phrases imply tool use you cannot perform. Answer once: either the final status template (current-turn changes + validation evidence) or, if incomplete, a single short line stating the next concrete unfinished action so Haze can continue in a fresh tool slice. Do not repeat yourself, do not loop, do not emit XML/JSON tool-call syntax.';
 }
 
 export function postContinuationPrompt() {

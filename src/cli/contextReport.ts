@@ -37,6 +37,7 @@ if (traceIndex >= 0) {
     before: contextBreakdown({system, messages, tools: hazeTools}),
     after: contextBreakdown({system, messages: compacted.messages, tools: hazeTools}),
     compactedToolResults: pruned.compactedResults,
+    compactedToolCalls: pruned.compactedCalls,
     compactedMessages: compacted.compacted,
     olderMessagesRemoved: compacted.olderCount,
   }, null, 2)}\n`);

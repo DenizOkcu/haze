@@ -135,7 +135,13 @@ describe('completionDecision', () => {
 
   it('uses autonomous-friendly tool slice wording', () => {
     const prompt = toolLoopBudgetPrompt();
-    expect(prompt).toContain('Haze can continue autonomously');
+    expect(prompt).toMatch(/Haze can continue/i);
     expect(prompt).not.toContain('You cannot call tools now');
+  });
+
+  it('forbids announcement-style tool-call loops', () => {
+    const prompt = toolLoopBudgetPrompt();
+    expect(prompt).toMatch(/do not repeat yourself/i);
+    expect(prompt).toMatch(/Let me|Now I/i);
   });
 });

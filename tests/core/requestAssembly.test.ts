@@ -38,4 +38,58 @@ describe('toolRequestSettings', () => {
     expect(JSON.stringify(result.messages[3])).toContain('failurefailure');
     expect(JSON.stringify(result.messages[5])).toContain('xxxxxxxx');
   });
+
+  it('compacts old writeFile tool-call inputs but keeps recent ones', () => {
+    const bigContent = 'const x = ' + "'y'".repeat(800);
+    const messages = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'old1', toolName: 'writeFile', input: {path: 'src/old1.js', content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'old1', toolName: 'writeFile', output: {type: 'json', value: {ok: true, path: 'src/old1.js', bytes: bigContent.length}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'old2', toolName: 'writeFile', input: {path: 'src/old2.js', content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'old2', toolName: 'writeFile', output: {type: 'json', value: {ok: true, path: 'src/old2.js', bytes: bigContent.length}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'recent1', toolName: 'writeFile', input: {path: 'src/recent1.js', content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'recent1', toolName: 'writeFile', output: {type: 'json', value: {ok: true, path: 'src/recent1.js', bytes: bigContent.length}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'recent2', toolName: 'writeFile', input: {path: 'src/recent2.js', content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'recent2', toolName: 'writeFile', output: {type: 'json', value: {ok: true, path: 'src/recent2.js', bytes: bigContent.length}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactToolHistory(messages, {keepRecentCalls: 2, minCallTokens: 50});
+    expect(result.compactedCalls).toBe(2);
+    expect(result.messages).toHaveLength(messages.length);
+    const old1 = JSON.stringify(result.messages[0]);
+    const old2 = JSON.stringify(result.messages[2]);
+    const recent1 = JSON.stringify(result.messages[4]);
+    const recent2 = JSON.stringify(result.messages[6]);
+    expect(old1).toContain('[Compacted:');
+    expect(old1).toContain('src/old1.js');
+    expect(old2).toContain('[Compacted:');
+    expect(old2).toContain('src/old2.js');
+    expect(recent1).toContain(bigContent);
+    expect(recent2).toContain(bigContent);
+  });
+
+  it('leaves small writeFile inputs alone', () => {
+    const messages = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'small', toolName: 'writeFile', input: {path: 'tiny.txt', content: 'hi'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'small', toolName: 'writeFile', output: {type: 'json', value: {ok: true}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactToolHistory(messages, {keepRecentCalls: 0, minCallTokens: 400});
+    expect(result.compactedCalls).toBe(0);
+    expect(JSON.stringify(result.messages[0])).toContain('"content":"hi"');
+  });
+
+  it('compacts old bash tool-call commands but keeps short ones intact', () => {
+    const longCommand = 'node -e "const x = ' + "'a'".repeat(300) + '; console.log(x);"';
+    const messages = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'longbash', toolName: 'bash', input: {command: longCommand, allowMutation: false}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'longbash', toolName: 'bash', output: {type: 'json', value: {ok: true, code: 0}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'shortbash', toolName: 'bash', input: {command: 'npm test', allowMutation: false}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'shortbash', toolName: 'bash', output: {type: 'json', value: {ok: true, code: 0}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactToolHistory(messages, {keepRecentCalls: 0, minCallTokens: 50});
+    expect(result.compactedCalls).toBe(1);
+    const longJson = JSON.stringify(result.messages[0]);
+    const shortJson = JSON.stringify(result.messages[2]);
+    expect(longJson).toContain('more chars compacted');
+    expect(longJson).not.toContain("'a'".repeat(300));
+    expect(shortJson).toContain('"command":"npm test"');
+  });
 });

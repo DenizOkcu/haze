@@ -39,6 +39,8 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = [], session?: Pr
 - skill loads one installed workflow by name. writeTasks is for substantial work, normally five or more steps; update it only at meaningful phase changes, blockers, or completion.
 - Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change.
 - Ignored files require explicit need. Keep file mutations separate from validation commands when practical.
+- Batch independent tool calls in a single step (e.g. multiple writeFile or read operations that don't depend on each other). Do not narrate each call with phrases like "Now let me X" or "Next, I'll Y" — emit the tool calls directly. Reserve prose for non-obvious decisions, blockers, or final summaries.
+- When the tool set is narrowed (activeTools) or tools are removed (toolChoice: none), Haze is steering recovery or preventing a loop; the constraint is intentional. Do not emit tool-call syntax (XML, JSON, or angle-bracket blocks) as text. If forced to stop mid-task, summarize current-turn changes and validation evidence, then state the single next concrete unfinished action so Haze can continue in a fresh step.
 
 ## Completion
 - After edits, run the smallest relevant test, typecheck, lint, or build command you can identify.

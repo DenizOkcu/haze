@@ -30,7 +30,6 @@ export function parseValidationOutput(input: {
   const failedTests: string[] = [];
   const failedFiles: string[] = [];
   const kind = inferKind(input.command, input.classification);
-  const status = input.timedOut ? 'timed_out' : input.code === 0 ? 'passed' : input.code == null ? 'unknown' : 'failed';
 
   for (const line of lines) {
     const ts = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
@@ -54,7 +53,7 @@ export function parseValidationOutput(input: {
     }
     const vitestFile = line.match(/^\s*(?:FAIL|FAILED|✓|✗|❯)?\s*([^\s]+\.(?:test|spec)\.(?:ts|tsx|js|jsx))/i);
     if (vitestFile) failedFiles.push(vitestFile[1] ?? '');
-    const testName = line.match(/^\s*(?:FAIL|✗|×|●|-)\s+(.+)$/);
+    const testName = line.match(/^\s*(?:FAIL|✗|×|●)\s+(.+)$/);
     if (testName && !/^(FAIL|FAILED)\s+\S+\.(?:test|spec)\./i.test(line.trim())) failedTests.push((testName[1] ?? '').trim());
     const genericFile = line.match(/([^\s()]+\.(?:ts|tsx|js|jsx|mts|cts)):(\d+):(\d+)/);
     if (genericFile) {
@@ -68,6 +67,20 @@ export function parseValidationOutput(input: {
   const uniqueTests = uniq(failedTests).slice(0, 10);
   const diagCount = diagnostics.length;
   const rawOutputTruncated = Boolean(input.stdoutTruncated || input.stderrTruncated);
+  // Pipes (e.g. `npm test | tail`) and process substitutions can mask a
+  // non-zero exit code behind the final command in the pipeline. Treat
+  // parsed failure evidence as authoritative over `code` so a green exit
+  // status does not override real failures the parser already found.
+  const hasFailureEvidence = uniqueTests.length > 0 || diagCount > 0;
+  const status: ValidationSummary['status'] = input.timedOut
+    ? 'timed_out'
+    : hasFailureEvidence
+      ? 'failed'
+      : input.code === 0
+        ? 'passed'
+        : input.code == null
+          ? 'unknown'
+          : 'failed';
   let summaryText: string;
   if (status === 'passed') summaryText = `${kind} passed`;
   else if (status === 'timed_out') summaryText = `${kind} timed out`;

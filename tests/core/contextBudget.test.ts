@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {tool} from 'ai';
 import {z} from 'zod';
-import {contextBreakdown, effectiveNonCachedInput, estimateTextTokens} from '../../src/core/agent/contextBudget.js';
+import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateTextTokens} from '../../src/core/agent/contextBudget.js';
 import {toolRequestSettings} from '../../src/core/agent/requestAssembly.js';
 
 describe('context budget', () => {
@@ -23,6 +23,15 @@ describe('context budget', () => {
   it('calculates non-cached provider input', () => {
     expect(effectiveNonCachedInput(1000, 750)).toBe(250);
     expect(effectiveNonCachedInput(undefined, 0)).toBeUndefined();
+  });
+
+  it('calculates cache hit ratio', () => {
+    expect(cacheHitRatio(10000, 9500)).toBeCloseTo(0.95, 5);
+    expect(cacheHitRatio(10743, 512)).toBeCloseTo(0.0477, 3);
+    expect(cacheHitRatio(undefined, 1000)).toBeUndefined();
+    expect(cacheHitRatio(1000, undefined)).toBeUndefined();
+    expect(cacheHitRatio(0, 0)).toBeUndefined();
+    expect(cacheHitRatio(1000, 0)).toBeUndefined();
   });
 
   it('omits tools entirely for text-only calls', () => {

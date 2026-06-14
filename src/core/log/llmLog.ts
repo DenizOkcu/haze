@@ -8,7 +8,7 @@ export interface LlmLogEntry {
   /** ISO timestamp. */
   at: string;
   /** Entry type. */
-  type: 'request' | 'response' | 'step' | 'tool_call' | 'tool_result' | 'error';
+  type: 'request' | 'response' | 'step' | 'tool_call' | 'tool_result' | 'error' | 'warning';
   /** Which stream this belongs to: 'main' or 'continuation'. */
   stream: string;
   /** Step number within the stream. */
@@ -35,6 +35,8 @@ export interface LlmLogEntry {
     reasoningTokens?: number;
     logicalInputEstimate?: number;
     effectiveNonCachedInput?: number;
+    /** cacheReadTokens / inputTokens. Undefined when either is missing or input is 0. */
+    cacheHitRatio?: number;
   };
   /** Tool call details. */
   toolCall?: {

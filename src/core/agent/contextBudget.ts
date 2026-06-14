@@ -104,3 +104,8 @@ export function contextBreakdown(input: {
 export function effectiveNonCachedInput(inputTokens: number | undefined, cacheReadTokens: number) {
   return inputTokens == null ? undefined : Math.max(0, inputTokens - cacheReadTokens);
 }
+
+export function cacheHitRatio(inputTokens: number | undefined, cacheReadTokens: number | undefined) {
+  if (!inputTokens || !cacheReadTokens) return undefined;
+  return cacheReadTokens / inputTokens;
+}

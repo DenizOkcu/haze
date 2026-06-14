@@ -72,32 +72,75 @@ function compactResultOutput(output: unknown, toolName: string) {
   return output;
 }
 
+const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'bash']);
+const BASH_COMMAND_TRUNCATE_THRESHOLD = 200;
+const BASH_COMMAND_KEEP_CHARS = 150;
+
+function compactToolCallInput(input: unknown, toolName: string): unknown {
+  if (typeof input !== 'object' || input == null) return input;
+  const source = input as Record<string, unknown>;
+  if (toolName === 'writeFile' && typeof source.content === 'string') {
+    const bytes = source.content.length;
+    const path = typeof source.path === 'string' ? source.path : '<unknown>';
+    return {
+      ...source,
+      content: `[Compacted: original ${bytes} bytes. Use readFile on "${path}" to inspect.]`,
+    };
+  }
+  if (toolName === 'bash' && typeof source.command === 'string' && source.command.length > BASH_COMMAND_TRUNCATE_THRESHOLD) {
+    const total = source.command.length;
+    const truncated = source.command.slice(0, BASH_COMMAND_KEEP_CHARS).replace(/\s+/g, ' ').trim();
+    return {
+      ...source,
+      command: `${truncated} [+${total - BASH_COMMAND_KEEP_CHARS} more chars compacted]`,
+    };
+  }
+  return input;
+}
+
 export function compactToolHistory(
   messages: ModelMessage[],
-  options: {keepRecentResults?: number; minResultTokens?: number} = {},
+  options: {keepRecentResults?: number; minResultTokens?: number; keepRecentCalls?: number; minCallTokens?: number} = {},
 ) {
   const keepRecentResults = options.keepRecentResults ?? 3;
   const minResultTokens = options.minResultTokens ?? 300;
+  const keepRecentCalls = options.keepRecentCalls ?? 3;
+  const minCallTokens = options.minCallTokens ?? 400;
+
   const resultIds: string[] = [];
+  const compactableCallIds: string[] = [];
   for (const message of messages) {
     if (!Array.isArray(message.content)) continue;
     for (const part of message.content) {
-      if (typeof part === 'object' && part != null && part.type === 'tool-result' && typeof part.toolCallId === 'string') resultIds.push(part.toolCallId);
+      if (typeof part !== 'object' || part == null) continue;
+      if (part.type === 'tool-result' && typeof part.toolCallId === 'string') resultIds.push(part.toolCallId);
+      else if (part.type === 'tool-call' && typeof part.toolCallId === 'string' && COMPACTABLE_INPUT_TOOLS.has(part.toolName)) compactableCallIds.push(part.toolCallId);
     }
   }
-  const recent = new Set(resultIds.slice(-keepRecentResults));
+  const recent = new Set(keepRecentResults > 0 ? resultIds.slice(-keepRecentResults) : []);
+  const recentCallIds = new Set(keepRecentCalls > 0 ? compactableCallIds.slice(-keepRecentCalls) : []);
   let compactedResults = 0;
+  let compactedCalls = 0;
   const next = messages.map(message => {
     if (!Array.isArray(message.content)) return message;
     let changed = false;
     const content = message.content.map(part => {
-      if (typeof part !== 'object' || part == null || part.type !== 'tool-result') return part;
-      if (recent.has(part.toolCallId) || isFailedResult(part.output) || estimateValueTokens(part) < minResultTokens) return part;
-      changed = true;
-      compactedResults += 1;
-      return {...part, output: compactResultOutput(part.output, part.toolName)};
+      if (typeof part !== 'object' || part == null) return part;
+      if (part.type === 'tool-result') {
+        if (recent.has(part.toolCallId) || isFailedResult(part.output) || estimateValueTokens(part) < minResultTokens) return part;
+        changed = true;
+        compactedResults += 1;
+        return {...part, output: compactResultOutput(part.output, part.toolName)};
+      }
+      if (part.type === 'tool-call' && COMPACTABLE_INPUT_TOOLS.has(part.toolName)) {
+        if (recentCallIds.has(part.toolCallId) || estimateValueTokens(part) < minCallTokens) return part;
+        changed = true;
+        compactedCalls += 1;
+        return {...part, input: compactToolCallInput(part.input, part.toolName)};
+      }
+      return part;
     });
     return changed ? {...message, content} as ModelMessage : message;
   });
-  return {messages: next, compactedResults};
+  return {messages: next, compactedResults, compactedCalls};
 }

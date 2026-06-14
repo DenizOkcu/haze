@@ -14,7 +14,7 @@ import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../c
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {createSubagentTool} from '../../core/subagent/subagentRunner.js';
-import {contextBreakdown, effectiveNonCachedInput, estimateValueTokens} from '../../core/agent/contextBudget.js';
+import {contextBreakdown, cacheHitRatio, effectiveNonCachedInput, estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, toolRequestSettings, withSyntheticControl} from '../../core/agent/requestAssembly.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {workStatePrompt, type WorkState} from '../../core/agent/workState.js';
@@ -101,12 +101,12 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const IDLE_TIMEOUT_MS = 5 * 60_000;
-const MAIN_STEP_LIMIT = 16;
-const MAIN_TOOL_CALL_LIMIT = 12;
-const MAIN_TOOL_ONLY_STEP_LIMIT = 8;
-const FOLLOW_UP_STEP_LIMIT = 16;
-const FOLLOW_UP_TOOL_CALL_LIMIT = 12;
-const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 8;
+const MAIN_STEP_LIMIT = 64;
+const MAIN_TOOL_CALL_LIMIT = 40;
+const MAIN_TOOL_ONLY_STEP_LIMIT = 24;
+const FOLLOW_UP_STEP_LIMIT = 64;
+const FOLLOW_UP_TOOL_CALL_LIMIT = 40;
+const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 24;
 const COMPLETION_CONTINUATION_LIMIT = 12;
 const ACTIVE_CONTEXT_TOKEN_BUDGET = 40_000;
 
@@ -218,11 +218,19 @@ export async function runAgentTurn(
   const abortController = new AbortController();
   callbacks.setAbortController?.(abortController);
   let turnStatus: 'complete' | 'aborted' | 'failed' = 'failed';
+  type TurnStopReason = {
+    kind: 'step_limit' | 'tool_budget' | 'tool_only_limit' | 'text_repetition' | 'tool_repetition' | 'idle_timeout';
+    message: string;
+  };
+  let turnStopReason: TurnStopReason | undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let stopActiveTimers: () => void = () => undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => abortController.abort('Haze turn timed out after no model/tool activity.'), IDLE_TIMEOUT_MS);
+    idleTimer = setTimeout(() => {
+      turnStopReason = {kind: 'idle_timeout', message: `Stopped after ${Math.round(IDLE_TIMEOUT_MS / 60_000)} minutes of no activity. Type "continue" to resume — Haze will pick up where it left off.`};
+      abortController.abort('Haze turn timed out after no model/tool activity.');
+    }, IDLE_TIMEOUT_MS);
   };
 
   try {
@@ -244,9 +252,11 @@ export async function runAgentTurn(
     const likelyActionRequest = isActionRequest(value);
     const likelyValidationRequest = isValidationRequest(value);
     const planImplementationGuidance = 'Haze internal guidance for implementing plan files. The original user request remains authoritative. First identify the concrete required checklist items and compare them with the current files. Do not edit source or tests when the required behavior is already present. Implement the smallest clearly required phase or required items, skip optional/design-question items unless explicitly requested, add tests rather than exploratory one-off scripts where possible, prefer file tools for source changes, run validation once after code/test edits, then update plan status with file tools if requested. Do not call unresolved optional scope a blocker.';
-    const durableRequestMessages: ModelMessage[] = retryingExistingRequest
-      ? stripSyntheticControls(callbacks.getConversation())
-      : [...stripSyntheticControls(callbacks.getConversation()), {role: 'user', content: value}];
+    const durableRequestMessages: ModelMessage[] = compactToolHistory(
+      retryingExistingRequest
+        ? stripSyntheticControls(callbacks.getConversation())
+        : [...stripSyntheticControls(callbacks.getConversation()), {role: 'user', content: value}],
+    ).messages;
     let requestMessages = likelyPlanImplementationRequest
       ? withSyntheticControl(durableRequestMessages, planImplementationGuidance)
       : durableRequestMessages;
@@ -272,6 +282,12 @@ export async function runAgentTurn(
     let textAfterTool = false;
     let completionContinuationCount = 0;
     const maxCompletionContinuations = COMPLETION_CONTINUATION_LIMIT;
+    const recentStepTextSignatures: string[] = [];
+    let consecutiveTextOnlySteps = 0;
+    let repetitionAbortFired = false;
+    const toolCallSignatureCounts = new Map<string, number>();
+    const TOOL_REPETITION_THRESHOLD = 3;
+    let latestAccumulatedResponseMessages: ModelMessage[] = [];
     let editRecoveryPath: string | undefined;
     let editRecoveryReasonCode: string | undefined;
     let editRecoveryReadSatisfied = false;
@@ -498,16 +514,13 @@ export async function runAgentTurn(
           if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
             return {
               toolChoice: 'none',
-              messages: withSyntheticControl(messages, 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'),
             };
           }
           if (editRecoveryPath && !editRecoveryReadSatisfied) {
             return {
               activeTools: ['readFile'] as Array<keyof typeof availableTools>,
-              messages: withSyntheticControl(messages, `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`),
             };
           }
-          if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
           return undefined;
         },
         onError({error}) {
@@ -540,6 +553,17 @@ export async function runAgentTurn(
           resetIdleTimer();
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_call', stream: `continuation:${reason}`, toolCall: {id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}});
           callbacks.debugLog(`follow-up tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
+          const sig = stableToolKey(toolCall);
+          const count = (toolCallSignatureCounts.get(sig) ?? 0) + 1;
+          toolCallSignatureCounts.set(sig, count);
+          if (count >= TOOL_REPETITION_THRESHOLD && !repetitionAbortFired) {
+            repetitionAbortFired = true;
+            turnStopReason = {kind: 'tool_repetition', message: `Stopped: called ${toolCall.toolName} ${count} times with identical input (tool loop). Type "continue" to try again — the next turn starts fresh.`};
+            const preview = sig.length > 100 ? `${sig.slice(0, 100)}…` : sig;
+            logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: `continuation:${reason}`, text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Aborting to avoid tool-only loop.`});
+            callbacks.debugLog(`tool repetition guard abort (continuation): ${toolCall.toolName} count=${count}`);
+            abortController.abort(`Haze tool repetition guard: ${toolCall.toolName} called ${count} times with identical input.`);
+          }
         },
         experimental_onToolCallFinish(event) {
           resetIdleTimer();
@@ -611,13 +635,11 @@ export async function runAgentTurn(
         if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
           return {
             toolChoice: 'none',
-            messages: withSyntheticControl(messages, 'This was a planning request and the plan artifact has been created or updated. Stop using tools and summarize the plan file only; do not implement or validate it.'),
           };
         }
         if (editRecoveryPath && !editRecoveryReadSatisfied) {
           return {
             activeTools: ['readFile'] as Array<keyof typeof availableTools>,
-            messages: withSyntheticControl(messages, `A previous edit failed for ${editRecoveryPath}${editRecoveryReasonCode ? ` (${editRecoveryReasonCode})` : ''}. Before any further edit or bash inspection, call readFile on exactly ${editRecoveryPath}. Bash/cat does not satisfy this recovery step.`),
           };
         }
         if (repeatedToolCall) {
@@ -625,34 +647,71 @@ export async function runAgentTurn(
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
           return {
             activeTools,
-            messages: withSyntheticControl(messages, `You already called ${repeatedToolNames.join(', ')} with the same input. Do not repeat that tool call. Use a different relevant tool. If this is an action request and no file change has been made yet, continue with edit/write tools rather than summarizing.`),
-          };
-        }
-        if (likelyActionRequest && !mutatingToolSucceeded && consecutiveToolOnlySteps >= 3 && toolCalls.length < MAIN_TOOL_CALL_LIMIT) {
-          callbacks.debugLog('nudging action request toward mutation after read-only steps');
-          return {
-            messages: withSyntheticControl(messages, 'You have inspected enough for now. This is an action request; make the requested change with editFile, replaceLines, or writeFile instead of saying tools are unavailable or summarizing.'),
           };
         }
         if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || consecutiveToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
+          turnStopReason = toolCalls.length >= MAIN_TOOL_CALL_LIMIT
+            ? {kind: 'tool_budget', message: `Reached the per-turn tool-call limit (${MAIN_TOOL_CALL_LIMIT}). Type "continue" to resume — Haze will pick up where it left off.`}
+            : {kind: 'tool_only_limit', message: `Made ${MAIN_TOOL_ONLY_STEP_LIMIT} consecutive inspection-only steps without making changes. Type "continue" to resume.`};
           return {
             toolChoice: 'none',
             messages: withSyntheticControl(messages, toolLoopBudgetPrompt()),
           };
         }
-        if (editFileFailed) return {activeTools: ['listFiles', 'readFile', 'replaceLines', 'writeFile', 'bash'] as Array<keyof typeof availableTools>};
         return undefined;
       },
-      onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage}) {
+      onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
+        if (Array.isArray(response?.messages) && response.messages.length > 0) {
+          latestAccumulatedResponseMessages = response.messages as ModelMessage[];
+        }
+        if (!turnStopReason && stepNumber >= MAIN_STEP_LIMIT - 1) {
+          turnStopReason = {kind: 'step_limit', message: `Reached the per-turn step limit (${MAIN_STEP_LIMIT}). Type "continue" to resume — Haze will pick up where it left off.`};
+        }
         lastFinishReason = finishReason;
         const stepInputTokens = usage?.inputTokens;
         const stepOutputTokens = usage?.outputTokens;
         const stepCacheRead = usage?.inputTokenDetails?.cacheReadTokens ?? 0;
         const stepCacheWrite = usage?.inputTokenDetails?.cacheWriteTokens ?? 0;
         const stepReasoning = usage?.outputTokenDetails?.reasoningTokens ?? 0;
-        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepInputTokens, outputTokens: stepOutputTokens, cacheReadTokens: stepCacheRead || undefined, cacheWriteTokens: stepCacheWrite || undefined, noCacheTokens: effectiveNonCachedInput(stepInputTokens, stepCacheRead), reasoningTokens: stepReasoning || undefined}});
-        callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}; usage=${stepInputTokens != null ? `in=${stepInputTokens} out=${stepOutputTokens}` : 'not reported'}${stepCacheRead ? ` cached=${stepCacheRead}` : ''}${stepCacheWrite ? ` cache_write=${stepCacheWrite}` : ''}${stepReasoning ? ` reasoning=${stepReasoning}` : ''}`);
+        const stepNoCache = effectiveNonCachedInput(stepInputTokens, stepCacheRead) ?? 0;
+        const stepCacheHitRatio = cacheHitRatio(stepInputTokens, stepCacheRead || undefined);
+        logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepInputTokens, outputTokens: stepOutputTokens, cacheReadTokens: stepCacheRead || undefined, cacheWriteTokens: stepCacheWrite || undefined, noCacheTokens: stepNoCache || undefined, reasoningTokens: stepReasoning || undefined, cacheHitRatio: stepCacheHitRatio}});
+        if (stepCacheHitRatio !== undefined && stepCacheHitRatio < 0.5 && stepNoCache > 2000) {
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', step: stepNumber, text: `low cache hit: ${(stepCacheHitRatio * 100).toFixed(1)}% (${stepCacheRead}/${stepInputTokens}), ${stepNoCache} no-cache tokens. Likely prompt prefix changed mid-turn.`});
+        }
+        callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}; usage=${stepInputTokens != null ? `in=${stepInputTokens} out=${stepOutputTokens}` : 'not reported'}${stepCacheRead ? ` cached=${stepCacheRead}` : ''}${stepCacheWrite ? ` cache_write=${stepCacheWrite}` : ''}${stepReasoning ? ` reasoning=${stepReasoning}` : ''}${stepCacheHitRatio !== undefined ? ` cache_hit=${(stepCacheHitRatio * 100).toFixed(0)}%` : ''}`);
+        // Repetition guard: when a constrained (no-tools) step emits short text
+        // that matches the prior two short-text steps, the model is stuck in a
+        // "Let me X" loop. Abort the whole turn so we don't burn maxOutputTokens
+        // on every remaining step in the limit. The secondary consecutive-text-only
+        // check catches varied-phrasing loops (e.g. "Let me install" → "I'll install
+        // dependencies now" → "Now let me run npm install") that the exact-signature
+        // check would miss.
+        if (finishReason === 'stop' && toolCalls.length === 0) {
+          consecutiveTextOnlySteps += 1;
+          const signature = text.trim().toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').slice(0, 120);
+          if (signature.length >= 8) {
+            recentStepTextSignatures.push(signature);
+            const last3 = recentStepTextSignatures.slice(-3);
+            if (last3.length === 3 && last3[0] === last3[1] && last3[1] === last3[2] && !repetitionAbortFired) {
+              repetitionAbortFired = true;
+              turnStopReason = {kind: 'text_repetition', message: 'Stopped: the model emitted the same response 3 times in a row (text loop). Type "continue" to try again — the next turn starts fresh.'};
+              logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', step: stepNumber, text: `repetition guard: 3 consecutive identical text-only steps. Aborting turn to avoid loop. Last signature: "${signature.slice(0, 60)}"`});
+              callbacks.debugLog(`repetition guard abort at step ${stepNumber}; signature="${signature.slice(0, 60)}"`);
+              abortController.abort('Haze repetition guard: 3 consecutive identical text-only steps.');
+            }
+          }
+          if (consecutiveTextOnlySteps >= 4 && !repetitionAbortFired) {
+            repetitionAbortFired = true;
+            turnStopReason = {kind: 'text_repetition', message: 'Stopped: the model emitted several text responses in a row without making progress (likely a varied-phrasing loop). Type "continue" to try again — the next turn starts fresh.'};
+            logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', step: stepNumber, text: `repetition guard: ${consecutiveTextOnlySteps} consecutive text-only steps with no tool calls. Aborting turn to avoid varied-phrasing loop.`});
+            callbacks.debugLog(`repetition guard abort at step ${stepNumber}; consecutiveTextOnlySteps=${consecutiveTextOnlySteps}`);
+            abortController.abort(`Haze repetition guard: ${consecutiveTextOnlySteps} consecutive text-only steps without progress.`);
+          }
+        } else {
+          consecutiveTextOnlySteps = 0;
+        }
       },
       onFinish(event) {
         const providerUsage = extractUsage(event);
@@ -670,8 +729,14 @@ export async function runAgentTurn(
           logicalInputEstimate: mainInputBreakdown.logicalInputEstimate,
           effectiveNonCachedInput: effectiveNonCachedInput(providerUsage.inputTokens, providerUsage.cacheReadTokens),
         });
-        const nextConversation = [...stripSyntheticControls(requestMessages), ...event.response.messages];
+        const accumulated = [...stripSyntheticControls(requestMessages), ...event.response.messages];
+        const compacted = compactToolHistory(accumulated);
+        const nextConversation = compacted.messages;
         callbacks.setConversation(nextConversation);
+        if (compacted.compactedResults > 0 || compacted.compactedCalls > 0) {
+          callbacks.debugLog(`end-of-turn compaction: ${compacted.compactedResults} results, ${compacted.compactedCalls} tool-call inputs compacted`);
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', text: `end-of-turn compaction: ${compacted.compactedResults} old results, ${compacted.compactedCalls} old tool-call inputs compacted before next turn.`});
+        }
         callbacks.debugLog(`conversation updated to ${nextConversation.length} messages`);
       },
       experimental_onToolCallStart({toolCall}) {
@@ -680,6 +745,20 @@ export async function runAgentTurn(
         resetIdleTimer();
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_call', stream: 'main', toolCall: {id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}});
         callbacks.debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
+        // Tool-repetition guard: if the same (toolName, input) has been called
+        // TOOL_REPETITION_THRESHOLD times this turn, the model is stuck in a
+        // tool-only loop. Abort the turn rather than letting it burn more calls.
+        const sig = stableToolKey(toolCall);
+        const count = (toolCallSignatureCounts.get(sig) ?? 0) + 1;
+        toolCallSignatureCounts.set(sig, count);
+        if (count >= TOOL_REPETITION_THRESHOLD && !repetitionAbortFired) {
+          repetitionAbortFired = true;
+          turnStopReason = {kind: 'tool_repetition', message: `Stopped: called ${toolCall.toolName} ${count} times with identical input (tool loop). Type "continue" to try again — the next turn starts fresh.`};
+          const preview = sig.length > 100 ? `${sig.slice(0, 100)}…` : sig;
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Aborting to avoid tool-only loop.`});
+          callbacks.debugLog(`tool repetition guard abort: ${toolCall.toolName} count=${count} sig=${preview}`);
+          abortController.abort(`Haze tool repetition guard: ${toolCall.toolName} called ${count} times with identical input.`);
+        }
       },
       experimental_onToolCallFinish(event) {
         resetIdleTimer();
@@ -737,6 +816,18 @@ export async function runAgentTurn(
       completedConversation = [...stripSyntheticControls(requestMessages), ...response.messages];
       callbacks.setConversation(completedConversation);
     } catch (error) {
+      // The turn was aborted or errored mid-stream. If we have any accumulated
+      // response messages from completed steps (tracked in onStepFinish), persist
+      // them so the next turn inherits the partial work instead of losing it.
+      if (latestAccumulatedResponseMessages.length > 0) {
+        const accumulated = [...stripSyntheticControls(requestMessages), ...latestAccumulatedResponseMessages];
+        const compacted = compactToolHistory(accumulated);
+        callbacks.setConversation(compacted.messages);
+        if (compacted.compactedResults > 0 || compacted.compactedCalls > 0) {
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', text: `abort recovery: persisted ${latestAccumulatedResponseMessages.length} response messages, compacted ${compacted.compactedResults} results and ${compacted.compactedCalls} tool-call inputs.`});
+        }
+        callbacks.debugLog(`abort recovery: persisted ${latestAccumulatedResponseMessages.length} response messages before re-throwing`);
+      }
       throw streamError ?? error;
     }
     callbacks.debugLog(`response stream finished; session has ${completedConversation.length} model messages`);
@@ -832,12 +923,15 @@ export async function runAgentTurn(
     goal.phase = 'done';
     goal.status = 'complete';
     turnStatus = 'complete';
+    if (turnStopReason) {
+      callbacks.addMessage({role: 'system', text: turnStopReason.message});
+    }
     callbacks.setGoalStatus?.(undefined);
   } catch (error) {
     if (abortController.signal.aborted) {
       turnStatus = 'aborted';
       callbacks.debugLog('request aborted');
-      callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
+      callbacks.addMessage({role: 'system', text: turnStopReason?.message ?? 'Thinking aborted. You can type again.'});
     } else {
       const text = error instanceof Error ? error.message : String(error);
       callbacks.debugLog(`error: ${text}`);
