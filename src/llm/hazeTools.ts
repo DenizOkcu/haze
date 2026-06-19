@@ -11,13 +11,19 @@ import type {Task, TaskStatus} from '../core/tasks/taskStorage.js';
 import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
 import {classifyBashCommand, isValidationClassification} from '../core/safety/bashClassifier.js';
 import {parseValidationOutput} from '../core/validation/outputParser.js';
+import {filterBashOutput} from '../core/bashOutput/registry.js';
 import type {ToolDiffLine, ToolFailureReasonCode} from './toolResultTypes.js';
 import {readToolOutput as readStoredToolOutput, storeToolOutput} from '../core/agent/toolOutputStore.js';
+import {fetchUrlContent, BlockedUrlError} from './webFetch.js';
+import {reductionMetrics} from '../core/toolOutput/reduction.js';
+import {readScopedContextFilesForPath, type ContextFile} from '../config/contextFiles.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
 const DEFAULT_READ_LINES = 300;
 const COMPACT_COMMAND_CHARS = 12_000;
 const SHORT_VALIDATION_CHARS = 2_000;
+const GREP_MAX_OUTPUT_CHARS = 30_000;
+const GREP_MAX_LINE_CHARS = 500;
 const execFile = promisify(execFileCallback);
 
 async function isGitIgnored(absolutePath: string) {
@@ -64,6 +70,33 @@ function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS) {
     omittedChars: text.length - maxChars,
     handle,
   };
+}
+
+function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
+  if (text.length <= maxChars) return {text, truncated: false};
+  return {text: `${text.slice(0, Math.max(0, maxChars - 22))}[line truncated]`, truncated: true};
+}
+
+function renderGrepMatches(matches: Array<{file: string; line: number; content: string; isContext: boolean}>) {
+  return matches.map(match => `${match.file}:${match.line}:${match.isContext ? '-' : ''}${match.content}`).join('\n');
+}
+
+function compactGrepMatches(matches: Array<{file: string; line: number; content: string; isContext: boolean}>, maxChars = GREP_MAX_OUTPUT_CHARS) {
+  const compacted: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
+  let lineTruncated = false;
+  let omittedResultLines = 0;
+  for (const match of matches) {
+    const line = compactLine(match.content);
+    lineTruncated = lineTruncated || line.truncated;
+    const next = {...match, content: line.text};
+    const estimated = JSON.stringify([...compacted, next]).length;
+    if (estimated > maxChars) {
+      omittedResultLines = matches.length - compacted.length;
+      break;
+    }
+    compacted.push(next);
+  }
+  return {matches: compacted, lineTruncated, omittedResultLines, outputTruncated: omittedResultLines > 0 || lineTruncated};
 }
 
 function stripLineNumberPrefixes(text: string) {
@@ -133,6 +166,7 @@ type HazeToolContext = {
   failedMutationReasons?: Map<string, ToolFailureReasonCode | undefined>;
   pathsReadAfterFailedMutation?: Set<string>;
   inFlightMutationPaths?: Set<string>;
+  loadedContextFilePaths?: Set<string>;
 };
 
 function toolCallKey(toolName: string, input: unknown) {
@@ -145,12 +179,46 @@ function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined
     : undefined;
 }
 
+async function discoverScopedContext(filePath: string, context: ToolExecutionContext) {
+  const ctx = hazeContext(context);
+  const loaded = ctx?.loadedContextFilePaths ?? new Set<string>();
+  const files = await readScopedContextFilesForPath(filePath, {cwd: workspaceRoot(), alreadyLoadedPaths: loaded});
+  if (ctx && !ctx.loadedContextFilePaths) ctx.loadedContextFilePaths = loaded;
+  for (const file of files) loaded.add(file.path);
+  return files;
+}
+
+function withScopedContext<T extends Record<string, unknown>>(result: T, files: ContextFile[]): T & {applicableProjectInstructions?: ContextFile[]} {
+  return files.length > 0 ? {...result, applicableProjectInstructions: files} : result;
+}
+
+function scopedContextMutationStop(toolName: string, filePath: string, files: ContextFile[]) {
+  if (files.length === 0) return undefined;
+  return {
+    ok: false,
+    toolName,
+    path: filePath,
+    error: `Scoped project instructions apply to ${filePath}: ${files.map(file => file.path).join(', ')}. Review them before mutating this path.`,
+    reasonCode: 'scoped_instructions_discovered' as const,
+    recoverable: true,
+    suggestedNextStep: `Read the applicableProjectInstructions returned in this result, then retry ${toolName} only if the change follows those scoped instructions.`,
+    applicableProjectInstructions: files,
+  };
+}
+
 function isMutatingTool(toolName: string) {
   return ['editFile', 'replaceLines', 'writeFile'].includes(toolName);
 }
 
 function isReadOnlyFileTool(toolName: string) {
   return ['listFiles', 'readFile', 'grep'].includes(toolName);
+}
+
+function isDeduplicableReadOnlyTool(toolName: string) {
+  // Read-only tools that participate in completed-call deduplication within a
+  // turn (no side effects). File tools + bash + fetch; fetch has no path and is
+  // network-side-effect-free for the agent's purposes.
+  return isReadOnlyFileTool(toolName) || toolName === 'bash' || toolName === 'fetch';
 }
 
 function inputPath(input: unknown) {
@@ -180,6 +248,22 @@ function structuredToolFailure(toolName: string, error: unknown, suggestedNextSt
 }
 
 const INLINE_DIFF_LINE_LIMIT = 20;
+
+const SOURCE_OUTLINE_PATTERNS = [
+  /^\s*(?:import|from|export|package|namespace|module|using)\b/,
+  /^\s*#\s*include\b/,
+  /^\s*(?:public|private|protected|internal|static|async|final|open|sealed|abstract|export\s+)?\s*(?:class|interface|struct|enum|type|trait|record|protocol)\b/,
+  /^\s*(?:export\s+)?(?:async\s+)?function\b/,
+  /^\s*(?:def|func|fn)\s+[A-Za-z_]/,
+  /^\s*(?:pub\s+)?(?:async\s+)?fn\s+[A-Za-z_]/,
+  /^\s*(?:public|private|protected|internal|static|async|final|override|virtual|abstract)\s+[^=;{}]+\([^)]*\)\s*(?:\{|;|=>)?\s*$/,
+];
+
+function sourceOutlineEntries(lines: string[], startLine: number) {
+  return lines
+    .map((line, index) => ({lineNumber: startLine + index, text: line}))
+    .filter(entry => SOURCE_OUTLINE_PATTERNS.some(pattern => pattern.test(entry.text)));
+}
 
 function splitDiffLines(text: string) {
   const lines = text.split(/\r?\n/);
@@ -240,14 +324,16 @@ async function runDedupedTool<T>(toolName: string, input: unknown, context: Tool
   }
   const completedAt = ctx.completedToolCalls.get(key);
   const readAfterFailedMutation = toolName === 'readFile' && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput);
-  if ((isReadOnlyFileTool(toolName) || toolName === 'bash') && completedAt === ctx.mutationEpoch && !readAfterFailedMutation) {
+  if ((isDeduplicableReadOnlyTool(toolName)) && completedAt === ctx.mutationEpoch && !readAfterFailedMutation) {
     return {
       ok: true,
       duplicateSkipped: true,
       toolName,
       reason: toolName === 'bash'
         ? 'Skipped duplicate bash command; no files changed since the previous run.'
-        : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
+        : toolName === 'fetch'
+          ? 'Skipped duplicate fetch with identical URL; no files changed since the previous call.'
+          : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
     };
   }
   if (ctx.inFlightToolCalls.has(key)) {
@@ -306,12 +392,13 @@ export const hazeTools = {
       maxEntries: z.number().int().positive().max(500).default(100).describe('Maximum number of entries to return'),
       cursor: z.string().optional().describe('Pagination cursor from a previous listFiles result. Continue after that entry.'),
       includeIgnored: z.boolean().default(false).describe('Include .gitignored paths only when needed'),
+      includeSizes: z.boolean().default(false).describe('Include file byte sizes only when needed; omitted by default for compact output'),
     }),
-    execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored}, context, async () => {
+    execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context, async () => {
       try {
         const absolutePath = resolveWorkspacePath(dirPath);
         await assertNotIgnored(absolutePath, dirPath, includeIgnored);
-        const entries: Array<{path: string; type: 'file' | 'directory'; size?: number}> = [];
+        const entries: string[] = [];
         let ignoredSkipped = 0;
 
         const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, filter: async entry => {
@@ -323,14 +410,19 @@ export const hazeTools = {
 
         for (const entry of page) {
           if (entry.isDirectory) {
-            entries.push({path: entry.path, type: 'directory'});
+            entries.push(`${entry.path}/`);
           } else if (entry.isFile) {
-            const stat = await fs.stat(entry.absolutePath);
-            entries.push({path: entry.path, type: 'file', size: stat.size});
+            if (includeSizes) {
+              const stat = await fs.stat(entry.absolutePath);
+              entries.push(`${entry.path} (${stat.size} bytes)`);
+            } else {
+              entries.push(entry.path);
+            }
           }
         }
 
-        return {path: dirPath, recursive, includeIgnored, cursor, nextCursor: hasMore ? page.at(-1)?.path : undefined, ignoredSkipped, entries, truncated: hasMore};
+        const scopedContext = await discoverScopedContext(dirPath, context);
+        return withScopedContext({path: dirPath, recursive, includeIgnored, includeSizes, cursor, nextCursor: hasMore ? page.at(-1)?.path : undefined, ignoredSkipped, entryFormat: includeSizes ? 'directories end with /; files may include byte size in parentheses' : 'directories end with /', entries, truncated: hasMore}, scopedContext);
       } catch (error) {
         return structuredToolFailure('listFiles', error, 'Check that the directory exists and is not ignored, or retry with a narrower path.', dirPath);
       }
@@ -338,14 +430,15 @@ export const hazeTools = {
   }),
 
   readFile: tool({
-    description: 'Read numbered lines from a UTF-8 workspace file. Defaults to 300 lines and returns nextOffset when more remain.',
+    description: 'Read numbered lines from a UTF-8 workspace file. Defaults to exact mode; outline mode is for discovery only and must be followed by exact reads before editing.',
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       offset: z.number().int().positive().optional().describe('1-based line number to start reading from'),
       limit: z.number().int().positive().max(2000).optional().describe('Maximum lines to return; defaults to 300'),
+      mode: z.enum(['exact', 'outline']).default('exact').describe('exact returns source lines; outline returns imports/includes and top-level declarations for discovery only'),
       allowIgnored: z.boolean().default(false).describe('Read a .gitignored file only when needed'),
     }),
-    execute: async ({path: filePath, offset, limit, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, allowIgnored}, context, async () => {
+    execute: async ({path: filePath, offset, limit, mode, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, mode, allowIgnored}, context, async () => {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
@@ -354,34 +447,44 @@ export const hazeTools = {
         const start = offset == null ? 0 : offset - 1;
         const requestedEnd = Math.min(lines.length, start + (limit ?? DEFAULT_READ_LINES));
         const selectedLines = lines.slice(start, requestedEnd);
+        const outlineEntries = mode === 'outline' ? sourceOutlineEntries(selectedLines, start + 1) : undefined;
+        const displayLines = outlineEntries?.map(entry => ({lineNumber: entry.lineNumber, text: entry.text}))
+          ?? selectedLines.map((line, index) => ({lineNumber: start + index + 1, text: line}));
         const numberedLines: string[] = [];
         let includedLines = 0;
         let lineTruncated = false;
-        for (const [index, line] of selectedLines.entries()) {
-          const prefix = `${String(start + index + 1).padStart(4, ' ')} | `;
+        for (const entry of displayLines) {
+          const prefix = `${String(entry.lineNumber).padStart(4, ' ')} | `;
           const remaining = MAX_OUTPUT_CHARS - numberedLines.join('\n').length - (numberedLines.length > 0 ? 1 : 0);
           if (remaining <= prefix.length) break;
-          if (prefix.length + line.length > remaining) {
-            numberedLines.push(`${prefix}${line.slice(0, Math.max(0, remaining - prefix.length - 26))}[line content truncated]`);
+          if (prefix.length + entry.text.length > remaining) {
+            numberedLines.push(`${prefix}${entry.text.slice(0, Math.max(0, remaining - prefix.length - 26))}[line content truncated]`);
             includedLines += 1;
             lineTruncated = true;
             break;
           }
-          numberedLines.push(`${prefix}${line}`);
+          numberedLines.push(`${prefix}${entry.text}`);
           includedLines += 1;
         }
-        const endLine = start + includedLines;
-        const hasMore = endLine < lines.length;
-        return {
+        const endLine = mode === 'outline'
+          ? displayLines[Math.max(0, includedLines - 1)]?.lineNumber ?? start + 1
+          : start + includedLines;
+        const hasMore = mode === 'outline'
+          ? requestedEnd < lines.length
+          : endLine < lines.length;
+        const scopedContext = await discoverScopedContext(filePath, context);
+        return withScopedContext({
           path: filePath,
+          mode,
           startLine: start + 1,
           endLine,
           totalLines: lines.length,
           content: numberedLines.join('\n'),
-          nextOffset: hasMore ? endLine + 1 : undefined,
+          nextOffset: hasMore ? requestedEnd + 1 : undefined,
           truncated: hasMore || lineTruncated,
           lineTruncated,
-        };
+          ...(mode === 'outline' ? {outline: true, outlineEntries: includedLines, warning: 'Outline mode is lossy discovery output. Use exact readFile around relevant lines before editing.'} : {}),
+        }, scopedContext);
       } catch (error) {
         return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);
       }
@@ -423,8 +526,9 @@ export const hazeTools = {
           }
         }
 
+        const scopedContext = await discoverScopedContext(searchPath, context);
         if (!stdout) {
-          return {pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches: [], totalMatches: 0, truncated: false};
+          return withScopedContext({pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches: [], totalMatches: 0, truncated: false}, scopedContext);
         }
 
         const lines = stdout.split('\n').filter(Boolean);
@@ -470,18 +574,32 @@ export const hazeTools = {
           retainFollowingContext = true;
         }
 
-        return {
+        const compacted = compactGrepMatches(matches);
+        const outputTruncated = compacted.outputTruncated;
+        const rawRenderedMatches = renderGrepMatches(matches);
+        const returnedRenderedMatches = renderGrepMatches(compacted.matches);
+        const grepMetrics = reductionMetrics(rawRenderedMatches, returnedRenderedMatches);
+        const fullOutputHandle = outputTruncated ? storeToolOutput(rawRenderedMatches) : undefined;
+        return withScopedContext({
           pattern,
           path: searchPath,
           glob: glob ?? null,
           caseInsensitive,
-          matches,
+          matches: compacted.matches,
           totalMatches,
           returnedMatches,
           omittedMatches,
-          truncated: omittedMatches > 0,
-          suggestion: omittedMatches > 0 ? 'Narrow the path, glob, or pattern to inspect omitted matches.' : undefined,
-        };
+          omittedResultLines: compacted.omittedResultLines,
+          lineTruncated: compacted.lineTruncated,
+          truncated: omittedMatches > 0 || outputTruncated,
+          reducerName: 'grep-structured',
+          contentKind: 'search',
+          lossy: omittedMatches > 0 || outputTruncated,
+          parseTier: 'full',
+          ...grepMetrics,
+          ...(fullOutputHandle ? {handle: fullOutputHandle, rawHandle: fullOutputHandle, omittedChars: Math.max(0, rawRenderedMatches.length - returnedRenderedMatches.length)} : {omittedChars: 0}),
+          suggestion: omittedMatches > 0 || outputTruncated ? 'Narrow the path, glob, or pattern to inspect omitted results, or use readToolOutput with the handle when present.' : undefined,
+        }, scopedContext);
       } catch (error) {
         return structuredToolFailure('grep', error, 'Check that the search path exists and the pattern is valid regex. Try a narrower path or simpler pattern.', searchPath);
       }
@@ -501,6 +619,9 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const scopedContext = await discoverScopedContext(filePath, context);
+        const scopedStop = scopedContextMutationStop('replaceLines', filePath, scopedContext);
+        if (scopedStop) return scopedStop;
         const original = await fs.readFile(absolutePath, 'utf8');
         const hasTrailingNewline = original.endsWith('\n');
         const lines = original.split(/\r?\n/);
@@ -543,6 +664,9 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const scopedContext = await discoverScopedContext(filePath, context);
+        const scopedStop = scopedContextMutationStop('writeFile', filePath, scopedContext);
+        if (scopedStop) return scopedStop;
         try {
           await fs.access(absolutePath);
           if (!overwriteExisting) {
@@ -575,6 +699,9 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        const scopedContext = await discoverScopedContext(filePath, context);
+        const scopedStop = scopedContextMutationStop('editFile', filePath, scopedContext);
+        if (scopedStop) return scopedStop;
         const original = await fs.readFile(absolutePath, 'utf8');
         const ranges = edits.map((edit, index) => {
           const match = findEditRange(original, edit.oldText);
@@ -665,11 +792,50 @@ export const hazeTools = {
       handle: z.string().min(1).describe('Output handle from a prior tool result'),
       offset: z.number().int().nonnegative().default(0).describe('Character offset to start reading'),
       limit: z.number().int().positive().max(20_000).default(12_000).describe('Maximum characters to return'),
+      query: z.string().optional().describe('Optional case-insensitive substring search within the stored output instead of reading by offset'),
+      contextLines: z.number().int().nonnegative().max(20).default(2).describe('Lines of context around query matches'),
     }),
-    execute: async ({handle, offset, limit}) => {
-      const page = readStoredToolOutput(handle, offset, limit);
+    execute: async ({handle, offset, limit, query, contextLines}) => {
+      const page = readStoredToolOutput(handle, offset, limit, {query, contextLines});
       return page ?? {ok: false, error: `Unknown or expired tool output handle: ${handle}`};
     },
+  }),
+
+  fetch: tool({
+    description: 'Fetch a public http(s) URL and return readable content. Use for current docs, API references, error lookups, or CI logs. Private/loopback/metadata hosts are blocked.',
+    inputSchema: z.object({
+      url: z.string().url().describe('Absolute http(s) URL to fetch'),
+      format: z.enum(['auto', 'text']).default('auto').describe('auto = markdown for HTML, pretty for JSON, passthrough for text; text = raw text only'),
+    }),
+    execute: async ({url, format}, context) => runDedupedTool('fetch', {url, format}, context, async () => {
+      try {
+        const result = await fetchUrlContent(url, {signal: context.abortSignal, format});
+        const capped = compactStoredOutput(result.content, MAX_OUTPUT_CHARS);
+        const extractionMethod = format === 'text' ? 'text' as const : result.extractionMethod;
+        const fetchMetrics = reductionMetrics(result.content, capped.text);
+        return {
+          ok: true,
+          url: result.url,
+          status: result.status,
+          statusText: result.statusText,
+          contentType: result.contentType,
+          bytes: result.bytes,
+          redirected: result.redirected,
+          extractionMethod,
+          truncated: capped.truncated,
+          content: capped.text,
+          reducerName: extractionMethod === 'markdown' ? 'web-html-extract' : 'web-content-cap',
+          contentKind: 'web',
+          lossy: capped.truncated || extractionMethod === 'markdown',
+          parseTier: 'full',
+          ...fetchMetrics,
+          ...(capped.handle ? {handle: capped.handle, rawHandle: capped.handle, omittedChars: capped.omittedChars} : {omittedChars: 0}),
+        };
+      } catch (error) {
+        const reasonCode = error instanceof BlockedUrlError ? 'blocked_url' as const : undefined;
+        return structuredToolFailure('fetch', error, 'Check the URL is correct and public. Private/localhost/metadata hosts and non-http(s) schemes are blocked.', url, {reasonCode});
+      }
+    }),
   }),
 
   bash: tool({
@@ -708,8 +874,18 @@ export const hazeTools = {
             ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: stdout.length > COMPACT_COMMAND_CHARS, stderrTruncated: stderr.length > COMPACT_COMMAND_CHARS, classification})
             : undefined;
           const validationPassed = validationSummary?.status === 'passed';
-          const stdoutResult = compactStoredOutput(stdout, validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS);
-          const stderrResult = compactStoredOutput(stderr, validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS);
+          const output = filterBashOutput({
+            command,
+            code,
+            stdout,
+            stderr,
+            timedOut,
+            classification,
+            validationSummary,
+            storeRawOutput: storeToolOutput,
+            fallbackCompact: compactStoredOutput,
+            compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS,
+          });
           resolve({
             ok: code === 0 && !timedOut,
             code,
@@ -718,8 +894,8 @@ export const hazeTools = {
             classification,
             durationMs: Date.now() - startedAt,
             timedOut,
-            stdout: stdoutResult,
-            stderr: stderrResult,
+            stdout: output.stdout,
+            stderr: output.stderr,
             validationSummary,
           });
         });

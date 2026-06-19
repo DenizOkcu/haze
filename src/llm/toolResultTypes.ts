@@ -5,7 +5,9 @@ export type ToolFailureReasonCode =
   | 'ignored_path'
   | 'existing_file_requires_overwrite'
   | 'invalid_line_range'
-  | 'io_error';
+  | 'io_error'
+  | 'blocked_url'
+  | 'scoped_instructions_discovered';
 
 export type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
 

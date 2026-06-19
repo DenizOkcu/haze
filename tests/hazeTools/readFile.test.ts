@@ -15,11 +15,11 @@ describe('readFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function readFile(params: {path: string; offset?: number; limit?: number}) {
+  async function readFile(params: {path: string; offset?: number; limit?: number; mode?: 'exact' | 'outline'}, experimental_context?: unknown) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.readFile.execute(params, {abortSignal: undefined});
+      return await hazeTools.readFile.execute(params, {abortSignal: undefined, experimental_context});
     } finally {
       process.chdir(originalCwd);
     }
@@ -80,6 +80,40 @@ describe('readFile tool', () => {
     expect(result.lineTruncated).toBe(true);
   });
 
+  it('returns source outlines for discovery without replacing exact reads', async () => {
+    await fs.writeFile(path.join(tmp, 'app.py'), [
+      'import os',
+      '',
+      'CONSTANT = 1',
+      '',
+      'def build_app():',
+      '    return object()',
+      '',
+      'class Service:',
+      '    def run(self):',
+      '        return True',
+    ].join('\n'));
+    const result = await readFile({path: 'app.py', mode: 'outline'});
+    expect(result.mode).toBe('outline');
+    expect(result.content).toContain('import os');
+    expect(result.content).toContain('def build_app');
+    expect(result.content).toContain('class Service');
+    expect(result.content).not.toContain('return object()');
+    expect(result.warning).toContain('Use exact readFile');
+  });
+
+  it('returns scoped instructions for nested paths once', async () => {
+    await fs.outputFile(path.join(tmp, 'pkg/CLAUDE.md'), 'pkg rules');
+    await fs.outputFile(path.join(tmp, 'pkg/src/a.ts'), 'export const a = 1;');
+    const context = {loadedContextFilePaths: new Set<string>()};
+
+    const first = await readFile({path: 'pkg/src/a.ts'}, context);
+    const second = await readFile({path: 'pkg/src/a.ts'}, context);
+
+    expect(first.applicableProjectInstructions).toEqual([{path: 'pkg/CLAUDE.md', content: 'pkg rules'}]);
+    expect(second).not.toHaveProperty('applicableProjectInstructions');
+  });
+
   it('returns structured failure for nonexistent file', async () => {
     const result = await readFile({path: 'nope.txt'});
     expect(result.ok).toBe(false);
@@ -98,11 +132,11 @@ describe('writeFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean}) {
+  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean}, experimental_context?: unknown) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.writeFile.execute(params, {abortSignal: undefined});
+      return await hazeTools.writeFile.execute(params, {abortSignal: undefined, experimental_context});
     } finally {
       process.chdir(originalCwd);
     }
@@ -137,6 +171,18 @@ describe('writeFile tool', () => {
     expect(result.ok).toBe(true);
     const content = await fs.readFile(path.join(tmp, 'deep', 'nested', 'dir', 'file.txt'), 'utf8');
     expect(content).toBe('deep');
+  });
+
+  it('stops before writing when new scoped instructions apply', async () => {
+    await fs.outputFile(path.join(tmp, 'pkg/AGENTS.md'), 'pkg rules');
+    const context = {loadedContextFilePaths: new Set<string>()};
+
+    const result = await writeFile({path: 'pkg/src/a.ts', content: 'export const a = 1;'}, context);
+
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe('scoped_instructions_discovered');
+    expect(result.applicableProjectInstructions).toEqual([{path: 'pkg/AGENTS.md', content: 'pkg rules'}]);
+    expect(await fs.pathExists(path.join(tmp, 'pkg/src/a.ts'))).toBe(false);
   });
 
   it('reports byte count', async () => {

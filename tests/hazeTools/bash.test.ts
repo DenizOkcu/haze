@@ -61,4 +61,14 @@ describe('bash tool safety', () => {
     expect(page.content).toHaveLength(1000);
     expect(page.nextOffset).toBe(1000);
   });
+
+  it('searches stored output handles with context lines', async () => {
+    const result = await bash("node -e \"for (let i = 0; i < 2000; i++) console.log(i === 1234 ? 'needle failure' : 'line ' + i)\"");
+    expect(result.stdout.handle).toMatch(/^output-/);
+    const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000, query: 'needle', contextLines: 1}, {abortSignal: undefined});
+    expect(page.query).toBe('needle');
+    expect(page.content).toContain('needle failure');
+    expect(page.content).toContain('1234: line 1233');
+    expect(page.content).toContain('1236: line 1235');
+  });
 });

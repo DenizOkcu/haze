@@ -4,7 +4,7 @@ import {buildSubagentPrompt, type PromptSession} from '../../llm/systemPrompt.js
 import {hazeTools} from '../../llm/hazeTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
-const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile'] as const;
+const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'fetch'] as const;
 const STEP_LIMIT = 25;
 const MAX_SUMMARY = 4000;
 const TOOL_ONLY_LIMIT = 12;
@@ -143,7 +143,7 @@ export function createSubagentTool(options: {
     description: 'Spawn subagents to run independent tasks in parallel. ONLY use when a request clearly decomposes into 2+ independent subtasks that can run concurrently — spawn all of them in one step. Do NOT use for single tasks, sequential work, or anything that benefits from conversation context; do those directly instead. Subagents have no conversation history and return a summary.',
     inputSchema: z.object({
       task: z.string().min(1).describe('Clear, specific task for the subagent to complete.'),
-      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile'])).optional().describe('Tools the subagent can use. Defaults to all tools.'),
+      tools: z.array(z.enum(['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'fetch'])).optional().describe('Tools the subagent can use. Defaults to all tools.'),
       maxSteps: z.number().int().positive().max(50).optional().describe('Maximum tool-call rounds. Default 25.'),
     }),
     execute: async ({task, tools, maxSteps}, context) => runSubagent(task, {

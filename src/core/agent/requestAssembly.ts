@@ -47,7 +47,9 @@ function compactJsonValue(value: unknown, toolName: string) {
     'ok', 'path', 'command', 'code', 'signal', 'timedOut', 'durationMs', 'reasonCode',
     'bytes', 'created', 'replacements', 'totalMatches', 'returnedMatches',
     'omittedMatches', 'truncated', 'nextOffset', 'totalLines', 'startLine', 'endLine',
-    'validationSummary', 'classification', 'summary', 'counts',
+    'validationSummary', 'classification', 'summary', 'counts', 'filterName', 'reducerName',
+    'contentKind', 'lossy', 'rawHandle', 'handle', 'rawChars', 'returnedChars',
+    'rawTokensEstimate', 'returnedTokensEstimate', 'estimatedSavedTokens', 'savingsPct',
   ];
   const compacted: Record<string, unknown> = {compacted: true, toolName};
   for (const key of keys) if (key in source) compacted[key] = source[key];
@@ -57,8 +59,17 @@ function compactJsonValue(value: unknown, toolName: string) {
     const details = candidate as Record<string, unknown>;
     compacted[stream] = {
       ...(typeof details.handle === 'string' ? {handle: details.handle} : {}),
+      ...(typeof details.rawHandle === 'string' ? {rawHandle: details.rawHandle} : {}),
+      ...(typeof details.filterName === 'string' ? {filterName: details.filterName} : {}),
+      ...(typeof details.reducerName === 'string' ? {reducerName: details.reducerName} : {}),
+      ...(typeof details.contentKind === 'string' ? {contentKind: details.contentKind} : {}),
+      ...(typeof details.lossy === 'boolean' ? {lossy: details.lossy} : {}),
       ...(typeof details.truncated === 'boolean' ? {truncated: details.truncated} : {}),
       ...(typeof details.omittedChars === 'number' ? {omittedChars: details.omittedChars} : {}),
+      ...(typeof details.rawTokensEstimate === 'number' ? {rawTokensEstimate: details.rawTokensEstimate} : {}),
+      ...(typeof details.returnedTokensEstimate === 'number' ? {returnedTokensEstimate: details.returnedTokensEstimate} : {}),
+      ...(typeof details.estimatedSavedTokens === 'number' ? {estimatedSavedTokens: details.estimatedSavedTokens} : {}),
+      ...(typeof details.savingsPct === 'number' ? {savingsPct: details.savingsPct} : {}),
     };
   }
   return compacted;

@@ -105,6 +105,11 @@ export function toolLoopBudgetPrompt() {
   return 'Tool slice reached for this model step — tools are no longer callable in this turn. Stop attempting to describe or announce tool calls (e.g. "Let me install", "Now I\'ll run", "Let me X"); those phrases imply tool use you cannot perform. Answer once: either the final status template (current-turn changes + validation evidence) or, if incomplete, a single short line stating the next concrete unfinished action so Haze can continue in a fresh tool slice. Do not repeat yourself, do not loop, do not emit XML/JSON tool-call syntax.';
 }
 
+export function repeatedToolCallPrompt(toolNames: string[]) {
+  const names = [...new Set(toolNames)].join(', ');
+  return `You already called ${names || 'a tool'} with identical input in this turn. Do not call the same tool again with the same arguments. Use the existing tool result already in the conversation, choose a different concrete tool/input if genuinely needed, or give the final/blocked status now.`;
+}
+
 export function postContinuationPrompt() {
   return 'Your previous response still described unfinished work, missing validation, or a tool-budget issue. If tools are available, complete the remaining edit or run the final validation now. Only call something blocked for a concrete tool failure, missing dependency/permission, or unavoidable ambiguity.';
 }

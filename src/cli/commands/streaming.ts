@@ -7,9 +7,9 @@ import {buildSystemPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
-import {compact, toolCallSummary, toolResultSummary, formatElapsedTime, formatElapsedTimeWhole, formatSeconds} from './formatters.js';
+import {compact, toolCallSummary, toolResultSummary, formatElapsedTimeWhole, formatSeconds} from './formatters.js';
 import {isActionRequest, isPlanImplementationRequest, isPlanOnlyRequest, isValidationRequest} from '../../core/goal/requestClassifier.js';
-import {completionDecision, looksIncomplete, noTextAfterToolPrompt, postContinuationPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
+import {completionDecision, looksIncomplete, noTextAfterToolPrompt, postContinuationPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
@@ -19,7 +19,7 @@ import {compactToolHistory, stripSyntheticControls, toolRequestSettings, withSyn
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {workStatePrompt, type WorkState} from '../../core/agent/workState.js';
 
-export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number};
+export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
 
 function stableToolKey(toolCall: {toolName: string; input: unknown}) {
   return `${toolCall.toolName}:${JSON.stringify(toolCall.input)}`;
@@ -58,8 +58,73 @@ function hideSyntheticToolCallMarkup(text: string) {
     .replace(/(^|\n)\s*(?:```(?:xml)?\s*)?(?:xml\s*)?<tool_call>[\s\S]*$/i, '$1');
 }
 
+function isWordChar(char: string) {
+  return char.toLowerCase() !== char.toUpperCase() || (char >= '0' && char <= '9');
+}
+
+function wordCount(text: string) {
+  let count = 0;
+  let inWord = false;
+  for (const char of text) {
+    if (isWordChar(char)) {
+      if (!inWord) count += 1;
+      inWord = true;
+    } else {
+      inWord = false;
+    }
+  }
+  return count;
+}
+
+function endsWithSentenceBoundary(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || wordCount(trimmed) === 0) return false;
+  const last = trimmed.at(-1) ?? '';
+  return last === '.' || last === '!' || last === '?' || last === ':' || last === ';' || last === ')';
+}
+
 function isNonSubstantiveAssistantText(text: string) {
-  return /^[`\s]*$/.test(text);
+  return wordCount(text) === 0;
+}
+
+function isSubstantiveAssistantText(text: string) {
+  const trimmed = text.trim();
+  const words = wordCount(trimmed);
+  if (words === 0) return false;
+  if (trimmed.length >= 24) return true;
+  if (endsWithSentenceBoundary(trimmed)) return true;
+  return words >= 4;
+}
+
+function isIncompleteAssistantFragment(text: string) {
+  const trimmed = text.trim();
+  return !isSubstantiveAssistantText(trimmed) && wordCount(trimmed) <= 2 && !endsWithSentenceBoundary(trimmed);
+}
+
+function isLikelyUnfinishedMarkdownFragment(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed.includes('\n')) return false;
+  const last = trimmed.at(-1) ?? '';
+  return last === '-' || last === '*' || last === '#' || last === '`' || last === '>';
+}
+
+function isHiddenAssistantText(text: string) {
+  return text.length === 0 || isNonSubstantiveAssistantText(text);
+}
+
+function isHiddenAssistantFragment(text: string) {
+  return isHiddenAssistantText(text) || isIncompleteAssistantFragment(text) || isLikelyUnfinishedMarkdownFragment(text);
+}
+
+export function isHiddenUnstartedFinalText(text: string) {
+  return isHiddenAssistantText(text) || isLikelyUnfinishedMarkdownFragment(text);
+}
+
+const ASSISTANT_STREAM_DEBOUNCE_MS = 200;
+
+export function shouldStartAssistantStream(text: string, startedAt: number) {
+  if (isHiddenAssistantFragment(text)) return false;
+  return isSubstantiveAssistantText(text) || Date.now() - startedAt >= ASSISTANT_STREAM_DEBOUNCE_MS;
 }
 
 function assistantDisplayText(text: string) {
@@ -101,11 +166,16 @@ async function abortableDelay(milliseconds: number, signal: AbortSignal) {
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 const IDLE_TIMEOUT_MS = 5 * 60_000;
+// The step limit is the primary per-turn cost ceiling. The tool-call limits sit
+// above it so healthy autonomous runs (read -> edit -> validate per todo item)
+// complete in one turn instead of being interrupted by a blunt count ceiling.
+// True tool loops are steered by duplicate-call nudges and the tool-only-step
+// guard below, not by these count limits.
 const MAIN_STEP_LIMIT = 64;
-const MAIN_TOOL_CALL_LIMIT = 40;
+const MAIN_TOOL_CALL_LIMIT = 120;
 const MAIN_TOOL_ONLY_STEP_LIMIT = 24;
 const FOLLOW_UP_STEP_LIMIT = 64;
-const FOLLOW_UP_TOOL_CALL_LIMIT = 40;
+const FOLLOW_UP_TOOL_CALL_LIMIT = 120;
 const FOLLOW_UP_TOOL_ONLY_STEP_LIMIT = 24;
 const COMPLETION_CONTINUATION_LIMIT = 12;
 const ACTIVE_CONTEXT_TOKEN_BUDGET = 40_000;
@@ -155,6 +225,16 @@ function estimateInputBreakdown(input: {system: string; contextFiles: ContextFil
 
 function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
   if (log) void logAppend(log, entry).catch(() => undefined);
+}
+
+function responseCompletionMetrics(text: string, generationStartedAt: number) {
+  const finishedAt = Date.now();
+  const elapsedSeconds = Math.max((finishedAt - generationStartedAt) / 1000, 0.001);
+  const outputTokens = estimateValueTokens(text);
+  return {
+    finishedAt,
+    tokensPerSecond: outputTokens > 0 ? outputTokens / elapsedSeconds : undefined,
+  };
 }
 
 function subagentTokenEstimate(output: unknown) {
@@ -225,6 +305,7 @@ export async function runAgentTurn(
   let turnStopReason: TurnStopReason | undefined;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let stopActiveTimers: () => void = () => undefined;
+  let finalizeToolGroup: () => void = () => undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
@@ -235,14 +316,26 @@ export async function runAgentTurn(
 
   try {
     const runtime = await modelWithConfig(session ? {cwd: session.cwd} : undefined);
-    if (!runtime.model) {
+    if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
       return;
     }
     const activeModel = runtime.model;
     const providerSettings = providerRequestSettings(runtime.config);
+    let activeContextFiles = [...contextFiles];
+    const rememberContextFiles = (files: unknown) => {
+      if (!Array.isArray(files)) return;
+      const seen = new Set(activeContextFiles.map(file => file.path));
+      for (const file of files) {
+        if (typeof file !== 'object' || file == null) continue;
+        const candidate = file as {path?: unknown; content?: unknown};
+        if (typeof candidate.path !== 'string' || typeof candidate.content !== 'string' || seen.has(candidate.path)) continue;
+        activeContextFiles = [...activeContextFiles, {path: candidate.path, content: candidate.content}];
+        seen.add(candidate.path);
+      }
+    };
     const skillRegistry = await loadSkillRegistry();
-    const subagentTool = createSubagentTool({model: activeModel, contextFiles, session});
+    const subagentTool = createSubagentTool({model: activeModel, contextFiles: activeContextFiles, session});
     const availableTools = {...hazeTools, subagent: subagentTool, ...buildSkillTools(skillRegistry)};
     const goal = createSessionGoal(value);
     callbacks.setWorkState?.(goal.workState);
@@ -285,6 +378,7 @@ export async function runAgentTurn(
     const recentStepTextSignatures: string[] = [];
     let consecutiveTextOnlySteps = 0;
     let repetitionAbortFired = false;
+    const warnedRepeatedToolSignatures = new Set<string>();
     const toolCallSignatureCounts = new Map<string, number>();
     const TOOL_REPETITION_THRESHOLD = 3;
     let latestAccumulatedResponseMessages: ModelMessage[] = [];
@@ -309,14 +403,14 @@ export async function runAgentTurn(
       const normalized = normalizeAssistantText(text);
       return normalized.length > 0 && [...visibleAssistantTexts].some(previous => previous.startsWith(normalized) && previous !== normalized);
     };
-    const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>()};
-    let toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path))};
     const INLINE_DIFF_LINE_LIMIT = 20;
     type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
-    type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; startedAt: number; finishedAt?: number; hidden?: boolean; subItems?: Array<{name: string; summary: string; durationMs: number}>; diff?: ToolDiffLine[]; diffLineCount?: number};
-    const toolDisplayItems: Array<ToolDisplayItem> = [];
-    let toolGroupStarted = false;
-    let toolGroupFinalized = false;
+    type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; durationMs?: number; startedAt: number; finishedAt?: number; subItems?: Array<{name: string; summary: string; durationMs: number}>; diff?: ToolDiffLine[]; diffLineCount?: number};
+    type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean};
+    const createToolDisplayGroup = (): ToolDisplayGroup => ({id: `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`, items: [], started: false});
+    let activeToolGroup = createToolDisplayGroup();
+    let assistantSinceActiveToolGroup = false;
     let toolTimer: ReturnType<typeof setInterval> | undefined;
 
     function stopToolTimer() {
@@ -328,42 +422,30 @@ export async function runAgentTurn(
     function startToolTimer() {
       if (toolTimer) return;
       toolTimer = setInterval(() => {
-        if (toolDisplayItems.some(item => item.status === 'running')) updateToolGroup(true);
+        if (activeToolGroup.items.some(item => item.status === 'running')) updateToolGroup(activeToolGroup, true);
         else stopToolTimer();
       }, 1000);
     }
     stopActiveTimers = stopToolTimer;
 
-    function renderToolGroup(streaming: boolean) {
-      const visibleItems = toolDisplayItems.filter(item => !item.hidden);
-      const running = visibleItems.some(item => item.status === 'running');
-      const failures = visibleItems.filter(item => item.status === 'error');
-      const changes = visibleItems.filter(item => /^(editFile|replaceLines|writeFile)\b/.test(item.summary));
-      const compactItems = !running && visibleItems.length > 12
-        ? [...new Map([...failures, ...changes].map(item => [item.id, item])).values()]
-        : visibleItems;
-      const grouped = new Map<string, {item: ToolDisplayItem; count: number}>();
-      for (const item of compactItems) {
-        const key = `${item.status}:${item.summary}:${item.result ?? ''}`;
-        const current = grouped.get(key);
-        if (current) current.count += 1;
-        else grouped.set(key, {item, count: 1});
-      }
-      const rows = [...grouped.values()];
-      const compactSuffix = !running && visibleItems.length > 12 ? ` · showing ${compactItems.length} important` : '';
-      const elapsedMs = visibleItems.length > 0
-        ? (running ? Date.now() : Math.max(...visibleItems.map(item => item.finishedAt ?? item.startedAt))) - Math.min(...visibleItems.map(item => item.startedAt))
+    function renderToolGroup(group: ToolDisplayGroup, _streaming: boolean) {
+      const running = group.items.some(item => item.status === 'running');
+      const failures = group.items.filter(item => item.status === 'error');
+      const changes = group.items.filter(item => /^(editFile|replaceLines|writeFile)\b/.test(item.summary));
+      const elapsedMs = group.items.length > 0
+        ? (running ? Date.now() : Math.max(...group.items.map(item => item.finishedAt ?? item.startedAt))) - Math.min(...group.items.map(item => item.startedAt))
         : 0;
-      const elapsed = running || streaming ? formatElapsedTimeWhole(elapsedMs) : formatElapsedTime(elapsedMs);
-      const header = running || streaming
-        ? `Running tools · ${elapsed}`
-        : `${visibleItems.length} call${visibleItems.length === 1 ? '' : 's'} · ${changes.length} change${changes.length === 1 ? '' : 's'} · ${failures.length} failed · ${elapsed}${compactSuffix}`;
+      const elapsed = formatElapsedTimeWhole(elapsedMs);
+      const summaryParts = [`${group.items.length} calls`, `${changes.length} changes`];
+      if (failures.length > 0) summaryParts.push(`${failures.length} failed`);
+      summaryParts.push(elapsed);
+      const summary = summaryParts.join(' · ');
+      const header = summary;
       const lines: string[] = [];
-      for (const {item, count} of rows) {
+      for (const item of group.items) {
         const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
-        const countText = count > 1 ? ` ×${count}` : '';
         const result = item.status === 'running' ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
-        lines.push(`  ${icon} ${item.summary}${countText}${result}`);
+        lines.push(`  ${icon} ${item.summary}${result}`);
         if (item.diff && item.diff.length > 0 && (item.diffLineCount ?? item.diff.length) <= INLINE_DIFF_LINE_LIMIT) {
           for (const diffLine of item.diff) {
             const lineNumber = diffLine.type === 'add' ? diffLine.newLine : diffLine.oldLine;
@@ -383,43 +465,67 @@ export async function runAgentTurn(
       return [header, ...lines].join('\n');
     }
 
-    function updateToolGroup(streaming = true) {
-      const text = renderToolGroup(streaming);
-      if (!toolGroupStarted) {
-        toolGroupStarted = true;
-        callbacks.addMessage({id: toolGroupId, role: 'tool', text, streaming});
+    function updateToolGroup(group = activeToolGroup, streaming = true) {
+      const text = renderToolGroup(group, streaming);
+      if (!group.started) {
+        group.started = true;
+        callbacks.addMessage({id: group.id, role: 'tool', text, streaming});
       } else {
-        callbacks.updateMessage(toolGroupId, {text, streaming});
+        callbacks.updateMessage(group.id, {text, streaming});
       }
-      if (!streaming) toolGroupFinalized = true;
+    }
+    finalizeToolGroup = () => {
+      if (activeToolGroup.started) updateToolGroup(activeToolGroup, false);
+    };
+
+    function closeToolGroupBeforeAssistantMessage() {
+      if (!activeToolGroup.started) return undefined;
+      const relatedToolStartedAt = activeToolGroup.items.length > 0
+        ? Math.min(...activeToolGroup.items.map(item => item.startedAt))
+        : undefined;
+      updateToolGroup(activeToolGroup, false);
+      assistantSinceActiveToolGroup = true;
+      return relatedToolStartedAt;
+    }
+
+    function toolGroupForNextCall() {
+      const hasRunningTools = activeToolGroup.items.some(item => item.status === 'running');
+      if (assistantSinceActiveToolGroup && activeToolGroup.started && !hasRunningTools) {
+        activeToolGroup = createToolDisplayGroup();
+        assistantSinceActiveToolGroup = false;
+      }
+      return activeToolGroup;
+    }
+
+    function ensureToolDisplayItem(toolCall: {toolCallId: string; toolName: string; input: unknown}) {
+      let item = activeToolGroup.items.find(candidate => candidate.id === toolCall.toolCallId);
+      if (item) return item;
+      const group = toolGroupForNextCall();
+      item = {id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running', startedAt: Date.now()};
+      group.items.push(item);
+      startToolTimer();
+      updateToolGroup(group, true);
+      return item;
     }
 
     function recordToolStart(toolCall: {toolCallId: string; toolName: string; input: unknown}) {
-      if (toolGroupFinalized) {
-        toolDisplayItems.length = 0;
-        toolGroupId = `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        toolGroupFinalized = false;
-        toolGroupStarted = false;
-      }
       callbacks.onEvent?.(agentEvent({type: 'tool_start', id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}));
-      toolDisplayItems.push({id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running', startedAt: Date.now()});
-      startToolTimer();
-      updateToolGroup(true);
-      const runningSubagents = toolDisplayItems.filter(item => item.status === 'running' && item.summary.startsWith('subagent')).length;
+      ensureToolDisplayItem(toolCall);
+      const runningSubagents = activeToolGroup.items.filter(item => item.status === 'running' && item.summary.startsWith('subagent')).length;
       if (runningSubagents > 0) callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
     }
 
     function recordToolDisplayFinish(event: {toolCall: {toolCallId: string; toolName: string; input: unknown}; success: boolean; output?: unknown; error?: unknown; durationMs: number}) {
       callbacks.onEvent?.(agentEvent({type: 'tool_end', id: event.toolCall.toolCallId, name: event.toolCall.toolName, success: event.success, output: event.output, error: event.error, durationMs: event.durationMs}));
-      const item = toolDisplayItems.find(candidate => candidate.id === event.toolCall.toolCallId);
-      if (!item) return;
+      const item = ensureToolDisplayItem(event.toolCall);
+      item.startedAt = Math.min(item.startedAt, Date.now() - event.durationMs);
       item.status = toolOutputOk(event.output, event.success) ? 'success' : 'error';
       item.result = toolResultSummary(event);
       item.durationMs = event.durationMs;
       item.finishedAt = item.startedAt + event.durationMs;
-      item.hidden = isDuplicateSkippedOutput(event.output);
       if (typeof event.output === 'object' && event.output != null) {
-        const output = event.output as {diff?: unknown; diffLineCount?: unknown};
+        const output = event.output as {diff?: unknown; diffLineCount?: unknown; applicableProjectInstructions?: unknown};
+        rememberContextFiles(output.applicableProjectInstructions);
         if (typeof output.diffLineCount === 'number') item.diffLineCount = output.diffLineCount;
         if (Array.isArray(output.diff)) item.diff = output.diff as ToolDiffLine[];
       }
@@ -436,10 +542,10 @@ export async function runAgentTurn(
       if (event.toolCall.toolName === 'writeTasks' && event.success) {
         callbacks.onTasksChanged?.();
       }
-      const hasRunningTools = toolDisplayItems.some(candidate => candidate.status === 'running');
-      updateToolGroup(hasRunningTools);
+      const hasRunningTools = activeToolGroup.items.some(candidate => candidate.status === 'running');
+      updateToolGroup(activeToolGroup, !assistantSinceActiveToolGroup);
       if (!hasRunningTools) stopToolTimer();
-      const runningSubagents = toolDisplayItems.filter(i => i.status === 'running' && i.summary.startsWith('subagent')).length;
+      const runningSubagents = activeToolGroup.items.filter(i => i.status === 'running' && i.summary.startsWith('subagent')).length;
       if (runningSubagents === 0) callbacks.setBusyLabel?.('Haze is thinking');
       else callbacks.setBusyLabel?.(`Running ${runningSubagents} subagent${runningSubagents === 1 ? '' : 's'}`);
     }
@@ -479,8 +585,8 @@ export async function runAgentTurn(
     async function streamAssistantResponse(messages: ModelMessage[], reason: string, prompt: string, allowTools = false) {
       callbacks.debugLog(`requesting assistant ${allowTools ? 'continuation' : 'text'}: ${reason}`);
       const responseId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const responseStarted = true;
-      const responseStartedAt = Date.now();
+      let responseStarted = false;
+      let responseStartedAt = Date.now();
       let responseText = '';
       let continuationToolCalls = 0;
       let followUpStreamError: unknown;
@@ -489,9 +595,9 @@ export async function runAgentTurn(
         ? compactModelMessages(prunedMessages, {tokenBudget: ACTIVE_CONTEXT_TOKEN_BUDGET, workState: goal.workState}).messages
         : prunedMessages;
       const continuationMessages = withSyntheticControl(compactedMessages, `${prompt}\n\n${workStatePrompt(goal.workState)}`);
-      const followUpSystemPrompt = buildSystemPrompt(contextFiles, session);
+      const followUpSystemPrompt = buildSystemPrompt(activeContextFiles, session);
       const followUpTools = allowTools ? availableTools : undefined;
-      const followUpInputBreakdown = estimateInputBreakdown({system: followUpSystemPrompt, contextFiles, messages: continuationMessages, tools: followUpTools});
+      const followUpInputBreakdown = estimateInputBreakdown({system: followUpSystemPrompt, contextFiles: activeContextFiles, messages: continuationMessages, tools: followUpTools});
       logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: `continuation:${reason}`, system: followUpSystemPrompt, messages: continuationMessages, tools: followUpTools ? Object.keys(followUpTools) : [], context: followUpInputBreakdown.breakdown});
       const followUp = streamText({
         model: activeModel,
@@ -504,12 +610,21 @@ export async function runAgentTurn(
         abortSignal: abortController.signal,
         experimental_context: toolExecutionContext,
         prepareStep({steps, messages}) {
-          continuationToolCalls = steps.flatMap(step => step.toolCalls).length;
+          const toolCalls = steps.flatMap(step => step.toolCalls);
+          continuationToolCalls = toolCalls.length;
+          const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
           if (continuationToolCalls >= FOLLOW_UP_TOOL_CALL_LIMIT || toolOnlyStepCount(steps) >= FOLLOW_UP_TOOL_ONLY_STEP_LIMIT) {
             return {
               toolChoice: 'none',
               messages: withSyntheticControl(messages, toolLoopBudgetPrompt()),
             };
+          }
+          if (repeatedToolNames.length > 0) {
+            const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as keyof typeof hazeTools));
+            callbacks.debugLog(`disabling repeated tools for follow-up step: ${repeatedToolNames.join(', ')}`);
+            return activeTools.length > 0
+              ? {activeTools, messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))}
+              : {toolChoice: 'none', messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))};
           }
           if (likelyPlanOnlyRequest && mutatingToolSucceeded) {
             return {
@@ -556,13 +671,11 @@ export async function runAgentTurn(
           const sig = stableToolKey(toolCall);
           const count = (toolCallSignatureCounts.get(sig) ?? 0) + 1;
           toolCallSignatureCounts.set(sig, count);
-          if (count >= TOOL_REPETITION_THRESHOLD && !repetitionAbortFired) {
-            repetitionAbortFired = true;
-            turnStopReason = {kind: 'tool_repetition', message: `Stopped: called ${toolCall.toolName} ${count} times with identical input (tool loop). Type "continue" to try again — the next turn starts fresh.`};
+          if (count >= TOOL_REPETITION_THRESHOLD && !warnedRepeatedToolSignatures.has(sig)) {
+            warnedRepeatedToolSignatures.add(sig);
             const preview = sig.length > 100 ? `${sig.slice(0, 100)}…` : sig;
-            logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: `continuation:${reason}`, text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Aborting to avoid tool-only loop.`});
-            callbacks.debugLog(`tool repetition guard abort (continuation): ${toolCall.toolName} count=${count}`);
-            abortController.abort(`Haze tool repetition guard: ${toolCall.toolName} called ${count} times with identical input.`);
+            logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: `continuation:${reason}`, text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Steering the model away from this repeated call.`});
+            callbacks.debugLog(`tool repetition guard steering (continuation): ${toolCall.toolName} count=${count}`);
           }
         },
         experimental_onToolCallFinish(event) {
@@ -580,16 +693,22 @@ export async function runAgentTurn(
             : `follow-up tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
         },
       });
-      callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
-      callbacks.addMessage({id: responseId, role: 'assistant', text: 'Awaiting response…', streaming: true, startedAt: responseStartedAt});
       for await (const rawDelta of followUp.textStream) {
         resetIdleTimer();
         const delta = sanitizeAssistantText(rawDelta);
         responseText += delta;
         const displayText = assistantDisplayText(responseText);
-        if (!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) continue;
-        callbacks.onEvent?.(agentEvent({type: 'message_update', id: responseId, text: displayText}));
-        callbacks.updateMessage(responseId, {text: displayText});
+        if ((!shouldStartAssistantStream(displayText, responseStartedAt) || isPrefixOfVisibleAssistantText(displayText)) && !responseStarted) continue;
+        if (!responseStarted) {
+          responseStarted = true;
+          responseStartedAt = Date.now();
+          callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
+          const displayedStartedAt = closeToolGroupBeforeAssistantMessage() ?? responseStartedAt;
+          callbacks.addMessage({id: responseId, role: 'assistant', text: displayText, streaming: true, startedAt: displayedStartedAt});
+        } else {
+          callbacks.onEvent?.(agentEvent({type: 'message_update', id: responseId, text: displayText}));
+          callbacks.updateMessage(responseId, {text: displayText});
+        }
       }
       try {
         await followUp.response;
@@ -598,19 +717,24 @@ export async function runAgentTurn(
       }
       const finalText = assistantDisplayText(responseText);
       const visibleFinalText = finalText;
-      const hidden = visibleFinalText.length === 0 || isNonSubstantiveAssistantText(visibleFinalText) || isDuplicateVisibleAssistantText(visibleFinalText);
+      const hidden = (responseStarted ? isHiddenAssistantFragment(visibleFinalText) : isHiddenUnstartedFinalText(visibleFinalText)) || isDuplicateVisibleAssistantText(visibleFinalText);
       if (responseStarted) {
         if (!hidden) rememberVisibleAssistantText(visibleFinalText);
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: responseId, text: visibleFinalText, hidden}));
-        callbacks.updateMessage(responseId, {text: visibleFinalText, streaming: false, hidden, finishedAt: Date.now()});
+        callbacks.updateMessage(responseId, {text: visibleFinalText, streaming: false, hidden, ...responseCompletionMetrics(visibleFinalText, responseStartedAt)});
+      } else if (!hidden) {
+        rememberVisibleAssistantText(visibleFinalText);
+        callbacks.onEvent?.(agentEvent({type: 'message_start', id: responseId, role: 'assistant'}));
+        callbacks.onEvent?.(agentEvent({type: 'message_end', id: responseId, text: visibleFinalText, hidden: false}));
+        callbacks.addMessage({id: responseId, role: 'assistant', text: visibleFinalText, streaming: false, startedAt: responseStartedAt, ...responseCompletionMetrics(visibleFinalText, responseStartedAt)});
       }
       return {text: finalText, id: responseId, started: responseStarted};
     }
 
     let streamError: unknown;
     let lastFinishReason: string | undefined;
-    const mainSystemPrompt = buildSystemPrompt(contextFiles, session);
-    const mainInputBreakdown = estimateInputBreakdown({system: mainSystemPrompt, contextFiles, messages: requestMessages, tools: availableTools});
+    const mainSystemPrompt = buildSystemPrompt(activeContextFiles, session);
+    const mainInputBreakdown = estimateInputBreakdown({system: mainSystemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: availableTools});
     logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: mainSystemPrompt, messages: requestMessages, tools: Object.keys(availableTools), context: mainInputBreakdown.breakdown});
     const result = streamText({
       model: activeModel,
@@ -645,9 +769,9 @@ export async function runAgentTurn(
         if (repeatedToolCall) {
           const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as keyof typeof hazeTools));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
-          return {
-            activeTools,
-          };
+          return activeTools.length > 0
+            ? {activeTools, messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))}
+            : {toolChoice: 'none', messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))};
         }
         if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || consecutiveToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
@@ -662,6 +786,7 @@ export async function runAgentTurn(
         return undefined;
       },
       onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
+        for (const toolCall of toolCalls) ensureToolDisplayItem(toolCall);
         if (Array.isArray(response?.messages) && response.messages.length > 0) {
           latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         }
@@ -746,18 +871,16 @@ export async function runAgentTurn(
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_call', stream: 'main', toolCall: {id: toolCall.toolCallId, name: toolCall.toolName, input: toolCall.input}});
         callbacks.debugLog(`tool start: ${toolCall.toolName} ${compact(toolCall.input)}`);
         // Tool-repetition guard: if the same (toolName, input) has been called
-        // TOOL_REPETITION_THRESHOLD times this turn, the model is stuck in a
-        // tool-only loop. Abort the turn rather than letting it burn more calls.
+        // TOOL_REPETITION_THRESHOLD times this turn, log once. prepareStep then
+        // disables that repeated tool and injects a model-facing correction.
         const sig = stableToolKey(toolCall);
         const count = (toolCallSignatureCounts.get(sig) ?? 0) + 1;
         toolCallSignatureCounts.set(sig, count);
-        if (count >= TOOL_REPETITION_THRESHOLD && !repetitionAbortFired) {
-          repetitionAbortFired = true;
-          turnStopReason = {kind: 'tool_repetition', message: `Stopped: called ${toolCall.toolName} ${count} times with identical input (tool loop). Type "continue" to try again — the next turn starts fresh.`};
+        if (count >= TOOL_REPETITION_THRESHOLD && !warnedRepeatedToolSignatures.has(sig)) {
+          warnedRepeatedToolSignatures.add(sig);
           const preview = sig.length > 100 ? `${sig.slice(0, 100)}…` : sig;
-          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Aborting to avoid tool-only loop.`});
-          callbacks.debugLog(`tool repetition guard abort: ${toolCall.toolName} count=${count} sig=${preview}`);
-          abortController.abort(`Haze tool repetition guard: ${toolCall.toolName} called ${count} times with identical input.`);
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', text: `tool repetition guard: "${preview}" called ${count} times with identical input this turn. Steering the model away from this repeated call.`});
+          callbacks.debugLog(`tool repetition guard steering: ${toolCall.toolName} count=${count} sig=${preview}`);
         }
       },
       experimental_onToolCallFinish(event) {
@@ -775,19 +898,16 @@ export async function runAgentTurn(
           : `tool error: ${event.toolCall.toolName} after ${event.durationMs}ms ${compact(event.error)}`);
       }
     });
-    callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
-    callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Awaiting response…', streaming: true, startedAt: currentAssistantStartedAt});
-    assistantStarted = true;
-    currentAssistantStarted = true;
     for await (const rawDelta of result.textStream) {
       resetIdleTimer();
       const delta = sanitizeAssistantText(rawDelta);
       if (sawToolCall) textAfterTool = true;
       if (currentAssistantStarted && currentAssistantText.length > 0 && toolEpoch > currentAssistantToolEpoch) {
         const intermediateText = assistantDisplayText(currentAssistantText);
-        const hidden = true;
+        const hidden = isHiddenAssistantFragment(intermediateText) || isDuplicateVisibleAssistantText(intermediateText);
+        if (!hidden) rememberVisibleAssistantText(intermediateText);
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: intermediateText, hidden}));
-        callbacks.updateMessage(currentAssistantId, {text: intermediateText, streaming: false, hidden, finishedAt: Date.now()});
+        callbacks.updateMessage(currentAssistantId, {text: intermediateText, streaming: false, hidden, ...responseCompletionMetrics(intermediateText, currentAssistantStartedAt)});
         currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         currentAssistantStarted = false;
         currentAssistantStartedAt = Date.now();
@@ -798,13 +918,14 @@ export async function runAgentTurn(
       assistantText += delta;
       currentAssistantText += delta;
       const displayText = assistantDisplayText(currentAssistantText);
-      if ((!displayText || isNonSubstantiveAssistantText(displayText) || isPrefixOfVisibleAssistantText(displayText)) && !currentAssistantStarted) continue;
+      if ((!shouldStartAssistantStream(displayText, currentAssistantStartedAt) || isPrefixOfVisibleAssistantText(displayText)) && !currentAssistantStarted) continue;
       if (!currentAssistantStarted) {
         assistantStarted = true;
         currentAssistantStarted = true;
         callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
         currentAssistantStartedAt = Date.now();
-        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: displayText, streaming: true, startedAt: currentAssistantStartedAt});
+        const displayedStartedAt = closeToolGroupBeforeAssistantMessage() ?? currentAssistantStartedAt;
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: displayText, streaming: true, startedAt: displayedStartedAt});
       } else {
         callbacks.onEvent?.(agentEvent({type: 'message_update', id: currentAssistantId, text: displayText}));
         callbacks.updateMessage(currentAssistantId, {text: displayText});
@@ -890,13 +1011,23 @@ export async function runAgentTurn(
       }
     }
 
+    if (!assistantStarted) {
+      const hidden = isHiddenUnstartedFinalText(combinedAssistantText) || isDuplicateVisibleAssistantText(combinedAssistantText);
+      if (!hidden) {
+        assistantStarted = true;
+        currentAssistantStarted = true;
+        currentAssistantText = combinedAssistantText;
+        callbacks.onEvent?.(agentEvent({type: 'message_start', id: currentAssistantId, role: 'assistant'}));
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: combinedAssistantText, streaming: true, startedAt: currentAssistantStartedAt});
+      }
+    }
+
     if (assistantStarted) {
-      const hidePreToolFragment = sawToolCall && !textAfterTool;
       const visibleFinalAssistantText = assistantDisplayText(currentAssistantText);
-      const hidden = visibleFinalAssistantText.length === 0 || isNonSubstantiveAssistantText(visibleFinalAssistantText) || isDuplicateVisibleAssistantText(visibleFinalAssistantText) || hidePreToolFragment;
+      const hidden = isHiddenAssistantFragment(visibleFinalAssistantText) || isDuplicateVisibleAssistantText(visibleFinalAssistantText);
       if (!hidden) rememberVisibleAssistantText(visibleFinalAssistantText);
       callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: visibleFinalAssistantText, hidden}));
-      callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden, finishedAt: Date.now()});
+      callbacks.updateMessage(currentAssistantId, {text: visibleFinalAssistantText, streaming: false, hidden, ...responseCompletionMetrics(visibleFinalAssistantText, currentAssistantStartedAt)});
       if (decision.needsActionContinuation || decision.needsValidationContinuation) {
         await runCompletionLoop(completedConversation, combinedAssistantText);
       } else if (sawToolCall && !textAfterTool) {
@@ -915,10 +1046,11 @@ export async function runAgentTurn(
         const fallback = toolSummaries.length > 0
           ? `Finished tool work but the model did not produce a final response. Last tool result: ${toolSummaries.at(-1)}.`
           : 'Finished without a text response.';
-        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false, startedAt: currentAssistantStartedAt, finishedAt: Date.now()});
+        callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false, startedAt: currentAssistantStartedAt, ...responseCompletionMetrics(fallback, currentAssistantStartedAt)});
       }
     } else {
-      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: 'Finished without a text response.', streaming: false, startedAt: currentAssistantStartedAt, finishedAt: Date.now()});
+      const fallback = 'Finished without a text response.';
+      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false, startedAt: currentAssistantStartedAt, ...responseCompletionMetrics(fallback, currentAssistantStartedAt)});
     }
     goal.phase = 'done';
     goal.status = 'complete';
@@ -959,6 +1091,7 @@ export async function runAgentTurn(
     }
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
+    finalizeToolGroup();
     stopActiveTimers();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status: turnStatus}));
     callbacks.setAbortController?.(null);

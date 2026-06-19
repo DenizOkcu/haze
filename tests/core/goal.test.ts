@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {classifyRequestIntent, isActionRequest, isPlanOnlyRequest, isValidationRequest} from '../../src/core/goal/requestClassifier.js';
-import {completionDecision, looksBlocked, looksIncomplete, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
+import {completionDecision, looksBlocked, looksIncomplete, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
 
 describe('requestClassifier', () => {
@@ -143,5 +143,12 @@ describe('completionDecision', () => {
     const prompt = toolLoopBudgetPrompt();
     expect(prompt).toMatch(/do not repeat yourself/i);
     expect(prompt).toMatch(/Let me|Now I/i);
+  });
+
+  it('steers repeated tool calls back to the model', () => {
+    const prompt = repeatedToolCallPrompt(['readFile', 'readFile']);
+    expect(prompt).toMatch(/already called readFile/i);
+    expect(prompt).toMatch(/Do not call the same tool again/i);
+    expect(prompt).toMatch(/existing tool result/i);
   });
 });
