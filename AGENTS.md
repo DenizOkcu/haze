@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Project-specific instructions for Haze (and other coding agents) working in this repository.
+Project-specific instructions for Haze coding agents.
 
-Last comprehensive analysis: 2026-06-13.
+Last analysis: 2026-06-19.
 
 ## Project overview
 
@@ -12,11 +12,11 @@ Core product shape:
 
 - Interactive terminal chat UI built with React + Ink.
 - LLM integration through the Vercel AI SDK and OpenAI-compatible providers (`@ai-sdk/openai`).
-- Transparent local tools for file discovery, reading, regex search, targeted edits, file creation, and bash execution.
+- Transparent local tools for file discovery, reading, regex search, targeted edits, file creation, public URL fetching, and bash execution.
 - Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, Markdown skills, and task tracking.
 - Minimal distribution model: source in `src/`, generated declarations/JS in `dist/`, thin published binary in `bin/haze.js`.
 
-Current package version is `0.4.0`; always verify against `package.json` before release work.
+Current package version is `0.5.0`; always verify against `package.json` before release work.
 
 ## Common commands
 
@@ -69,17 +69,20 @@ Notes:
   - `config/` — runtime config and user data paths.
     - `paths.ts` defines `~/.haze` and global skills directory.
     - `settings.ts` reads/writes `~/.haze/settings.json` and preserves legacy OpenRouter settings.
-    - `providers.ts` resolves active provider/model, provider defaults, model selectors, saved keys.
-    - `contextFiles.ts` loads `~/.haze/AGENTS.md`, `~/.haze/CLAUDE.md`, then ancestor `AGENTS.md`/`CLAUDE.md` files from filesystem root to cwd; each file is capped at 20k chars and has size/hash diagnostics.
+    - `providers.ts` resolves active provider/model from configured providers only, model selectors, and saved keys. There is no default provider or model; users must add one via `/provider`.
+    - `contextFiles.ts` loads global `~/.claude/CLAUDE.md`, `~/.haze/AGENTS.md`, then ancestor `CLAUDE.md`/`AGENTS.md` files from filesystem root to cwd; each file is capped at 20k chars and has size/hash diagnostics. Nested files below cwd are loaded lazily when file tools operate inside their subtree.
     - `inputHistory.ts` persists input history under `~/.haze/history`.
   - `llm/` — model client, prompts, and tool definitions.
-    - `client.ts` builds an OpenAI-compatible chat model from env vars or settings.
+    - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
-    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `writeTasks`.
+    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
+    - `webFetch.ts` implements the bounded HTTP fetch + content extraction (HTML→Markdown via `defuddle`, pretty JSON, passthrough text) behind the `fetch` tool.
   - `core/agent/` — context accounting, request assembly, bounded tool-output storage, structured work state, model-message compaction, agent events, and retry/context-overflow helpers.
+  - `core/bashOutput/` — command-aware bash-output reduction: validation rendering, git/search/diff/JSON/log reducers, line filters, ANSI handling, and reduction metadata.
   - `core/goal/` — request intent classification, session-goal phase tracking, and completion/continuation decisions.
   - `core/safety/bashClassifier.ts` — bash risk/trait classifier; classification is metadata, not a confirmation gate.
+  - `core/safety/urlGuard.ts` — SSRF guard for the `fetch` tool: scheme allowlist + private/loopback/link-local/cloud-metadata blocking, re-validated on each redirect hop and after DNS resolution. Pure safety logic, parallel to `bashClassifier.ts`.
   - `core/validation/outputParser.ts` — parses common test/typecheck/lint/build output into compact validation summaries.
   - `core/session/sessionStore.ts` — durable JSONL session files under `~/.haze/sessions`, per-workspace hashed directory, snapshot restore.
   - `core/tasks/taskStorage.ts` — workspace-local task list persisted to `.haze/tasks.json`.
@@ -90,7 +93,7 @@ Notes:
     - `skillTools.ts` exposes one `skill` catalog tool; it returns instructions first and one referenced file only on demand.
     - `builder/SkillBuilder.ts` creates skills from natural-language descriptions, using a model when configured and a deterministic fallback otherwise.
     - `types.ts` defines loaded skill and registry types.
-  - `ui/` — reusable Ink components (`Header`, `TextInput`, `MarkdownText`, `ErrorView`) and `theme.ts`.
+  - `ui/` — reusable Ink components (`Header`, `TextInput`, `MarkdownText`, `ErrorView`) and `theme.ts`; `MarkdownText` renders headings, lists, blockquotes, syntax-highlighted code fences, inline emphasis/links/code, rules, and width-aware tables.
   - `utils/` — workspace-safe path helpers, directory walking, filesystem and YAML utilities.
 - `tests/` — Vitest suite covering CLI commands/formatters, config, core agent/goal/safety/session/validation logic, haze tools, skills, and utils.
 - `examples/skills/` — packaged reference skill example(s), including `SKILL.md` plus optional referenced files.
@@ -105,13 +108,12 @@ Notes:
 
 ### Providers and model selection
 
-- Default provider constants currently live in `src/config/providers.ts` (`openrouter`, OpenRouter base URL, default model).
-- Runtime model config is resolved in this order:
-  - `OPENAI_BASE_URL` overrides provider URL.
-  - `OPENAI_API_KEY` overrides saved provider key / legacy key.
-  - `HAZE_MODEL` overrides saved/default model.
-  - Otherwise use `~/.haze/settings.json` provider/model settings.
+- There is **no default provider or default model**. Users must configure a provider via `/provider` (or legacy `apiKey`/`baseURL`, which are migrated into an `openrouter` provider only when actually supplied).
+- Runtime model config is resolved from `~/.haze/settings.json` provider/model settings and the saved provider key; if no provider/model is configured, `activeModel` returns `undefined` and the agent turn aborts with guidance to run `/provider`.
+- Provider key resolution: saved provider key → legacy `settings.apiKey` → `'not-needed'` placeholder (local OpenAI-compatible providers).
+- There are **no user-facing environment variables** for provider/model configuration; everything is configured via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands. (Test code only reads `HAZE_DIR` to redirect `~/.haze` during tests.)
 - Local OpenAI-compatible providers may intentionally use a placeholder API key (`not-needed`).
+- File LLM logging (detailed JSONL under `~/.haze/logs/`) is **off by default** and enabled solely by the `--debug` CLI flag. When not in debug mode, `startNewLog()` in `chat.tsx` never creates a log and `llmLogRef.current` stays `undefined`, so every `logEntry()` in `streaming.ts` is a no-op. `/logs` still reads historical files.
 
 ### Agent tools
 
@@ -123,8 +125,9 @@ Built-in tools in `src/llm/hazeTools.ts` are intentionally small and structured:
 - `editFile` — unique text replacements; tolerates readFile line-number prefixes and trailing-whitespace-only differences only when still unique; multiple replacements for one file should be in one call.
 - `replaceLines` — 1-based inclusive line range replacement; useful when exact text is ambiguous or stale.
 - `writeFile` — creates files and parents; refuses to overwrite existing files unless `overwriteExisting=true`.
-- `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, compact validation summaries, and retrievable handles for oversized output.
+- `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, command-aware output reduction, compact validation summaries, and retrievable handles for oversized/reduced raw output.
 - `readToolOutput` — retrieves an omitted output page by process-scoped handle; handles are cleared for new sessions.
+- `fetch` — reads a public `http(s)` URL and returns readable content (Markdown via readability extraction for HTML, pretty JSON for JSON, passthrough for text). SSRF is blocked by construction: scheme allowlist + private/loopback/link-local address blocking, re-validated on each redirect hop and after DNS resolution. Output is capped at 50k chars with a `readToolOutput` handle for oversize content; read-only and deduplicated like `bash`.
 - `writeTasks` — full-replacement task list for tracking multi-step work. Model passes the complete list every call; IDs and timestamps are generated server-side. Persists to `.haze/tasks.json` in the workspace.
 
 Tool constraints:
@@ -132,8 +135,9 @@ Tool constraints:
 - File tools are restricted to `process.cwd()` via `resolveWorkspacePath`.
 - File tools respect `.gitignore` by default; use `allowIgnored`/`includeIgnored` only when explicitly needed.
 - `node_modules` and `.git` are skipped by directory walking.
-- Direct file output is capped at 50k chars; command output is compacted near 12k chars and remains retrievable by handle.
+- Direct file output is capped at 50k chars; command output is reduced by validation/git/search/diff/JSON/log/line-filter reducers, compacted near 12k chars, and remains retrievable by handle when raw output is stored.
 - Repeated read-only calls are deduplicated when no mutation occurred; after failed mutations, the model is forced toward a fresh read before retrying.
+- `fetch` is the network equivalent of the workspace path confinement: it is confined by URL-scheme + SSRF guards (`src/core/safety/urlGuard.ts`) rather than `resolveWorkspacePath`.
 
 ### Task tracking
 
@@ -141,6 +145,7 @@ Tool constraints:
 - The `writeTasks` tool uses full-replacement semantics: every call sends the complete list, replacing whatever existed before.
 - Server-side ID generation prevents ID collisions and hallucinated IDs.
 - Tasks are managed by the LLM via the `writeTasks` tool; there is no user-facing slash command.
+- When a new user question starts a turn and every existing task is already completed, the task bar is cleared automatically (and `.haze/tasks.json` reset) so completed todos do not linger; the model can create fresh todos for the new question, or none for simple cases.
 - `/clear` also clears tasks.
 - Types and storage live in `src/core/tasks/taskStorage.ts`; the tool is in `src/llm/hazeTools.ts`.
 
@@ -152,23 +157,21 @@ Tool constraints:
 - `/compact [instructions]` uses token-aware compaction and embeds exact structured work state with the recent message window.
 - Runtime control nudges use `<haze_control>` messages for one request only and must not be persisted as user conversation.
 - Older successful tool results may be reduced to protocol-safe summaries; recent results and failures remain verbatim.
-- Context files are loaded at startup and on refresh; root `AGENTS.md` is injected into the system prompt, so keep this file accurate and concise enough to fit context.
+- Context files load at startup/refresh; keep root `AGENTS.md` concise. Global Claude guidance comes from `~/.claude/CLAUDE.md`, but `~/.haze/AGENTS.md` wins on conflict. Nested `CLAUDE.md`/`AGENTS.md` below cwd are scoped: file tools surface them only inside their subtree, and mutating tools stop once so the model can review newly discovered scoped instructions. `/init` should preserve useful guidance, avoid broad discovery, and keep `AGENTS.md` below the context budget.
+- File LLM logging (`~/.haze/logs/`) is off by default; see the logging contract above (`--debug`). Structured-event session logging under `~/.haze/sessions/` is a separate mechanism and is unaffected.
 
 ### Skills
 
-- Skills are Markdown directories in `~/.haze/skills/<name>/SKILL.md` with required YAML frontmatter:
-  - `name` — letters, numbers, hyphens, underscores only.
-  - `description` — non-empty, ideally starts with “Use when ...”.
-- Skill bodies are instructions only; they do not execute code by themselves.
+- Skills are Markdown dirs in `~/.haze/skills/<name>/SKILL.md` with required YAML frontmatter: `name` (letters/numbers/hyphens/underscores) and non-empty `description`.
+- Skill bodies are instructions only; they do not execute code.
 - Relative references in a skill body are loaded if they are Markdown links or plain file-looking paths; references must remain inside the skill directory and be <=50k bytes.
 - Slash commands include `/create-skill`, `/skills`, `/skill-info`, `/validate-skill`, `/remove-skill <name> --yes`.
 - The model-facing `skill` tool takes an exact skill name. It returns the body and reference paths first; a later call can load one reference.
 
 ### Subagents
 
-- `streaming.ts` adds a `subagent` tool alongside built-in tools and skills.
-- Use subagents only when work splits into genuinely independent parallel investigations or actions.
-- Do not use subagents for simple sequential tasks where the main agent already has sufficient context.
+- `streaming.ts` adds a `subagent` tool alongside built-ins and skills.
+- Use subagents only for genuinely independent parallel investigations/actions, not simple sequential tasks.
 
 ## Coding conventions
 

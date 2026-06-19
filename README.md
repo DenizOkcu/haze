@@ -2,18 +2,22 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.4.0
+## What's new in 0.5.0
 
-Haze 0.4.0 reworks skill creation and simplifies the command surface.
+Haze 0.5.0 adds web fetching, scoped project instructions, debug-only detailed logs, and quieter long-running transcripts.
 
-- **3-step skill wizard.** `/create-skill` is now an interactive wizard: name the skill, optionally give it a role, then describe what it does. The model writes the Markdown body. Your typed name and role are used verbatim — no LLM rename.
-- **Language-agnostic intent extraction.** Skill descriptions are interpreted by the model in any language. `"crée une compétence qui vérifie le style du code"` produces a skill that vérifies code style, not a skill about creating one.
-- **Tasks are model-managed.** The `/tasks` slash command is gone. The model tracks multi-step work via the `writeTasks` tool — you talk, it plans. `/clear` still wipes tasks as part of clearing the conversation.
-- **Leaner command surface.** Removed `/list-skills` (folded into `/skills`), the `/skill X` legacy subcommand forms, and the `/tasks rm` alias. Each operation now has exactly one way to be invoked.
-- **Docs site additions.** New §02 segment frames skill creation as the native superpower with copy-pasteable recipe cards; new §07 commands index lists all 16 commands grouped by category. §04 "Serviceable procedures" was removed and sections renumbered sequentially.
+- **Fetch public URLs.** The new `fetch` tool reads public HTTP(S) pages as Markdown, JSON, or text, with SSRF protections, redirects re-checked, bounded downloads, and oversize output retrievable via `readToolOutput`.
+- **No provider env vars.** `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read. Configure providers, models, keys, and base URLs through `/provider`, `/model`, `/settings`, and `~/.haze/settings.json`.
+- **Debug-only LLM logs.** Detailed JSONL LLM logging is now off by default and only starts with `haze --debug`. `/logs` can still review historical logs.
+- **Quieter tool output.** Bash, git, search, JSON, diff, and log output are reduced before they enter model context, with raw output available through `readToolOutput` when needed.
+- **Cleaner terminal rendering.** Assistant Markdown now renders headings, lists, code fences with syntax highlighting, blockquotes, links, emphasis, and wrapped tables in the CLI.
+- **Cleaner transcripts.** Consecutive assistant messages in one turn share one visible `haze` header, live tool groups use compact elapsed-time summaries, and repeated identical tool calls are steered back to the model instead of aborting immediately.
+- **Scoped instructions.** Haze reads global `~/.claude/CLAUDE.md` plus Haze/project `AGENTS.md` files, and discovers nested `CLAUDE.md`/`AGENTS.md` files only when tools enter their subtree.
+- **Less stale state.** Completed task lists clear automatically on the next user turn, and `/init` now guides `AGENTS.md` toward the context-file budget.
 
 Previous releases:
 
+- **0.4.0** — 3-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, leaner command surface, docs site additions.
 - **0.3.0** — Docs site redesign, task bar moves above the activity spinner, tasks auto-clear between sessions.
 - **0.2.0** — Reliability release: stronger continuation after failed edits and validation, structured bash classification, parsed validation summaries, multi-line chat input with vertical cursor movement.
 - **0.1.0** — Bundled ripgrep, subagent delegation, inline diff display.
@@ -64,16 +68,7 @@ On first run, create or choose a provider, then choose your first model:
 /model local:llama3.1
 ```
 
-Or use environment variables for any OpenAI-compatible endpoint:
-
-```bash
-# e.g. OpenRouter, OpenAI, LM Studio, Ollama, or an OpenAI-compatible proxy
-export OPENAI_API_KEY=... # provider API key, if needed; local providers may not need one
-export OPENAI_BASE_URL=https://openrouter.ai/api/v1 # or http://localhost:1234/v1, http://localhost:11434/v1, ...
-export HAZE_MODEL=anthropic/claude-sonnet-4.6 # or gpt-4.1, llama3.1, qwen2.5-coder, ...
-```
-
-Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key.
+Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
 Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill` (a 3-step wizard: name, role, description). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
@@ -85,7 +80,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-Haze will inspect, search, write files, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Bash validation output is summarized when possible so failures point at the relevant files, tests, or diagnostics. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
+Haze will inspect, search, write files, fetch public URLs, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Bash output is reduced by command-aware filters for validation, git, search, JSON, diffs, and noisy logs; failures point at the relevant files, tests, or diagnostics, and raw output remains available by handle when it was omitted. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
 
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
@@ -170,6 +165,7 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /model <name-or-provider:name>
 /model list
 /settings
+/logs [id]
 /init
 /session
 /resume
@@ -178,21 +174,24 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /clear
 /exit
 
+/skills
 /create-skill
 /skill-info <name>
 /validate-skill <name-or-dir>
 /remove-skill <name> --yes
 ```
 
-Legacy `/skill ...` and `/skills ...` commands still work as aliases.
+Older `/skill <subcommand>` and `/skills <subcommand>` routing forms were removed; use the direct skill commands above.
 
 CLI flags:
 
 ```bash
-haze --debug       # show model/tool debug logs
+haze --debug       # show model/tool debug logs and write detailed JSONL logs to ~/.haze/logs
 haze --continue    # resume the latest saved session for this workspace
 haze --no-session  # run without durable session storage
 ```
+
+By default, Haze does **not** write the detailed LLM log files under `~/.haze/logs/` (they capture full prompts, messages, and tool I/O). File logging is only enabled with `haze --debug`, which also turns on the on-screen debug panel. Use the `/logs` command to review past log files once logging has been enabled.
 
 ## Agent tools
 
@@ -200,16 +199,17 @@ Haze exposes a deliberately small toolset:
 
 - `listFiles` — structured discovery, recursive with cursor pagination when needed.
 - `readFile` — read numbered UTF-8 lines in bounded pages, with `nextOffset` when more remain.
-- `grep` — structured ripgrep search with a true global result cap.
+- `grep` — structured ripgrep search with a true global result cap and compacted long lines/results.
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
-- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with compact validation output.
-- `readToolOutput` — page through full output omitted from an oversized tool result.
-- `writeTasks` — replace the task list at meaningful phase changes.
+- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with command-aware output reduction and compact validation output.
+- `readToolOutput` — page through full/raw output omitted from an oversized or reduced tool result.
+- `fetch` — read a public `http(s)` URL and return readable content (Markdown for docs, pretty JSON, or text). Private/loopback/metadata hosts and non-`http(s)` schemes are blocked; output is bounded and retrievable via `readToolOutput`.
+- `writeTasks` — replace the task list at meaningful phase changes; completed lists auto-clear on the next user turn.
 - `skill` — load one installed Markdown workflow or one of its references.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints. Large bash output is kept behind an in-memory handle so later model calls carry only a bounded head/tail or validation summary.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints. Large bash/search/fetch output is kept behind an in-memory handle so later model calls carry only reduced validation, git, search, diff, JSON, log, or head/tail summaries.
 
 ## Subagents
 
@@ -225,12 +225,13 @@ Long turns use bounded tool slices. Older successful tool results are compacted 
 
 Haze loads project instructions from:
 
+- `~/.claude/CLAUDE.md`
 - `~/.haze/AGENTS.md`
-- `~/.haze/CLAUDE.md`
-- `AGENTS.md` files from filesystem root to the current workspace
-- `CLAUDE.md` files from filesystem root to the current workspace
+- `CLAUDE.md` / `AGENTS.md` files from filesystem root to the current workspace
 
-Use `AGENTS.md` for project conventions, commands, architecture notes, and things future-you does not want to re-explain.
+At the same scope, `AGENTS.md` overrides `CLAUDE.md`; global Haze guidance in `~/.haze/AGENTS.md` overrides global Claude guidance in `~/.claude/CLAUDE.md`. Nested `CLAUDE.md` / `AGENTS.md` files below the workspace are scoped: Haze surfaces them only when file tools operate inside that directory or its subdirectories, and mutating tools stop once so the model can review newly discovered scoped instructions before editing.
+
+Use `AGENTS.md` for project conventions, commands, architecture notes, and things future-you does not want to re-explain. `/init` is intentionally budget-aware: it does one small discovery pass, preserves useful existing guidance, and asks for a compact file because context files are injected into every request.
 
 ## Safety model
 
@@ -238,6 +239,7 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and thing
 - File tools follow `.gitignore` by default.
 - Ignored files require an explicit override.
 - Bash commands are classified and shown with working-directory metadata, but Haze does not use command confirmation gates.
+- The `fetch` tool reads public `http(s)` URLs only; private, loopback, link-local, and cloud-metadata hosts and non-`http(s)` schemes are blocked, re-checked on every redirect and after DNS resolution.
 - Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.
 - Haze is powerful enough to help and dumb enough to deserve supervision. Ideal software, basically.
 

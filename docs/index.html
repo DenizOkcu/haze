@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>haze — a terminal agent for AI experts</title>
-  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent local tools, direct command execution, parsed validation feedback. Bring your own model.">
+  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent tools, direct command execution, public URL fetch, parsed validation feedback. Bring your own model.">
   <meta property="og:title" content="haze">
-  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, verify. No web UI, no permission gates, no surprise API calls.">
+  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, fetch, verify. No web UI, no permission gates, no telemetry.">
   <meta property="og:type" content="website">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#181823">
@@ -1310,12 +1310,12 @@
       <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
       <div class="head-meta" aria-hidden="true">
         <span>HAZE-CLI-001</span>
-        <span>REV 0.4.0</span>
+        <span>REV 0.5.0</span>
         <span>MIT</span>
       </div>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.4.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.5.0</a>
       </nav>
     </div>
   </header>
@@ -1327,13 +1327,13 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.4.0</div>
+            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.5.0</div>
             <h1 class="hero-h1">
               A CLI agent for Experts
               <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
             </h1>
             <p class="hero-sub">
-              Agentic workflows for people who know what they're doing. Minimal system prompt, minimal bias. Seven tools. Do something twice, make it a skill.
+              Agentic workflows for people who know what they're doing. Bring your own model. File, shell, fetch, task, subagent, and skill tools. Do something twice, make it a skill.
             </p>
             <div class="hero-install">
               <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
@@ -1514,10 +1514,12 @@
           </div>
           <h2 class="sec-headline">Watch it work.</h2>
           <div class="field-prose">
-            <p>Tool calls are grouped into per-turn activity blocks.<br><strong>haze has no permission gates, intentionally.</strong></p>
+            <p>Tool calls are grouped into per-turn activity blocks with compact live summaries.<br><strong>haze has no permission gates, intentionally.</strong></p>
+            <p>Assistant Markdown renders as real terminal UI — headings, tables, code, quotes, links.<br><strong>The transcript stays readable during actual work.</strong></p>
             <p>Skills are handed over to the model.<br><strong>The LLM decides when to use a skill.</strong></p>
             <p>Skills are tools written by you.<br><strong>Create a skill if you have to do it multiple times.</strong></p>
-            <p>Failures return structured reason codes with recovery hints to the model.<br><strong>Not apologies.</strong></p>
+            <p>Failures and repeated identical tool calls get recovery hints.<br><strong>Reuse what already happened, change inputs, or stop cleanly.</strong></p>
+            <p>Project instructions follow the files being touched.<br><strong>Global CLAUDE.md and AGENTS.md are loaded up front; nested files are discovered only inside their subtree.</strong></p>
           </div>
         </div>
         <div class="specimen reveal" aria-label="Example tool block">
@@ -1534,14 +1536,14 @@
               <span class="rem">− // TODO: validate environment</span>
             </div>
             <div class="spec-row">
-              <span class="check">+</span><span class="name">bash</span><span class="args">npm run typecheck</span><span class="detail">mutating, exited 0 in 1.8s</span>
+              <span class="check">+</span><span class="name">bash</span><span class="args">npm run typecheck</span><span class="detail">validation, exited 0 in 1.8s</span>
             </div>
             <div class="spec-validation">validation: 0 diagnostics, 12 files checked</div>
             <div class="spec-row">
               <span class="check">+</span><span class="name">bash</span><span class="args">npm test</span><span class="detail">validation, exited 0 in 2.4s</span>
             </div>
             <div class="spec-validation">validation: 38 passed, 0 failed</div>
-            <div class="spec-footer">3 tool calls, all succeeded. Compaction preserved failure evidence.</div>
+            <div class="spec-footer">3 tool calls, all succeeded. Large output stays retrievable when Haze summarizes it.</div>
           </div>
         </div>
       </div>
@@ -1557,13 +1559,13 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">The components.</h2>
-          <p class="sec-sub">No hidden tools. What you see is what the model gets. Nothing phones home.</p>
+          <p class="sec-sub">No hidden tools. What you see is what the model gets. No telemetry; network access is an explicit bounded <code class="cmd">fetch</code> tool for public URLs.</p>
         </div>
         <div class="components reveal">
           <div class="comp-group">
             <div class="comp-group-head">
               <span class="comp-group-name">Read</span>
-              <span class="comp-group-code">HAZE-R · 3</span>
+              <span class="comp-group-code">HAZE-R · 4</span>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
@@ -1585,6 +1587,13 @@
                 <span class="comp-part">HAZE-R-003</span>
               </div>
               <p class="comp-desc">Bundled ripgrep search with a true global result cap.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">readToolOutput</span>
+                <span class="comp-part">HAZE-R-004</span>
+              </div>
+              <p class="comp-desc">Retrieve paged output omitted from oversized bash, grep, and fetch results.</p>
             </div>
           </div>
 
@@ -1629,6 +1638,48 @@
               <p class="comp-desc">Run commands with classification, cwd, duration, and parsed validation.</p>
             </div>
           </div>
+
+          <div class="comp-group">
+            <div class="comp-group-head">
+              <span class="comp-group-name">Network</span>
+              <span class="comp-group-code">HAZE-N · 1</span>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">fetch</span>
+                <span class="comp-part">HAZE-N-001</span>
+              </div>
+              <p class="comp-desc">Read public http(s) URLs as Markdown, pretty JSON, or text with scheme, DNS, redirect, and private-address SSRF guards.</p>
+            </div>
+          </div>
+
+          <div class="comp-group">
+            <div class="comp-group-head">
+              <span class="comp-group-name">Agent state</span>
+              <span class="comp-group-code">HAZE-A · 3</span>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">writeTasks</span>
+                <span class="comp-part">HAZE-A-001</span>
+              </div>
+              <p class="comp-desc">Replace the workspace task list at meaningful phase changes; IDs are generated server-side and completed lists auto-clear on the next user turn.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">skill</span>
+                <span class="comp-part">HAZE-A-002</span>
+              </div>
+              <p class="comp-desc">Load one installed Markdown workflow, then fetch referenced files only on demand.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">subagent</span>
+                <span class="comp-part">HAZE-A-003</span>
+              </div>
+              <p class="comp-desc">Delegate genuinely independent investigations or actions with a capped focused tool loop.</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -1643,7 +1694,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Bring your<br>own model.</h2>
-          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure via <code class="cmd">/provider</code>, <code class="cmd">/model</code>, or environment variables. Your key, your bill.</p>
+          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys via <code class="cmd">/provider</code> and <code class="cmd">/model</code> inside Haze — not environment variables. Your key, your bill.</p>
         </div>
         <table class="compat-table reveal" aria-label="Supported providers">
           <thead>
@@ -1674,7 +1725,7 @@
       <div class="container reveal">
         <div class="eyebrow-stamp">§06 · INSTALL</div>
         <h2 class="install-mark">Install <span class="em">haze</span>.</h2>
-        <p class="install-sub">MIT-licensed. Open source. No contact-sales button.</p>
+        <p class="install-sub">MIT-licensed. Open source. No contact-sales button. Detailed LLM logs are off by default and only written with <code class="cmd">haze --debug</code>. Provider settings live in <code class="cmd">~/.haze/settings.json</code>, not environment variables.</p>
         <div class="install-cmd">
           <code><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
           <button id="copy-btn-cta" type="button" aria-label="Copy install command">Copy</button>
@@ -1696,7 +1747,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Every command,<br><span class="em">all at once.</span></h2>
-          <p class="sec-sub">Sixteen slash commands plus installed-skill invocations. Tasks are managed by the model via the <code class="cmd">writeTasks</code> tool — no command for them.</p>
+          <p class="sec-sub">Core slash commands plus aliases, model/log subforms, and installed-skill invocations. Tasks are managed by the model via the <code class="cmd">writeTasks</code> tool — no command for them.</p>
         </div>
 
         <table class="cmd-table reveal" aria-label="Haze slash commands">
@@ -1732,7 +1783,7 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>/init</code></td>
-              <td class="cmd-d">Create or update <code>AGENTS.md</code> project instructions.</td>
+              <td class="cmd-d">Create or update compact, budget-aware <code>AGENTS.md</code> project instructions.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
@@ -1758,7 +1809,7 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>/logs [id]</code></td>
-              <td class="cmd-d">List recent LLM logs, or summarize one by id.</td>
+              <td class="cmd-d">List recent LLM logs, or summarize one by id. New detailed logs are written only when haze starts with <code>--debug</code>.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Skills</td></tr>
@@ -1801,7 +1852,7 @@
   <footer>
     <div class="container footer-grid">
       <div class="footer-colophon">
-        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.4.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
+        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.5.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
         <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
       </div>
       <nav class="footer-links" aria-label="Footer">

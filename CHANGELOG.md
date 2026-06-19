@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.5.0 - 2026-06-19
+
+### Changed
+
+- Removed all user-facing environment variables. `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read; configure providers, models, API keys, and base URLs through `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands instead. This also removes the `OPENAI_*` env overrides from the startup provider info and the header.
+- File LLM logging is now **off by default**. Previously Haze wrote a detailed JSONL log (full prompts, model messages, tool inputs/outputs, token usage) to `~/.haze/logs/<timestamp>.jsonl` on every session. Logging is now enabled solely with the `--debug` flag (`haze --debug`), which also turns on the on-screen debug panel. The `/logs` command still reviews historical log files.
+- Bash results now pass through command-aware reducers before they enter the transcript/model context. Validation failures render focused diagnostics, successful validation stays short, git/diff/search/JSON/log-like output is compacted, noisy command families get line filters, and reduced raw output remains retrievable by `readToolOutput` when stored.
+- `grep` now returns compact structured search output for long match sets/lines, with reduction metadata, omitted-result counts, and a raw-output handle when the rendered result was truncated.
+- Tool activity rendering is quieter: live tool groups show elapsed timers, subagent child calls, capped group detail, and compact success/failure summaries instead of dumping large result objects.
+- Assistant Markdown rendering in the CLI now supports styled headings, inline code/strong/emphasis/links, blockquotes, syntax-highlighted code fences, horizontal rules, and width-aware tables.
+- Consecutive assistant messages in one turn now share a single visible `haze` header for a less noisy transcript.
+- Completed task lists now clear automatically at the start of a new user turn so old successful todos do not linger in the task bar.
+- Context loading now includes global `~/.claude/CLAUDE.md` while keeping `~/.haze/AGENTS.md` higher priority for Haze-specific global guidance.
+- Nested `CLAUDE.md`/`AGENTS.md` files below the workspace are now scoped and loaded lazily when file tools operate inside their directory tree; mutating file tools stop before the first edit when newly scoped instructions are discovered.
+- Repeated identical tool calls are now steered back to the model with an explicit correction instead of aborting the turn immediately, so Haze can reuse existing results or finish cleanly.
+- `/init` now explicitly keeps `AGENTS.md` compact, reminds the model that context files are injected into every request, and references the current context-file truncation budget.
+
+### Added
+
+- `fetch` tool: read public URLs as readable content (Markdown for HTML, pretty JSON for JSON, passthrough text), with SSRF protection (scheme allowlist + private/loopback/link-local/metadata blocking, re-validated per redirect and after DNS resolution), a 2 MB raw-download cap, and a 30 s timeout. Oversize output stays retrievable via `readToolOutput`. HTML→Markdown extraction uses `defuddle` (readability-grade, pure-JS DOM).
+- Shared tool-output reduction metadata (`reducerName`, `contentKind`, `lossy`, `parseTier`, token/character savings, handles, omitted counts) for reduced tool results.
+
+### Removed
+
+- Removed obsolete token-efficiency planning documents and the unused alternate docs-site HTML file from `docs/`.
+
 ## 0.4.0 - 2026-06-15
 
 ### Skills
