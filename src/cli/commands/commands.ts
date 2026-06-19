@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
-import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/contextFiles.js';
+import {contextFileDiagnostics, summarizeContextDiagnostics, MAX_CONTEXT_FILE_CHARS} from '../../config/contextFiles.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {Mode} from './chat.js';
@@ -327,6 +327,10 @@ export async function handleSlashCommand(
     }
     if (resolved.status === 'missing') {
       const provider = activeProvider(ctx.settings);
+      if (!provider) {
+        ctx.addSystemMessage('No provider configured. Run /provider to choose or add a provider before setting a model.');
+        return 'handled';
+      }
       const nextProvider = provider.models.includes(selector) ? provider : {...provider, models: [...provider.models, selector]};
       await ctx.updateSettings({provider: provider.name, model: selector, providers: upsertProvider(ctx.settings, nextProvider)});
       ctx.addSystemMessage(`Model set to ${selector} on ${provider.name}. Saved to ~/.haze/settings.json.`);
@@ -339,6 +343,16 @@ export async function handleSlashCommand(
   if (value === '/init') {
     await ctx.runAgentTurn(buildInitPrompt(), '/init');
     await ctx.refreshContextFiles();
+    const agentsMdPath = path.join(process.cwd(), 'AGENTS.md');
+    if (await fs.pathExists(agentsMdPath)) {
+      const content = await fs.readFile(agentsMdPath, 'utf8');
+      const chars = content.length;
+      const lines = content.split('\n').length;
+      const msg = chars > MAX_CONTEXT_FILE_CHARS
+        ? `AGENTS.md validation: ${chars.toLocaleString()} chars / ${lines} lines — exceeds the ${MAX_CONTEXT_FILE_CHARS.toLocaleString()}-char context budget and will be truncated. Trim it before relying on it.`
+        : `AGENTS.md validation: ${chars.toLocaleString()} chars / ${lines} lines — within the ${MAX_CONTEXT_FILE_CHARS.toLocaleString()}-char context budget.`;
+      ctx.addSystemMessage(msg);
+    }
     return 'handled';
   }
   if (value === '/skills') return await handleSkillCommand('help', '', ctx);

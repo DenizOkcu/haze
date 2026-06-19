@@ -32,13 +32,13 @@ const DEFAULT_BUDGET_THRESHOLD = 0.15;
 
 function resolveBudgetThreshold(explicit?: number) {
   if (typeof explicit === 'number' && Number.isFinite(explicit)) return Math.min(1, Math.max(0, explicit));
-  const envValue = Number.parseFloat(process.env.HAZE_CONTEXT_BUDGET_SHARE ?? '');
-  if (Number.isFinite(envValue)) return Math.min(1, Math.max(0, envValue));
   return DEFAULT_BUDGET_THRESHOLD;
 }
 
-const CONTEXT_FILE_NAMES = ['AGENTS.md', 'CLAUDE.md'];
-const MAX_CONTEXT_FILE_CHARS = 20_000;
+const CONTEXT_FILE_NAMES = ['CLAUDE.md', 'AGENTS.md'];
+
+/** Maximum characters of a context file included in every request's system context. */
+export const MAX_CONTEXT_FILE_CHARS = 20_000;
 
 function uniqueExistingAncestors(fromDir: string) {
   const dirs: string[] = [];
@@ -60,20 +60,7 @@ function displayPath(filePath: string) {
   return filePath;
 }
 
-export async function readContextFiles(cwd = process.cwd()): Promise<ContextFile[]> {
-  const candidates: string[] = [];
-
-  for (const name of CONTEXT_FILE_NAMES) {
-    candidates.push(path.join(HAZE_DIR, name));
-  }
-
-  for (const dir of uniqueExistingAncestors(cwd)) {
-    for (const name of CONTEXT_FILE_NAMES) {
-      candidates.push(path.join(dir, name));
-    }
-  }
-
-  const seen = new Set<string>();
+async function readContextCandidates(candidates: string[], seen = new Set<string>()): Promise<ContextFile[]> {
   const contextFiles: ContextFile[] = [];
   for (const candidate of candidates) {
     const absolute = path.resolve(candidate);
@@ -91,6 +78,50 @@ export async function readContextFiles(cwd = process.cwd()): Promise<ContextFile
     });
   }
   return contextFiles;
+}
+
+async function scopedDirsForPath(targetPath: string, cwd: string) {
+  const root = path.resolve(cwd);
+  const absolute = path.resolve(root, targetPath);
+  const relative = path.relative(root, absolute);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return [];
+
+  const stat = await fs.stat(absolute).catch(() => null);
+  let current = stat?.isDirectory() ? absolute : path.dirname(absolute);
+  const dirs: string[] = [];
+  while (current.startsWith(root + path.sep) && current !== root) {
+    dirs.push(current);
+    current = path.dirname(current);
+  }
+  return dirs.reverse();
+}
+
+export async function readContextFiles(cwd = process.cwd()): Promise<ContextFile[]> {
+  const candidates: string[] = [
+    path.join(os.homedir(), '.claude', 'CLAUDE.md'),
+    path.join(HAZE_DIR, 'AGENTS.md'),
+  ];
+
+  for (const dir of uniqueExistingAncestors(cwd)) {
+    for (const name of CONTEXT_FILE_NAMES) candidates.push(path.join(dir, name));
+  }
+
+  return await readContextCandidates(candidates);
+}
+
+export async function readScopedContextFilesForPath(targetPath: string, options: {cwd?: string; alreadyLoadedPaths?: Iterable<string>} = {}): Promise<ContextFile[]> {
+  const cwd = options.cwd ?? process.cwd();
+  const loaded = new Set(options.alreadyLoadedPaths ?? []);
+  const candidates: string[] = [];
+  for (const dir of await scopedDirsForPath(targetPath, cwd)) {
+    for (const name of CONTEXT_FILE_NAMES) candidates.push(path.join(dir, name));
+  }
+  const alreadySeen = new Set<string>();
+  for (const loadedPath of loaded) {
+    if (loadedPath.startsWith('~/')) alreadySeen.add(path.resolve(os.homedir(), loadedPath.slice(2)));
+    else alreadySeen.add(path.resolve(cwd, loadedPath));
+  }
+  return await readContextCandidates(candidates, alreadySeen);
 }
 
 export function contextFileDiagnostics(files: ContextFile[]): ContextFileDiagnostic[] {

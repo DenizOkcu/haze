@@ -114,6 +114,35 @@ describe('handleSlashCommand', () => {
     expect(ctx.refreshContextFiles).toHaveBeenCalled();
   });
 
+  it('reports AGENTS.md size within the context budget after /init', async () => {
+    const ctx = mockContext();
+    await handleSlashCommand('/init', ctx);
+    const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0] as string);
+    const validation = calls.find(m => m.includes('AGENTS.md validation'));
+    expect(validation).toBeDefined();
+    expect(validation).toContain('within the');
+    expect(validation).not.toContain('exceeds');
+  });
+
+  it('warns when AGENTS.md exceeds the context budget', async () => {
+    const orig = process.cwd();
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-init-budget-'));
+    await fs.writeFile(path.join(tmp, 'AGENTS.md'), 'x'.repeat(20001));
+    process.chdir(tmp);
+    try {
+      const ctx = mockContext();
+      await handleSlashCommand('/init', ctx);
+      const calls = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0] as string);
+      const validation = calls.find(m => m.includes('AGENTS.md validation'));
+      expect(validation).toBeDefined();
+      expect(validation).toContain('exceeds the');
+      expect(validation).toContain('truncated');
+    } finally {
+      process.chdir(orig);
+      await fs.remove(tmp);
+    }
+  });
+
   it('reports unknown commands', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/unknown', ctx)).toBe('handled');

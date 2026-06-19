@@ -54,4 +54,16 @@ describe('providers', () => {
     };
     expect(resolveModelSelector(settings, 'local:shared')).toMatchObject({status: 'found', provider: {name: 'local'}, model: 'shared'});
   });
+
+  it('returns no providers and no active model when nothing is configured', () => {
+    const empty = {};
+    expect(configuredProviders(empty)).toEqual([]);
+    expect(activeProvider(empty)).toBeUndefined();
+    expect(activeModel(empty)).toBeUndefined();
+  });
+
+  it('returns no active model when a provider has no models', () => {
+    const settings = {providers: [{name: 'remote', url: 'https://example.com/v1', models: []}]};
+    expect(activeModel(settings)).toBeUndefined();
+  });
 });

@@ -72,6 +72,7 @@ export interface LlmLog {
   file: string;
 }
 
+
 export async function createLog(): Promise<LlmLog> {
   await fs.ensureDir(LOGS_DIR);
   const id = logFileId();

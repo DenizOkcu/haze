@@ -36,9 +36,10 @@ function capabilities(providerName: string, baseURL: string): ProviderCapabiliti
 export async function modelWithConfig(session?: {cwd?: string}) {
   const settings = await readSettings();
   const selection = activeModel(settings);
-  const baseURL = process.env.OPENAI_BASE_URL ?? selection.provider.url;
-  const apiKey = process.env.OPENAI_API_KEY ?? selection.provider.key ?? settings.apiKey ?? 'not-needed';
-  const name = process.env.HAZE_MODEL ?? selection.model;
+  if (!selection) return undefined;
+  const baseURL = selection.provider.url;
+  const apiKey = selection.provider.key ?? settings.apiKey ?? 'not-needed';
+  const name = selection.model;
   const cacheSeed = session?.cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
   return {
@@ -54,7 +55,7 @@ export async function modelWithConfig(session?: {cwd?: string}) {
 }
 
 export async function model() {
-  return (await modelWithConfig()).model;
+  return (await modelWithConfig())?.model;
 }
 
 export function cacheKeyFor(name: string, cwd?: string) {

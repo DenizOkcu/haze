@@ -1,5 +1,46 @@
-import {describe, expect, it} from 'vitest';
-import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../src/config/contextFiles.js';
+import fs from 'fs-extra';
+import os from 'node:os';
+import path from 'node:path';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {contextFileDiagnostics, readScopedContextFilesForPath, summarizeContextDiagnostics} from '../../src/config/contextFiles.js';
+
+let originalCwd: string;
+let tmp: string;
+
+beforeEach(async () => {
+  originalCwd = process.cwd();
+  tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-context-test-'));
+});
+
+afterEach(async () => {
+  process.chdir(originalCwd);
+  await fs.remove(tmp);
+});
+
+describe('readScopedContextFilesForPath', () => {
+  it('loads only nested instruction files that apply to the target path', async () => {
+    await fs.outputFile(path.join(tmp, 'AGENTS.md'), 'root');
+    await fs.outputFile(path.join(tmp, 'packages/api/CLAUDE.md'), 'api claude');
+    await fs.outputFile(path.join(tmp, 'packages/api/AGENTS.md'), 'api agents');
+    await fs.outputFile(path.join(tmp, 'packages/mobile/CLAUDE.md'), 'mobile claude');
+    process.chdir(tmp);
+
+    const files = await readScopedContextFilesForPath('packages/api/src/server.ts', {alreadyLoadedPaths: ['AGENTS.md']});
+
+    expect(files.map(file => file.path)).toEqual(['packages/api/CLAUDE.md', 'packages/api/AGENTS.md']);
+    expect(files.map(file => file.content)).toEqual(['api claude', 'api agents']);
+  });
+
+  it('does not load sibling scoped instructions', async () => {
+    await fs.outputFile(path.join(tmp, 'packages/api/CLAUDE.md'), 'api claude');
+    await fs.outputFile(path.join(tmp, 'packages/mobile/CLAUDE.md'), 'mobile claude');
+    process.chdir(tmp);
+
+    const files = await readScopedContextFilesForPath('packages/mobile/app.tsx');
+
+    expect(files.map(file => file.path)).toEqual(['packages/mobile/CLAUDE.md']);
+  });
+});
 
 describe('contextFileDiagnostics', () => {
   it('reports stable hashes and token estimates without returning file content', () => {

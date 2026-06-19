@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
+import os from 'node:os';
 import {promisify} from 'node:util';
 import {Box, render, Static, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
@@ -9,7 +10,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, configuredProviders, DEFAULT_PROVIDER_NAME, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -60,6 +61,12 @@ function toolCallCount(messages: Message[]) {
 
 function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
+}
+
+function compactHomePath(filePath: string) {
+  const home = os.homedir();
+  if (filePath === home) return '~';
+  return filePath.startsWith(`${home}/`) ? `~/${filePath.slice(home.length + 1)}` : filePath;
 }
 
 function formatTokenCount(tokens: number) {
@@ -141,10 +148,13 @@ function messageElapsedLabel(message: Message) {
   if (message.startedAt == null) return '';
   const end = message.finishedAt ?? (message.streaming ? Date.now() : message.startedAt);
   const elapsed = end - message.startedAt;
+  if (message.role === 'assistant' && !message.streaming && message.tokensPerSecond != null) {
+    return `✓ Done in ${formatElapsedTime(elapsed)} · ${Math.round(message.tokensPerSecond)} tok/s`;
+  }
   return message.streaming ? formatElapsedTimeWhole(elapsed) : formatElapsedTime(elapsed);
 }
 
-function MessageView({message, width}: {message: Message; width: number}) {
+function MessageView({message, width, suppressAssistantHeader = false}: {message: Message; width: number; suppressAssistantHeader?: boolean}) {
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
       <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
@@ -155,10 +165,10 @@ function MessageView({message, width}: {message: Message; width: number}) {
   }
 
   return <Box flexDirection="column" marginBottom={1}>
-    <Text>
+    {!suppressAssistantHeader && <Text>
       <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
-    </Text>
+    </Text>}
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} />
       : message.role === 'assistant' && !message.streaming
@@ -171,22 +181,50 @@ function messageKey(message: Message, index: number) {
   return message.id ?? `${index}-${message.role}-${message.text}`;
 }
 
+function orderedDisplayMessages(messages: Message[]) {
+  return messages
+    .map((message, index) => ({message, index}))
+    .sort((a, b) => {
+      if (a.message.displayOrder != null && b.message.displayOrder != null && a.message.displayOrder !== b.message.displayOrder) {
+        return a.message.displayOrder - b.message.displayOrder;
+      }
+      return a.index - b.index;
+    })
+    .map(item => item.message);
+}
+
+function annotateTurnHeaders(messages: Message[]) {
+  return messages.map(message => ({message, suppressAssistantHeader: false}));
+}
+
 function startupProviderInfo(settings: HazeSettings) {
   const selection = activeModel(settings);
-  const model = process.env.HAZE_MODEL ?? selection.model;
-  const modelSource = process.env.HAZE_MODEL ? 'HAZE_MODEL env' : settings.model ? 'settings' : 'provider default';
-  const baseURL = process.env.OPENAI_BASE_URL ?? selection.provider.url;
-  const baseURLSource = process.env.OPENAI_BASE_URL ? 'OPENAI_BASE_URL env' : 'settings';
-  const apiKeySource = process.env.OPENAI_API_KEY ? 'OPENAI_API_KEY env' : providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
-  const provider = process.env.OPENAI_BASE_URL ? 'OpenAI-compatible custom endpoint' : selection.provider.name;
+  const configuredCount = configuredProviders(settings).length;
+  if (!selection) {
+    return [
+      'Provider configuration',
+      '- Provider: not configured',
+      '- Model: not set',
+      '- Base URL: not configured',
+      '- API key: missing',
+      `- Configured providers: ${configuredCount}`,
+      '',
+      'Run /provider to choose or add a provider, then select a model.',
+    ].join('\n');
+  }
+  const model = selection.model;
+  const modelSource = settings.model ? 'settings' : 'provider default';
+  const baseURL = selection.provider.url;
+  const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
+  const provider = selection.provider.name;
 
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
-    `- Base URL: ${baseURL} (${baseURLSource})`,
+    `- Base URL: ${baseURL} (settings)`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
-    `- Configured providers: ${configuredProviders(settings).length}`,
+    `- Configured providers: ${configuredCount}`,
   ].join('\n');
 }
 
@@ -240,14 +278,23 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const {exit} = useApp();
   const {stdout} = useStdout();
   const width = stdout.columns ?? process.stdout.columns ?? 80;
-  const [messages, setMessages] = useState<Message[]>([
-    {role: 'system', text: 'Welcome to Haze. Use /help for commands.'}
+  const nextDisplayOrderRef = useRef(1);
+  const withDisplayOrder = (message: Message): Message => {
+    if (message.displayOrder != null) return message;
+    return {...message, displayOrder: nextDisplayOrderRef.current++};
+  };
+  const withDisplayOrders = (next: Message[]) => next.map(withDisplayOrder);
+  const [messages, setMessagesRaw] = useState<Message[]>([
+    {role: 'system', text: 'Welcome to Haze. Use /help for commands.', displayOrder: 0}
   ]);
+  const setMessages = (updater: React.SetStateAction<Message[]>) => {
+    setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
+  };
   const [liveMessages, setLiveMessages] = useState<Message[]>([]);
   const liveMessagesRef = useRef<Message[]>([]);
   const setLiveMessagesState = (updater: (messages: Message[]) => Message[]) => {
     setLiveMessages(previous => {
-      const next = updater(previous);
+      const next = withDisplayOrders(updater(previous));
       liveMessagesRef.current = next;
       return next;
     });
@@ -273,7 +320,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [, setSessionLabel] = useState<string | undefined>();
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
-  const [, setTimerTick] = useState(0);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
@@ -281,11 +327,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
   const [skillCreateDraft, setSkillCreateDraft] = useState<{name?: string; role?: string}>({});
-
-  useEffect(() => {
-    const timer = setInterval(() => setTimerTick(tick => tick + 1), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
@@ -339,6 +380,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function startNewLog() {
+    if (!debug) return undefined;
     if (llmLogRef.current) {
       await endLlmLog(llmLogRef.current).catch(() => undefined);
     }
@@ -962,6 +1004,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function doAgentTurn(value: string, displayValue?: string) {
     setDebugLogs([]);
+    // When every task is already completed, start the new turn with a clean
+    // slate: the task bar clears (nothing shown for simple questions) and the
+    // model may create fresh todos via writeTasks if the new question warrants.
+    if (visibleTasks.length > 0 && visibleTasks.every(t => t.status === 'completed')) {
+      setVisibleTasks([]);
+      setTasksExpanded(false);
+      setTaskBarPadding(0);
+      await clearTasksFromStore().catch(() => undefined);
+    }
     await runSingleAgentTurn(value, displayValue);
     while (followUpQueueRef.current.length > 0) {
       const next = followUpQueueRef.current[0];
@@ -979,17 +1030,19 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     };
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
-      setMessages(m => [...m, msg]);
-      persistUiMessage(msg);
+      const ordered = withDisplayOrder(msg);
+      setMessages(m => [...m, ordered]);
+      persistUiMessage(ordered);
     };
 
     await runAgentTurn(value, displayValue, contextFiles, {
       addMessage: msg => {
-        if (msg.streaming) {
-          setLiveMessagesState(m => [...m, msg]);
+        const ordered = withDisplayOrder(msg);
+        if (ordered.streaming) {
+          setLiveMessagesState(m => [...m, ordered]);
           return;
         }
-        finalizeMessage(msg);
+        finalizeMessage(ordered);
       },
       updateMessage: (id, update) => {
         const liveMessage = liveMessagesRef.current.find(msg => msg.id === id);
@@ -1050,8 +1103,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   const visible = messages.filter(message => !message.hidden);
-  const transcriptItems = visible.map((message, index) => ({key: messageKey(message, index), message}));
   const activeLiveMessages = liveMessages.filter(message => !message.hidden);
+  const orderedVisibleMessages = orderedDisplayMessages([...visible, ...activeLiveMessages]);
+  const annotatedDisplayMessages = annotateTurnHeaders(orderedVisibleMessages);
+  const staticDisplayItems = annotatedDisplayMessages.filter(item => !item.message.streaming);
+  const transcriptItems = staticDisplayItems.map((item, index) => ({key: messageKey(item.message, index), ...item}));
+  const activeLiveItems = annotatedDisplayMessages.filter(item => item.message.streaming);
   const activeSelection = activeModel(settings);
   const placeholder = mode === 'provider'
     ? 'Choose provider'
@@ -1080,30 +1137,30 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
                         : mode === 'skillCreateDescription'
                           ? 'Describe what the skill should do'
                           : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
-  const activeModelName = `${activeSelection.provider.name}:${process.env.HAZE_MODEL ?? activeSelection.model}`;
-  const hasLogin = Boolean(process.env.OPENAI_API_KEY ?? settings.apiKey ?? activeSelection.provider.key) || activeSelection.provider.name !== DEFAULT_PROVIDER_NAME;
-  const hasChosenModel = Boolean(process.env.HAZE_MODEL ?? settings.model ?? activeSelection.model);
-  const headerSubtitle = hasLogin && hasChosenModel
-    ? [
-      'A minimal LLM harness for growing your own workflows while you work.',
-      '',
-      'Start with simple chat, then teach Haze your habits with skills:',
-      '/create-skill  — three-step skill wizard (name, role, description).',
-      '',
-      'The most adaptive workflow is the one you shape as you go.',
-      '',
-      'Guardrails are light: Haze lets the LLM work from the terminal almost like you,',
-      'while trying to stay scoped to this project.',
-    ].join('\n')
-    : 'First things first: run /provider to choose or add a provider, then select a model.';
-  const workspaceLabel = `${process.cwd()}${branchName ? ` (${branchName})` : ''}`;
+  const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
+  const headerSubtitle = [
+    'A minimal LLM harness for growing your own workflows while you work.',
+    '',
+    'Start with simple chat, then teach Haze your habits with skills:',
+    '/create-skill  — three-step skill wizard (name, role, description).',
+    '',
+    'The most adaptive workflow is the one you shape as you go.',
+    '',
+    'Guardrails are light: Haze lets the LLM work from the terminal almost like you,',
+    'while trying to stay scoped to this project.',
+  ].join('\n');
+  const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const allDisplayMessages = [...messages, ...liveMessages];
+  const hazeMessages = allDisplayMessages.filter(message => message.role === 'assistant' && !message.hidden).length;
   const toolsUsed = toolCallCount(allDisplayMessages);
   const fallbackTokens = estimateConversationTokens(allDisplayMessages);
-  const effectiveInput = tokenUsage.inputTokens ?? (fallbackTokens.input || 0);
+  const estimatedLogicalInput = tokenUsage.logicalInputEstimate || fallbackTokens.input || 0;
+  const providerInput = tokenUsage.inputTokens;
+  const effectiveInput = providerInput == null ? estimatedLogicalInput : Math.max(providerInput, estimatedLogicalInput);
   const effectiveOutput = tokenUsage.outputTokens ?? (fallbackTokens.output || 0);
-  const precise = tokenUsage.inputTokens != null;
-  const statusDetailLabel = `${conversationRef.current.length} messages / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${precise ? '' : '~'}↑${formatTokenCount(effectiveInput)} ${precise ? '' : '~'}↓${formatTokenCount(effectiveOutput)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+  const inputEstimated = providerInput == null || effectiveInput !== providerInput;
+  const outputEstimated = tokenUsage.outputTokens == null;
+  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   // Goal tracking is internal; display removed in favor of task bar
@@ -1128,7 +1185,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     ...skills.map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
   ] : [];
   const staticItems = [
-    {kind: 'header' as const, key: `header-${activeModelName}-${hasLogin}-${hasChosenModel}`, subtitle: headerSubtitle},
+    {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
   ];
 
@@ -1136,10 +1193,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     <Static items={staticItems}>
       {item => item.kind === 'header'
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
-        : <MessageView key={item.key} message={item.message} width={width} />}
+        : <MessageView key={item.key} message={item.message} width={width} suppressAssistantHeader={item.suppressAssistantHeader} />}
     </Static>
-    {activeLiveMessages.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {activeLiveMessages.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
+    {activeLiveItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {activeLiveItems.map((item, index) => <MessageView key={messageKey(item.message, index)} message={item.message} width={width} suppressAssistantHeader={item.suppressAssistantHeader} />)}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
@@ -1189,7 +1246,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       </Box>
     </Box>
     {debug && hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
-      <Text color={theme.muted} bold>Token usage {precise ? '(precise)' : '(estimated)'}</Text>
+      <Text color={theme.muted} bold>Token usage {inputEstimated || outputEstimated ? '(estimated)' : '(precise)'}</Text>
       <Text color={theme.muted}>  in={formatTokenCount(effectiveInput)} out={formatTokenCount(effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
       <Text color={theme.muted}>  logical={formatTokenCount(tokenUsage.logicalInputEstimate)}{tokenUsage.effectiveNonCachedInput != null ? ` effective_non_cached=${formatTokenCount(tokenUsage.effectiveNonCachedInput)}` : ''}</Text>
       <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>

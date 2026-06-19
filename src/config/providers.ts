@@ -1,8 +1,9 @@
 import type {HazeSettings, HazeProviderSettings} from './settings.js';
 
-export const DEFAULT_PROVIDER_NAME = 'openrouter';
-export const DEFAULT_PROVIDER_URL = 'https://openrouter.ai/api/v1';
-export const DEFAULT_MODEL = 'x-ai/grok-build-0.1';
+// Used only to migrate legacy single-provider OpenRouter settings (apiKey/baseURL)
+// into the providers array. There is no default provider or model anymore: users
+// must configure a provider themselves via /provider.
+const LEGACY_OPENROUTER_URL = 'https://openrouter.ai/api/v1';
 
 export type ModelResolution =
   | {status: 'found'; provider: HazeProviderSettings; model: string}
@@ -37,18 +38,16 @@ export function configuredProviders(settings: HazeSettings): HazeProviderSetting
     .map(provider => normalizeProvider(provider))
     .filter((provider): provider is HazeProviderSettings => Boolean(provider));
 
-  const legacyUrl = settings.baseURL ?? (settings.provider === DEFAULT_PROVIDER_NAME || settings.apiKey ? DEFAULT_PROVIDER_URL : undefined);
-  if (legacyUrl && !providers.some(provider => provider.name === DEFAULT_PROVIDER_NAME)) {
+  // Legacy single-provider settings. Only migrate when the user actually supplied
+  // a base URL or API key — never invent a provider or model out of nothing.
+  const legacyUrl = settings.baseURL ?? (settings.apiKey ? LEGACY_OPENROUTER_URL : undefined);
+  if (legacyUrl && !providers.some(provider => provider.name === 'openrouter')) {
     providers.unshift({
-      name: DEFAULT_PROVIDER_NAME,
+      name: 'openrouter',
       url: legacyUrl,
       ...(settings.apiKey ? {key: settings.apiKey} : {}),
-      models: normalizeModels([], settings.model ?? DEFAULT_MODEL),
+      models: normalizeModels([], settings.model),
     });
-  }
-
-  if (providers.length === 0) {
-    return [{name: DEFAULT_PROVIDER_NAME, url: DEFAULT_PROVIDER_URL, models: [settings.model ?? DEFAULT_MODEL]}];
   }
 
   return providers;
@@ -58,16 +57,18 @@ export function findProvider(settings: HazeSettings, name: string): HazeProvider
   return configuredProviders(settings).find(provider => provider.name === name);
 }
 
-export function activeProvider(settings: HazeSettings): HazeProviderSettings {
+export function activeProvider(settings: HazeSettings): HazeProviderSettings | undefined {
   const providers = configuredProviders(settings);
   return providers.find(provider => provider.name === settings.provider) ?? providers[0];
 }
 
-export function activeModel(settings: HazeSettings): {provider: HazeProviderSettings; model: string} {
+export function activeModel(settings: HazeSettings): {provider: HazeProviderSettings; model: string} | undefined {
   const provider = activeProvider(settings);
+  if (!provider) return undefined;
   const model = settings.model && provider.models.includes(settings.model)
     ? settings.model
-    : settings.model ?? provider.models[0] ?? DEFAULT_MODEL;
+    : settings.model ?? provider.models[0];
+  if (!model) return undefined;
   return {provider, model};
 }
 
@@ -99,5 +100,5 @@ export function upsertProvider(settings: HazeSettings, provider: HazeProviderSet
 }
 
 export function providerHasKey(settings: HazeSettings, provider: HazeProviderSettings) {
-  return Boolean(provider.key ?? (provider.name === DEFAULT_PROVIDER_NAME ? settings.apiKey : undefined));
+  return Boolean(provider.key ?? (provider.name === 'openrouter' ? settings.apiKey : undefined));
 }

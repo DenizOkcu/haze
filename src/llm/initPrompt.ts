@@ -1,3 +1,5 @@
+import {MAX_CONTEXT_FILE_CHARS} from '../config/contextFiles.js';
+
 export function buildInitPrompt() {
   return `Initialize this repository for Haze by creating a best-practice AGENTS.md file.
 
@@ -8,7 +10,7 @@ Explore the codebase first, respecting .gitignore, but keep this quick and minim
 4. Do not call listFiles with the same input twice. Do not read the same path repeatedly. Do not read speculative files; list the parent first if unsure.
 5. Aim to finish in 12 tool calls or fewer. Do not read ignored files unless truly necessary.
 
-Create or update AGENTS.md at the workspace root. It should be concise and useful for future coding agents. Include sections when known:
+Create or update AGENTS.md at the workspace root. It should be concise and useful for future coding agents. Keep it compact: the full file is injected into every request's system context and is truncated at ${MAX_CONTEXT_FILE_CHARS} characters, so prefer a target under ~${Math.round(MAX_CONTEXT_FILE_CHARS / 80 / 10) * 10} lines and omit anything an agent could discover by reading the source. Include sections when known:
 - Project overview
 - Common commands for install, development, typecheck, build, test, lint, release
 - Architecture and important directories
