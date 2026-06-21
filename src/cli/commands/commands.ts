@@ -1,10 +1,12 @@
+import {spawn} from 'node:child_process';
 import fs from 'fs-extra';
 import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {contextFileDiagnostics, summarizeContextDiagnostics, MAX_CONTEXT_FILE_CHARS} from '../../config/contextFiles.js';
-import type {HazeSettings} from '../../config/settings.js';
+import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer} from '../../config/lspSettings.js';
 import type {Mode} from './chat.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
@@ -126,10 +128,98 @@ async function handleSkillCommand(sub: SkillSubcommand, args: string, ctx: Comma
   return 'handled';
 }
 
+async function ensureSettingsFile(settings: HazeSettings) {
+  if (!await fs.pathExists(SETTINGS_FILE)) await writeSettings(settings);
+  return SETTINGS_FILE;
+}
+
+function openPath(filePath: string) {
+  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', filePath] : [filePath];
+  const child = spawn(command, args, {stdio: 'ignore', detached: true});
+  child.on('error', () => undefined);
+  child.unref();
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function splitArgs(input: string) {
+  const matches = input.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  return matches.map(part => part.replace(/^(["'])(.*)\1$/, '$2'));
+}
+
+function lspOverview(settings: HazeSettings) {
+  const servers = configuredLspServers(settings);
+  const lines = [
+    'LSP commands:',
+    '/lsp',
+    '  List configured language servers.',
+    '/lsp presets',
+    `  Show built-in presets: ${Object.keys(LSP_PRESETS).join(', ')}`,
+    '/lsp add <preset>',
+    '  Add a preset, e.g. /lsp add typescript.',
+    '/lsp add <name> -- <command> [args...]',
+    '  Add a custom stdio LSP server. Example: /lsp add custom-ts -- typescript-language-server --stdio',
+    '/lsp enable <name> | /lsp disable <name> | /lsp remove <name>',
+    '',
+    'Configured LSP servers:',
+    ...(servers.length === 0 ? ['- none'] : servers.map(server => `- ${server.name} ${server.enabled === false ? '(disabled)' : '(enabled)'}: ${server.command} ${(server.args ?? []).join(' ')} [${(server.extensions ?? []).join(', ') || 'no extensions'}]`)),
+  ];
+  return lines.join('\n');
+}
+
+async function handleLspCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
+  const parts = splitArgs(args);
+  const sub = parts[0];
+  if (!sub) {
+    ctx.addSystemMessage(lspOverview(ctx.settings));
+    return 'handled';
+  }
+  if (sub === 'presets') {
+    ctx.addSystemMessage(['LSP presets:', ...Object.values(LSP_PRESETS).map(preset => `- ${preset.name}: ${preset.command} ${(preset.args ?? []).join(' ')} [${(preset.extensions ?? []).join(', ')}]`)].join('\n'));
+    return 'handled';
+  }
+  if (sub === 'add') {
+    const name = parts[1];
+    if (!name) {
+      ctx.addSystemMessage('Usage: /lsp add <preset> OR /lsp add <name> -- <command> [args...]');
+      return 'handled';
+    }
+    const preset = lspPreset(name);
+    if (preset) {
+      await ctx.updateSettings({lspServers: upsertLspServer(ctx.settings, preset)});
+      ctx.addSystemMessage(`Added LSP preset ${name}. Ensure ${preset.command} is installed and on PATH.`);
+      return 'handled';
+    }
+    const sep = parts.indexOf('--');
+    const command = sep === -1 ? undefined : parts[sep + 1];
+    if (!command) {
+      ctx.addSystemMessage(`Unknown preset ${name}. Use /lsp presets or /lsp add <name> -- <command> [args...]`);
+      return 'handled';
+    }
+    const server = {name, command, args: parts.slice(sep + 2), extensions: [], rootPatterns: ['.git'], enabled: true};
+    await ctx.updateSettings({lspServers: upsertLspServer(ctx.settings, server)});
+    ctx.addSystemMessage(`Added custom LSP server ${name}. Add extensions manually in ~/.haze/settings.json before tools can auto-select it.`);
+    return 'handled';
+  }
+  if (sub === 'remove' || sub === 'enable' || sub === 'disable') {
+    const name = parts[1];
+    if (!name) {
+      ctx.addSystemMessage(`Usage: /lsp ${sub} <name>`);
+      return 'handled';
+    }
+    if (sub === 'remove') await ctx.updateSettings({lspServers: removeLspServer(ctx.settings, name)});
+    else await ctx.updateSettings({lspServers: setLspServerEnabled(ctx.settings, name, sub === 'enable')});
+    ctx.addSystemMessage(`LSP server ${name} ${sub === 'remove' ? 'removed' : sub === 'enable' ? 'enabled' : 'disabled'}.`);
+    return 'handled';
+  }
+  ctx.addSystemMessage('Unknown /lsp command. Use /lsp for help.');
+  return 'handled';
 }
 
 async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
@@ -216,7 +306,9 @@ export async function handleSlashCommand(
       '/model <name-or-provider:name>',
       '  Set a model directly. Selecting a model also sets its provider.',
       '/settings',
-      '  Show the configured provider, model, API key status, and loaded context files.',
+      '  Show the configured provider, model, API key status, LSP servers, and loaded context files.',
+      '/settings open',
+      '  Open ~/.haze/settings.json with the OS default app.',
       '/create-skill',
       '  Launch the 3-step skill wizard (name, role, description).',
       '/skills',
@@ -231,6 +323,8 @@ export async function handleSlashCommand(
       '  Start a fresh durable session.',
       '/logs',
       '  List recent log files with sizes and dates.',
+      '/lsp',
+      '  Configure read-only Language Server Protocol navigation tools.',
       '/logs <id>',
       '  Show summary of a specific log: entry counts by type, total tokens, tool calls.',
       '/compact [instructions]',
@@ -273,6 +367,16 @@ export async function handleSlashCommand(
     const args = value.slice('/logs'.length).trim();
     return await handleLogsCommand(args, ctx);
   }
+  if (value === '/lsp' || value.startsWith('/lsp ')) {
+    const args = value.slice('/lsp'.length).trim();
+    return await handleLspCommand(args, ctx);
+  }
+  if (value === '/settings open' || value === '/settings edit') {
+    const file = await ensureSettingsFile(ctx.settings);
+    openPath(file);
+    ctx.addSystemMessage(`Opened settings file: ${file}`);
+    return 'handled';
+  }
   if (value === '/settings') {
     const providers = configuredProviders(ctx.settings);
     const activeProvider = providers.find(provider => provider.name === ctx.settings.provider) ?? providers[0];
@@ -289,12 +393,14 @@ export async function handleSlashCommand(
       const duplicateTotal = summary.duplicateFileCount;
       notes.push(`${summary.duplicateGroups.length} duplicate group${summary.duplicateGroups.length === 1 ? '' : 's'} (${duplicateTotal} file${duplicateTotal === 1 ? '' : 's'} with identical content)`);
     }
+    const lspServers = configuredLspServers(ctx.settings);
     const lines = [
       `Provider: ${activeProvider?.name ?? 'not configured'}`,
       `Model: ${ctx.settings.model ?? 'not set'}`,
       `Base URL: ${activeProvider?.url ?? ctx.settings.baseURL ?? 'not configured'}`,
       `API key: ${activeProvider && providerHasKey(ctx.settings, activeProvider) ? 'saved' : 'missing'}`,
       `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
+      `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
       `Context files: ${ctx.contextFiles.length ? `${ctx.contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
     ];
     if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);

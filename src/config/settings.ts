@@ -9,10 +9,20 @@ export interface HazeProviderSettings {
   models: string[];
 }
 
+export interface HazeLspServerSettings {
+  name: string;
+  command: string;
+  args?: string[];
+  extensions?: string[];
+  rootPatterns?: string[];
+  enabled?: boolean;
+}
+
 export interface HazeSettings {
   provider?: string;
   model?: string;
   providers?: HazeProviderSettings[];
+  lspServers?: HazeLspServerSettings[];
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;

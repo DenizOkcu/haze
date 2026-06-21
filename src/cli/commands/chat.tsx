@@ -11,6 +11,7 @@ import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {configuredLspServers} from '../../config/lspSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -200,6 +201,11 @@ function annotateTurnHeaders(messages: Message[]) {
 function startupProviderInfo(settings: HazeSettings) {
   const selection = activeModel(settings);
   const configuredCount = configuredProviders(settings).length;
+  const lspServers = configuredLspServers(settings);
+  const enabledLsp = lspServers.filter(server => server.enabled !== false);
+  const lspLine = enabledLsp.length > 0
+    ? `- LSP: ${enabledLsp.length} configured (${enabledLsp.map(server => server.name).join(', ')}; tools appear only when the command is installed)`
+    : '- LSP: none configured (optional: install a language server, then /lsp presets and /lsp add typescript for semantic code navigation)';
   if (!selection) {
     return [
       'Provider configuration',
@@ -208,6 +214,7 @@ function startupProviderInfo(settings: HazeSettings) {
       '- Base URL: not configured',
       '- API key: missing',
       `- Configured providers: ${configuredCount}`,
+      lspLine,
       '',
       'Run /provider to choose or add a provider, then select a model.',
     ].join('\n');
@@ -225,6 +232,7 @@ function startupProviderInfo(settings: HazeSettings) {
     `- Base URL: ${baseURL} (settings)`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
     `- Configured providers: ${configuredCount}`,
+    lspLine,
   ].join('\n');
 }
 

@@ -33,6 +33,7 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/provider'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/logs'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/lsp'));
   });
 
   it('shows skill command help inside the app', async () => {
@@ -141,6 +142,23 @@ describe('handleSlashCommand', () => {
       process.chdir(orig);
       await fs.remove(tmp);
     }
+  });
+
+  it('lists and adds lsp presets', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/lsp presets', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('typescript'));
+
+    expect(await handleSlashCommand('/lsp add typescript', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      lspServers: [expect.objectContaining({name: 'typescript', command: 'typescript-language-server'})],
+    }));
+  });
+
+  it('shows configured lsp servers', async () => {
+    const ctx = mockContext({settings: {lspServers: [{name: 'ts', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts']}]}});
+    expect(await handleSlashCommand('/lsp', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('ts'));
   });
 
   it('reports unknown commands', async () => {

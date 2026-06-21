@@ -37,6 +37,9 @@ export function toolCallSummary(toolName: string, input: unknown) {
     const tasks = Array.isArray(data?.tasks) ? data.tasks as {title?: string}[] : [];
     return `writeTasks (${tasks.length} task${tasks.length === 1 ? '' : 's'})`;
   }
+  if (toolName === 'lspWorkspaceSymbols' && typeof data?.query === 'string') return `lspWorkspaceSymbols "${data.query}"`;
+  if (toolName === 'lspSymbols' && typeof data?.path === 'string') return `lspSymbols ${data.path}`;
+  if ((toolName === 'lspDefinition' || toolName === 'lspReferences') && typeof data?.path === 'string') return `${toolName} ${data.path}:${data.line}:${data.column}`;
   return `${toolName} ${compact(input)}`;
 }
 
@@ -66,6 +69,14 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     const duration = typeof output.durationMs === 'number' ? ` in ${(output.durationMs / 1000).toFixed(1)}s` : '';
     const meta = calls > 0 ? ` (${calls} call${calls === 1 ? '' : 's'}${duration})` : '';
     return `${output.status as string}${meta}: ${preview}`;
+  }
+  if (typeof output?.server === 'string' && Array.isArray(output.symbols)) {
+    const count = output.symbols.length;
+    return `${count} symbol${count === 1 ? '' : 's'} from ${output.server}`;
+  }
+  if (typeof output?.server === 'string' && Array.isArray(output.locations)) {
+    const count = output.locations.length;
+    return `${count} location${count === 1 ? '' : 's'} from ${output.server}`;
   }
   if (typeof output?.ok === 'boolean') {
     // writeTasks result
