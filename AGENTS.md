@@ -6,7 +6,7 @@ Last analysis: 2026-06-19.
 
 ## Project overview
 
-Haze is a pragmatic, intentionally limited agentic CLI for building apps from the terminal. It is a Node >=20, source-only TypeScript ESM package published as `@denizokcu/haze`.
+Haze is a pragmatic, intentionally limited agentic CLI for building apps from the terminal. It is a Node >=20 TypeScript ESM package published as `@denizokcu/haze`.
 
 Core product shape:
 
@@ -16,7 +16,7 @@ Core product shape:
 - Lightweight autonomy features: session persistence, conversation compaction, goal/completion policy, validation-output parsing, subagents, Markdown skills, and task tracking.
 - Minimal distribution model: source in `src/`, generated declarations/JS in `dist/`, thin published binary in `bin/haze.js`.
 
-Current package version is `0.5.0`; always verify against `package.json` before release work.
+Current package version is `0.6.0`; verify against `package.json` before release work.
 
 ## Common commands
 
@@ -76,6 +76,7 @@ Notes:
     - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
     - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`.
+    - `lspTools.ts`/`lsp.ts` provide optional read-only LSP navigation via installed stdio language servers.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
     - `webFetch.ts` implements the bounded HTTP fetch + content extraction (HTML→Markdown via `defuddle`, pretty JSON, passthrough text) behind the `fetch` tool.
   - `core/agent/` — context accounting, request assembly, bounded tool-output storage, structured work state, model-message compaction, agent events, and retry/context-overflow helpers.
@@ -101,19 +102,19 @@ Notes:
 - `dist/` — generated build output; never edit directly.
 - `docs/index.html` — generated/static documentation page included in the repo.
 - `.github/workflows/ci.yml` — GitHub Actions CI (Node 20 + 22: `npm ci`, typecheck, test, build).
-- `calc-app/`, `haiku/` — non-project sample/fixture directories; not part of the published package.
+- `calc-app/`, `haiku/` — sample/fixture directories; not published.
 - Root metadata: `package.json`, `package-lock.json`, `tsconfig.json`, `eslint.config.js`, `vitest.config.ts`, README, CHANGELOG, CONTRIBUTING, LICENSE.
 
 ## Runtime behavior and important contracts
 
 ### Providers and model selection
 
-- There is **no default provider or default model**. Users must configure a provider via `/provider` (or legacy `apiKey`/`baseURL`, which are migrated into an `openrouter` provider only when actually supplied).
+- There is **no default provider/model**. Users must configure a provider via `/provider` (or legacy `apiKey`/`baseURL`, migrated into `openrouter` only when supplied).
 - Runtime model config is resolved from `~/.haze/settings.json` provider/model settings and the saved provider key; if no provider/model is configured, `activeModel` returns `undefined` and the agent turn aborts with guidance to run `/provider`.
 - Provider key resolution: saved provider key → legacy `settings.apiKey` → `'not-needed'` placeholder (local OpenAI-compatible providers).
 - There are **no user-facing environment variables** for provider/model configuration; everything is configured via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands. (Test code only reads `HAZE_DIR` to redirect `~/.haze` during tests.)
 - Local OpenAI-compatible providers may intentionally use a placeholder API key (`not-needed`).
-- File LLM logging (detailed JSONL under `~/.haze/logs/`) is **off by default** and enabled solely by the `--debug` CLI flag. When not in debug mode, `startNewLog()` in `chat.tsx` never creates a log and `llmLogRef.current` stays `undefined`, so every `logEntry()` in `streaming.ts` is a no-op. `/logs` still reads historical files.
+- File LLM logging (detailed JSONL under `~/.haze/logs/`) is **off by default** and enabled solely by `--debug`. Without debug, `startNewLog()` creates no log and `logEntry()` is a no-op. `/logs` still reads historical files.
 
 ### Agent tools
 
@@ -129,6 +130,7 @@ Built-in tools in `src/llm/hazeTools.ts` are intentionally small and structured:
 - `readToolOutput` — retrieves an omitted output page by process-scoped handle; handles are cleared for new sessions.
 - `fetch` — reads a public `http(s)` URL and returns readable content (Markdown via readability extraction for HTML, pretty JSON for JSON, passthrough for text). SSRF is blocked by construction: scheme allowlist + private/loopback/link-local address blocking, re-validated on each redirect hop and after DNS resolution. Output is capped at 50k chars with a `readToolOutput` handle for oversize content; read-only and deduplicated like `bash`.
 - `writeTasks` — full-replacement task list for tracking multi-step work. Model passes the complete list every call; IDs and timestamps are generated server-side. Persists to `.haze/tasks.json` in the workspace.
+- Optional LSP tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) — read-only semantic navigation via user-configured stdio servers. `/lsp` manages settings/presets; tools are hidden unless an enabled server command exists on `PATH`.
 
 Tool constraints:
 

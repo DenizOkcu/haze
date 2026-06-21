@@ -2,9 +2,9 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.5.0
+## What's new in 0.6.0
 
-Haze 0.5.0 adds web fetching, scoped project instructions, debug-only detailed logs, and quieter long-running transcripts.
+Haze 0.6.0 adds an AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, and a cleaner segmented transcript for tool/text turns.
 
 - **Fetch public URLs.** The new `fetch` tool reads public HTTP(S) pages as Markdown, JSON, or text, with SSRF protections, redirects re-checked, bounded downloads, and oversize output retrievable via `readToolOutput`.
 - **No provider env vars.** `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read. Configure providers, models, keys, and base URLs through `/provider`, `/model`, `/settings`, and `~/.haze/settings.json`.
@@ -165,7 +165,13 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /model <name-or-provider:name>
 /model list
 /settings
+/settings open
 /logs [id]
+/lsp
+/lsp presets
+/lsp add <preset>
+/lsp add <name> -- <command> [args...]
+/lsp enable|disable|remove <name>
 /init
 /session
 /resume
@@ -208,8 +214,23 @@ Haze exposes a deliberately small toolset:
 - `fetch` — read a public `http(s)` URL and return readable content (Markdown for docs, pretty JSON, or text). Private/loopback/metadata hosts and non-`http(s)` schemes are blocked; output is bounded and retrievable via `readToolOutput`.
 - `writeTasks` — replace the task list at meaningful phase changes; completed lists auto-clear on the next user turn.
 - `skill` — load one installed Markdown workflow or one of its references.
+- `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences` — optional read-only semantic navigation through user-configured language servers. These tools are exposed only when an enabled LSP command is installed.
 
 Tool calls are grouped in the transcript so you can see what happened without reading a novella. Successful targeted file edits show a compact diff with colored additions/removals and one context line around the change when the diff is small; larger diffs are summarized with a pointer to `git diff`. File-tool failures return structured reason codes and recovery hints. Large bash/search/fetch output is kept behind an in-memory handle so later model calls carry only reduced validation, git, search, diff, JSON, log, or head/tail summaries.
+
+### Optional LSP navigation
+
+Haze can use user-configured stdio Language Server Protocol servers for semantic code navigation. Configure them with `/lsp`; presets currently include TypeScript, Rust, Python, Go, and PHP. Haze does not install language servers for you, and it hides LSP tools from the model unless an enabled server command exists on `PATH`, so projects without LSP still use `grep`, `listFiles`, and `readFile` normally.
+
+Example TypeScript setup:
+
+```bash
+npm install -g typescript typescript-language-server
+```
+
+```txt
+/lsp add typescript
+```
 
 ## Subagents
 

@@ -4,6 +4,21 @@
 
 - Nothing yet.
 
+## 0.6.0 - 2026-06-21
+
+### Added
+
+- Added optional configurable stdio LSP support through `/lsp`, with TypeScript, Rust, Python, Go, and PHP presets.
+- Added `/settings open` to open `~/.haze/settings.json` with the OS default app.
+- Added read-only semantic navigation tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) that are exposed to the model only when an enabled LSP command is installed on `PATH`.
+
+### Changed
+
+- Switched the main agent turn to the AI SDK v6 `ToolLoopAgent` abstraction while preserving compact terminal tool/text rendering and key loop guardrails.
+- Improved transcript segmentation so assistant text and tool blocks alternate cleanly during multi-step turns.
+- Added LSP-aware prompt guidance only when LSP tools are actually available; otherwise Haze naturally falls back to `grep`, `listFiles`, and `readFile`.
+- Updated README, docs site, and project agent guidance for LSP setup and the 0.6.0 release.
+
 ## 0.5.0 - 2026-06-19
 
 ### Changed

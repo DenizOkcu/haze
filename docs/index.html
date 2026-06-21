@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>haze — a terminal agent for AI experts</title>
-  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent tools, direct command execution, public URL fetch, parsed validation feedback. Bring your own model.">
+  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent tools, direct command execution, public URL fetch, optional LSP navigation, parsed validation feedback. Bring your own model.">
   <meta property="og:title" content="haze">
-  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, fetch, verify. No web UI, no permission gates, no telemetry.">
+  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, fetch, navigate with optional LSP, verify. No web UI, no permission gates, no telemetry.">
   <meta property="og:type" content="website">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#181823">
@@ -1310,12 +1310,12 @@
       <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
       <div class="head-meta" aria-hidden="true">
         <span>HAZE-CLI-001</span>
-        <span>REV 0.5.0</span>
+        <span>REV 0.6.0</span>
         <span>MIT</span>
       </div>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.5.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.6.0</a>
       </nav>
     </div>
   </header>
@@ -1327,13 +1327,13 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.5.0</div>
+            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.6.0</div>
             <h1 class="hero-h1">
               A CLI agent for Experts
               <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
             </h1>
             <p class="hero-sub">
-              Agentic workflows for people who know what they're doing. Bring your own model. File, shell, fetch, task, subagent, and skill tools. Do something twice, make it a skill.
+              Agentic workflows for people who know what they're doing. Bring your own model. File, shell, fetch, optional LSP, task, subagent, and skill tools. Do something twice, make it a skill.
             </p>
             <div class="hero-install">
               <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
@@ -1565,7 +1565,7 @@
           <div class="comp-group">
             <div class="comp-group-head">
               <span class="comp-group-name">Read</span>
-              <span class="comp-group-code">HAZE-R · 4</span>
+              <span class="comp-group-code">HAZE-R · 5</span>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
@@ -1594,6 +1594,13 @@
                 <span class="comp-part">HAZE-R-004</span>
               </div>
               <p class="comp-desc">Retrieve paged output omitted from oversized bash, grep, and fetch results.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">lsp*</span>
+                <span class="comp-part">HAZE-R-005</span>
+              </div>
+              <p class="comp-desc">Optional semantic symbols, definitions, and references via installed user-configured language servers.</p>
             </div>
           </div>
 
@@ -1680,6 +1687,10 @@
               <p class="comp-desc">Delegate genuinely independent investigations or actions with a capped focused tool loop.</p>
             </div>
           </div>
+        </div>
+        <div class="reveal" style="margin-top: 24px; border: 1px solid var(--rule); padding: 18px 20px; background: rgba(0,0,0,.16);">
+          <div class="eyebrow-stamp">OPTIONAL · LSP</div>
+          <p class="sec-sub" style="margin: 10px 0 0; max-width: 900px;">Configure read-only Language Server Protocol navigation with <code class="cmd">/lsp</code>. Presets cover TypeScript, Rust, Python, Go, and PHP. Haze does not install language servers, and hides LSP tools from the model unless an enabled server command exists on <code class="cmd">PATH</code>; without LSP it falls back to <code class="cmd">grep</code>, <code class="cmd">listFiles</code>, and <code class="cmd">readFile</code>.</p>
         </div>
       </div>
     </section>
@@ -1805,11 +1816,31 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>/settings</code></td>
-              <td class="cmd-d">Show provider, model, API key status, and loaded context files.</td>
+              <td class="cmd-d">Show provider, model, API key status, LSP servers, and loaded context files.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/settings open</code></td>
+              <td class="cmd-d">Open <code>~/.haze/settings.json</code> with the OS default app.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>/logs [id]</code></td>
               <td class="cmd-d">List recent LLM logs, or summarize one by id. New detailed logs are written only when haze starts with <code>--debug</code>.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/lsp</code>, <code>/lsp presets</code></td>
+              <td class="cmd-d">List configured language servers or show built-in presets.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/lsp add &lt;preset&gt;</code></td>
+              <td class="cmd-d">Add a preset such as <code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, or <code>php</code>.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/lsp add &lt;name&gt; -- &lt;command&gt; [args...]</code></td>
+              <td class="cmd-d">Add a custom stdio LSP server. The command must be installed separately.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>/lsp enable|disable|remove &lt;name&gt;</code></td>
+              <td class="cmd-d">Manage configured language servers.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Skills</td></tr>
@@ -1852,7 +1883,7 @@
   <footer>
     <div class="container footer-grid">
       <div class="footer-colophon">
-        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.5.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
+        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.6.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
         <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
       </div>
       <nav class="footer-links" aria-label="Footer">
