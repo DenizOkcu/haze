@@ -6,6 +6,7 @@ import {Box, render, Static, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
+import {checkForUpdate} from '../../config/updateCheck.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
@@ -376,6 +377,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     readContextFiles().then(setContextFiles).catch(() => undefined);
     refreshSkills().catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
+    if (version) {
+      checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'})
+        .then(result => {
+          if (result?.isOutdated) {
+            setMessages(m => [...m, {role: 'system', text: `A new version of Haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
+          }
+        })
+        .catch(() => undefined);
+    }
     const branchTimer = setInterval(() => {
       currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
     }, 3000);
