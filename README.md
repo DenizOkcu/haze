@@ -68,6 +68,25 @@ On first run, create or choose a provider, then choose your first model:
 /model local:llama3.1
 ```
 
+### MCP servers
+
+Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) servers and give the agent extra tools. Context7 (up-to-date library docs) ships as a built-in preset:
+
+```txt
+/mcp add context7
+```
+
+Add a remote or local server, set an API key, or manage existing ones:
+
+```txt
+/mcp add github -- http https://mcp.example.com/mcp
+/mcp add fs -- stdio npx -y @modelcontextprotocol/server-filesystem .
+/mcp key context7 <api-key>
+/mcp enable context7 | /mcp disable context7 | /mcp remove context7
+```
+
+Servers persist in `~/.haze/settings.json` under `mcpServers` and support `http`, `sse`, and `stdio` transports. Their tools load at the start of each agent turn and the connections close when the turn ends. An unreachable server is isolated and never blocks the agent.
+
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
 Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill` (a 3-step wizard: name, role, description). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.

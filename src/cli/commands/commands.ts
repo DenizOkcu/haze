@@ -4,9 +4,10 @@ import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {contextFileDiagnostics, summarizeContextDiagnostics, MAX_CONTEXT_FILE_CHARS} from '../../config/contextFiles.js';
-import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
+import {SETTINGS_FILE, writeSettings, type HazeMcpServer, type HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer} from '../../config/lspSettings.js';
+import {configuredMcpServers, findMcpPreset, findMcpServer, presetIds, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
 import type {Mode} from './chat.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
@@ -222,6 +223,136 @@ async function handleLspCommand(args: string, ctx: CommandContext): Promise<Comm
   return 'handled';
 }
 
+function mcpOverview(settings: HazeSettings) {
+  const servers = configuredMcpServers(settings);
+  const lines = [
+    'MCP commands:',
+    '/mcp',
+    '  List configured MCP servers.',
+    '/mcp presets',
+    `  Show built-in presets: ${presetIds().join(', ') || 'none'}`,
+    '/mcp add <preset>',
+    '  Add a preset, e.g. /mcp add context7.',
+    '/mcp add <name> -- (http|sse) <url>',
+    '  Add a remote MCP server. Example: /mcp add github -- http https://mcp.example.com/mcp',
+    '/mcp add <name> -- stdio <command> [args...]',
+    '  Add a local MCP server. Example: /mcp add fs -- stdio npx -y @modelcontextprotocol/server-filesystem .',
+    '/mcp key <name> <value>',
+    '  Set an Authorization: Bearer <value> header for a server.',
+    '/mcp enable <name> | /mcp disable <name> | /mcp remove <name>',
+    '',
+    'Configured MCP servers:',
+    ...(servers.length === 0 ? ['- none'] : servers.map(server => {
+      const location = server.url ?? (server.command ? `${server.command} ${(server.args ?? []).join(' ')}`.trim() : '');
+      return `- ${server.name} ${server.enabled === false ? '(disabled)' : '(enabled)'}: ${server.transport}${location ? ` ${location}` : ''}`;
+    })),
+    '',
+    'MCP tools load at the start of each turn and the connections close when the turn ends.',
+  ];
+  return lines.join('\n');
+}
+
+async function handleMcpCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
+  const parts = splitArgs(args);
+  const sub = parts[0];
+  if (!sub) {
+    ctx.addSystemMessage(mcpOverview(ctx.settings));
+    return 'handled';
+  }
+  if (sub === 'presets') {
+    ctx.addSystemMessage(['MCP presets:', ...presetIds().map(id => `- ${id}: ${findMcpPreset(id)?.description ?? 'custom'}`)].join('\n'));
+    return 'handled';
+  }
+  if (sub === 'add') {
+    const name = parts[1];
+    if (!name) {
+      ctx.addSystemMessage('Usage: /mcp add <preset> OR /mcp add <name> -- (http|sse) <url> OR /mcp add <name> -- stdio <command> [args...]');
+      return 'handled';
+    }
+    const preset = findMcpPreset(name);
+    if (preset) {
+      const {description: _description, ...rest} = preset;
+      void _description;
+      const server: HazeMcpServer = {name, ...rest, enabled: true};
+      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
+      ctx.addSystemMessage(`Added MCP preset ${name} (${preset.transport}${preset.url ? ` ${preset.url}` : ''}). Tools load on the next turn.`);
+      return 'handled';
+    }
+    const sep = parts.indexOf('--');
+    const rest = sep === -1 ? [] : parts.slice(sep + 1);
+    const transport = rest[0];
+    if (transport === 'http' || transport === 'sse') {
+      const url = rest[1];
+      if (!url) {
+        ctx.addSystemMessage(`Usage: /mcp add ${name} -- ${transport} <url>`);
+        return 'handled';
+      }
+      const server: HazeMcpServer = {name, transport, url, enabled: true};
+      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
+      ctx.addSystemMessage(`Added MCP server ${name} (${transport}, ${url}). Tools load on the next turn.`);
+      return 'handled';
+    }
+    if (transport === 'stdio') {
+      const command = rest[1];
+      if (!command) {
+        ctx.addSystemMessage(`Usage: /mcp add ${name} -- stdio <command> [args...]`);
+        return 'handled';
+      }
+      const server: HazeMcpServer = {name, transport, command, args: rest.slice(2), enabled: true};
+      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
+      ctx.addSystemMessage(`Added MCP server ${name} (stdio, ${command}${rest.length > 2 ? ` ${rest.slice(2).join(' ')}` : ''}). Tools load on the next turn.`);
+      return 'handled';
+    }
+    ctx.addSystemMessage(`Unknown transport "${transport ?? ''}". Use http, sse, or stdio. Example: /mcp add ${name} -- http https://mcp.example.com/mcp`);
+    return 'handled';
+  }
+  if (sub === 'enable' || sub === 'disable') {
+    const name = parts[1];
+    if (!name) {
+      ctx.addSystemMessage(`Usage: /mcp ${sub} <name>`);
+      return 'handled';
+    }
+    const next = toggleMcpServer(ctx.settings, name, sub === 'enable');
+    if (!next) {
+      ctx.addSystemMessage(`No MCP server named ${name}.`);
+      return 'handled';
+    }
+    await ctx.updateSettings({mcpServers: next});
+    ctx.addSystemMessage(`MCP server ${name} ${sub === 'enable' ? 'enabled' : 'disabled'}.`);
+    return 'handled';
+  }
+  if (sub === 'remove') {
+    const name = parts[1];
+    if (!name) {
+      ctx.addSystemMessage('Usage: /mcp remove <name>');
+      return 'handled';
+    }
+    await ctx.updateSettings({mcpServers: removeMcpServer(ctx.settings, name)});
+    ctx.addSystemMessage(`Removed MCP server ${name}.`);
+    return 'handled';
+  }
+  if (sub === 'key') {
+    const name = parts[1];
+    const value = parts[2];
+    if (!name || !value) {
+      ctx.addSystemMessage('Usage: /mcp key <name> <value>  (sets an Authorization: Bearer <value> header)');
+      return 'handled';
+    }
+    const server = findMcpServer(ctx.settings, name);
+    if (!server) {
+      ctx.addSystemMessage(`No MCP server named ${name}.`);
+      return 'handled';
+    }
+    const headers = (server.headers ?? []).filter(header => header.name !== 'Authorization');
+    headers.push({name: 'Authorization', value: `Bearer ${value}`});
+    await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, {...server, headers})});
+    ctx.addSystemMessage(`Set Authorization header for MCP server ${name}.`);
+    return 'handled';
+  }
+  ctx.addSystemMessage('Unknown /mcp command. Use /mcp for help.');
+  return 'handled';
+}
+
 async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
   const id = args.trim();
 
@@ -306,7 +437,7 @@ export async function handleSlashCommand(
       '/model <name-or-provider:name>',
       '  Set a model directly. Selecting a model also sets its provider.',
       '/settings',
-      '  Show the configured provider, model, API key status, LSP servers, and loaded context files.',
+      '  Show the configured provider, model, API key status, LSP/MCP servers, and loaded context files.',
       '/settings open',
       '  Open ~/.haze/settings.json with the OS default app.',
       '/create-skill',
@@ -325,6 +456,8 @@ export async function handleSlashCommand(
       '  List recent log files with sizes and dates.',
       '/lsp',
       '  Configure read-only Language Server Protocol navigation tools.',
+      '/mcp',
+      '  Configure Model Context Protocol servers (e.g. Context7) to add external tools.',
       '/logs <id>',
       '  Show summary of a specific log: entry counts by type, total tokens, tool calls.',
       '/compact [instructions]',
@@ -371,6 +504,10 @@ export async function handleSlashCommand(
     const args = value.slice('/lsp'.length).trim();
     return await handleLspCommand(args, ctx);
   }
+  if (value === '/mcp' || value.startsWith('/mcp ')) {
+    const args = value.slice('/mcp'.length).trim();
+    return await handleMcpCommand(args, ctx);
+  }
   if (value === '/settings open' || value === '/settings edit') {
     const file = await ensureSettingsFile(ctx.settings);
     openPath(file);
@@ -401,6 +538,7 @@ export async function handleSlashCommand(
       `API key: ${activeProvider && providerHasKey(ctx.settings, activeProvider) ? 'saved' : 'missing'}`,
       `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
       `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
+      `MCP servers: ${configuredMcpServers(ctx.settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
       `Context files: ${ctx.contextFiles.length ? `${ctx.contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
     ];
     if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);

@@ -61,29 +61,30 @@ Notes:
 
 - `src/` — primary TypeScript/TSX source.
   - `cli/index.ts` — Commander entrypoint, CLI flags (`--debug`, `--continue`, `--no-session`), version loading, and dispatch to chat UI.
-  - `cli/commands/chat.tsx` — main Ink/React interactive screen: provider/model flows, session lifecycle, context loading, slash command wiring, input history, live messages, status header, queued follow-ups, abort handling.
+  - `cli/commands/chat.tsx` — main Ink/React interactive screen: provider/model flows, session lifecycle, context loading, slash command wiring, input history, live messages, abort handling.
   - `cli/commands/commands.ts` — slash command parser and command handlers: help, settings, provider/model selection, init, sessions, compaction, skill aliases.
-  - `cli/commands/streaming.ts` — core agent loop around `streamText`: tool orchestration, goal observation, continuation/retry policy, subagent/skill tool injection, tool display state, token estimates, idle timeout.
+  - `cli/commands/streaming.ts` — core agent loop around `ToolLoopAgent`: tool orchestration, goal observation, retry policy, subagent/skill/MCP tool injection, tool display state, token estimates, idle timeout.
   - `cli/commands/formatters.ts` — compact display summaries for tool calls/results, bash output details, elapsed-time formatting.
   - `cli/commands/skills.tsx` — skill-related UI helpers.
   - `config/` — runtime config and user data paths.
     - `paths.ts` defines `~/.haze` and global skills directory.
     - `settings.ts` reads/writes `~/.haze/settings.json` and preserves legacy OpenRouter settings.
     - `providers.ts` resolves active provider/model from configured providers only, model selectors, and saved keys. There is no default provider or model; users must add one via `/provider`.
-    - `contextFiles.ts` loads global `~/.claude/CLAUDE.md`, `~/.haze/AGENTS.md`, then ancestor `CLAUDE.md`/`AGENTS.md` files from filesystem root to cwd; each file is capped at 20k chars and has size/hash diagnostics. Nested files below cwd are loaded lazily when file tools operate inside their subtree.
+    - `contextFiles.ts` loads global `~/.claude/CLAUDE.md`, `~/.haze/AGENTS.md`, then ancestor `CLAUDE.md`/`AGENTS.md` from filesystem root to cwd; each capped at 20k chars with size/hash diagnostics. Nested files below cwd load lazily when file tools operate in their subtree.
     - `inputHistory.ts` persists input history under `~/.haze/history`.
   - `llm/` — model client, prompts, and tool definitions.
     - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
     - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`.
     - `lspTools.ts`/`lsp.ts` provide optional read-only LSP navigation via installed stdio language servers.
+    - `mcp.ts` loads tools from configured Model Context Protocol servers (`@ai-sdk/mcp`) into the toolset per turn.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
     - `webFetch.ts` implements the bounded HTTP fetch + content extraction (HTML→Markdown via `defuddle`, pretty JSON, passthrough text) behind the `fetch` tool.
   - `core/agent/` — context accounting, request assembly, bounded tool-output storage, structured work state, model-message compaction, agent events, and retry/context-overflow helpers.
   - `core/bashOutput/` — command-aware bash-output reduction: validation rendering, git/search/diff/JSON/log reducers, line filters, ANSI handling, and reduction metadata.
   - `core/goal/` — request intent classification, session-goal phase tracking, and completion/continuation decisions.
   - `core/safety/bashClassifier.ts` — bash risk/trait classifier; classification is metadata, not a confirmation gate.
-  - `core/safety/urlGuard.ts` — SSRF guard for the `fetch` tool: scheme allowlist + private/loopback/link-local/cloud-metadata blocking, re-validated on each redirect hop and after DNS resolution. Pure safety logic, parallel to `bashClassifier.ts`.
+  - `core/safety/urlGuard.ts` — SSRF guard for the `fetch` tool: scheme allowlist + private/loopback/link-local/cloud-metadata blocking, re-validated per redirect hop and after DNS resolution. Parallel to `bashClassifier.ts`.
   - `core/validation/outputParser.ts` — parses common test/typecheck/lint/build output into compact validation summaries.
   - `core/session/sessionStore.ts` — durable JSONL session files under `~/.haze/sessions`, per-workspace hashed directory, snapshot restore.
   - `core/tasks/taskStorage.ts` — workspace-local task list persisted to `.haze/tasks.json`.
@@ -110,11 +111,11 @@ Notes:
 ### Providers and model selection
 
 - There is **no default provider/model**. Users must configure a provider via `/provider` (or legacy `apiKey`/`baseURL`, migrated into `openrouter` only when supplied).
-- Runtime model config is resolved from `~/.haze/settings.json` provider/model settings and the saved provider key; if no provider/model is configured, `activeModel` returns `undefined` and the agent turn aborts with guidance to run `/provider`.
+- Runtime model config resolves from `~/.haze/settings.json` provider/model settings and the saved provider key; if none is configured, `activeModel` returns `undefined` and the turn aborts with guidance to run `/provider`.
 - Provider key resolution: saved provider key → legacy `settings.apiKey` → `'not-needed'` placeholder (local OpenAI-compatible providers).
-- There are **no user-facing environment variables** for provider/model configuration; everything is configured via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands. (Test code only reads `HAZE_DIR` to redirect `~/.haze` during tests.)
+- There are **no user-facing environment variables** for provider/model configuration; everything is via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` commands. (Tests read `HAZE_DIR` only to redirect `~/.haze`.)
 - Local OpenAI-compatible providers may intentionally use a placeholder API key (`not-needed`).
-- File LLM logging (detailed JSONL under `~/.haze/logs/`) is **off by default** and enabled solely by `--debug`. Without debug, `startNewLog()` creates no log and `logEntry()` is a no-op. `/logs` still reads historical files.
+- File LLM logging (JSONL under `~/.haze/logs/`) is **off by default**, enabled solely by `--debug`; without it `startNewLog()` creates no log and `logEntry()` is a no-op. `/logs` still reads historical files.
 
 ### Agent tools
 
@@ -128,9 +129,10 @@ Built-in tools in `src/llm/hazeTools.ts` are intentionally small and structured:
 - `writeFile` — creates files and parents; refuses to overwrite existing files unless `overwriteExisting=true`.
 - `bash` — runs `bash -lc` in the workspace with timeout, classification metadata, command-aware output reduction, compact validation summaries, and retrievable handles for oversized/reduced raw output.
 - `readToolOutput` — retrieves an omitted output page by process-scoped handle; handles are cleared for new sessions.
-- `fetch` — reads a public `http(s)` URL and returns readable content (Markdown via readability extraction for HTML, pretty JSON for JSON, passthrough for text). SSRF is blocked by construction: scheme allowlist + private/loopback/link-local address blocking, re-validated on each redirect hop and after DNS resolution. Output is capped at 50k chars with a `readToolOutput` handle for oversize content; read-only and deduplicated like `bash`.
+- `fetch` — reads a public `http(s)` URL and returns readable content (Markdown for HTML, pretty JSON, passthrough text). SSRF is blocked by construction (`src/core/safety/urlGuard.ts`); output is capped at 50k chars with a `readToolOutput` handle for oversize content; read-only and deduplicated like `bash`.
 - `writeTasks` — full-replacement task list for tracking multi-step work. Model passes the complete list every call; IDs and timestamps are generated server-side. Persists to `.haze/tasks.json` in the workspace.
-- Optional LSP tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) — read-only semantic navigation via user-configured stdio servers. `/lsp` manages settings/presets; tools are hidden unless an enabled server command exists on `PATH`.
+- Optional LSP tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) — read-only semantic navigation via user-configured stdio servers. `/lsp` manages presets; tools appear only when an enabled server command is on `PATH`.
+- MCP server tools — discovered at runtime from configured servers (`http`/`sse`/`stdio`); `/mcp` manages them. `streaming.ts` connects per turn, merges non-colliding tools (collisions skipped, never shadowing built-ins), and closes clients in the `finally`; failures are isolated. Helpers in `src/config/mcpSettings.ts` and `src/llm/mcp.ts`.
 
 Tool constraints:
 
@@ -147,7 +149,7 @@ Tool constraints:
 - The `writeTasks` tool uses full-replacement semantics: every call sends the complete list, replacing whatever existed before.
 - Server-side ID generation prevents ID collisions and hallucinated IDs.
 - Tasks are managed by the LLM via the `writeTasks` tool; there is no user-facing slash command.
-- When a new user question starts a turn and every existing task is already completed, the task bar is cleared automatically (and `.haze/tasks.json` reset) so completed todos do not linger; the model can create fresh todos for the new question, or none for simple cases.
+- When a new turn starts and every existing task is already completed, the task bar (and `.haze/tasks.json`) is cleared automatically; the model may create fresh todos or none for simple cases.
 - `/clear` also clears tasks.
 - Types and storage live in `src/core/tasks/taskStorage.ts`; the tool is in `src/llm/hazeTools.ts`.
 
@@ -159,7 +161,7 @@ Tool constraints:
 - `/compact [instructions]` uses token-aware compaction and embeds exact structured work state with the recent message window.
 - Runtime control nudges use `<haze_control>` messages for one request only and must not be persisted as user conversation.
 - Older successful tool results may be reduced to protocol-safe summaries; recent results and failures remain verbatim.
-- Context files load at startup/refresh; keep root `AGENTS.md` concise. Global Claude guidance comes from `~/.claude/CLAUDE.md`, but `~/.haze/AGENTS.md` wins on conflict. Nested `CLAUDE.md`/`AGENTS.md` below cwd are scoped: file tools surface them only inside their subtree, and mutating tools stop once so the model can review newly discovered scoped instructions. `/init` should preserve useful guidance, avoid broad discovery, and keep `AGENTS.md` below the context budget.
+- Context files load at startup/refresh; keep root `AGENTS.md` concise. Global Claude guidance comes from `~/.claude/CLAUDE.md`, but `~/.haze/AGENTS.md` wins on conflict. Nested `CLAUDE.md`/`AGENTS.md` below cwd are scoped: file tools surface them only inside their subtree, and mutating tools stop once so the model can review newly discovered scoped instructions. `/init` should preserve useful guidance and avoid broad discovery.
 - File LLM logging (`~/.haze/logs/`) is off by default; see the logging contract above (`--debug`). Structured-event session logging under `~/.haze/sessions/` is a separate mechanism and is unaffected.
 
 ### Skills

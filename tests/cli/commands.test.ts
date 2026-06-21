@@ -161,6 +161,31 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('ts'));
   });
 
+  it('lists and adds mcp presets', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/mcp presets', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('context7'));
+
+    expect(await handleSlashCommand('/mcp add context7', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      mcpServers: [expect.objectContaining({name: 'context7', transport: 'http', url: 'https://mcp.context7.com/mcp'})],
+    }));
+  });
+
+  it('adds a custom mcp http server', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/mcp add custom -- http https://mcp.example.com/mcp', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      mcpServers: [expect.objectContaining({name: 'custom', transport: 'http', url: 'https://mcp.example.com/mcp'})],
+    }));
+  });
+
+  it('shows configured mcp servers', async () => {
+    const ctx = mockContext({settings: {mcpServers: [{name: 'ctx7', transport: 'http', url: 'https://mcp.context7.com/mcp'}]}});
+    expect(await handleSlashCommand('/mcp', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('ctx7'));
+  });
+
   it('reports unknown commands', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/unknown', ctx)).toBe('handled');

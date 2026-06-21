@@ -12,6 +12,7 @@ import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
+import {configuredMcpServers} from '../../config/mcpSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -206,6 +207,11 @@ function startupProviderInfo(settings: HazeSettings) {
   const lspLine = enabledLsp.length > 0
     ? `- LSP: ${enabledLsp.length} configured (${enabledLsp.map(server => server.name).join(', ')}; tools appear only when the command is installed)`
     : '- LSP: none configured (optional: install a language server, then /lsp presets and /lsp add typescript for semantic code navigation)';
+  const mcpServers = configuredMcpServers(settings);
+  const enabledMcp = mcpServers.filter(server => server.enabled !== false);
+  const mcpLine = enabledMcp.length > 0
+    ? `- MCP: ${enabledMcp.length} configured (${enabledMcp.map(server => server.name).join(', ')}; tools load each turn)`
+    : '- MCP: none configured (optional: /mcp add context7 for up-to-date library docs)';
   if (!selection) {
     return [
       'Provider configuration',
@@ -215,6 +221,7 @@ function startupProviderInfo(settings: HazeSettings) {
       '- API key: missing',
       `- Configured providers: ${configuredCount}`,
       lspLine,
+      mcpLine,
       '',
       'Run /provider to choose or add a provider, then select a model.',
     ].join('\n');
@@ -233,6 +240,7 @@ function startupProviderInfo(settings: HazeSettings) {
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
     `- Configured providers: ${configuredCount}`,
     lspLine,
+    mcpLine,
   ].join('\n');
 }
 
@@ -1177,6 +1185,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
+    {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
     {value: '/create-skill ', description: 'Launch the skill wizard', kind: 'command'},
     {value: '/skill-info ', description: 'Show details for a skill', kind: 'command'},

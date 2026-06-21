@@ -7,6 +7,8 @@ import {lspTools} from '../../llm/lspTools.js';
 import {buildSystemPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
 import {installedLspServers} from '../../config/lspSettings.js';
+import {configuredMcpServers} from '../../config/mcpSettings.js';
+import {closeMcpClients, loadMcpTools, type LoadedMcpTools} from '../../llm/mcp.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {buildSkillTools} from '../../skills/skillTools.js';
 import type {ContextFile} from '../../config/contextFiles.js';
@@ -303,6 +305,7 @@ export async function runAgentTurn(
 
   let turnStatus: 'complete' | 'aborted' | 'failed' = 'failed';
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let loadedMcp: LoadedMcpTools | undefined;
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
@@ -394,6 +397,11 @@ export async function runAgentTurn(
     const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
     const subagentTool = createSubagentTool({model: activeModel, contextFiles: activeContextFiles, session});
     const availableTools: ToolSet = {...hazeTools, ...(hasInstalledLsp ? lspTools : {}), subagent: subagentTool, ...buildSkillTools(skillRegistry)};
+    const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
+    loadedMcp = mcpServers.length > 0 ? await loadMcpTools(mcpServers, new Set(Object.keys(availableTools))) : undefined;
+    if (loadedMcp && Object.keys(loadedMcp.tools).length > 0) Object.assign(availableTools, loadedMcp.tools);
+    if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
+    const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
 
     const goal = createSessionGoal(value);
     callbacks.setWorkState?.(goal.workState);
@@ -411,7 +419,7 @@ export async function runAgentTurn(
     }
     callbacks.setConversation(stripSyntheticControls(requestMessages));
 
-    const systemPrompt = buildSystemPrompt(activeContextFiles, session, {lspAvailable: hasInstalledLsp});
+    const systemPrompt = buildSystemPrompt(activeContextFiles, session, {lspAvailable: hasInstalledLsp, mcpAvailable});
     const inputBreakdown = estimateInputBreakdown({system: systemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: availableTools});
     logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: systemPrompt, messages: requestMessages, tools: Object.keys(availableTools), context: inputBreakdown.breakdown});
 
@@ -694,6 +702,7 @@ export async function runAgentTurn(
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
     }
   } finally {
+    if (loadedMcp?.clients.length) await closeMcpClients(loadedMcp.clients);
     if (idleTimer) clearTimeout(idleTimer);
     stopToolTimer();
     finalizeToolGroup();

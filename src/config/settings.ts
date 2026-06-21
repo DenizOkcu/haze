@@ -18,11 +18,27 @@ export interface HazeLspServerSettings {
   enabled?: boolean;
 }
 
+export interface HazeMcpHeader {
+  name: string;
+  value: string;
+}
+
+export interface HazeMcpServer {
+  name: string;
+  transport: 'http' | 'sse' | 'stdio';
+  url?: string;
+  command?: string;
+  args?: string[];
+  headers?: HazeMcpHeader[];
+  enabled?: boolean;
+}
+
 export interface HazeSettings {
   provider?: string;
   model?: string;
   providers?: HazeProviderSettings[];
   lspServers?: HazeLspServerSettings[];
+  mcpServers?: HazeMcpServer[];
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
