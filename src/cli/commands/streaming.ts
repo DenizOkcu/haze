@@ -1,23 +1,16 @@
-import {ToolLoopAgent, stepCountIs, type ModelMessage, type ToolSet} from 'ai';
+import {ToolLoopAgent, stepCountIs, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
-import {hazeTools} from '../../llm/hazeTools.js';
-import {lspTools} from '../../llm/lspTools.js';
-import {buildSystemPrompt, type PromptSession} from '../../llm/systemPrompt.js';
-import {readSettings} from '../../config/settings.js';
-import {installedLspServers} from '../../config/lspSettings.js';
-import {configuredMcpServers} from '../../config/mcpSettings.js';
-import {closeMcpClients, loadMcpTools, type LoadedMcpTools} from '../../llm/mcp.js';
-import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
-import {buildSkillTools} from '../../skills/skillTools.js';
+import {assembleRequestContext} from '../../llm/requestContext.js';
+import {type PromptSession} from '../../llm/systemPrompt.js';
+import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {compact, toolCallSummary, toolResultSummary, formatElapsedTimeWhole, formatSeconds} from './formatters.js';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
-import {createSubagentTool} from '../../core/subagent/subagentRunner.js';
 import {contextBreakdown, cacheHitRatio, effectiveNonCachedInput, estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl} from '../../core/agent/requestAssembly.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
@@ -392,16 +385,10 @@ export async function runAgentTurn(
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
     const providerSettings = providerRequestSettings(runtime.config);
-    const skillRegistry = await loadSkillRegistry();
-    const settings = await readSettings();
-    const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
-    const subagentTool = createSubagentTool({model: activeModel, contextFiles: activeContextFiles, session});
-    const availableTools: ToolSet = {...hazeTools, ...(hasInstalledLsp ? lspTools : {}), subagent: subagentTool, ...buildSkillTools(skillRegistry)};
-    const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
-    loadedMcp = mcpServers.length > 0 ? await loadMcpTools(mcpServers, new Set(Object.keys(availableTools))) : undefined;
-    if (loadedMcp && Object.keys(loadedMcp.tools).length > 0) Object.assign(availableTools, loadedMcp.tools);
+    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel});
+    const availableTools = assembled.availableTools;
+    loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
-    const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
 
     const goal = createSessionGoal(value);
     callbacks.setWorkState?.(goal.workState);
@@ -419,7 +406,7 @@ export async function runAgentTurn(
     }
     callbacks.setConversation(stripSyntheticControls(requestMessages));
 
-    const systemPrompt = buildSystemPrompt(activeContextFiles, session, {lspAvailable: hasInstalledLsp, mcpAvailable});
+    const systemPrompt = assembled.systemPrompt;
     const inputBreakdown = estimateInputBreakdown({system: systemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: availableTools});
     logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: systemPrompt, messages: requestMessages, tools: Object.keys(availableTools), context: inputBreakdown.breakdown});
 

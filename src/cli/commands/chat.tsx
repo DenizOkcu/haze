@@ -20,6 +20,7 @@ import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
+import {formatContextReport} from './formatters.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
@@ -28,6 +29,11 @@ import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
+import {contextBreakdown} from '../../core/agent/contextBudget.js';
+import {stripSyntheticControls} from '../../core/agent/requestAssembly.js';
+import {modelWithConfig} from '../../llm/client.js';
+import {assembleRequestContext} from '../../llm/requestContext.js';
+import {closeMcpClients} from '../../llm/mcp.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 
@@ -512,6 +518,39 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setTokenUsage({...EMPTY_TOKEN_USAGE});
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
+  }
+
+  async function buildContextReport(): Promise<string> {
+    const runtime = await modelWithConfig({cwd: process.cwd()});
+    if (!runtime?.model) {
+      return 'No model provider configured. Run /provider to choose or add a provider before /context can estimate tokens.';
+    }
+    const session = {start: sessionStartRef.current, cwd: process.cwd()};
+    const assembled = await assembleRequestContext({contextFiles, session, model: runtime.model});
+    try {
+      const messages = stripSyntheticControls(conversationRef.current);
+      const breakdown = contextBreakdown({system: assembled.systemPrompt, contextFiles, messages, tools: assembled.availableTools});
+      const tools = breakdown.toolSchemas.map(tool => ({
+        name: tool.name,
+        tokens: tool.tokens,
+        category: assembled.toolCategories.get(tool.name) ?? 'builtin',
+      }));
+      return formatContextReport({
+        modelLabel: `${runtime.config.providerName}:${runtime.config.modelName}`,
+        systemTokens: breakdown.system,
+        projectContext: breakdown.projectContext,
+        tools,
+        messagesByRole: breakdown.messagesByRole,
+        toolResults: breakdown.toolResults,
+        toolInputs: breakdown.toolInputs,
+        syntheticControl: breakdown.syntheticControl,
+        logicalInputEstimate: breakdown.logicalInputEstimate,
+        messageCount: messages.length,
+        mcpErrors: assembled.loadedMcp?.errors ?? [],
+      });
+    } finally {
+      if (assembled.loadedMcp?.clients.length) await closeMcpClients(assembled.loadedMcp.clients);
+    }
   }
 
   function cancelThinking() {
@@ -1455,6 +1494,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setSettings(next);
         return next;
       },
+      getContextReport: async () => buildContextReport(),
     };
     let result;
     try {
@@ -1655,6 +1695,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/lsp', description: 'Manage LSP servers (semantic navigation)', kind: 'command'},
     {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
+    {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
     {value: '/create-skill ', description: 'Launch the skill wizard', kind: 'command'},
     {value: '/skill-info ', description: 'Show details for a skill', kind: 'command'},
     {value: '/validate-skill ', description: 'Validate a skill', kind: 'command'},

@@ -34,6 +34,7 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/logs'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/lsp'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
   });
 
   it('shows skill command help inside the app', async () => {
@@ -172,6 +173,18 @@ describe('handleSlashCommand', () => {
 
   it('returns unhandled for empty string', async () => {
     expect(await handleSlashCommand('', mockContext())).toBe('unhandled');
+  });
+
+  it('renders the context report for /context when getContextReport is wired', async () => {
+    const ctx = mockContext({getContextReport: async () => 'Context overview — model: openrouter:test\nEstimated input: ~1,000 tokens'});
+    expect(await handleSlashCommand('/context', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Context overview'));
+  });
+
+  it('reports context overview unavailable for /context without a callback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/context', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
   });
 });
 

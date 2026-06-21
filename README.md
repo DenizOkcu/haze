@@ -183,6 +183,7 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /lsp
 /mcp
 /init
+/context
 /session
 /resume
 /new

@@ -26,6 +26,7 @@ export type CommandContext = {
   runAgentTurn: (prompt: string, displayValue?: string) => Promise<void>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
+  getContextReport?: () => Promise<string>;
 };
 
 export type CommandResult = 'handled' | 'unhandled' | 'exit';
@@ -242,6 +243,8 @@ export async function handleSlashCommand(
       '  Show Markdown skill commands and installed skill slash commands.',
       '/init',
       '  Inspect the current workspace and create or update AGENTS.md project instructions.',
+      '/context',
+      '  Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.',
       '/session',
       '  Show the current durable session file.',
       '/resume',
@@ -265,6 +268,11 @@ export async function handleSlashCommand(
       '/quit',
       '  Exit Haze.',
     ].join('\n'));
+    return 'handled';
+  }
+  if (value === '/context') {
+    if (ctx.getContextReport) ctx.addSystemMessage(await ctx.getContextReport());
+    else ctx.addSystemMessage('Context overview is unavailable.');
     return 'handled';
   }
   if (value === '/session') {
