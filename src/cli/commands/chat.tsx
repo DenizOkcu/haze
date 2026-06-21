@@ -9,10 +9,10 @@ import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
-import {readSettings, updateSettings, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
+import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
-import {configuredLspServers} from '../../config/lspSettings.js';
-import {configuredMcpServers} from '../../config/mcpSettings.js';
+import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
+import {configuredMcpServers, findMcpPreset, findMcpServer, presetIds, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -30,7 +30,14 @@ import {compactModelMessages, modelMessageText} from '../../core/agent/compactio
 import type {WorkState} from '../../core/agent/workState.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skillCreateName' | 'skillCreateRole' | 'skillCreateDescription';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skillCreateName' | 'skillCreateRole' | 'skillCreateDescription' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
+
+/** Modes that show an always-on suggestion picker (server/preset lists). */
+const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
+/** Modes that mask input (secrets/API keys). */
+const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
+/** Modes where submitting an empty value is valid (optional steps). */
+const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'skillCreateRole', 'mcpAddKey']);
 
 interface ChatOptions {
   debug?: boolean;
@@ -343,6 +350,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
   const [skillCreateDraft, setSkillCreateDraft] = useState<{name?: string; role?: string}>({});
+  const [selectedLspName, setSelectedLspName] = useState<string | undefined>();
+  const [lspDraft, setLspDraft] = useState<Partial<HazeLspServer>>({});
+  const [selectedMcpName, setSelectedMcpName] = useState<string | undefined>();
+  const [mcpDraft, setMcpDraft] = useState<Partial<HazeMcpServer>>({});
 
   useEffect(() => {
     Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
@@ -519,6 +530,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setSelectedProviderName(undefined);
       setProviderDraft({});
       setSkillCreateDraft({});
+      setSelectedLspName(undefined);
+      setLspDraft({});
+      setSelectedMcpName(undefined);
+      setMcpDraft({});
     }
   }
 
@@ -569,6 +584,73 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       description: provider.name,
       kind: 'model' as const,
     })));
+  }
+
+  function lspSuggestions(): TextInputSuggestion[] {
+    const servers = configuredLspServers(settings);
+    return [{value: 'add server', description: 'add an LSP server (presets available)', kind: 'lsp' as const},
+      ...servers.map(server => ({
+        value: server.name,
+        description: `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''} · ${server.enabled === false ? 'disabled' : 'enabled'}`,
+        kind: 'lsp' as const,
+      }))];
+  }
+
+  function lspActionSuggestions(): TextInputSuggestion[] {
+    const server = selectedLspName ? configuredLspServers(settings).find(s => s.name === selectedLspName) : undefined;
+    const result: TextInputSuggestion[] = [];
+    if (server) result.push({value: server.enabled === false ? 'enable' : 'disable', description: `${server.enabled === false ? 'enable' : 'disable'} this server`, kind: 'lsp' as const});
+    result.push({value: 'remove server', description: 'remove this server', kind: 'lsp' as const});
+    return result;
+  }
+
+  function lspPresetSuggestions(): TextInputSuggestion[] {
+    return [
+      ...Object.values(LSP_PRESETS).map(preset => ({
+        value: preset.name,
+        description: `${preset.command} ${(preset.args ?? []).join(' ')} [${(preset.extensions ?? []).join(', ')}]`,
+        kind: 'lsp' as const,
+      })),
+      {value: 'custom', description: 'enter a name and command manually', kind: 'lsp' as const},
+    ];
+  }
+
+  function mcpSuggestions(): TextInputSuggestion[] {
+    const servers = configuredMcpServers(settings);
+    return [{value: 'add server', description: 'add an MCP server (presets available)', kind: 'mcp' as const},
+      ...servers.map(server => {
+        const location = server.url ?? (server.command ? `${server.command} ${(server.args ?? []).join(' ')}`.trim() : '');
+        return {value: server.name, description: `${server.transport}${location ? ` ${location}` : ''} · ${server.enabled === false ? 'disabled' : 'enabled'}`, kind: 'mcp' as const};
+      })];
+  }
+
+  function mcpActionSuggestions(): TextInputSuggestion[] {
+    const server = selectedMcpName ? findMcpServer(settings, selectedMcpName) : undefined;
+    const result: TextInputSuggestion[] = [];
+    if (server) {
+      result.push({value: server.enabled === false ? 'enable' : 'disable', description: `${server.enabled === false ? 'enable' : 'disable'} this server`, kind: 'mcp' as const});
+      result.push({value: 'set API key', description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
+    }
+    result.push({value: 'remove server', description: 'remove this server', kind: 'mcp' as const});
+    return result;
+  }
+
+  function mcpPresetSuggestions(): TextInputSuggestion[] {
+    return [
+      ...presetIds().map(presetId => {
+        const preset = findMcpPreset(presetId)!;
+        return {value: presetId, description: preset.description ?? `${preset.transport} server`, kind: 'mcp' as const};
+      }),
+      {value: 'custom', description: 'enter name, transport, and URL or command manually', kind: 'mcp' as const},
+    ];
+  }
+
+  function mcpTransportSuggestions(): TextInputSuggestion[] {
+    return [
+      {value: 'http', description: 'Streamable HTTP (remote)', kind: 'mcp' as const},
+      {value: 'sse', description: 'Server-Sent Events (remote)', kind: 'mcp' as const},
+      {value: 'stdio', description: 'local process', kind: 'mcp' as const},
+    ];
   }
 
   async function selectProvider(providerName: string) {
@@ -740,6 +822,231 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setModelProviderFilter(provider.name);
     setMode('model');
     setMessages(m => [...m, {role: 'system', text: `Added provider ${provider.name}. Choose a model.`}]);
+  }
+
+  // --- LSP wizard handlers (mirror the provider wizard) ---
+
+  async function selectLspServer(serverName: string) {
+    if (serverName === 'add server') {
+      setLspDraft({});
+      setMode('lspAddPreset');
+      setMessages(m => [...m, {role: 'system', text: 'Choose an LSP preset, or select "custom" to enter a name and command manually.'}]);
+      return;
+    }
+    const server = configuredLspServers(settings).find(s => s.name === serverName);
+    if (!server) {
+      setMessages(m => [...m, {role: 'system', text: `No LSP server named ${serverName}. Use /lsp and choose add server.`}]);
+      setMode('chat');
+      return;
+    }
+    setSelectedLspName(server.name);
+    setMode('lspAction');
+    setMessages(m => [...m, {role: 'system', text: `${server.name}: choose an action.`}]);
+  }
+
+  async function selectLspPreset(presetId: string) {
+    if (presetId === 'custom') {
+      setLspDraft({});
+      setMode('lspAddName');
+      setMessages(m => [...m, {role: 'system', text: 'LSP server name? Example: typescript, rust, my-lsp.'}]);
+      return;
+    }
+    const preset = lspPreset(presetId);
+    if (!preset) {
+      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
+      return;
+    }
+    if (configuredLspServers(settings).some(s => s.name === preset.name)) {
+      setMessages(m => [...m, {role: 'system', text: `LSP server ${preset.name} already exists. Use /lsp to manage existing servers.`}]);
+      setMode('chat');
+      return;
+    }
+    const next = await updateSettings({lspServers: upsertLspServer(settings, preset)});
+    setSettings(next);
+    setMode('chat');
+    setMessages(m => [...m, {role: 'system', text: `Added LSP preset ${preset.name}. Ensure ${preset.command} is installed and on PATH; tools appear once it is.`}]);
+  }
+
+  async function selectLspAction(action: string) {
+    if (!selectedLspName) {
+      setMode('lsp');
+      return;
+    }
+    const server = configuredLspServers(settings).find(s => s.name === selectedLspName);
+    if (!server) {
+      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} not found.`}]);
+      setMode('chat');
+      setSelectedLspName(undefined);
+      return;
+    }
+    if (action === 'enable' || action === 'disable') {
+      const next = await updateSettings({lspServers: setLspServerEnabled(settings, selectedLspName, action === 'enable')});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setSelectedLspName(undefined);
+      setMode('chat');
+      return;
+    }
+    if (action === 'remove server') {
+      setMode('lspConfirmRemove');
+      setMessages(m => [...m, {role: 'system', text: `Remove LSP server ${selectedLspName}? Type "yes" to confirm. Esc to cancel.`}]);
+      return;
+    }
+    setMessages(m => [...m, {role: 'system', text: `Unknown LSP action: ${action}`}]);
+  }
+
+  async function finishLspCustom(commandLine: string) {
+    const name = lspDraft.name?.trim();
+    const parts = commandLine.trim().split(/\s+/).filter(Boolean);
+    const command = parts[0];
+    if (!name || !command) {
+      setMessages(m => [...m, {role: 'system', text: 'LSP server name and command are required.'}]);
+      setMode('chat');
+      setLspDraft({});
+      return;
+    }
+    const server: HazeLspServer = {name, command, args: parts.slice(1), extensions: [], rootPatterns: ['.git'], enabled: true};
+    const next = await updateSettings({lspServers: upsertLspServer(settings, server)});
+    setSettings(next);
+    setLspDraft({});
+    setMode('chat');
+    setMessages(m => [...m, {role: 'system', text: `Added LSP server ${name} (${command}${parts.length > 1 ? ` ${parts.slice(1).join(' ')}` : ''}). Add extensions in ~/.haze/settings.json so tools can auto-select it.`}]);
+  }
+
+  // --- MCP wizard handlers (mirror the provider wizard) ---
+
+  async function selectMcpServer(serverName: string) {
+    if (serverName === 'add server') {
+      setMcpDraft({});
+      setMode('mcpAddPreset');
+      setMessages(m => [...m, {role: 'system', text: 'Choose an MCP preset, or select "custom" to enter details manually.'}]);
+      return;
+    }
+    const server = findMcpServer(settings, serverName);
+    if (!server) {
+      setMessages(m => [...m, {role: 'system', text: `No MCP server named ${serverName}. Use /mcp and choose add server.`}]);
+      setMode('chat');
+      return;
+    }
+    setSelectedMcpName(server.name);
+    setMode('mcpAction');
+    setMessages(m => [...m, {role: 'system', text: `${server.name}: choose an action.`}]);
+  }
+
+  async function selectMcpPreset(presetId: string) {
+    if (presetId === 'custom') {
+      setMcpDraft({});
+      setMode('mcpAddName');
+      setMessages(m => [...m, {role: 'system', text: 'MCP server name? Example: context7, github, filesystem.'}]);
+      return;
+    }
+    const preset = findMcpPreset(presetId);
+    if (!preset) {
+      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
+      return;
+    }
+    if (findMcpServer(settings, presetId)) {
+      setMessages(m => [...m, {role: 'system', text: `MCP server ${presetId} already exists. Use /mcp to manage existing servers.`}]);
+      setMode('chat');
+      return;
+    }
+    setMcpDraft({name: presetId, transport: preset.transport, ...(preset.url ? {url: preset.url} : {})});
+    setMode('mcpAddKey');
+    setMessages(m => [...m, {role: 'system', text: `Adding ${presetId} (${preset.transport}${preset.url ? `, ${preset.url}` : ''}).\nOptional API key or auth header value? (Leave blank to skip — Enter works.)`}]);
+  }
+
+  async function selectMcpAction(action: string) {
+    if (!selectedMcpName) {
+      setMode('mcp');
+      return;
+    }
+    const server = findMcpServer(settings, selectedMcpName);
+    if (!server) {
+      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} not found.`}]);
+      setMode('chat');
+      setSelectedMcpName(undefined);
+      return;
+    }
+    if (action === 'enable' || action === 'disable') {
+      const toggled = toggleMcpServer(settings, selectedMcpName, action === 'enable');
+      const next = await updateSettings({mcpServers: toggled ?? []});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setSelectedMcpName(undefined);
+      setMode('chat');
+      return;
+    }
+    if (action === 'set API key') {
+      setMode('mcpSetKey');
+      setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedMcpName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`}]);
+      return;
+    }
+    if (action === 'remove server') {
+      setMode('mcpConfirmRemove');
+      setMessages(m => [...m, {role: 'system', text: `Remove MCP server ${selectedMcpName}? Type "yes" to confirm. Esc to cancel.`}]);
+      return;
+    }
+    setMessages(m => [...m, {role: 'system', text: `Unknown MCP action: ${action}`}]);
+  }
+
+  async function finishMcpCustom(keyValue?: string) {
+    const name = mcpDraft.name?.trim();
+    const transport = mcpDraft.transport;
+    if (!name || !transport) {
+      setMessages(m => [...m, {role: 'system', text: 'MCP server name and transport are required.'}]);
+      setMode('chat');
+      setMcpDraft({});
+      return;
+    }
+    const headers = keyValue?.trim() ? [{name: 'Authorization', value: `Bearer ${keyValue.trim()}`}] : undefined;
+    const server: HazeMcpServer = transport === 'stdio'
+      ? {name, transport, command: mcpDraft.command, args: mcpDraft.args, ...(headers ? {headers} : {}), enabled: true}
+      : {name, transport, url: mcpDraft.url, ...(headers ? {headers} : {}), enabled: true};
+    // Re-validate the transport-specific required field.
+    if (transport === 'stdio' && !server.command) {
+      setMessages(m => [...m, {role: 'system', text: 'Command is required for stdio transport.'}]);
+      setMode('chat');
+      setMcpDraft({});
+      return;
+    }
+    if (transport !== 'stdio' && !server.url) {
+      setMessages(m => [...m, {role: 'system', text: `URL is required for ${transport} transport.`}]);
+      setMode('chat');
+      setMcpDraft({});
+      return;
+    }
+    const next = await updateSettings({mcpServers: upsertMcpServer(settings, server)});
+    setSettings(next);
+    setMcpDraft({});
+    setMode('chat');
+    const location = transport === 'stdio' ? `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''}` : server.url;
+    setMessages(m => [...m, {role: 'system', text: `Added MCP server ${name} (${transport}, ${location}). Tools load on the next turn.`}]);
+  }
+
+  async function setMcpServerKey(keyValue: string) {
+    if (!selectedMcpName) {
+      setMode('mcp');
+      return;
+    }
+    const server = findMcpServer(settings, selectedMcpName);
+    if (!server) {
+      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} not found.`}]);
+      setMode('chat');
+      setSelectedMcpName(undefined);
+      return;
+    }
+    const key = keyValue.trim();
+    if (!key) {
+      setMessages(m => [...m, {role: 'system', text: 'API key cannot be empty. Esc to cancel.'}]);
+      return;
+    }
+    const headers = (server.headers ?? []).filter(header => header.name !== 'Authorization');
+    headers.push({name: 'Authorization', value: `Bearer ${key}`});
+    const next = await updateSettings({mcpServers: upsertMcpServer(settings, {...server, headers})});
+    setSettings(next);
+    setSelectedMcpName(undefined);
+    setMode('chat');
+    setMessages(m => [...m, {role: 'system', text: `API key updated for ${server.name}.`}]);
   }
 
   async function captureSkillName(value: string) {
@@ -964,6 +1271,149 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
+    if (mode === 'lsp') {
+      await selectLspServer(value);
+      return;
+    }
+    if (mode === 'lspAction') {
+      await selectLspAction(value);
+      return;
+    }
+    if (mode === 'lspAddPreset') {
+      await selectLspPreset(value);
+      return;
+    }
+    if (mode === 'lspAddName') {
+      const name = value.trim();
+      if (!name) {
+        setMessages(m => [...m, {role: 'system', text: 'LSP server name is required.'}]);
+        return;
+      }
+      if (configuredLspServers(settings).some(s => s.name === name)) {
+        setMessages(m => [...m, {role: 'system', text: `LSP server ${name} already exists. Choose a unique name.`}]);
+        return;
+      }
+      setLspDraft({name});
+      setMode('lspAddCommand');
+      setMessages(m => [...m, {role: 'system', text: 'Command to run? Example: typescript-language-server --stdio'}]);
+      return;
+    }
+    if (mode === 'lspAddCommand') {
+      await finishLspCustom(value);
+      return;
+    }
+    if (mode === 'lspConfirmRemove') {
+      if (!selectedLspName) {
+        setMode('chat');
+        return;
+      }
+      if (value.trim().toLowerCase() !== 'yes') {
+        setMessages(m => [...m, {role: 'system', text: 'Cancelled. LSP server not removed.'}]);
+        setSelectedLspName(undefined);
+        setMode('chat');
+        return;
+      }
+      const next = await updateSettings({lspServers: removeLspServer(settings, selectedLspName)});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `Removed LSP server ${selectedLspName}.`}]);
+      setSelectedLspName(undefined);
+      setMode('chat');
+      return;
+    }
+
+    if (mode === 'mcp') {
+      await selectMcpServer(value);
+      return;
+    }
+    if (mode === 'mcpAction') {
+      await selectMcpAction(value);
+      return;
+    }
+    if (mode === 'mcpAddPreset') {
+      await selectMcpPreset(value);
+      return;
+    }
+    if (mode === 'mcpAddName') {
+      const name = value.trim();
+      if (!name) {
+        setMessages(m => [...m, {role: 'system', text: 'MCP server name is required.'}]);
+        return;
+      }
+      if (findMcpServer(settings, name)) {
+        setMessages(m => [...m, {role: 'system', text: `MCP server ${name} already exists. Choose a unique name.`}]);
+        return;
+      }
+      setMcpDraft({name});
+      setMode('mcpAddTransport');
+      setMessages(m => [...m, {role: 'system', text: 'Transport type? http (Streamable HTTP), sse (Server-Sent Events), or stdio (local process).'}]);
+      return;
+    }
+    if (mode === 'mcpAddTransport') {
+      const transport = value.trim().toLowerCase();
+      if (transport !== 'http' && transport !== 'sse' && transport !== 'stdio') {
+        setMessages(m => [...m, {role: 'system', text: 'Enter http, sse, or stdio.'}]);
+        return;
+      }
+      setMcpDraft(draft => ({...draft, transport: transport as 'http' | 'sse' | 'stdio'}));
+      if (transport === 'stdio') {
+        setMode('mcpAddCommand');
+        setMessages(m => [...m, {role: 'system', text: 'Command to run? Example: npx -y @modelcontextprotocol/server-filesystem .'}]);
+      } else {
+        setMode('mcpAddUrl');
+        setMessages(m => [...m, {role: 'system', text: `MCP server URL? Example: https://mcp.context7.com/mcp for ${transport}.`}]);
+      }
+      return;
+    }
+    if (mode === 'mcpAddUrl') {
+      try {
+        new URL(value);
+      } catch {
+        setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example https://mcp.context7.com/mcp.'}]);
+        return;
+      }
+      setMcpDraft(draft => ({...draft, url: value.trim()}));
+      setMode('mcpAddKey');
+      setMessages(m => [...m, {role: 'system', text: 'Optional API key or auth header value? (Leave blank to skip — Enter works.) Sent as Authorization: Bearer <value>.'}]);
+      return;
+    }
+    if (mode === 'mcpAddCommand') {
+      const parts = value.trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) {
+        setMessages(m => [...m, {role: 'system', text: 'Command is required.'}]);
+        return;
+      }
+      setMcpDraft(draft => ({...draft, command: parts[0], args: parts.slice(1)}));
+      setMode('mcpAddKey');
+      setMessages(m => [...m, {role: 'system', text: 'Optional API key or auth header value? (Leave blank to skip — Enter works.) Sent as Authorization: Bearer <value>.'}]);
+      return;
+    }
+    if (mode === 'mcpAddKey') {
+      await finishMcpCustom(value);
+      return;
+    }
+    if (mode === 'mcpSetKey') {
+      await setMcpServerKey(value);
+      return;
+    }
+    if (mode === 'mcpConfirmRemove') {
+      if (!selectedMcpName) {
+        setMode('chat');
+        return;
+      }
+      if (value.trim().toLowerCase() !== 'yes') {
+        setMessages(m => [...m, {role: 'system', text: 'Cancelled. MCP server not removed.'}]);
+        setSelectedMcpName(undefined);
+        setMode('chat');
+        return;
+      }
+      const next = await updateSettings({mcpServers: removeMcpServer(settings, selectedMcpName)});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `Removed MCP server ${selectedMcpName}.`}]);
+      setSelectedMcpName(undefined);
+      setMode('chat');
+      return;
+    }
+
     const invokedSkill = skillInvocation(value);
     if (invokedSkill) {
       const argumentText = invokedSkill.args ? `\nUser-provided skill arguments: ${invokedSkill.args}` : '';
@@ -1126,33 +1576,40 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const transcriptItems = staticDisplayItems.map((item, index) => ({key: messageKey(item.message, index), ...item}));
   const activeLiveItems = annotatedDisplayMessages.filter(item => item.message.streaming);
   const activeSelection = activeModel(settings);
-  const placeholder = mode === 'provider'
-    ? 'Choose provider'
-    : mode === 'providerAction'
-      ? 'Choose provider action'
-      : mode === 'providerAddPreset'
-        ? 'Choose a provider preset or custom'
-      : mode === 'model'
-        ? 'Choose model'
-        : mode === 'providerAddName'
-          ? 'Provider name'
-          : mode === 'providerAddUrl'
-            ? 'https://example.com/v1'
-            : mode === 'providerAddKey' || mode === 'providerSetKey'
-              ? 'API key, or blank for local'
-              : mode === 'providerAddModels' || mode === 'providerAppendModels'
-                ? 'model-a, model-b'
-                : mode === 'providerRemoveModels'
-                  ? 'model-a, model-b'
-                  : mode === 'providerConfirmRemove'
-                    ? 'Type "yes" to confirm'
-                    : mode === 'skillCreateName'
-                      ? 'Skill name (kebab-case, e.g. security-review)'
-                      : mode === 'skillCreateRole'
-                        ? 'Role (optional — Enter to skip)'
-                        : mode === 'skillCreateDescription'
-                          ? 'Describe what the skill should do'
-                          : busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app';
+  const PLACEHOLDERS: Partial<Record<Mode, string>> = {
+    provider: 'Choose provider',
+    providerAction: 'Choose provider action',
+    providerAddPreset: 'Choose a provider preset or custom',
+    model: 'Choose model',
+    providerAddName: 'Provider name',
+    providerAddUrl: 'https://example.com/v1',
+    providerAddKey: 'API key, or blank for local',
+    providerSetKey: 'API key',
+    providerAddModels: 'model-a, model-b',
+    providerAppendModels: 'model-a, model-b',
+    providerRemoveModels: 'model-a, model-b',
+    providerConfirmRemove: 'Type "yes" to confirm',
+    skillCreateName: 'Skill name (kebab-case, e.g. security-review)',
+    skillCreateRole: 'Role (optional — Enter to skip)',
+    skillCreateDescription: 'Describe what the skill should do',
+    lsp: 'Choose LSP server or add server',
+    lspAction: 'enable, disable, or remove server',
+    lspAddPreset: 'Choose an LSP preset or custom',
+    lspAddName: 'LSP server name (e.g. typescript)',
+    lspAddCommand: 'Command (e.g. typescript-language-server --stdio)',
+    lspConfirmRemove: 'Type "yes" to confirm',
+    mcp: 'Choose MCP server or add server',
+    mcpAction: 'enable, disable, remove, or set key',
+    mcpAddPreset: 'Choose an MCP preset or custom',
+    mcpAddName: 'MCP server name (e.g. context7)',
+    mcpAddTransport: 'http, sse, or stdio',
+    mcpAddUrl: 'https://mcp.example.com/mcp',
+    mcpAddCommand: 'Command (e.g. npx -y @pkg/server)',
+    mcpAddKey: 'API key, or blank to skip',
+    mcpSetKey: 'API key',
+    mcpConfirmRemove: 'Type "yes" to confirm',
+  };
+  const placeholder = PLACEHOLDERS[mode] ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app');
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
   const headerSubtitle = [
     'A minimal LLM harness for growing your own workflows while you work.',
@@ -1181,10 +1638,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   // Goal tracking is internal; display removed in favor of task bar
   void goalText;
-  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'chat' ? [
+  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'lsp' ? lspSuggestions() : mode === 'lspAction' ? lspActionSuggestions() : mode === 'lspAddPreset' ? lspPresetSuggestions() : mode === 'mcp' ? mcpSuggestions() : mode === 'mcpAction' ? mcpActionSuggestions() : mode === 'mcpAddPreset' ? mcpPresetSuggestions() : mode === 'mcpAddTransport' ? mcpTransportSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
+    {value: '/lsp', description: 'Manage LSP servers (semantic navigation)', kind: 'command'},
     {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
     {value: '/create-skill ', description: 'Launch the skill wizard', kind: 'command'},
@@ -1234,12 +1692,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         <TextInput
           placeholder={placeholder}
           disabled={busy && mode !== 'chat'}
-          mask={mode === 'providerAddKey' || mode === 'providerSetKey'}
+          mask={MASKED_MODES.has(mode)}
           historyItems={inputHistory}
           recordHistory={mode === 'chat'}
           suggestions={inputSuggestions}
-          suggestionMode={mode === 'provider' || mode === 'providerAction' || mode === 'providerAddPreset' || mode === 'model' ? 'always' : 'slash'}
-          submitOnEmpty={mode === 'providerAddKey' || mode === 'skillCreateRole'}
+          suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
+          submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
           width={Math.max(20, width - 4)}
           onHistoryAdd={persistInputHistory}
           onToggleTasks={() => {

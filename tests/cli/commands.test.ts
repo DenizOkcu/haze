@@ -144,46 +144,20 @@ describe('handleSlashCommand', () => {
     }
   });
 
-  it('lists and adds lsp presets', async () => {
+  it('opens the lsp picker from /lsp', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/lsp presets', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('typescript'));
-
-    expect(await handleSlashCommand('/lsp add typescript', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      lspServers: [expect.objectContaining({name: 'typescript', command: 'typescript-language-server'})],
-    }));
-  });
-
-  it('shows configured lsp servers', async () => {
-    const ctx = mockContext({settings: {lspServers: [{name: 'ts', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts']}]}});
     expect(await handleSlashCommand('/lsp', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('ts'));
+    expect(ctx.setMode).toHaveBeenCalledWith('lsp');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('add server'));
   });
 
-  it('lists and adds mcp presets', async () => {
+  it('opens the mcp picker from /mcp (and forgives trailing args)', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/mcp presets', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('context7'));
-
-    expect(await handleSlashCommand('/mcp add context7', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      mcpServers: [expect.objectContaining({name: 'context7', transport: 'http', url: 'https://mcp.context7.com/mcp'})],
-    }));
-  });
-
-  it('adds a custom mcp http server', async () => {
-    const ctx = mockContext();
-    expect(await handleSlashCommand('/mcp add custom -- http https://mcp.example.com/mcp', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      mcpServers: [expect.objectContaining({name: 'custom', transport: 'http', url: 'https://mcp.example.com/mcp'})],
-    }));
-  });
-
-  it('shows configured mcp servers', async () => {
-    const ctx = mockContext({settings: {mcpServers: [{name: 'ctx7', transport: 'http', url: 'https://mcp.context7.com/mcp'}]}});
     expect(await handleSlashCommand('/mcp', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('ctx7'));
+    expect(ctx.setMode).toHaveBeenCalledWith('mcp');
+    const ctx2 = mockContext();
+    expect(await handleSlashCommand('/mcp add context7', ctx2)).toBe('handled');
+    expect(ctx2.setMode).toHaveBeenCalledWith('mcp');
   });
 
   it('reports unknown commands', async () => {

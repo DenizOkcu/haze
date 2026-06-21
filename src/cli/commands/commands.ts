@@ -4,10 +4,10 @@ import path from 'node:path';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {contextFileDiagnostics, summarizeContextDiagnostics, MAX_CONTEXT_FILE_CHARS} from '../../config/contextFiles.js';
-import {SETTINGS_FILE, writeSettings, type HazeMcpServer, type HazeSettings} from '../../config/settings.js';
+import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
-import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer} from '../../config/lspSettings.js';
-import {configuredMcpServers, findMcpPreset, findMcpServer, presetIds, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
+import {configuredLspServers} from '../../config/lspSettings.js';
+import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {Mode} from './chat.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
@@ -149,210 +149,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function splitArgs(input: string) {
-  const matches = input.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
-  return matches.map(part => part.replace(/^(["'])(.*)\1$/, '$2'));
-}
-
-function lspOverview(settings: HazeSettings) {
-  const servers = configuredLspServers(settings);
-  const lines = [
-    'LSP commands:',
-    '/lsp',
-    '  List configured language servers.',
-    '/lsp presets',
-    `  Show built-in presets: ${Object.keys(LSP_PRESETS).join(', ')}`,
-    '/lsp add <preset>',
-    '  Add a preset, e.g. /lsp add typescript.',
-    '/lsp add <name> -- <command> [args...]',
-    '  Add a custom stdio LSP server. Example: /lsp add custom-ts -- typescript-language-server --stdio',
-    '/lsp enable <name> | /lsp disable <name> | /lsp remove <name>',
-    '',
-    'Configured LSP servers:',
-    ...(servers.length === 0 ? ['- none'] : servers.map(server => `- ${server.name} ${server.enabled === false ? '(disabled)' : '(enabled)'}: ${server.command} ${(server.args ?? []).join(' ')} [${(server.extensions ?? []).join(', ') || 'no extensions'}]`)),
-  ];
-  return lines.join('\n');
-}
-
-async function handleLspCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
-  const parts = splitArgs(args);
-  const sub = parts[0];
-  if (!sub) {
-    ctx.addSystemMessage(lspOverview(ctx.settings));
-    return 'handled';
-  }
-  if (sub === 'presets') {
-    ctx.addSystemMessage(['LSP presets:', ...Object.values(LSP_PRESETS).map(preset => `- ${preset.name}: ${preset.command} ${(preset.args ?? []).join(' ')} [${(preset.extensions ?? []).join(', ')}]`)].join('\n'));
-    return 'handled';
-  }
-  if (sub === 'add') {
-    const name = parts[1];
-    if (!name) {
-      ctx.addSystemMessage('Usage: /lsp add <preset> OR /lsp add <name> -- <command> [args...]');
-      return 'handled';
-    }
-    const preset = lspPreset(name);
-    if (preset) {
-      await ctx.updateSettings({lspServers: upsertLspServer(ctx.settings, preset)});
-      ctx.addSystemMessage(`Added LSP preset ${name}. Ensure ${preset.command} is installed and on PATH.`);
-      return 'handled';
-    }
-    const sep = parts.indexOf('--');
-    const command = sep === -1 ? undefined : parts[sep + 1];
-    if (!command) {
-      ctx.addSystemMessage(`Unknown preset ${name}. Use /lsp presets or /lsp add <name> -- <command> [args...]`);
-      return 'handled';
-    }
-    const server = {name, command, args: parts.slice(sep + 2), extensions: [], rootPatterns: ['.git'], enabled: true};
-    await ctx.updateSettings({lspServers: upsertLspServer(ctx.settings, server)});
-    ctx.addSystemMessage(`Added custom LSP server ${name}. Add extensions manually in ~/.haze/settings.json before tools can auto-select it.`);
-    return 'handled';
-  }
-  if (sub === 'remove' || sub === 'enable' || sub === 'disable') {
-    const name = parts[1];
-    if (!name) {
-      ctx.addSystemMessage(`Usage: /lsp ${sub} <name>`);
-      return 'handled';
-    }
-    if (sub === 'remove') await ctx.updateSettings({lspServers: removeLspServer(ctx.settings, name)});
-    else await ctx.updateSettings({lspServers: setLspServerEnabled(ctx.settings, name, sub === 'enable')});
-    ctx.addSystemMessage(`LSP server ${name} ${sub === 'remove' ? 'removed' : sub === 'enable' ? 'enabled' : 'disabled'}.`);
-    return 'handled';
-  }
-  ctx.addSystemMessage('Unknown /lsp command. Use /lsp for help.');
-  return 'handled';
-}
-
-function mcpOverview(settings: HazeSettings) {
-  const servers = configuredMcpServers(settings);
-  const lines = [
-    'MCP commands:',
-    '/mcp',
-    '  List configured MCP servers.',
-    '/mcp presets',
-    `  Show built-in presets: ${presetIds().join(', ') || 'none'}`,
-    '/mcp add <preset>',
-    '  Add a preset, e.g. /mcp add context7.',
-    '/mcp add <name> -- (http|sse) <url>',
-    '  Add a remote MCP server. Example: /mcp add github -- http https://mcp.example.com/mcp',
-    '/mcp add <name> -- stdio <command> [args...]',
-    '  Add a local MCP server. Example: /mcp add fs -- stdio npx -y @modelcontextprotocol/server-filesystem .',
-    '/mcp key <name> <value>',
-    '  Set an Authorization: Bearer <value> header for a server.',
-    '/mcp enable <name> | /mcp disable <name> | /mcp remove <name>',
-    '',
-    'Configured MCP servers:',
-    ...(servers.length === 0 ? ['- none'] : servers.map(server => {
-      const location = server.url ?? (server.command ? `${server.command} ${(server.args ?? []).join(' ')}`.trim() : '');
-      return `- ${server.name} ${server.enabled === false ? '(disabled)' : '(enabled)'}: ${server.transport}${location ? ` ${location}` : ''}`;
-    })),
-    '',
-    'MCP tools load at the start of each turn and the connections close when the turn ends.',
-  ];
-  return lines.join('\n');
-}
-
-async function handleMcpCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
-  const parts = splitArgs(args);
-  const sub = parts[0];
-  if (!sub) {
-    ctx.addSystemMessage(mcpOverview(ctx.settings));
-    return 'handled';
-  }
-  if (sub === 'presets') {
-    ctx.addSystemMessage(['MCP presets:', ...presetIds().map(id => `- ${id}: ${findMcpPreset(id)?.description ?? 'custom'}`)].join('\n'));
-    return 'handled';
-  }
-  if (sub === 'add') {
-    const name = parts[1];
-    if (!name) {
-      ctx.addSystemMessage('Usage: /mcp add <preset> OR /mcp add <name> -- (http|sse) <url> OR /mcp add <name> -- stdio <command> [args...]');
-      return 'handled';
-    }
-    const preset = findMcpPreset(name);
-    if (preset) {
-      const {description: _description, ...rest} = preset;
-      void _description;
-      const server: HazeMcpServer = {name, ...rest, enabled: true};
-      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
-      ctx.addSystemMessage(`Added MCP preset ${name} (${preset.transport}${preset.url ? ` ${preset.url}` : ''}). Tools load on the next turn.`);
-      return 'handled';
-    }
-    const sep = parts.indexOf('--');
-    const rest = sep === -1 ? [] : parts.slice(sep + 1);
-    const transport = rest[0];
-    if (transport === 'http' || transport === 'sse') {
-      const url = rest[1];
-      if (!url) {
-        ctx.addSystemMessage(`Usage: /mcp add ${name} -- ${transport} <url>`);
-        return 'handled';
-      }
-      const server: HazeMcpServer = {name, transport, url, enabled: true};
-      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
-      ctx.addSystemMessage(`Added MCP server ${name} (${transport}, ${url}). Tools load on the next turn.`);
-      return 'handled';
-    }
-    if (transport === 'stdio') {
-      const command = rest[1];
-      if (!command) {
-        ctx.addSystemMessage(`Usage: /mcp add ${name} -- stdio <command> [args...]`);
-        return 'handled';
-      }
-      const server: HazeMcpServer = {name, transport, command, args: rest.slice(2), enabled: true};
-      await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, server)});
-      ctx.addSystemMessage(`Added MCP server ${name} (stdio, ${command}${rest.length > 2 ? ` ${rest.slice(2).join(' ')}` : ''}). Tools load on the next turn.`);
-      return 'handled';
-    }
-    ctx.addSystemMessage(`Unknown transport "${transport ?? ''}". Use http, sse, or stdio. Example: /mcp add ${name} -- http https://mcp.example.com/mcp`);
-    return 'handled';
-  }
-  if (sub === 'enable' || sub === 'disable') {
-    const name = parts[1];
-    if (!name) {
-      ctx.addSystemMessage(`Usage: /mcp ${sub} <name>`);
-      return 'handled';
-    }
-    const next = toggleMcpServer(ctx.settings, name, sub === 'enable');
-    if (!next) {
-      ctx.addSystemMessage(`No MCP server named ${name}.`);
-      return 'handled';
-    }
-    await ctx.updateSettings({mcpServers: next});
-    ctx.addSystemMessage(`MCP server ${name} ${sub === 'enable' ? 'enabled' : 'disabled'}.`);
-    return 'handled';
-  }
-  if (sub === 'remove') {
-    const name = parts[1];
-    if (!name) {
-      ctx.addSystemMessage('Usage: /mcp remove <name>');
-      return 'handled';
-    }
-    await ctx.updateSettings({mcpServers: removeMcpServer(ctx.settings, name)});
-    ctx.addSystemMessage(`Removed MCP server ${name}.`);
-    return 'handled';
-  }
-  if (sub === 'key') {
-    const name = parts[1];
-    const value = parts[2];
-    if (!name || !value) {
-      ctx.addSystemMessage('Usage: /mcp key <name> <value>  (sets an Authorization: Bearer <value> header)');
-      return 'handled';
-    }
-    const server = findMcpServer(ctx.settings, name);
-    if (!server) {
-      ctx.addSystemMessage(`No MCP server named ${name}.`);
-      return 'handled';
-    }
-    const headers = (server.headers ?? []).filter(header => header.name !== 'Authorization');
-    headers.push({name: 'Authorization', value: `Bearer ${value}`});
-    await ctx.updateSettings({mcpServers: upsertMcpServer(ctx.settings, {...server, headers})});
-    ctx.addSystemMessage(`Set Authorization header for MCP server ${name}.`);
-    return 'handled';
-  }
-  ctx.addSystemMessage('Unknown /mcp command. Use /mcp for help.');
-  return 'handled';
-}
-
 async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
   const id = args.trim();
 
@@ -455,9 +251,9 @@ export async function handleSlashCommand(
       '/logs',
       '  List recent log files with sizes and dates.',
       '/lsp',
-      '  Configure read-only Language Server Protocol navigation tools.',
+      '  Configure Language Server Protocol navigation tools (interactive picker).',
       '/mcp',
-      '  Configure Model Context Protocol servers (e.g. Context7) to add external tools.',
+      '  Configure Model Context Protocol servers like Context7 (interactive picker).',
       '/logs <id>',
       '  Show summary of a specific log: entry counts by type, total tokens, tool calls.',
       '/compact [instructions]',
@@ -501,12 +297,14 @@ export async function handleSlashCommand(
     return await handleLogsCommand(args, ctx);
   }
   if (value === '/lsp' || value.startsWith('/lsp ')) {
-    const args = value.slice('/lsp'.length).trim();
-    return await handleLspCommand(args, ctx);
+    ctx.setMode('lsp');
+    ctx.addSystemMessage('Choose an LSP server to enable, disable, or remove it. Choose "add server" to add one from presets (e.g. typescript) or enter a custom command.');
+    return 'handled';
   }
   if (value === '/mcp' || value.startsWith('/mcp ')) {
-    const args = value.slice('/mcp'.length).trim();
-    return await handleMcpCommand(args, ctx);
+    ctx.setMode('mcp');
+    ctx.addSystemMessage('Choose an MCP server to enable, disable, remove, or set a key for it. Choose "add server" to add one from presets (e.g. context7) or enter custom details.');
+    return 'handled';
   }
   if (value === '/settings open' || value === '/settings edit') {
     const file = await ensureSettingsFile(ctx.settings);

@@ -116,7 +116,7 @@ function cursorPosition(lines: WrappedLine[], displayCursor: number) {
 export type TextInputSuggestion = {
   value: string;
   description?: string;
-  kind?: 'command' | 'skill' | 'provider' | 'model';
+  kind?: 'command' | 'skill' | 'provider' | 'model' | 'lsp' | 'mcp';
 };
 
 export function TextInput({

@@ -4,7 +4,8 @@
 
 ### Added
 
-- **MCP server support.** Haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. Use `/mcp add context7` (Context7 preset for up-to-date library docs) or `/mcp add <name> -- (http|sse) <url>` / `-- stdio <command> [args...]` for a custom server. `/mcp` lists configured servers; `/mcp key <name> <value>` sets an `Authorization: Bearer` header. Servers persist in `~/.haze/settings.json` under `mcpServers` and support `http`, `sse`, and `stdio` transports. MCP clients open per agent turn and close when it ends; a failing server is isolated.
+- **MCP server support.** Haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
+- **Consistent config UX.** `/lsp` and `/mcp` are now interactive pickers matching the `/provider` flow (autocomplete lists, preset pickers, masked API-key entry), replacing the previous `/lsp`/`/mcp` subcommand syntax.
 
 ## 0.6.0 - 2026-06-21
 

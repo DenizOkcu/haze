@@ -70,22 +70,16 @@ On first run, create or choose a provider, then choose your first model:
 
 ### MCP servers
 
-Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) servers and give the agent extra tools. Context7 (up-to-date library docs) ships as a built-in preset:
+Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) servers and give the agent extra tools. It opens an interactive picker (like `/provider`): choose a server to enable, disable, remove, or set an API key for it, or choose **add server** to add one from a preset (Context7 ships built-in for up-to-date library docs) or enter custom details.
 
 ```txt
-/mcp add context7
+/mcp            # opens the server picker
+# add server -> context7                       (preset)
+# add server -> custom -> name -> http -> url  (custom remote)
+# add server -> custom -> name -> stdio -> cmd (custom local)
 ```
 
-Add a remote or local server, set an API key, or manage existing ones:
-
-```txt
-/mcp add github -- http https://mcp.example.com/mcp
-/mcp add fs -- stdio npx -y @modelcontextprotocol/server-filesystem .
-/mcp key context7 <api-key>
-/mcp enable context7 | /mcp disable context7 | /mcp remove context7
-```
-
-Servers persist in `~/.haze/settings.json` under `mcpServers` and support `http`, `sse`, and `stdio` transports. Their tools load at the start of each agent turn and the connections close when the turn ends. An unreachable server is isolated and never blocks the agent.
+API keys are entered in a masked prompt and sent as `Authorization: Bearer <value>`. Servers persist in `~/.haze/settings.json` under `mcpServers` and support `http`, `sse`, and `stdio` transports. Their tools load at the start of each agent turn and the connections close when the turn ends. An unreachable server is isolated and never blocks the agent, and MCP tools never shadow built-in tools.
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
@@ -187,10 +181,7 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /settings open
 /logs [id]
 /lsp
-/lsp presets
-/lsp add <preset>
-/lsp add <name> -- <command> [args...]
-/lsp enable|disable|remove <name>
+/mcp
 /init
 /session
 /resume
@@ -239,7 +230,7 @@ Tool calls are grouped in the transcript so you can see what happened without re
 
 ### Optional LSP navigation
 
-Haze can use user-configured stdio Language Server Protocol servers for semantic code navigation. Configure them with `/lsp`; presets currently include TypeScript, Rust, Python, Go, and PHP. Haze does not install language servers for you, and it hides LSP tools from the model unless an enabled server command exists on `PATH`, so projects without LSP still use `grep`, `listFiles`, and `readFile` normally.
+Haze can use user-configured stdio Language Server Protocol servers for semantic code navigation. Configure them with `/lsp` (an interactive picker, like `/provider` and `/mcp`): add a preset or a custom command, then enable/disable/remove servers. Presets currently include TypeScript, Rust, Python, Go, and PHP. Haze does not install language servers for you, and it hides LSP tools from the model unless an enabled server command exists on `PATH`, so projects without LSP still use `grep`, `listFiles`, and `readFile` normally.
 
 Example TypeScript setup:
 
@@ -248,7 +239,8 @@ npm install -g typescript typescript-language-server
 ```
 
 ```txt
-/lsp add typescript
+/lsp
+# -> add server -> typescript
 ```
 
 ## Subagents
