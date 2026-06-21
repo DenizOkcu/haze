@@ -33,12 +33,24 @@ export interface HazeMcpServer {
   enabled?: boolean;
 }
 
+/**
+ * Metadata override for an on-disk skill. The skill directory (~/.haze/skills/<name>)
+ * remains the source of truth for existence and content; this index only records
+ * overrides. A skill is enabled unless an entry here sets `enabled: false`, mirroring
+ * the enable/disable toggle the provider/LSP/MCP pickers expose.
+ */
+export interface HazeSkillSetting {
+  name: string;
+  enabled?: boolean;
+}
+
 export interface HazeSettings {
   provider?: string;
   model?: string;
   providers?: HazeProviderSettings[];
   lspServers?: HazeLspServerSettings[];
   mcpServers?: HazeMcpServer[];
+  skills?: HazeSkillSetting[];
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;

@@ -37,10 +37,11 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
   });
 
-  it('shows skill command help inside the app', async () => {
+  it('opens the skills picker from /skills', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/skills', ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/create-skill'));
+    expect(ctx.setMode).toHaveBeenCalledWith('skills');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('add skill'));
   });
 
   it('rejects removed /skill X and /skills X subcommand forms', async () => {
@@ -66,6 +67,7 @@ describe('handleSlashCommand', () => {
     expect(msg).toContain('openrouter');
     expect(msg).toContain('test-model');
     expect(msg).toContain('saved');
+    expect(msg).toContain('Skills:');
   });
 
   it('shows missing api key in settings', async () => {
@@ -94,11 +96,10 @@ describe('handleSlashCommand', () => {
     expect(ctx.setMode).toHaveBeenCalledWith('provider');
   });
 
-  it('launches the skill wizard for /create-skill and ignores inline args', async () => {
+  it('treats /create-skill as an unknown command now that skills use the picker', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/create-skill ignored inline args', ctx)).toBe('handled');
-    expect(ctx.setMode).toHaveBeenCalledWith('skillCreateName');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('step 1/3'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown command'));
   });
 
   it('sets provider and model for qualified model selectors', async () => {

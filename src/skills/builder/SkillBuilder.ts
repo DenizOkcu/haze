@@ -1,6 +1,7 @@
 import {generateObject} from 'ai';
 import fs from 'fs-extra';
 import path from 'node:path';
+import YAML from 'yaml';
 import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
 import {model} from '../../llm/client.js';
 import {loadSkill} from '../SkillLoader.js';
@@ -11,15 +12,13 @@ const STANDARD_SKILL_REQUIREMENTS = `
 # Operating rules
 
 - Optimize for autonomous completion for expert users: do not ask for command confirmations; stop only for concrete blockers or necessary product decisions.
-- Always ground the work in actual tool output or file contents before producing the final answer.
-- Define the exact commands, files, or project state that count as input for this workflow.
-- Inspect large inputs incrementally. Prefer summary/list commands first, then targeted per-file reads or per-file diffs for the files most relevant to the goal.
-- If a command output is truncated, do not stop. Run narrower commands or read specific files to gather enough evidence for a useful answer.
-- If the primary expected input is empty, check the natural fallback inputs before stopping. For example, when reviewing a branch diff, also inspect staged and unstaged working-tree changes.
-- Only report "nothing to do" when every explicitly relevant input source has been checked and is empty.
-- Only call something a blocker when a concrete tool failure, missing dependency/permission, or ambiguous user requirement prevents progress. Truncated output is not a blocker when narrower follow-up inspection is possible.
-- Do not stop after status/summary commands when the workflow requires analysis; inspect the actual content to analyze.
-- In the final response, cite the concrete files, commands, or evidence used. Exact line numbers are helpful but must not be required when the available evidence supports file/function-level feedback.
+- Ground the work in actual tool output or file contents before producing the final answer.
+- Inspect large inputs incrementally: summary/list commands first, then targeted reads or per-file diffs for what matters to the goal.
+- Truncated output is not a blocker. Run narrower commands or read specific files to gather enough evidence.
+- If the primary input is empty, check natural fallback inputs before stopping (e.g. for a branch diff, also inspect staged and unstaged changes).
+- Only report "nothing to do" when every relevant input source has been checked and is empty.
+- Only call something a blocker when a concrete tool failure, missing dependency/permission, or ambiguous user requirement prevents progress.
+- Cite concrete files, commands, or evidence in the final response. Prefer file/function references; require exact lines only when available.
 `;
 
 const SKILL_CREATOR_SKILL = `---
@@ -158,6 +157,14 @@ function withSkillDescription(content: string, description: string) {
   return content;
 }
 
+/** Read the `description` field from generated SKILL.md frontmatter (single source of truth). */
+function extractDescription(content: string): string | undefined {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/m.exec(content);
+  if (!match) return undefined;
+  const parsed = YAML.parse(match[1] ?? '') as {description?: unknown};
+  return typeof parsed.description === 'string' && parsed.description.trim() ? parsed.description.trim() : undefined;
+}
+
 function extractJson(text: string) {
   const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/.exec(text);
   return fenced?.[1] ?? text;
@@ -174,37 +181,6 @@ function parseGeneratedSkill(text: string, description: string): GeneratedSkill 
   return {name, intent, files};
 }
 
-async function descriptionFromSkillSummary(intent: string, finalName: string, files: GeneratedSkillFile[]) {
-  const skillMd = files.find(file => file.path === 'SKILL.md')?.content;
-  if (!skillMd) return normalizeSkillDescription(`the user asks: ${intent}`);
-  const activeModel = await model();
-  if (!activeModel) return normalizeSkillDescription(`the user asks: ${intent}`);
-  const result = await generateObject({
-    model: activeModel,
-    schema: z.object({description: z.string().min(1).describe('Final Use when description that tells an LLM when to invoke this skill')}),
-    schemaName: 'GeneratedHazeSkillDescription',
-    schemaDescription: 'A final skill description chosen from the complete generated SKILL.md.',
-    prompt: [
-      'Write the final Haze skill frontmatter description after reading the entire generated SKILL.md.',
-      '',
-      `Skill purpose (intent): ${intent}`,
-      `Final skill name: ${finalName}`,
-      '',
-      'Description rules:',
-      '- Start with "Use when".',
-      '- Optimize for LLM understandability: make it obvious when this skill should be invoked.',
-      '- Summarize the actual workflow in the SKILL.md, not only the user wording.',
-      '- Be specific about the trigger and desired outcome.',
-      '- Keep it one sentence, concise but complete.',
-      '- Avoid vague descriptions like "Use when the user asks for this workflow" unless no better signal exists.',
-      '',
-      'Generated SKILL.md:',
-      skillMd,
-    ].join('\n'),
-  });
-  return normalizeSkillDescription(result.object.description || `the user asks: ${intent}`);
-}
-
 function assertSafeGeneratedFile(filePath: string) {
   if (path.isAbsolute(filePath)) throw new Error(`Generated skill file must be relative: ${filePath}`);
   const normalized = path.normalize(filePath);
@@ -215,7 +191,7 @@ function assertSafeGeneratedFile(filePath: string) {
 
 async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
   const activeModel = await model();
-  if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before using /create-skill.');
+  if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before creating a skill via /skills.');
   const role = input.role?.trim() || DEFAULT_SKILL_ROLE;
   const result = await generateObject({
     model: activeModel,
@@ -263,9 +239,13 @@ async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
   });
   const generated = result.object;
   const intent = generated.intent?.trim() || input.description;
-  // The user already named the skill — use it verbatim, do NOT run nameFromSkillSummary.
+  // The user already named the skill — use it verbatim. The single generation pass
+  // also writes the frontmatter description; normalize it rather than spending a
+  // second model call to re-derive it.
   const finalName = input.name;
-  const finalDescription = await descriptionFromSkillSummary(intent, finalName, generated.files).catch(() => normalizeSkillDescription(`the user asks: ${intent}`));
+  const skillMd = generated.files.find(file => file.path === 'SKILL.md')?.content;
+  const rawDescription = skillMd ? extractDescription(skillMd) : undefined;
+  const finalDescription = normalizeSkillDescription(rawDescription ?? `the user asks: ${intent}`);
   const files = generated.files.map(file => file.path === 'SKILL.md' ? {...file, content: withSkillDescription(file.content, finalDescription)} : file);
   return {name: finalName, intent, files};
 }

@@ -83,7 +83,7 @@ API keys are entered in a masked prompt and sent as `Authorization: Bearer <valu
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
-Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/create-skill` (a 3-step wizard: name, role, description). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
+Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/skills` (an interactive picker: generate a custom skill from a description, then enable/disable, validate, or remove it). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
 ## Get productive immediately
 
@@ -101,7 +101,7 @@ Useful starters:
 
 ```txt
 /init
-/create-skill   # then the wizard asks for name, role, and a description like:
+/skills        # then add skill: name + a description like:
                 # "review my current branch against main like a senior engineer"
                 # "prepare clean git commits from my uncommitted changes"
                 # "implement small features with tests and a concise summary"
@@ -111,14 +111,15 @@ Useful starters:
 
 ## Skills: your workflows, grown while working
 
-Skills are Markdown workflows that Haze creates with `/create-skill` and stores in `~/.haze/skills` so you can inspect or refine them later.
+Skills are Markdown workflows that Haze creates with `/skills` and stores in `~/.haze/skills` so you can inspect or refine them later.
 
 If you do something for the second time, build a skill for it:
 
 ```txt
-/create-skill
-# Wizard: name=branch-diff-review, role="Senior engineer reviewing diffs",
-#         description="review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS"
+/skills
+# Picker → add skill
+# Name: branch-diff-review
+# Description: review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
 ```
 
 Haze uses the model to create the skill file for you:
@@ -192,13 +193,9 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /exit
 
 /skills
-/create-skill
-/skill-info <name>
-/validate-skill <name-or-dir>
-/remove-skill <name> --yes
 ```
 
-Older `/skill <subcommand>` and `/skills <subcommand>` routing forms were removed; use the direct skill commands above.
+Skill management is a single interactive picker, mirroring `/provider`, `/lsp`, and `/mcp`: generate a custom skill from a description, then show info, enable/disable, validate, or remove. Disabled skills drop out of the model catalog and the `/<name>` command list until re-enabled.
 
 CLI flags:
 

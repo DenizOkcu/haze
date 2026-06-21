@@ -8,6 +8,7 @@ import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/sett
 import {activeProvider, configuredProviders, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
+import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {Mode} from './chat.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
@@ -30,105 +31,6 @@ export type CommandContext = {
 };
 
 export type CommandResult = 'handled' | 'unhandled' | 'exit';
-
-function skillHelp() {
-  return [
-    'Skill commands:',
-    '/create-skill',
-    '  Launch the 3-step skill wizard (name -> role -> description). Creates a Markdown skill in ~/.haze/skills.',
-    '/skill-info <name>',
-    '  Show a skill description and path.',
-    '/validate-skill <name-or-dir>',
-    '  Validate a skill directory containing SKILL.md.',
-    '/remove-skill <name> --yes',
-    '  Remove an installed skill. Requires --yes because it deletes files.',
-  ].join('\n');
-}
-
-async function skillOverview(): Promise<string> {
-  const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
-  const registry = await loadSkillRegistry();
-  const skills = [...registry.skills.values()];
-  const installed = skills.length === 0
-    ? ['Installed skills:', '- None yet. Create one with /create-skill.']
-    : ['Installed skills:', ...skills.map(s => `- /${s.name} - ${s.description}`)];
-  return `${skillHelp()}\n\n${installed.join('\n')}`;
-}
-
-type SkillSubcommand = 'help' | 'create' | 'info' | 'validate' | 'remove';
-
-async function handleSkillCommand(sub: SkillSubcommand, args: string, ctx: CommandContext): Promise<CommandResult> {
-  if (sub === 'help') {
-    ctx.addSystemMessage(await skillOverview());
-    return 'handled';
-  }
-
-  if (sub === 'create') {
-    // Inline args are intentionally ignored — the wizard is the only path.
-    ctx.setMode('skillCreateName');
-    ctx.addSystemMessage('Skill wizard — step 1/3: Name the skill (kebab-case, e.g. security-review). ESC cancels.');
-    return 'handled';
-  }
-
-  if (sub === 'info') {
-    const name = args.trim();
-    if (!name) {
-      ctx.addSystemMessage('Usage: /skill-info <name>');
-      return 'handled';
-    }
-    const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
-    const registry = await loadSkillRegistry();
-    const skill = registry.skills.get(name);
-    if (!skill) {
-      ctx.addSystemMessage(`No skill named ${name}`);
-      return 'handled';
-    }
-    ctx.addSystemMessage([
-      `${skill.name}`,
-      skill.description,
-      '',
-      `References: ${skill.references.length}`,
-      `Path: ${skill.dir}`,
-    ].join('\n'));
-    return 'handled';
-  }
-
-  if (sub === 'validate') {
-    const target = args.trim();
-    if (!target) {
-      ctx.addSystemMessage('Usage: /validate-skill <name-or-dir>');
-      return 'handled';
-    }
-    const {GLOBAL_SKILLS_DIR} = await import('../../config/paths.js');
-    const {loadSkill} = await import('../../skills/SkillLoader.js');
-    const direct = path.resolve(target);
-    const dir = await fs.pathExists(path.join(direct, 'SKILL.md')) ? direct : path.join(GLOBAL_SKILLS_DIR, target);
-    const skill = await loadSkill(dir, 'global');
-    ctx.addSystemMessage(skill ? `Valid: ${skill.name}` : 'No SKILL.md found');
-    return 'handled';
-  }
-
-  if (sub === 'remove') {
-    const parts = args.split(/\s+/).filter(Boolean);
-    const name = parts[0];
-    if (!name || !parts.includes('--yes')) {
-      ctx.addSystemMessage('Usage: /remove-skill <name> --yes');
-      return 'handled';
-    }
-    const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
-    const registry = await loadSkillRegistry();
-    const skill = registry.skills.get(name);
-    if (!skill) {
-      ctx.addSystemMessage(`No skill named ${name}`);
-      return 'handled';
-    }
-    await fs.remove(skill.dir);
-    ctx.addSystemMessage(`Removed ${name} from ${skill.dir}.`);
-    return 'handled';
-  }
-
-  return 'handled';
-}
 
 async function ensureSettingsFile(settings: HazeSettings) {
   if (!await fs.pathExists(SETTINGS_FILE)) await writeSettings(settings);
@@ -234,13 +136,11 @@ export async function handleSlashCommand(
       '/model <name-or-provider:name>',
       '  Set a model directly. Selecting a model also sets its provider.',
       '/settings',
-      '  Show the configured provider, model, API key status, LSP/MCP servers, and loaded context files.',
+      '  Show the configured provider, model, API key status, LSP/MCP servers, skills, and loaded context files.',
       '/settings open',
       '  Open ~/.haze/settings.json with the OS default app.',
-      '/create-skill',
-      '  Launch the 3-step skill wizard (name, role, description).',
       '/skills',
-      '  Show Markdown skill commands and installed skill slash commands.',
+      '  Manage Markdown skills: generate a custom skill, show info, enable/disable, validate, or remove.',
       '/init',
       '  Inspect the current workspace and create or update AGENTS.md project instructions.',
       '/context',
@@ -337,6 +237,9 @@ export async function handleSlashCommand(
       notes.push(`${summary.duplicateGroups.length} duplicate group${summary.duplicateGroups.length === 1 ? '' : 's'} (${duplicateTotal} file${duplicateTotal === 1 ? '' : 's'} with identical content)`);
     }
     const lspServers = configuredLspServers(ctx.settings);
+    const {loadSkillRegistry} = await import('../../skills/SkillRegistry.js');
+    const installedSkills = [...(await loadSkillRegistry()).skills.values()];
+    const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(ctx.settings, skill.name) ? '' : ' (disabled)'}`).join(', ');
     const lines = [
       `Provider: ${activeProvider?.name ?? 'not configured'}`,
       `Model: ${ctx.settings.model ?? 'not set'}`,
@@ -345,6 +248,7 @@ export async function handleSlashCommand(
       `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
       `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
       `MCP servers: ${configuredMcpServers(ctx.settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
+      `Skills: ${skillNames || 'none'}`,
       `Context files: ${ctx.contextFiles.length ? `${ctx.contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
     ];
     if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);
@@ -405,11 +309,11 @@ export async function handleSlashCommand(
     }
     return 'handled';
   }
-  if (value === '/skills') return await handleSkillCommand('help', '', ctx);
-  if (value === '/create-skill' || value.startsWith('/create-skill ')) return await handleSkillCommand('create', '', ctx);
-  if (value === '/skill-info' || value.startsWith('/skill-info ')) return await handleSkillCommand('info', value.slice('/skill-info '.length), ctx);
-  if (value === '/validate-skill' || value.startsWith('/validate-skill ')) return await handleSkillCommand('validate', value.slice('/validate-skill '.length), ctx);
-  if (value === '/remove-skill' || value.startsWith('/remove-skill ')) return await handleSkillCommand('remove', value.slice('/remove-skill '.length), ctx);
+  if (value === '/skills') {
+    ctx.setMode('skills');
+    ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.');
+    return 'handled';
+  }
   if (value.startsWith('/')) {
     ctx.addSystemMessage(`Unknown command: ${value}. Bold start.`);
     return 'handled';

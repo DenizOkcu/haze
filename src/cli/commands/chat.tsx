@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import os from 'node:os';
 import {promisify} from 'node:util';
+import fs from 'fs-extra';
 import {Box, render, Static, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
@@ -14,6 +15,7 @@ import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSetti
 import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
 import {configuredMcpServers, findMcpPreset, findMcpServer, presetIds, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
+import {isSkillEnabled, removeSkillSetting, setSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
@@ -37,14 +39,14 @@ import {closeMcpClients} from '../../llm/mcp.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skillCreateName' | 'skillCreateRole' | 'skillCreateDescription' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
 
 /** Modes that show an always-on suggestion picker (server/preset lists). */
-const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
+const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'skills', 'skillsAction', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
 /** Modes that mask input (secrets/API keys). */
 const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
 /** Modes where submitting an empty value is valid (optional steps). */
-const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'skillCreateRole', 'mcpAddKey']);
+const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'mcpAddKey']);
 
 interface ChatOptions {
   debug?: boolean;
@@ -356,7 +358,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
-  const [skillCreateDraft, setSkillCreateDraft] = useState<{name?: string; role?: string}>({});
+  const [skillDraft, setSkillDraft] = useState<{name?: string}>({});
+  const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>();
   const [selectedLspName, setSelectedLspName] = useState<string | undefined>();
   const [lspDraft, setLspDraft] = useState<Partial<HazeLspServer>>({});
   const [selectedMcpName, setSelectedMcpName] = useState<string | undefined>();
@@ -414,7 +417,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     const [name, ...args] = value.slice(1).trim().split(/\s+/).filter(Boolean);
     if (!name) return undefined;
     const skill = skills.find(candidate => candidate.name === name);
-    return skill ? {skill, args: args.join(' ')} : undefined;
+    // Disabled skills are not invocable: they are absent from the model catalog,
+    // mirroring how disabled LSP/MCP tools never load.
+    return skill && isSkillEnabled(settings, skill.name) ? {skill, args: args.join(' ')} : undefined;
   }
 
   function debugLog(line: string) {
@@ -578,7 +583,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setModelProviderFilter(undefined);
       setSelectedProviderName(undefined);
       setProviderDraft({});
-      setSkillCreateDraft({});
+      setSkillDraft({});
+      setSelectedSkillName(undefined);
       setSelectedLspName(undefined);
       setLspDraft({});
       setSelectedMcpName(undefined);
@@ -700,6 +706,28 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       {value: 'sse', description: 'Server-Sent Events (remote)', kind: 'mcp' as const},
       {value: 'stdio', description: 'local process', kind: 'mcp' as const},
     ];
+  }
+
+  function skillsSuggestions(): TextInputSuggestion[] {
+    return [{value: 'add skill', description: 'describe a new skill for Haze to generate', kind: 'skill' as const},
+      ...skills.map(skill => ({
+        value: skill.name,
+        description: `${skill.description}${isSkillEnabled(settings, skill.name) ? '' : ' · disabled'}`,
+        kind: 'skill' as const,
+      }))];
+  }
+
+  function skillsActionSuggestions(): TextInputSuggestion[] {
+    const skill = selectedSkillName ? skills.find(candidate => candidate.name === selectedSkillName) : undefined;
+    const result: TextInputSuggestion[] = [];
+    if (skill) {
+      const enabled = isSkillEnabled(settings, skill.name);
+      result.push({value: enabled ? 'disable' : 'enable', description: `${enabled ? 'disable' : 'enable'} this skill`, kind: 'skill' as const});
+      result.push({value: 'show info', description: 'show description, references, and path', kind: 'skill' as const});
+      result.push({value: 'validate', description: 're-load and validate SKILL.md', kind: 'skill' as const});
+    }
+    result.push({value: 'remove skill', description: 'delete this skill directory', kind: 'skill' as const});
+    return result;
   }
 
   async function selectProvider(providerName: string) {
@@ -1098,6 +1126,76 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setMessages(m => [...m, {role: 'system', text: `API key updated for ${server.name}.`}]);
   }
 
+  // --- Skills wizard handlers (mirror the provider/LSP/MCP wizards) ---
+
+  async function selectSkill(name: string) {
+    if (name === 'add skill') {
+      setSkillDraft({});
+      setMode('skillsAddName');
+      setMessages(m => [...m, {role: 'system', text: 'Name the skill (kebab-case, e.g. security-review). ESC cancels.'}]);
+      return;
+    }
+    const skill = skills.find(candidate => candidate.name === name);
+    if (!skill) {
+      setMessages(m => [...m, {role: 'system', text: `No skill named ${name}. Use /skills and choose add skill.`}]);
+      setMode('chat');
+      return;
+    }
+    setSelectedSkillName(skill.name);
+    setMode('skillsAction');
+    setMessages(m => [...m, {role: 'system', text: `${skill.name}: choose an action.`}]);
+  }
+
+  async function selectSkillAction(action: string) {
+    if (!selectedSkillName) {
+      setMode('skills');
+      return;
+    }
+    const skill = skills.find(candidate => candidate.name === selectedSkillName);
+    if (!skill) {
+      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} not found.`}]);
+      setMode('chat');
+      setSelectedSkillName(undefined);
+      return;
+    }
+    if (action === 'enable' || action === 'disable') {
+      const next = await updateSettings({skills: setSkillEnabled(settings, selectedSkillName, action === 'enable')});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setSelectedSkillName(undefined);
+      setMode('chat');
+      return;
+    }
+    if (action === 'show info') {
+      setMessages(m => [...m, {role: 'system', text: [
+        `${skill.name}`,
+        skill.description,
+        '',
+        `References: ${skill.references.length}`,
+        `Path: ${skill.dir}`,
+        `State: ${isSkillEnabled(settings, skill.name) ? 'enabled' : 'disabled'}`,
+      ].join('\n')}]);
+      return;
+    }
+    if (action === 'validate') {
+      const {loadSkill} = await import('../../skills/SkillLoader.js');
+      try {
+        const loaded = await loadSkill(skill.dir, 'global');
+        setMessages(m => [...m, {role: 'system', text: loaded ? `Valid: ${loaded.name}` : 'No SKILL.md found'}]);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        setMessages(m => [...m, {role: 'system', text: `Invalid skill: ${text}`}]);
+      }
+      return;
+    }
+    if (action === 'remove skill') {
+      setMode('skillsConfirmRemove');
+      setMessages(m => [...m, {role: 'system', text: `Remove skill ${selectedSkillName}? This deletes ~/.haze/skills/${selectedSkillName}. Type "yes" to confirm. Esc to cancel.`}]);
+      return;
+    }
+    setMessages(m => [...m, {role: 'system', text: `Unknown skill action: ${action}`}]);
+  }
+
   async function captureSkillName(value: string) {
     const dirName = toSkillDirName(value);
     if (!dirName) {
@@ -1109,16 +1207,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMessages(m => [...m, {role: 'system', text: `A skill named "${dirName}" already exists. Pick another name, or press ESC to cancel.`}]);
       return;
     }
-    setSkillCreateDraft(d => ({...d, name: dirName}));
-    setMode('skillCreateRole');
-    setMessages(m => [...m, {role: 'system', text: `Skill wizard — step 2/3: Role for "${dirName}". Describe who the skill should be (optional — press Enter to skip, ESC to cancel).`}]);
-  }
-
-  function captureSkillRole(value: string) {
-    const role = value.trim();
-    setSkillCreateDraft(d => ({...d, ...(role ? {role} : {})}));
-    setMode('skillCreateDescription');
-    setMessages(m => [...m, {role: 'system', text: `Skill wizard — step 3/3: Describe what the skill should do. This is the work the LLM will expand into the skill body.`}]);
+    setSkillDraft(d => ({...d, name: dirName}));
+    setMode('skillsAddDescription');
+    setMessages(m => [...m, {role: 'system', text: `Describe what "${dirName}" should do. This is the work the LLM will expand into the skill body.`}]);
   }
 
   async function captureSkillDescription(value: string) {
@@ -1127,25 +1218,25 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMessages(m => [...m, {role: 'system', text: 'Description is required. Try again, or press ESC to cancel.'}]);
       return;
     }
-    const name = skillCreateDraft.name;
+    const name = skillDraft.name;
     if (!name) {
       setMode('chat');
-      setSkillCreateDraft({});
-      setMessages(m => [...m, {role: 'system', text: 'Skill wizard lost the name. Start over with /create-skill.'}]);
+      setSkillDraft({});
+      setMessages(m => [...m, {role: 'system', text: 'Skill wizard lost the name. Start over with /skills.'}]);
       return;
     }
     setMode('chat');
+    setSkillDraft({});
     setBusyLabel('Creating skill');
     setBusy(true);
     try {
-      const result = await createSkill({name, role: skillCreateDraft.role, description});
+      const result = await createSkill({name, description});
       setMessages(m => [...m, {role: 'system', text: `Created skill ${result.name} at ${result.file}. Invoke it with /${result.name}. Edit SKILL.md to refine its workflow.`}]);
       await refreshSkills();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
     } finally {
-      setSkillCreateDraft({});
       setBusy(false);
       setBusyLabel('Haze is thinking');
     }
@@ -1157,18 +1248,47 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    if (mode === 'skillCreateName') {
+    if (mode === 'skills') {
+      await selectSkill(value);
+      return;
+    }
+    if (mode === 'skillsAction') {
+      await selectSkillAction(value);
+      return;
+    }
+    if (mode === 'skillsAddName') {
       await captureSkillName(value);
       return;
     }
-
-    if (mode === 'skillCreateRole') {
-      captureSkillRole(value);
+    if (mode === 'skillsAddDescription') {
+      await captureSkillDescription(value);
       return;
     }
-
-    if (mode === 'skillCreateDescription') {
-      await captureSkillDescription(value);
+    if (mode === 'skillsConfirmRemove') {
+      if (!selectedSkillName) {
+        setMode('chat');
+        return;
+      }
+      if (value.trim().toLowerCase() !== 'yes') {
+        setMessages(m => [...m, {role: 'system', text: 'Cancelled. Skill not removed.'}]);
+        setSelectedSkillName(undefined);
+        setMode('chat');
+        return;
+      }
+      const skill = skills.find(candidate => candidate.name === selectedSkillName);
+      if (!skill) {
+        setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} not found.`}]);
+        setSelectedSkillName(undefined);
+        setMode('chat');
+        return;
+      }
+      await fs.remove(skill.dir);
+      const next = await updateSettings({skills: removeSkillSetting(settings, selectedSkillName)});
+      setSettings(next);
+      setMessages(m => [...m, {role: 'system', text: `Removed skill ${selectedSkillName}.`}]);
+      setSelectedSkillName(undefined);
+      setMode('chat');
+      await refreshSkills();
       return;
     }
 
@@ -1506,9 +1626,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     if (result === 'exit') return exit();
     if (result === 'handled') {
-      if (value.startsWith('/remove-skill ')) {
-        await refreshSkills().catch(() => undefined);
-      }
       if (value === '/clear') {
         loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
       }
@@ -1639,9 +1756,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     providerAppendModels: 'model-a, model-b',
     providerRemoveModels: 'model-a, model-b',
     providerConfirmRemove: 'Type "yes" to confirm',
-    skillCreateName: 'Skill name (kebab-case, e.g. security-review)',
-    skillCreateRole: 'Role (optional — Enter to skip)',
-    skillCreateDescription: 'Describe what the skill should do',
+    skills: 'Choose a skill or add skill',
+    skillsAction: 'show info, enable, disable, validate, or remove',
+    skillsAddName: 'Skill name (kebab-case, e.g. security-review)',
+    skillsAddDescription: 'Describe what the skill should do',
+    skillsConfirmRemove: 'Type "yes" to confirm',
     lsp: 'Choose LSP server or add server',
     lspAction: 'enable, disable, or remove server',
     lspAddPreset: 'Choose an LSP preset or custom',
@@ -1665,7 +1784,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     'A minimal LLM harness for growing your own workflows while you work.',
     '',
     'Start with simple chat, then teach Haze your habits with skills:',
-    '/create-skill  — three-step skill wizard (name, role, description).',
+    '/skills  — add, enable/disable, validate, or remove Markdown skills.',
     '',
     'The most adaptive workflow is the one you shape as you go.',
     '',
@@ -1683,12 +1802,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const effectiveOutput = tokenUsage.outputTokens ?? (fallbackTokens.output || 0);
   const inputEstimated = providerInput == null || effectiveInput !== providerInput;
   const outputEstimated = tokenUsage.outputTokens == null;
-  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${skills.length} skill${skills.length === 1 ? '' : 's'}`;
+  const enabledSkills = skills.filter(skill => isSkillEnabled(settings, skill.name));
+  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
   // Goal tracking is internal; display removed in favor of task bar
   void goalText;
-  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'lsp' ? lspSuggestions() : mode === 'lspAction' ? lspActionSuggestions() : mode === 'lspAddPreset' ? lspPresetSuggestions() : mode === 'mcp' ? mcpSuggestions() : mode === 'mcpAction' ? mcpActionSuggestions() : mode === 'mcpAddPreset' ? mcpPresetSuggestions() : mode === 'mcpAddTransport' ? mcpTransportSuggestions() : mode === 'chat' ? [
+  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'skills' ? skillsSuggestions() : mode === 'skillsAction' ? skillsActionSuggestions() : mode === 'lsp' ? lspSuggestions() : mode === 'lspAction' ? lspActionSuggestions() : mode === 'lspAddPreset' ? lspPresetSuggestions() : mode === 'mcp' ? mcpSuggestions() : mode === 'mcpAction' ? mcpActionSuggestions() : mode === 'mcpAddPreset' ? mcpPresetSuggestions() : mode === 'mcpAddTransport' ? mcpTransportSuggestions() : mode === 'chat' ? [
     {value: '/help', description: 'Show commands', kind: 'command'},
     {value: '/provider', description: 'Choose a provider', kind: 'command'},
     {value: '/model', description: 'Choose a model', kind: 'command'},
@@ -1696,10 +1816,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
     {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
     {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
-    {value: '/create-skill ', description: 'Launch the skill wizard', kind: 'command'},
-    {value: '/skill-info ', description: 'Show details for a skill', kind: 'command'},
-    {value: '/validate-skill ', description: 'Validate a skill', kind: 'command'},
-    {value: '/remove-skill ', description: 'Remove a skill with --yes', kind: 'command'},
+    {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
     {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
     {value: '/session', description: 'Show current session path', kind: 'command'},
     {value: '/resume', description: 'Resume latest session for this workspace', kind: 'command'},
@@ -1708,7 +1825,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {value: '/clear', description: 'Clear conversation history', kind: 'command'},
     {value: '/exit', description: 'Exit Haze', kind: 'command'},
     {value: '/quit', description: 'Exit Haze', kind: 'command'},
-    ...skills.map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
+    ...skills.filter(skill => isSkillEnabled(settings, skill.name)).map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
   ] : [];
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},

@@ -8,6 +8,7 @@ import {configuredMcpServers} from '../config/mcpSettings.js';
 import {loadMcpTools, type LoadedMcpTools} from './mcp.js';
 import {loadSkillRegistry} from '../skills/SkillRegistry.js';
 import {buildSkillTools} from '../skills/skillTools.js';
+import {isSkillEnabled} from '../config/skillSettings.js';
 import {createSubagentTool} from '../core/subagent/subagentRunner.js';
 import type {ContextFile} from '../config/contextFiles.js';
 
@@ -39,6 +40,7 @@ export async function assembleRequestContext(input: {
 }): Promise<AssembledRequestContext> {
   const settings = await readSettings();
   const skillRegistry = await loadSkillRegistry();
+  const enabledSkills = new Map([...skillRegistry.skills.entries()].filter(([name]) => isSkillEnabled(settings, name)));
   const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
 
   const toolCategories = new Map<string, ToolCategory>();
@@ -57,7 +59,7 @@ export async function assembleRequestContext(input: {
   const subagentTool = createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session});
   toolCategories.set('subagent', 'subagent');
   availableTools.subagent = subagentTool;
-  const skillTools = buildSkillTools(skillRegistry);
+  const skillTools = buildSkillTools({skills: enabledSkills});
   for (const [name, value] of Object.entries(skillTools)) {
     toolCategories.set(name, 'skill');
     availableTools[name] = value;

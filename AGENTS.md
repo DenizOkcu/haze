@@ -62,15 +62,15 @@ Notes:
 - `src/` — primary TypeScript/TSX source.
   - `cli/index.ts` — Commander entrypoint, CLI flags (`--debug`, `--continue`, `--no-session`), version loading, and dispatch to chat UI.
   - `cli/commands/chat.tsx` — main Ink/React interactive screen: provider/model flows, session lifecycle, context loading, slash command wiring, input history, live messages, abort handling.
-  - `cli/commands/commands.ts` — slash command parser and command handlers: help, settings, provider/model selection, init, sessions, compaction, skill aliases.
+  - `cli/commands/commands.ts` — slash command parser and handlers: help, settings, provider/model, init, sessions, compaction, and the skills/LSP/MCP/provider pickers.
   - `cli/commands/streaming.ts` — core agent loop around `ToolLoopAgent`: tool orchestration, goal observation, retry policy, subagent/skill/MCP tool injection, tool display state, token estimates, idle timeout.
   - `cli/commands/formatters.ts` — compact display summaries for tool calls/results, bash output details, elapsed-time formatting.
-  - `cli/commands/skills.tsx` — skill-related UI helpers.
   - `config/` — runtime config and user data paths.
     - `paths.ts` defines `~/.haze` and global skills directory.
     - `settings.ts` reads/writes `~/.haze/settings.json` and preserves legacy OpenRouter settings.
     - `providers.ts` resolves active provider/model from configured providers only, model selectors, and saved keys. There is no default provider or model; users must add one via `/provider`.
     - `contextFiles.ts` loads global `~/.claude/CLAUDE.md`, `~/.haze/AGENTS.md`, then ancestor `CLAUDE.md`/`AGENTS.md` from filesystem root to cwd; each capped at 20k chars with size/hash diagnostics. Nested files below cwd load lazily when file tools operate in their subtree.
+    - `skillSettings.ts` — skill enabled override (mirrors peers).
     - `inputHistory.ts` persists input history under `~/.haze/history`.
   - `llm/` — model client, prompts, and tool definitions.
     - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
@@ -93,12 +93,12 @@ Notes:
     - `SkillLoader.ts` parses `SKILL.md` YAML frontmatter, validates names/descriptions, and loads relative referenced files (max 50k bytes each, no escaping skill dir).
     - `SkillRegistry.ts` loads global skills from `~/.haze/skills`.
     - `skillTools.ts` exposes one `skill` catalog tool; it returns instructions first and one referenced file only on demand.
-    - `builder/SkillBuilder.ts` creates skills from natural-language descriptions, using a model when configured and a deterministic fallback otherwise.
+    - `builder/SkillBuilder.ts` creates skills from a name + natural-language description in a single model pass (with a deterministic fallback when no model is configured).
     - `types.ts` defines loaded skill and registry types.
   - `ui/` — reusable Ink components (`Header`, `TextInput`, `MarkdownText`, `ErrorView`) and `theme.ts`; `MarkdownText` renders headings, lists, blockquotes, syntax-highlighted code fences, inline emphasis/links/code, rules, and width-aware tables.
   - `utils/` — workspace-safe path helpers, directory walking, filesystem and YAML utilities.
 - `tests/` — Vitest suite covering CLI commands/formatters, config, core agent/goal/safety/session/validation logic, haze tools, skills, and utils.
-- `examples/skills/` — packaged reference skill example(s), including `SKILL.md` plus optional referenced files.
+- `examples/skills/` — packaged reference skill example(s).
 - `bin/haze.js` — npm binary shim; keep it thin.
 - `dist/` — generated build output; never edit directly.
 - `docs/index.html` — generated/static documentation page included in the repo.
@@ -113,7 +113,7 @@ Notes:
 - There is **no default provider/model**. Users must configure a provider via `/provider` (or legacy `apiKey`/`baseURL`, migrated into `openrouter` only when supplied).
 - Runtime model config resolves from `~/.haze/settings.json` provider/model settings and the saved provider key; if none is configured, `activeModel` returns `undefined` and the turn aborts with guidance to run `/provider`.
 - Provider key resolution: saved provider key → legacy `settings.apiKey` → `'not-needed'` placeholder (local OpenAI-compatible providers).
-- There are **no user-facing environment variables** for provider/model configuration; everything is via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` commands. (Tests read `HAZE_DIR` only to redirect `~/.haze`.)
+- There are **no user-facing environment variables** for provider/model config; everything is via `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` commands.
 - Local OpenAI-compatible providers may intentionally use a placeholder API key (`not-needed`).
 - File LLM logging (JSONL under `~/.haze/logs/`) is **off by default**, enabled solely by `--debug`; without it `startNewLog()` creates no log and `logEntry()` is a no-op. `/logs` still reads historical files.
 
@@ -161,7 +161,7 @@ Tool constraints:
 - `/compact [instructions]` uses token-aware compaction and embeds exact structured work state with the recent message window.
 - Runtime control nudges use `<haze_control>` messages for one request only and must not be persisted as user conversation.
 - Older successful tool results may be reduced to protocol-safe summaries; recent results and failures remain verbatim.
-- Context files load at startup/refresh; keep root `AGENTS.md` concise. Global Claude guidance comes from `~/.claude/CLAUDE.md`, but `~/.haze/AGENTS.md` wins on conflict. Nested `CLAUDE.md`/`AGENTS.md` below cwd are scoped: file tools surface them only inside their subtree, and mutating tools stop once so the model can review newly discovered scoped instructions. `/init` should preserve useful guidance and avoid broad discovery.
+- Context files load at startup/refresh; keep root `AGENTS.md` concise (capped at 20k chars). `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`. Nested `CLAUDE.md`/`AGENTS.md` below cwd are scoped to their subtree; mutating tools pause there so the model can review them. `/init` preserves useful guidance.
 - File LLM logging (`~/.haze/logs/`) is off by default; see the logging contract above (`--debug`). Structured-event session logging under `~/.haze/sessions/` is a separate mechanism and is unaffected.
 
 ### Skills
@@ -169,8 +169,8 @@ Tool constraints:
 - Skills are Markdown dirs in `~/.haze/skills/<name>/SKILL.md` with required YAML frontmatter: `name` (letters/numbers/hyphens/underscores) and non-empty `description`.
 - Skill bodies are instructions only; they do not execute code.
 - Relative references in a skill body are loaded if they are Markdown links or plain file-looking paths; references must remain inside the skill directory and be <=50k bytes.
-- Slash commands include `/create-skill`, `/skills`, `/skill-info`, `/validate-skill`, `/remove-skill <name> --yes`.
-- The model-facing `skill` tool takes an exact skill name. It returns the body and reference paths first; a later call can load one reference.
+- Slash commands: `/skills` is the skill picker (mirrors `/provider`/`/lsp`/`/mcp`) to add/enable/disable/validate/remove; installed skills are also `/<name>` commands and default to enabled (an `enabled: false` override in `settings.json` hides one from the catalog and `/<name>` list).
+- The model-facing `skill` tool takes an exact skill name, returns the body and reference paths first, then one reference on demand.
 
 ### Subagents
 
@@ -213,7 +213,7 @@ Run validation appropriate to the change:
 - Build/package changes: also `npm run build` and `npm pack --dry-run`.
 - CLI/TUI-only visual changes: typecheck + relevant tests; manual smoke with `npm run dev` when practical.
 - Tool behavior changes: run the specific haze tool tests plus full `npm test` when practical.
-- Skill changes: validate via tests and, for manually created skills, `/validate-skill <dir-or-name>` inside Haze when practical.
+- Skill changes: validate via tests and, for manually created skills, the `/skills` picker's validate action inside Haze when practical.
 
 If validation is skipped, state clearly why in the final response.
 
