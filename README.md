@@ -4,19 +4,19 @@ A minimal LLM harness for your terminal.
 
 ## What's new in 0.6.0
 
-Haze 0.6.0 adds an AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, and a cleaner segmented transcript for tool/text turns.
+Haze 0.6.0 adds an AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, MCP server support, and a unified config-picker UX.
 
-- **Fetch public URLs.** The new `fetch` tool reads public HTTP(S) pages as Markdown, JSON, or text, with SSRF protections, redirects re-checked, bounded downloads, and oversize output retrievable via `readToolOutput`.
-- **No provider env vars.** `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read. Configure providers, models, keys, and base URLs through `/provider`, `/model`, `/settings`, and `~/.haze/settings.json`.
-- **Debug-only LLM logs.** Detailed JSONL LLM logging is now off by default and only starts with `haze --debug`. `/logs` can still review historical logs.
-- **Quieter tool output.** Bash, git, search, JSON, diff, and log output are reduced before they enter model context, with raw output available through `readToolOutput` when needed.
-- **Cleaner terminal rendering.** Assistant Markdown now renders headings, lists, code fences with syntax highlighting, blockquotes, links, emphasis, and wrapped tables in the CLI.
-- **Cleaner transcripts.** Consecutive assistant messages in one turn share one visible `haze` header, live tool groups use compact elapsed-time summaries, and repeated identical tool calls are steered back to the model instead of aborting immediately.
-- **Scoped instructions.** Haze reads global `~/.claude/CLAUDE.md` plus Haze/project `AGENTS.md` files, and discovers nested `CLAUDE.md`/`AGENTS.md` files only when tools enter their subtree.
-- **Less stale state.** Completed task lists clear automatically on the next user turn, and `/init` now guides `AGENTS.md` toward the context-file budget.
+- **MCP servers.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers with `/mcp` and expose their tools alongside the built-ins. A Context7 preset ships built-in for up-to-date library docs; custom `http`/`sse`/`stdio` servers are supported too. Clients open per turn and close when it ends, a failing server is isolated, and MCP tools never shadow built-ins.
+- **Optional LSP navigation.** Configure stdio language servers with `/lsp` (TypeScript, Rust, Python, Go, and PHP presets). Read-only `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, and `lspReferences` tools are exposed only when an enabled server command is on `PATH`; otherwise Haze falls back to `grep`, `listFiles`, and `readFile`.
+- **Unified config pickers.** `/provider`, `/lsp`, `/mcp`, and `/skills` are now interactive pickers with autocomplete, presets, and masked API-key entry, replacing the old subcommand syntax.
+- **ToolLoopAgent core.** The main turn runs on the AI SDK v6 `ToolLoopAgent` while preserving compact terminal tool/text rendering and the loop guardrails (idle timeout, tool-loop detection, edit recovery, context-overflow auto-compact).
+- **Cleaner transcripts.** Assistant text and tool blocks alternate cleanly during multi-step turns.
+- **Context breakdown.** `/context` shows estimated system-prompt, project-context, tool (including MCP), and message tokens for the current request.
+- **Startup update check.** Haze quietly surfaces a newer published version when one exists.
 
 Previous releases:
 
+- **0.5.0** — `fetch` tool for public URLs (Markdown/JSON/text, SSRF-protected), removed all provider env vars (config via `/provider`/`/model`/`/settings`), debug-only LLM logs, command-aware output reduction, Markdown rendering in the CLI, scoped nested context files, and auto-clearing completed tasks.
 - **0.4.0** — 3-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, leaner command surface, docs site additions.
 - **0.3.0** — Docs site redesign, task bar moves above the activity spinner, tasks auto-clear between sessions.
 - **0.2.0** — Reliability release: stronger continuation after failed edits and validation, structured bash classification, parsed validation summaries, multi-line chat input with vertical cursor movement.

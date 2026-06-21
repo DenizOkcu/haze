@@ -1420,7 +1420,7 @@
             <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
           </li>
         </ol>
-        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is grown with the model through <strong>/create-skill</strong> — the three-step wizard below.</p>
+        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is grown with the model through <strong>/skills</strong> → add skill — the wizard below.</p>
       </div>
     </section>
 
@@ -1434,30 +1434,26 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Skills, grown<br><span class="em">inside haze.</span></h2>
-          <p class="sec-sub">Run <code class="cmd">/create-skill</code> from the chat. Three prompts — name, role, description. The model writes the Markdown. The skill becomes a slash command on equal footing with the built-ins. <strong>This is the superpower.</strong> No plugin runtime, no schema file, no second binary.</p>
+          <p class="sec-sub">Run <code class="cmd">/skills</code> and choose add skill. Two prompts — name and description. The model writes the Markdown. The skill becomes a slash command on equal footing with the built-ins. <strong>This is the superpower.</strong> No plugin runtime, no schema file, no second binary.</p>
         </div>
 
         <div class="skill-create-grid reveal">
           <div class="skill-wizard">
             <div class="skill-wizard-head">
-              <span>3-step wizard — live in the chat</span>
+              <span>skill wizard — live in the chat</span>
               <span class="corner" aria-hidden="true"></span>
             </div>
             <div class="skill-wizard-body">
               <div class="wiz-row">
-                <span class="wiz-cmd">/create-skill</span>
-                <span class="wiz-note">launches the wizard from any haze session</span>
+                <span class="wiz-cmd">/skills → add skill</span>
+                <span class="wiz-note">starts the wizard from any haze session</span>
               </div>
               <div class="wiz-row">
-                <span class="wiz-step">step 1/3 · name</span>
+                <span class="wiz-step">step 1/2 · name</span>
                 <span class="wiz-in"><span class="prompt">›</span> code-review</span>
               </div>
               <div class="wiz-row">
-                <span class="wiz-step">step 2/3 · role</span>
-                <span class="wiz-in"><span class="prompt">›</span> You are a focused code reviewer.</span>
-              </div>
-              <div class="wiz-row">
-                <span class="wiz-step">step 3/3 · description</span>
+                <span class="wiz-step">step 2/2 · description</span>
                 <span class="wiz-in"><span class="prompt">›</span> Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS.</span>
               </div>
               <div class="wiz-result">created at <span class="path">~/.haze/skills/code-review/SKILL.md</span> · invoke with <span class="cmd">/code-review</span></div>
@@ -1472,8 +1468,8 @@
 
         <div class="recipes reveal">
           <div class="recipes-head">
-            <span>Try these — run /create-skill and type them in</span>
-            <span>· /create-skill</span>
+            <span>Try these — run /skills, choose add skill, and type them in</span>
+            <span>· /skills</span>
           </div>
           <div class="recipe-grid">
             <article class="recipe-card">
@@ -1796,6 +1792,10 @@
               <td class="cmd-c"><code>/init</code></td>
               <td class="cmd-d">Create or update compact, budget-aware <code>AGENTS.md</code> project instructions.</td>
             </tr>
+            <tr>
+              <td class="cmd-c"><code>/context</code></td>
+              <td class="cmd-d">Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.</td>
+            </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
             <tr>
@@ -1827,42 +1827,18 @@
               <td class="cmd-d">List recent LLM logs, or summarize one by id. New detailed logs are written only when haze starts with <code>--debug</code>.</td>
             </tr>
             <tr>
-              <td class="cmd-c"><code>/lsp</code>, <code>/lsp presets</code></td>
-              <td class="cmd-d">List configured language servers or show built-in presets.</td>
+              <td class="cmd-c"><code>/lsp</code></td>
+              <td class="cmd-d">Configure language-server navigation tools. Interactive picker: add a preset (<code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, <code>php</code>) or a custom command, then enable/disable/remove. LSP tools appear only when an enabled server command is on <code>PATH</code>.</td>
             </tr>
             <tr>
-              <td class="cmd-c"><code>/lsp add &lt;preset&gt;</code></td>
-              <td class="cmd-d">Add a preset such as <code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, or <code>php</code>.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/lsp add &lt;name&gt; -- &lt;command&gt; [args...]</code></td>
-              <td class="cmd-d">Add a custom stdio LSP server. The command must be installed separately.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/lsp enable|disable|remove &lt;name&gt;</code></td>
-              <td class="cmd-d">Manage configured language servers.</td>
+              <td class="cmd-c"><code>/mcp</code></td>
+              <td class="cmd-d">Configure Model Context Protocol servers like Context7. Interactive picker: add a preset or custom <code>http</code>/<code>sse</code>/<code>stdio</code> server, then enable/disable/remove it or set a masked API key. MCP tools never shadow built-ins.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Skills</td></tr>
             <tr>
               <td class="cmd-c"><code>/skills</code></td>
-              <td class="cmd-d">Show skill commands and installed skills.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/create-skill</code></td>
-              <td class="cmd-d">Launch the 3-step skill wizard (name, role, description).</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/skill-info &lt;name&gt;</code></td>
-              <td class="cmd-d">Show a skill description, references count, and path.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/validate-skill &lt;name-or-dir&gt;</code></td>
-              <td class="cmd-d">Validate a skill directory containing SKILL.md.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/remove-skill &lt;name&gt; --yes</code></td>
-              <td class="cmd-d">Remove an installed skill. <code>--yes</code> required because it deletes files.</td>
+              <td class="cmd-d">Manage Markdown skills in one interactive picker: generate a custom skill from a description, show info, enable/disable, validate, or remove.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Dynamic</td></tr>

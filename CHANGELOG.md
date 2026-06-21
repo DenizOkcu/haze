@@ -1,25 +1,23 @@
 # Changelog
 
-## Unreleased
-
-### Added
-
-- **MCP server support.** Haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
-- **Consistent config UX.** `/lsp` and `/mcp` are now interactive pickers matching the `/provider` flow (autocomplete lists, preset pickers, masked API-key entry), replacing the previous `/lsp`/`/mcp` subcommand syntax.
-
 ## 0.6.0 - 2026-06-21
 
 ### Added
 
+- **MCP server support.** Haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
 - Added optional configurable stdio LSP support through `/lsp`, with TypeScript, Rust, Python, Go, and PHP presets.
-- Added `/settings open` to open `~/.haze/settings.json` with the OS default app.
 - Added read-only semantic navigation tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) that are exposed to the model only when an enabled LSP command is installed on `PATH`.
+- Added `/context`, a token breakdown of the current request (system prompt, project context, tools including MCP, and chat messages).
+- Added `/settings open` to open `~/.haze/settings.json` with the OS default app.
+- Added a non-blocking startup update check (throttled to once per 24 h via `~/.haze/updateCheck.json`) that surfaces a newer published version when one exists; every failure mode resolves silently.
 
 ### Changed
 
 - Switched the main agent turn to the AI SDK v6 `ToolLoopAgent` abstraction while preserving compact terminal tool/text rendering and key loop guardrails.
 - Improved transcript segmentation so assistant text and tool blocks alternate cleanly during multi-step turns.
 - Added LSP-aware prompt guidance only when LSP tools are actually available; otherwise Haze naturally falls back to `grep`, `listFiles`, and `readFile`.
+- Made `/lsp` and `/mcp` interactive pickers matching the `/provider` flow (autocomplete lists, preset pickers, masked API-key entry), replacing the previous `/lsp`/`/mcp` subcommand syntax.
+- Unified skill management into a single `/skills` interactive picker that mirrors `/provider`, `/lsp`, and `/mcp`; removed the legacy `/create-skill`, `/skill-info`, `/validate-skill`, and `/remove-skill` commands.
 - Updated README, docs site, and project agent guidance for LSP setup and the 0.6.0 release.
 
 ## 0.5.0 - 2026-06-19

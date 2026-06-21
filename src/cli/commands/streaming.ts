@@ -26,7 +26,7 @@ function stableToolKey(toolCall: {toolName: string; input: unknown}) {
   return `${toolCall.toolName}:${JSON.stringify(toolCall.input)}`;
 }
 
-function uniqueRepeatedToolNames(toolCalls: Array<{toolName: string; input: unknown}>) {
+export function uniqueRepeatedToolNames(toolCalls: Array<{toolName: string; input: unknown}>) {
   const seen = new Set<string>();
   const repeated = new Set<string>();
   for (const toolCall of toolCalls) {
@@ -37,7 +37,7 @@ function uniqueRepeatedToolNames(toolCalls: Array<{toolName: string; input: unkn
   return [...repeated];
 }
 
-function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
+export function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
   let count = 0;
   for (const step of [...steps].reverse()) {
     if (step.toolCalls.length === 0 || step.text.trim().length > 0) break;
