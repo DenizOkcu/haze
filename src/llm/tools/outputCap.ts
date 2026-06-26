@@ -45,20 +45,25 @@ export function compactGrepMatches(matches: Array<{file: string; line: number; c
   let omittedResultLines = 0;
   // Estimate the serialized size incrementally to keep this O(n) rather than
   // re-serializing the whole accumulated array on every iteration (O(n²)).
-  // Start at 2 chars for the surrounding `[]`.
-  let estimatedSize = 2;
+  // We approximate the JSON shape: a `[`/`]` wrapper, per-object structural
+  // overhead (keys, quotes, braces, separators), and the field values
+  // themselves. This is slightly tighter than a real `JSON.stringify` would
+  // be (it ignores escaping of `"`, `\`, and control chars in `content`),
+  // which is the safe direction for a soft truncation ceiling.
+  const itemSeparatorChars = 2; // `, ` between objects in the serialized array.
+  const objectOverheadChars = 30; // keys + quotes + braces + structural separators.
+  const arrayWrapperChars = 2; // the surrounding `[` and `]`.
+  let estimatedSize = arrayWrapperChars;
   for (const match of matches) {
     const line = compactLine(match.content);
     lineTruncated = lineTruncated || line.truncated;
     const lineText = line.text;
-    // ~30 chars overhead per object (keys, quotes, braces, separators) plus
-    // the actual field lengths.
-    const itemSize = 30 + match.file.length + String(match.line).length + lineText.length;
+    const itemSize = objectOverheadChars + match.file.length + String(match.line).length + lineText.length;
     if (estimatedSize + itemSize > maxChars) {
       omittedResultLines = matches.length - compacted.length;
       break;
     }
-    estimatedSize += itemSize + 2; // +2 for the `, ` between items.
+    estimatedSize += itemSize + itemSeparatorChars;
     compacted.push({...match, content: lineText});
   }
   return {matches: compacted, lineTruncated, omittedResultLines, outputTruncated: omittedResultLines > 0 || lineTruncated};
