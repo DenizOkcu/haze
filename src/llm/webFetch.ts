@@ -32,7 +32,7 @@ export interface FetchOptions {
 
 /**
  * Transport signature: fetch `url`, pinning the TCP connection to `pinnedIp`
- * when set (hostname URL whose DNS was already resolved+ validated by the
+ * when set (hostname URL whose DNS was already resolved and validated by the
  * caller). When `pinnedIp` is undefined (literal-IP URL), the transport falls
  * back to the global fetch — no DNS-rebinding surface exists for a literal IP.
  */
@@ -194,13 +194,37 @@ async function readBodyCapped(
  * they fall through to the global `fetch` — which also keeps the test mocks that
  * stub `globalThis.fetch` working for that path.
  */
+/**
+ * Coerce a RequestInit headers value into a plain string record. Keeps the
+ * transport defensive against `Headers`/tuple/array inputs instead of blindly
+ * casting (the fetch tool only ever passes a plain object, but be safe).
+ */
+function normalizeHeaders(input: HeadersInit | undefined): Record<string, string> {
+  if (!input) return {};
+  if (Array.isArray(input)) {
+    const out: Record<string, string> = {};
+    for (const pair of input) {
+      if (Array.isArray(pair) && pair.length === 2) out[String(pair[0])] = String(pair[1]);
+    }
+    return out;
+  }
+  if (input instanceof Headers) {
+    const out: Record<string, string> = {};
+    input.forEach((value, key) => {
+      out[key] = value;
+    });
+    return out;
+  }
+  return {...(input as Record<string, string>)};
+}
+
 export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: RequestInit): Promise<Response> {
   if (!pinnedIp) return globalThis.fetch(url, init);
 
   const isTls = url.protocol === 'https:';
   const port = url.port ? Number(url.port) : (isTls ? 443 : 80);
   const path = url.pathname + url.search;
-  const headers: Record<string, string> = {...(init.headers as Record<string, string> | undefined)};
+  const headers = normalizeHeaders(init.headers);
   // Preserve the original host in the request line; node would otherwise send
   // the pinned IP as the Host header.
   headers.host = url.host;

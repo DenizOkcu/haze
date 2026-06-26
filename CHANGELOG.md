@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- **Closed a DNS-rebinding TOCTOU in the `fetch` tool.** `urlGuard.validateUrl` resolved a hostname and confirmed every address was public, but the subsequent global `fetch` re-resolved the hostname at connect time, so an attacker-controlled DNS server could answer validation with a public IP and connect with an internal/cloud-metadata IP — fully bypassing the SSRF guard that exists precisely to stop that. `fetchUrlContent` now pins each connection (and each redirect hop) to the already-validated IP via a small stdlib transport that preserves the original `Host` header and TLS `servername`/cert verification, with no second DNS lookup between validation and connect. The post-fetch re-validation was removed as it re-resolved DNS against an already-pinned connection and only reopened the race. Literal-IP URLs keep using the global `fetch` (no rebinding surface).
+
 ## 0.6.0 - 2026-06-21
 
 ### Added
