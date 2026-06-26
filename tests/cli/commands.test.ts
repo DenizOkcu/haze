@@ -187,6 +187,64 @@ describe('handleSlashCommand', () => {
     expect(await handleSlashCommand('/context', ctx)).toBe('handled');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
   });
+
+  it('renders session info for /session when wired', async () => {
+    const ctx = mockContext({sessionInfo: () => 'session abc-123 (5 turns)'});
+    expect(await handleSlashCommand('/session', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith('session abc-123 (5 turns)');
+  });
+
+  it('reports session persistence unavailable for /session without a callback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/session', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+  });
+
+  it('resumes the session for /resume when wired', async () => {
+    const resumeSession = vi.fn().mockResolvedValue(undefined);
+    const ctx = mockContext({resumeSession});
+    expect(await handleSlashCommand('/resume', ctx)).toBe('handled');
+    expect(resumeSession).toHaveBeenCalled();
+  });
+
+  it('reports session persistence unavailable for /resume without a callback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/resume', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+  });
+
+  it('starts a new session for /new when wired', async () => {
+    const newSession = vi.fn().mockResolvedValue(undefined);
+    const ctx = mockContext({newSession});
+    expect(await handleSlashCommand('/new', ctx)).toBe('handled');
+    expect(newSession).toHaveBeenCalled();
+  });
+
+  it('reports session persistence unavailable for /new without a callback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/new', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+  });
+
+  it('compacts the conversation for /compact when wired, forwarding args', async () => {
+    const compactConversation = vi.fn();
+    const ctx = mockContext({compactConversation});
+    expect(await handleSlashCommand('/compact keep the plan', ctx)).toBe('handled');
+    expect(compactConversation).toHaveBeenCalledWith('keep the plan');
+  });
+
+  it('compacts with no args when /compact is bare', async () => {
+    const compactConversation = vi.fn();
+    const ctx = mockContext({compactConversation});
+    expect(await handleSlashCommand('/compact', ctx)).toBe('handled');
+    expect(compactConversation).toHaveBeenCalledWith(undefined);
+  });
+
+  it('reports compaction unavailable for /compact without a callback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/compact', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Compaction is unavailable'));
+  });
 });
 
 describe('handleSlashCommand /logs', () => {
