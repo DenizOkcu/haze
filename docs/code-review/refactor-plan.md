@@ -121,6 +121,26 @@ Acceptance criteria:
 - Pure buffer functions are covered directly.
 - Existing keyboard behavior is unchanged in tests/manual smoke.
 
+## Implementation status (2026-06-26)
+
+All planned phases are implemented.
+
+| Phase | Status | Notes |
+|---|---|---|
+| 1 — Characterization tests | Done | Added direct helper tests; existing test coverage preserved. |
+| 2 — Extract wizard reducers from `chat.tsx` | Done | `providerWizard.ts`, `lspWizard.ts`, `mcpWizard.ts`, `skillWizard.ts`. |
+| 3 — Extract chat session and turn adapters | Done | `sessionRecorder.ts`, `turnState.ts`. |
+| 4 — Slash command registry | Done | Table-driven `SLASH_COMMANDS` in `commands.ts`. |
+| 5 — File-tool envelopes | Done | `tools/workspaceFile.ts` (`prepareWorkspaceRead`, `prepareWorkspaceMutation`, `prepareWorkspaceWritePath`, `prepareWorkspaceExisting`). |
+| 6 — Named-collection helpers | Done | `src/utils/collections.ts` reused by provider/LSP/MCP/skill settings. |
+| 7 — TextInput buffer | Done | `src/ui/inputBuffer.ts` with direct unit tests. |
+
+### Remaining nice-to-haves (not in plan)
+
+- `chat.tsx` (~1,248 lines) can be split further once wizard reducers stabilize.
+- `hazeTools.ts` still contains inline grep parsing/rendering; a later refactor could extract it.
+- Manual smoke via `npm run dev` is impractical to run inside this review.
+
 ## Final validation
 
 Before merging all simplification work:
