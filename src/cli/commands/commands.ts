@@ -9,7 +9,7 @@ import {activeProvider, configuredProviders, modelSelector, providerHasKey, reso
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
-import type {Mode} from './chat.js';
+import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
 

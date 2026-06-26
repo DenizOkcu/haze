@@ -10,24 +10,22 @@ import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {checkForUpdate} from '../../config/updateCheck.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
-import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
+import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, configuredProviders, findProvider, modelSelector, providerHasKey, resolveModelSelector, upsertProvider} from '../../config/providers.js';
-import {configuredLspServers, lspPreset, LSP_PRESETS, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
-import {configuredMcpServers, findMcpPreset, findMcpServer, presetIds, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
+import {activeModel, configuredProviders, findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {configuredLspServers, lspPreset, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
+import {findMcpPreset, findMcpServer, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
 import {isSkillEnabled, removeSkillSetting, setSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
-import {TextInput, type TextInputSuggestion} from '../../ui/components/TextInput.js';
-import {MarkdownText} from '../../ui/components/MarkdownText.js';
+import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
 import {formatContextReport} from './formatters.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
-import {formatElapsedTime, formatElapsedTimeWhole} from './formatters.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
-import {PROVIDER_PRESETS, findPreset} from '../../config/providerPresets.js';
+import {findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
@@ -37,16 +35,13 @@ import {modelWithConfig} from '../../llm/client.js';
 import {assembleRequestContext} from '../../llm/requestContext.js';
 import {closeMcpClients} from '../../llm/mcp.js';
 import type {WorkState} from '../../core/agent/workState.js';
+import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
-
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
-
-/** Modes that show an always-on suggestion picker (server/preset lists). */
-const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'skills', 'skillsAction', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
-/** Modes that mask input (secrets/API keys). */
-const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
-/** Modes where submitting an empty value is valid (optional steps). */
-const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'mcpAddKey']);
+import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
+import {startupProviderInfo} from '../chat/startupInfo.js';
+import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
+import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
+import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES, YES_CONFIRMATION} from './wizardActions.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -116,196 +111,6 @@ function estimateConversationTokens(messages: Message[]) {
   };
 }
 
-function fullWidthLines(text: string, width: number, leftPadding = 0) {
-  const safeWidth = Math.max(1, width);
-  const prefix = ' '.repeat(leftPadding);
-  return text.replace(/\r\n|\r/g, '\n').split('\n').map(line => `${prefix}${line}`.padEnd(Math.max(safeWidth, line.length + leftPadding)));
-}
-
-function fullWidthBlankLine(width: number) {
-  return ''.padEnd(Math.max(1, width));
-}
-
-function ToolMessageText({text, streaming}: {text: string; streaming?: boolean}) {
-  const lines = text.split('\n');
-  return <Box flexDirection="column">
-    {lines.map((line, index) => {
-      const diffRow = /^(\s*\d+\s+)([+-])(.*)$/.exec(line);
-      if (diffRow) {
-        const [, prefix, marker, rest] = diffRow;
-        const isAdd = marker === '+';
-        return <Text key={`${index}-${line}`} color="white" backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>
-          <Text color={isAdd ? theme.success : theme.danger} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>{prefix}{marker}</Text>{rest}
-        </Text>;
-      }
-      const contextRow = /^(\s*\d+\s+)\s(.*)$/.exec(line);
-      if (contextRow) {
-        const [, prefix, rest] = contextRow;
-        return <Text key={`${index}-${line}`} color="white">
-          <Text color={theme.muted}>{prefix} </Text>{rest}
-        </Text>;
-      }
-      const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
-      if (!row) {
-        const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(line);
-        return <Text key={`${index}-${line}`} color={theme.muted}>
-          {index === 0 && streaming ? <><Spinner type="dots" /> </> : null}{timer ? timer[1] : line}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
-        </Text>;
-      }
-      const [, indent, icon, toolName, rest] = row;
-      const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;
-      const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(rest);
-      return <Text key={`${index}-${line}`} color={theme.muted}>
-        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
-      </Text>;
-    })}
-  </Box>;
-}
-
-function messageElapsedLabel(message: Message) {
-  if (message.startedAt == null) return '';
-  const end = message.finishedAt ?? (message.streaming ? Date.now() : message.startedAt);
-  const elapsed = end - message.startedAt;
-  if (message.role === 'assistant' && !message.streaming && message.tokensPerSecond != null) {
-    return `✓ Done in ${formatElapsedTime(elapsed)} · ${Math.round(message.tokensPerSecond)} tok/s`;
-  }
-  return message.streaming ? formatElapsedTimeWhole(elapsed) : formatElapsedTime(elapsed);
-}
-
-function MessageView({message, width, suppressAssistantHeader = false}: {message: Message; width: number; suppressAssistantHeader?: boolean}) {
-  if (message.role === 'user') {
-    return <Box flexDirection="column" marginBottom={1}>
-      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
-      <Text color={theme.success} bold backgroundColor={theme.quoteBg}>{'  You asked'.padEnd(width)}</Text>
-      {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color="white" backgroundColor={theme.quoteBg}>{line}</Text>)}
-      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
-    </Box>;
-  }
-
-  return <Box flexDirection="column" marginBottom={1}>
-    {!suppressAssistantHeader && <Text>
-      <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
-      {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
-    </Text>}
-    {message.role === 'tool'
-      ? <ToolMessageText text={message.text} streaming={message.streaming} />
-      : message.role === 'assistant' && !message.streaming
-        ? <MarkdownText content={message.text} />
-        : <Text>{message.text}</Text>}
-  </Box>;
-}
-
-function messageKey(message: Message, index: number) {
-  return message.id ?? `${index}-${message.role}-${message.text}`;
-}
-
-function orderedDisplayMessages(messages: Message[]) {
-  return messages
-    .map((message, index) => ({message, index}))
-    .sort((a, b) => {
-      if (a.message.displayOrder != null && b.message.displayOrder != null && a.message.displayOrder !== b.message.displayOrder) {
-        return a.message.displayOrder - b.message.displayOrder;
-      }
-      return a.index - b.index;
-    })
-    .map(item => item.message);
-}
-
-function annotateTurnHeaders(messages: Message[]) {
-  return messages.map(message => ({message, suppressAssistantHeader: false}));
-}
-
-function startupProviderInfo(settings: HazeSettings) {
-  const selection = activeModel(settings);
-  const configuredCount = configuredProviders(settings).length;
-  const lspServers = configuredLspServers(settings);
-  const enabledLsp = lspServers.filter(server => server.enabled !== false);
-  const lspLine = enabledLsp.length > 0
-    ? `- LSP: ${enabledLsp.length} configured (${enabledLsp.map(server => server.name).join(', ')}; tools appear only when the command is installed)`
-    : '- LSP: none configured (optional: install a language server, then /lsp presets and /lsp add typescript for semantic code navigation)';
-  const mcpServers = configuredMcpServers(settings);
-  const enabledMcp = mcpServers.filter(server => server.enabled !== false);
-  const mcpLine = enabledMcp.length > 0
-    ? `- MCP: ${enabledMcp.length} configured (${enabledMcp.map(server => server.name).join(', ')}; tools load each turn)`
-    : '- MCP: none configured (optional: /mcp add context7 for up-to-date library docs)';
-  if (!selection) {
-    return [
-      'Provider configuration',
-      '- Provider: not configured',
-      '- Model: not set',
-      '- Base URL: not configured',
-      '- API key: missing',
-      `- Configured providers: ${configuredCount}`,
-      lspLine,
-      mcpLine,
-      '',
-      'Run /provider to choose or add a provider, then select a model.',
-    ].join('\n');
-  }
-  const model = selection.model;
-  const modelSource = settings.model ? 'settings' : 'provider default';
-  const baseURL = selection.provider.url;
-  const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
-  const provider = selection.provider.name;
-
-  return [
-    'Provider configuration',
-    `- Provider: ${provider}`,
-    `- Model: ${model} (${modelSource})`,
-    `- Base URL: ${baseURL} (settings)`,
-    `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
-    `- Configured providers: ${configuredCount}`,
-    lspLine,
-    mcpLine,
-  ].join('\n');
-}
-
-const TASK_STATUS_ICON: Record<TaskStatus, string> = {
-  pending: '\u25CB',
-  in_progress: '\u25D0',
-  completed: '\u2713',
-};
-
-function taskStatusColor(status: TaskStatus): string {
-  switch (status) {
-    case 'completed': return theme.success;
-    case 'in_progress': return theme.warning;
-    default: return theme.muted;
-  }
-}
-
-const MAX_VISIBLE_TASKS = 5;
-
-function TaskBarContent({tasks, width, expanded, padding}: {tasks: Task[]; width: number; expanded: boolean; padding: number}) {
-  const maxTitleWidth = Math.max(10, width - 6);
-  const inProgress = tasks.filter(t => t.status === 'in_progress');
-  const pending = tasks.filter(t => t.status === 'pending');
-  const completed = tasks.filter(t => t.status === 'completed');
-  const limit = expanded ? tasks.length : MAX_VISIBLE_TASKS;
-  const ordered: Task[] = [];
-  for (const t of inProgress) { if (ordered.length < limit) ordered.push(t); }
-  for (const t of pending) { if (ordered.length < limit) ordered.push(t); }
-  for (let i = completed.length - 1; i >= 0 && ordered.length < limit; i--) {
-    ordered.push(completed[i]!);
-  }
-  const counts = `${inProgress.length > 0 ? `${inProgress.length} active` : ''}${pending.length > 0 ? `${inProgress.length > 0 ? ', ' : ''}${pending.length} pending` : ''}${completed.length > 0 ? `${inProgress.length + pending.length > 0 ? ', ' : ''}${completed.length} done` : ''}`;
-  return (
-    <Box flexDirection="column" flexShrink={0}>
-      {padding > 0 && Array.from({length: padding}, (_, i) => <Text key={`pad-${i}`}>{' '}</Text>)}
-      <Text><Text color={theme.purple} bold>Tasks</Text>{counts ? <Text color={theme.muted}> ({counts})</Text> : null}{tasks.length > MAX_VISIBLE_TASKS ? <Text color={theme.muted} dimColor> · ctrl+o {expanded ? 'collapse' : 'expand'}</Text> : null}</Text>
-      {ordered.map(task => {
-        const title = task.title.length > maxTitleWidth ? task.title.slice(0, maxTitleWidth - 1) + '\u2026' : task.title;
-        return (
-          <Text key={task.id} wrap="truncate-end">
-            <Text color={taskStatusColor(task.status)}>{TASK_STATUS_ICON[task.status]} </Text>
-            <Text color={task.status === 'completed' ? theme.muted : 'white'}>{title}</Text>
-          </Text>
-        );
-      })}
-    </Box>
-  );
-}
-
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -346,7 +151,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
-  const [activeGoalStatus, setActiveGoalStatus] = useState<string | undefined>();
+  const [, setActiveGoalStatus] = useState<string | undefined>();
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
@@ -592,146 +397,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
   }
 
-  function providerSuggestions(): TextInputSuggestion[] {
-    return [
-      ...configuredProviders(settings).map(provider => ({
-        value: provider.name,
-        description: `${provider.url} · ${provider.models.length} model${provider.models.length === 1 ? '' : 's'}`,
-        kind: 'provider' as const,
-      })),
-      {value: 'add provider', description: 'Add a new provider (presets available)', kind: 'provider' as const},
-    ];
-  }
-
-  function providerActionSuggestions(): TextInputSuggestion[] {
-    const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-    return [
-      {value: 'use provider', description: 'Set this provider and choose a model', kind: 'provider' as const},
-      {value: 'add models', description: 'Append comma-separated model names', kind: 'provider' as const},
-      {value: 'set API key', description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const},
-      ...(provider?.models?.length ? [{value: 'remove models', description: 'Remove models from this provider', kind: 'provider' as const}] : []),
-      {value: 'remove provider', description: 'Delete this provider from settings', kind: 'provider' as const},
-    ];
-  }
-
-  function presetSuggestions(): TextInputSuggestion[] {
-    const cloudPresets = PROVIDER_PRESETS.filter(p => p.category === 'cloud');
-    const localPresets = PROVIDER_PRESETS.filter(p => p.category === 'local');
-    return [
-      ...cloudPresets.map(preset => ({
-        value: preset.id,
-        description: `${preset.baseUrl}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
-        kind: 'provider' as const,
-      })),
-      ...localPresets.map(preset => ({
-        value: preset.id,
-        description: `${preset.baseUrl} · local, no API key needed`,
-        kind: 'provider' as const,
-      })),
-      {value: 'custom', description: 'Enter provider name, URL, and API key manually', kind: 'provider' as const},
-    ];
-  }
-
-  function modelSuggestions(): TextInputSuggestion[] {
-    const providers = configuredProviders(settings).filter(provider => !modelProviderFilter || provider.name === modelProviderFilter);
-    return providers.flatMap(provider => provider.models.map(model => ({
-      value: modelProviderFilter ? model : modelSelector(provider, model),
-      description: provider.name,
-      kind: 'model' as const,
-    })));
-  }
-
-  function lspSuggestions(): TextInputSuggestion[] {
-    const servers = configuredLspServers(settings);
-    return [{value: 'add server', description: 'add an LSP server (presets available)', kind: 'lsp' as const},
-      ...servers.map(server => ({
-        value: server.name,
-        description: `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''} · ${server.enabled === false ? 'disabled' : 'enabled'}`,
-        kind: 'lsp' as const,
-      }))];
-  }
-
-  function lspActionSuggestions(): TextInputSuggestion[] {
-    const server = selectedLspName ? configuredLspServers(settings).find(s => s.name === selectedLspName) : undefined;
-    const result: TextInputSuggestion[] = [];
-    if (server) result.push({value: server.enabled === false ? 'enable' : 'disable', description: `${server.enabled === false ? 'enable' : 'disable'} this server`, kind: 'lsp' as const});
-    result.push({value: 'remove server', description: 'remove this server', kind: 'lsp' as const});
-    return result;
-  }
-
-  function lspPresetSuggestions(): TextInputSuggestion[] {
-    return [
-      ...Object.values(LSP_PRESETS).map(preset => ({
-        value: preset.name,
-        description: `${preset.command} ${(preset.args ?? []).join(' ')} [${(preset.extensions ?? []).join(', ')}]`,
-        kind: 'lsp' as const,
-      })),
-      {value: 'custom', description: 'enter a name and command manually', kind: 'lsp' as const},
-    ];
-  }
-
-  function mcpSuggestions(): TextInputSuggestion[] {
-    const servers = configuredMcpServers(settings);
-    return [{value: 'add server', description: 'add an MCP server (presets available)', kind: 'mcp' as const},
-      ...servers.map(server => {
-        const location = server.url ?? (server.command ? `${server.command} ${(server.args ?? []).join(' ')}`.trim() : '');
-        return {value: server.name, description: `${server.transport}${location ? ` ${location}` : ''} · ${server.enabled === false ? 'disabled' : 'enabled'}`, kind: 'mcp' as const};
-      })];
-  }
-
-  function mcpActionSuggestions(): TextInputSuggestion[] {
-    const server = selectedMcpName ? findMcpServer(settings, selectedMcpName) : undefined;
-    const result: TextInputSuggestion[] = [];
-    if (server) {
-      result.push({value: server.enabled === false ? 'enable' : 'disable', description: `${server.enabled === false ? 'enable' : 'disable'} this server`, kind: 'mcp' as const});
-      result.push({value: 'set API key', description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
-    }
-    result.push({value: 'remove server', description: 'remove this server', kind: 'mcp' as const});
-    return result;
-  }
-
-  function mcpPresetSuggestions(): TextInputSuggestion[] {
-    return [
-      ...presetIds().map(presetId => {
-        const preset = findMcpPreset(presetId)!;
-        return {value: presetId, description: preset.description ?? `${preset.transport} server`, kind: 'mcp' as const};
-      }),
-      {value: 'custom', description: 'enter name, transport, and URL or command manually', kind: 'mcp' as const},
-    ];
-  }
-
-  function mcpTransportSuggestions(): TextInputSuggestion[] {
-    return [
-      {value: 'http', description: 'Streamable HTTP (remote)', kind: 'mcp' as const},
-      {value: 'sse', description: 'Server-Sent Events (remote)', kind: 'mcp' as const},
-      {value: 'stdio', description: 'local process', kind: 'mcp' as const},
-    ];
-  }
-
-  function skillsSuggestions(): TextInputSuggestion[] {
-    return [{value: 'add skill', description: 'describe a new skill for Haze to generate', kind: 'skill' as const},
-      ...skills.map(skill => ({
-        value: skill.name,
-        description: `${skill.description}${isSkillEnabled(settings, skill.name) ? '' : ' · disabled'}`,
-        kind: 'skill' as const,
-      }))];
-  }
-
-  function skillsActionSuggestions(): TextInputSuggestion[] {
-    const skill = selectedSkillName ? skills.find(candidate => candidate.name === selectedSkillName) : undefined;
-    const result: TextInputSuggestion[] = [];
-    if (skill) {
-      const enabled = isSkillEnabled(settings, skill.name);
-      result.push({value: enabled ? 'disable' : 'enable', description: `${enabled ? 'disable' : 'enable'} this skill`, kind: 'skill' as const});
-      result.push({value: 'show info', description: 'show description, references, and path', kind: 'skill' as const});
-      result.push({value: 'validate', description: 're-load and validate SKILL.md', kind: 'skill' as const});
-    }
-    result.push({value: 'remove skill', description: 'delete this skill directory', kind: 'skill' as const});
-    return result;
-  }
-
   async function selectProvider(providerName: string) {
-    if (providerName === 'add provider') {
+    if (providerName === PROVIDER_CHOICES.addProvider) {
       setProviderDraft({});
       setMode('providerAddPreset');
       setMessages(m => [...m, {role: 'system', text: 'Choose a provider preset, or select "custom" to enter details manually.'}]);
@@ -749,7 +416,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function selectPreset(presetId: string) {
-    if (presetId === 'custom') {
+    if (presetId === PROVIDER_CHOICES.custom) {
       setProviderDraft({});
       setMode('providerAddName');
       setMessages(m => [...m, {role: 'system', text: 'Provider name? Example: openrouter, local, lmstudio.'}]);
@@ -813,26 +480,26 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setSelectedProviderName(undefined);
       return;
     }
-    if (action === 'use provider') {
+    if (action === PROVIDER_ACTIONS.useProvider) {
       await useProvider(selectedProviderName);
       return;
     }
-    if (action === 'add models') {
+    if (action === PROVIDER_ACTIONS.addModels) {
       setMode('providerAppendModels');
       setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to add to ${selectedProviderName}?`}]);
       return;
     }
-    if (action === 'set API key') {
+    if (action === PROVIDER_ACTIONS.setApiKey) {
       setMode('providerSetKey');
       setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedProviderName}? (current: ${provider.key ? 'saved' : 'not set'})`}]);
       return;
     }
-    if (action === 'remove models') {
+    if (action === PROVIDER_ACTIONS.removeModels) {
       setMode('providerRemoveModels');
       setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to remove from ${selectedProviderName}?\nCurrent models: ${provider.models.join(', ')}`}]);
       return;
     }
-    if (action === 'remove provider') {
+    if (action === PROVIDER_ACTIONS.removeProvider) {
       setMode('providerConfirmRemove');
       setMessages(m => [...m, {role: 'system', text: `Remove provider ${selectedProviderName}? Type "yes" to confirm. Esc to cancel.`}]);
       return;
@@ -904,7 +571,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   // --- LSP wizard handlers (mirror the provider wizard) ---
 
   async function selectLspServer(serverName: string) {
-    if (serverName === 'add server') {
+    if (serverName === SERVER_CHOICES.addServer) {
       setLspDraft({});
       setMode('lspAddPreset');
       setMessages(m => [...m, {role: 'system', text: 'Choose an LSP preset, or select "custom" to enter a name and command manually.'}]);
@@ -922,7 +589,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function selectLspPreset(presetId: string) {
-    if (presetId === 'custom') {
+    if (presetId === SERVER_CHOICES.custom) {
       setLspDraft({});
       setMode('lspAddName');
       setMessages(m => [...m, {role: 'system', text: 'LSP server name? Example: typescript, rust, my-lsp.'}]);
@@ -956,15 +623,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setSelectedLspName(undefined);
       return;
     }
-    if (action === 'enable' || action === 'disable') {
-      const next = await updateSettings({lspServers: setLspServerEnabled(settings, selectedLspName, action === 'enable')});
+    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
+      const next = await updateSettings({lspServers: setLspServerEnabled(settings, selectedLspName, action === COMMON_ACTIONS.enable)});
       setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
       setSelectedLspName(undefined);
       setMode('chat');
       return;
     }
-    if (action === 'remove server') {
+    if (action === LSP_ACTIONS.removeServer) {
       setMode('lspConfirmRemove');
       setMessages(m => [...m, {role: 'system', text: `Remove LSP server ${selectedLspName}? Type "yes" to confirm. Esc to cancel.`}]);
       return;
@@ -993,7 +660,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   // --- MCP wizard handlers (mirror the provider wizard) ---
 
   async function selectMcpServer(serverName: string) {
-    if (serverName === 'add server') {
+    if (serverName === SERVER_CHOICES.addServer) {
       setMcpDraft({});
       setMode('mcpAddPreset');
       setMessages(m => [...m, {role: 'system', text: 'Choose an MCP preset, or select "custom" to enter details manually.'}]);
@@ -1011,7 +678,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function selectMcpPreset(presetId: string) {
-    if (presetId === 'custom') {
+    if (presetId === SERVER_CHOICES.custom) {
       setMcpDraft({});
       setMode('mcpAddName');
       setMessages(m => [...m, {role: 'system', text: 'MCP server name? Example: context7, github, filesystem.'}]);
@@ -1044,21 +711,21 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setSelectedMcpName(undefined);
       return;
     }
-    if (action === 'enable' || action === 'disable') {
-      const toggled = toggleMcpServer(settings, selectedMcpName, action === 'enable');
+    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
+      const toggled = toggleMcpServer(settings, selectedMcpName, action === COMMON_ACTIONS.enable);
       const next = await updateSettings({mcpServers: toggled ?? []});
       setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
       setSelectedMcpName(undefined);
       setMode('chat');
       return;
     }
-    if (action === 'set API key') {
+    if (action === MCP_ACTIONS.setApiKey) {
       setMode('mcpSetKey');
       setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedMcpName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`}]);
       return;
     }
-    if (action === 'remove server') {
+    if (action === MCP_ACTIONS.removeServer) {
       setMode('mcpConfirmRemove');
       setMessages(m => [...m, {role: 'system', text: `Remove MCP server ${selectedMcpName}? Type "yes" to confirm. Esc to cancel.`}]);
       return;
@@ -1076,17 +743,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     const headers = keyValue?.trim() ? [{name: 'Authorization', value: `Bearer ${keyValue.trim()}`}] : undefined;
-    const server: HazeMcpServer = transport === 'stdio'
+    const server: HazeMcpServer = transport === MCP_TRANSPORTS.stdio
       ? {name, transport, command: mcpDraft.command, args: mcpDraft.args, ...(headers ? {headers} : {}), enabled: true}
       : {name, transport, url: mcpDraft.url, ...(headers ? {headers} : {}), enabled: true};
     // Re-validate the transport-specific required field.
-    if (transport === 'stdio' && !server.command) {
+    if (transport === MCP_TRANSPORTS.stdio && !server.command) {
       setMessages(m => [...m, {role: 'system', text: 'Command is required for stdio transport.'}]);
       setMode('chat');
       setMcpDraft({});
       return;
     }
-    if (transport !== 'stdio' && !server.url) {
+    if (transport !== MCP_TRANSPORTS.stdio && !server.url) {
       setMessages(m => [...m, {role: 'system', text: `URL is required for ${transport} transport.`}]);
       setMode('chat');
       setMcpDraft({});
@@ -1096,7 +763,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setSettings(next);
     setMcpDraft({});
     setMode('chat');
-    const location = transport === 'stdio' ? `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''}` : server.url;
+    const location = transport === MCP_TRANSPORTS.stdio ? `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''}` : server.url;
     setMessages(m => [...m, {role: 'system', text: `Added MCP server ${name} (${transport}, ${location}). Tools load on the next turn.`}]);
   }
 
@@ -1129,7 +796,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   // --- Skills wizard handlers (mirror the provider/LSP/MCP wizards) ---
 
   async function selectSkill(name: string) {
-    if (name === 'add skill') {
+    if (name === SKILL_CHOICES.addSkill) {
       setSkillDraft({});
       setMode('skillsAddName');
       setMessages(m => [...m, {role: 'system', text: 'Name the skill (kebab-case, e.g. security-review). ESC cancels.'}]);
@@ -1158,15 +825,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setSelectedSkillName(undefined);
       return;
     }
-    if (action === 'enable' || action === 'disable') {
-      const next = await updateSettings({skills: setSkillEnabled(settings, selectedSkillName, action === 'enable')});
+    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
+      const next = await updateSettings({skills: setSkillEnabled(settings, selectedSkillName, action === COMMON_ACTIONS.enable)});
       setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} ${action === 'enable' ? 'enabled' : 'disabled'}.`}]);
+      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
       setSelectedSkillName(undefined);
       setMode('chat');
       return;
     }
-    if (action === 'show info') {
+    if (action === SKILL_ACTIONS.showInfo) {
       setMessages(m => [...m, {role: 'system', text: [
         `${skill.name}`,
         skill.description,
@@ -1177,7 +844,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       ].join('\n')}]);
       return;
     }
-    if (action === 'validate') {
+    if (action === SKILL_ACTIONS.validate) {
       const {loadSkill} = await import('../../skills/SkillLoader.js');
       try {
         const loaded = await loadSkill(skill.dir, 'global');
@@ -1188,7 +855,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       }
       return;
     }
-    if (action === 'remove skill') {
+    if (action === SKILL_ACTIONS.removeSkill) {
       setMode('skillsConfirmRemove');
       setMessages(m => [...m, {role: 'system', text: `Remove skill ${selectedSkillName}? This deletes ~/.haze/skills/${selectedSkillName}. Type "yes" to confirm. Esc to cancel.`}]);
       return;
@@ -1269,7 +936,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== 'yes') {
+      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. Skill not removed.'}]);
         setSelectedSkillName(undefined);
         setMode('chat');
@@ -1421,7 +1088,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== 'yes') {
+      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. Provider not removed.'}]);
         setSelectedProviderName(undefined);
         setMode('chat');
@@ -1476,7 +1143,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== 'yes') {
+      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. LSP server not removed.'}]);
         setSelectedLspName(undefined);
         setMode('chat');
@@ -1519,12 +1186,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     if (mode === 'mcpAddTransport') {
       const transport = value.trim().toLowerCase();
-      if (transport !== 'http' && transport !== 'sse' && transport !== 'stdio') {
+      if (transport !== MCP_TRANSPORTS.http && transport !== MCP_TRANSPORTS.sse && transport !== MCP_TRANSPORTS.stdio) {
         setMessages(m => [...m, {role: 'system', text: 'Enter http, sse, or stdio.'}]);
         return;
       }
-      setMcpDraft(draft => ({...draft, transport: transport as 'http' | 'sse' | 'stdio'}));
-      if (transport === 'stdio') {
+      setMcpDraft(draft => ({...draft, transport: transport as HazeMcpServer['transport']}));
+      if (transport === MCP_TRANSPORTS.stdio) {
         setMode('mcpAddCommand');
         setMessages(m => [...m, {role: 'system', text: 'Command to run? Example: npx -y @modelcontextprotocol/server-filesystem .'}]);
       } else {
@@ -1569,7 +1236,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== 'yes') {
+      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. MCP server not removed.'}]);
         setSelectedMcpName(undefined);
         setMode('chat');
@@ -1738,47 +1405,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const visible = messages.filter(message => !message.hidden);
   const activeLiveMessages = liveMessages.filter(message => !message.hidden);
   const orderedVisibleMessages = orderedDisplayMessages([...visible, ...activeLiveMessages]);
-  const annotatedDisplayMessages = annotateTurnHeaders(orderedVisibleMessages);
-  const staticDisplayItems = annotatedDisplayMessages.filter(item => !item.message.streaming);
-  const transcriptItems = staticDisplayItems.map((item, index) => ({key: messageKey(item.message, index), ...item}));
-  const activeLiveItems = annotatedDisplayMessages.filter(item => item.message.streaming);
+  const transcriptItems = orderedVisibleMessages.filter(message => !message.streaming).map((message, index) => ({key: messageKey(message, index), message}));
+  const streamingItems = orderedVisibleMessages.filter(message => message.streaming);
   const activeSelection = activeModel(settings);
-  const PLACEHOLDERS: Partial<Record<Mode, string>> = {
-    provider: 'Choose provider',
-    providerAction: 'Choose provider action',
-    providerAddPreset: 'Choose a provider preset or custom',
-    model: 'Choose model',
-    providerAddName: 'Provider name',
-    providerAddUrl: 'https://example.com/v1',
-    providerAddKey: 'API key, or blank for local',
-    providerSetKey: 'API key',
-    providerAddModels: 'model-a, model-b',
-    providerAppendModels: 'model-a, model-b',
-    providerRemoveModels: 'model-a, model-b',
-    providerConfirmRemove: 'Type "yes" to confirm',
-    skills: 'Choose a skill or add skill',
-    skillsAction: 'show info, enable, disable, validate, or remove',
-    skillsAddName: 'Skill name (kebab-case, e.g. security-review)',
-    skillsAddDescription: 'Describe what the skill should do',
-    skillsConfirmRemove: 'Type "yes" to confirm',
-    lsp: 'Choose LSP server or add server',
-    lspAction: 'enable, disable, or remove server',
-    lspAddPreset: 'Choose an LSP preset or custom',
-    lspAddName: 'LSP server name (e.g. typescript)',
-    lspAddCommand: 'Command (e.g. typescript-language-server --stdio)',
-    lspConfirmRemove: 'Type "yes" to confirm',
-    mcp: 'Choose MCP server or add server',
-    mcpAction: 'enable, disable, remove, or set key',
-    mcpAddPreset: 'Choose an MCP preset or custom',
-    mcpAddName: 'MCP server name (e.g. context7)',
-    mcpAddTransport: 'http, sse, or stdio',
-    mcpAddUrl: 'https://mcp.example.com/mcp',
-    mcpAddCommand: 'Command (e.g. npx -y @pkg/server)',
-    mcpAddKey: 'API key, or blank to skip',
-    mcpSetKey: 'API key',
-    mcpConfirmRemove: 'Type "yes" to confirm',
-  };
-  const placeholder = PLACEHOLDERS[mode] ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app');
+  const placeholder = placeholderForMode(mode, busy);
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
   const headerSubtitle = [
     'A minimal LLM harness for growing your own workflows while you work.',
@@ -1805,28 +1435,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const enabledSkills = skills.filter(skill => isSkillEnabled(settings, skill.name));
   const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
-  const goalText = activeGoalStatus?.replace(/^Goal:\s*/, '');
-  // Goal tracking is internal; display removed in favor of task bar
-  void goalText;
-  const inputSuggestions: TextInputSuggestion[] = mode === 'provider' ? providerSuggestions() : mode === 'providerAction' ? providerActionSuggestions() : mode === 'providerAddPreset' ? presetSuggestions() : mode === 'model' ? modelSuggestions() : mode === 'skills' ? skillsSuggestions() : mode === 'skillsAction' ? skillsActionSuggestions() : mode === 'lsp' ? lspSuggestions() : mode === 'lspAction' ? lspActionSuggestions() : mode === 'lspAddPreset' ? lspPresetSuggestions() : mode === 'mcp' ? mcpSuggestions() : mode === 'mcpAction' ? mcpActionSuggestions() : mode === 'mcpAddPreset' ? mcpPresetSuggestions() : mode === 'mcpAddTransport' ? mcpTransportSuggestions() : mode === 'chat' ? [
-    {value: '/help', description: 'Show commands', kind: 'command'},
-    {value: '/provider', description: 'Choose a provider', kind: 'command'},
-    {value: '/model', description: 'Choose a model', kind: 'command'},
-    {value: '/lsp', description: 'Manage LSP servers (semantic navigation)', kind: 'command'},
-    {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
-    {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
-    {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
-    {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
-    {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
-    {value: '/session', description: 'Show current session path', kind: 'command'},
-    {value: '/resume', description: 'Resume latest session for this workspace', kind: 'command'},
-    {value: '/new', description: 'Start a new session', kind: 'command'},
-    {value: '/compact ', description: 'Summarize older context and keep recent messages', kind: 'command'},
-    {value: '/clear', description: 'Clear conversation history', kind: 'command'},
-    {value: '/exit', description: 'Exit Haze', kind: 'command'},
-    {value: '/quit', description: 'Exit Haze', kind: 'command'},
-    ...skills.filter(skill => isSkillEnabled(settings, skill.name)).map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
-  ] : [];
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
@@ -1836,10 +1445,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     <Static items={staticItems}>
       {item => item.kind === 'header'
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
-        : <MessageView key={item.key} message={item.message} width={width} suppressAssistantHeader={item.suppressAssistantHeader} />}
+        : <MessageView key={item.key} message={item.message} width={width} />}
     </Static>
-    {activeLiveItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {activeLiveItems.map((item, index) => <MessageView key={messageKey(item.message, index)} message={item.message} width={width} suppressAssistantHeader={item.suppressAssistantHeader} />)}
+    {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {streamingItems.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
@@ -1850,7 +1459,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} dimColor>  {index + 1}. {item}</Text>)}
     </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-      <TaskBarContent tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
+      <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
     {busy && <Box flexShrink={0}>
       <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
