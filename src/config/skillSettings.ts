@@ -1,4 +1,5 @@
 import type {HazeSettings, HazeSkillSetting} from './settings.js';
+import {findByName, removeByName} from '../utils/collections.js';
 
 /**
  * Normalized skill metadata overrides. The list is override-only: only skills that
@@ -16,7 +17,7 @@ export function configuredSkillSettings(settings: HazeSettings): HazeSkillSettin
 
 /** A skill is enabled unless an explicit override disables it. */
 export function isSkillEnabled(settings: HazeSettings, name: string): boolean {
-  const entry = configuredSkillSettings(settings).find(item => item.name === name);
+  const entry = findByName(configuredSkillSettings(settings), name);
   return entry ? entry.enabled !== false : true;
 }
 
@@ -25,11 +26,11 @@ export function isSkillEnabled(settings: HazeSettings, name: string): boolean {
  * `enabled: false`. Returns the next `skills` array for updateSettings.
  */
 export function setSkillEnabled(settings: HazeSettings, name: string, enabled: boolean): HazeSkillSetting[] {
-  const others = configuredSkillSettings(settings).filter(entry => entry.name !== name);
+  const others = removeByName(configuredSkillSettings(settings), name);
   return enabled ? others : [...others, {name, enabled: false}];
 }
 
 /** Drop a skill's override entry. Called when a skill directory is removed. */
 export function removeSkillSetting(settings: HazeSettings, name: string): HazeSkillSetting[] {
-  return configuredSkillSettings(settings).filter(entry => entry.name !== name);
+  return removeByName(configuredSkillSettings(settings), name);
 }

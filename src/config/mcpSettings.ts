@@ -1,4 +1,5 @@
 import type {HazeMcpServer, HazeSettings} from './settings.js';
+import {findByName, removeByName, upsertByName} from '../utils/collections.js';
 
 export type McpTransport = 'http' | 'sse' | 'stdio';
 
@@ -89,21 +90,20 @@ export function configuredMcpServers(settings: HazeSettings): HazeMcpServer[] {
 }
 
 export function findMcpServer(settings: HazeSettings, name: string): HazeMcpServer | undefined {
-  return configuredMcpServers(settings).find(server => server.name === name);
+  return findByName(configuredMcpServers(settings), name);
 }
 
 export function upsertMcpServer(settings: HazeSettings, server: HazeMcpServer): HazeMcpServer[] {
-  const servers = configuredMcpServers(settings).filter(existing => existing.name !== server.name);
-  return [...servers, server];
+  return upsertByName(configuredMcpServers(settings), server);
 }
 
 export function removeMcpServer(settings: HazeSettings, name: string): HazeMcpServer[] {
-  return configuredMcpServers(settings).filter(server => server.name !== name);
+  return removeByName(configuredMcpServers(settings), name);
 }
 
 export function toggleMcpServer(settings: HazeSettings, name: string, enabled: boolean): HazeMcpServer[] | undefined {
   const servers = configuredMcpServers(settings);
-  const target = servers.find(server => server.name === name);
+  const target = findByName(servers, name);
   if (!target) return undefined;
   return upsertMcpServer(settings, {...target, enabled});
 }

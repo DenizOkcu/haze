@@ -1,4 +1,5 @@
 import type {HazeSettings, HazeProviderSettings} from './settings.js';
+import {findByName, upsertByName} from '../utils/collections.js';
 
 // Used only to migrate legacy single-provider OpenRouter settings (apiKey/baseURL)
 // into the providers array. There is no default provider or model anymore: users
@@ -54,7 +55,7 @@ export function configuredProviders(settings: HazeSettings): HazeProviderSetting
 }
 
 export function findProvider(settings: HazeSettings, name: string): HazeProviderSettings | undefined {
-  return configuredProviders(settings).find(provider => provider.name === name);
+  return findByName(configuredProviders(settings), name);
 }
 
 export function activeProvider(settings: HazeSettings): HazeProviderSettings | undefined {
@@ -95,8 +96,7 @@ export function modelSelector(provider: HazeProviderSettings, model: string) {
 }
 
 export function upsertProvider(settings: HazeSettings, provider: HazeProviderSettings): HazeProviderSettings[] {
-  const providers = configuredProviders(settings).filter(existing => existing.name !== provider.name);
-  return [...providers, provider];
+  return upsertByName(configuredProviders(settings), provider);
 }
 
 export function providerHasKey(settings: HazeSettings, provider: HazeProviderSettings) {

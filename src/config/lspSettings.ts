@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {HazeSettings} from './settings.js';
+import {removeByName, upsertByName} from '../utils/collections.js';
 
 export interface HazeLspServer {
   name: string;
@@ -71,14 +72,11 @@ export function upsertLspServer(settings: HazeSettings, server: HazeLspServer): 
     rootPatterns: server.rootPatterns ?? [],
     enabled: server.enabled !== false,
   };
-  const servers = configuredLspServers(settings);
-  const index = servers.findIndex(existing => existing.name === normalized.name);
-  if (index === -1) return [...servers, normalized];
-  return servers.map(existing => existing.name === normalized.name ? normalized : existing);
+  return upsertByName(configuredLspServers(settings), normalized);
 }
 
 export function removeLspServer(settings: HazeSettings, name: string): HazeLspServer[] {
-  return configuredLspServers(settings).filter(server => server.name !== name);
+  return removeByName(configuredLspServers(settings), name);
 }
 
 export function setLspServerEnabled(settings: HazeSettings, name: string, enabled: boolean): HazeLspServer[] {

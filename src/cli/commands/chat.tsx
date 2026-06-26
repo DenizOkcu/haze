@@ -38,6 +38,7 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
+import {createSessionRecorder} from '../chat/sessionRecorder.js';
 import {startupProviderInfo} from '../chat/startupInfo.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
@@ -1324,15 +1325,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string) {
-    const persistUiMessage = (msg: Message) => {
-      const session = sessionRef.current;
-      if (session) void appendSessionEntry(session, {type: 'ui_message', at: new Date().toISOString(), role: msg.role, text: msg.text}).catch(() => undefined);
-    };
+    const sessionRecorder = createSessionRecorder(() => sessionRef.current);
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
       const ordered = withDisplayOrder(msg);
       setMessages(m => [...m, ordered]);
-      persistUiMessage(ordered);
+      sessionRecorder.recordUiMessage(ordered);
     };
 
     await runAgentTurn(value, displayValue, contextFiles, {
@@ -1360,8 +1358,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
       setConversation: msgs => {
         conversationRef.current = msgs;
-        const session = sessionRef.current;
-        if (session) void appendSessionEntry(session, {type: 'conversation_snapshot', at: new Date().toISOString(), messages: msgs}).catch(() => undefined);
+        sessionRecorder.recordConversation(msgs);
       },
       setBusy,
       setBusyLabel,
@@ -1373,8 +1370,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setGoalStatus: setActiveGoalStatus,
       setWorkState: state => {
         workStateRef.current = state;
-        const session = sessionRef.current;
-        if (session) void appendSessionEntry(session, {type: 'work_state_snapshot', at: new Date().toISOString(), state}).catch(() => undefined);
+        sessionRecorder.recordWorkState(state);
       },
       compactConversation,
       recordTokenUsage: usage => {
@@ -1394,8 +1390,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         }));
       },
       onEvent: event => {
-        const session = sessionRef.current;
-        if (session) void appendSessionEntry(session, {type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)}).catch(() => undefined);
+        sessionRecorder.recordEvent(event);
       },
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       log: llmLogRef.current,
