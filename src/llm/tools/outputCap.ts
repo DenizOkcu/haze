@@ -43,16 +43,23 @@ export function compactGrepMatches(matches: Array<{file: string; line: number; c
   const compacted: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
   let lineTruncated = false;
   let omittedResultLines = 0;
+  // Estimate the serialized size incrementally to keep this O(n) rather than
+  // re-serializing the whole accumulated array on every iteration (O(n²)).
+  // Start at 2 chars for the surrounding `[]`.
+  let estimatedSize = 2;
   for (const match of matches) {
     const line = compactLine(match.content);
     lineTruncated = lineTruncated || line.truncated;
-    const next = {...match, content: line.text};
-    const estimated = JSON.stringify([...compacted, next]).length;
-    if (estimated > maxChars) {
+    const lineText = line.text;
+    // ~30 chars overhead per object (keys, quotes, braces, separators) plus
+    // the actual field lengths.
+    const itemSize = 30 + match.file.length + String(match.line).length + lineText.length;
+    if (estimatedSize + itemSize > maxChars) {
       omittedResultLines = matches.length - compacted.length;
       break;
     }
-    compacted.push(next);
+    estimatedSize += itemSize + 2; // +2 for the `, ` between items.
+    compacted.push({...match, content: lineText});
   }
   return {matches: compacted, lineTruncated, omittedResultLines, outputTruncated: omittedResultLines > 0 || lineTruncated};
 }
