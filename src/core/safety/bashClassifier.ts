@@ -55,6 +55,32 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'mutating', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'command can modify files or repository state'};
   }
 
+  // `find -delete` removes matched files outright.
+  if (has(lower, /(\s|^)-delete\b/)) {
+    traits.push('deletes_files');
+    return {riskLevel: 'destructive', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'find -delete removes matched files'};
+  }
+
+  // `find -exec`/`-execdir` and `xargs` run an embedded command. Classify by
+  // the payload so destructive/mutating verbs are not masked by the read-only
+  // `find`/`xargs` wrapper, and never promise read-only for an arbitrary exec.
+  const execMatch = /(?:\s|^)(?:-exec(?:dir)?|xargs)\s+(.*)$/.exec(lower);
+  if (execMatch) {
+    const payload = execMatch[1];
+    if (has(payload, /\brm\b|git\s+clean|git\s+restore|drop\s+database|truncate\s+table/)) {
+      if (has(payload, /\brm\b/)) traits.push('deletes_files');
+      return {riskLevel: 'destructive', traits: uniq(traits), confidence: 'medium', reason: 'embedded command can delete files'};
+    }
+    if (has(payload, /\b(chmod|mv|cp|mkdir|touch|tee|sed\s+-i|perl\s+-pi)\b/) || has(payload, /\bgit\s+(add|commit|merge|rebase|checkout|restore)\b/)) {
+      traits.push('writes_files');
+      if (has(payload, /\bchmod\b/)) traits.push('changes_permissions');
+      if (has(payload, /\bgit\b/)) traits.push('changes_git_state');
+      return {riskLevel: 'mutating', traits: uniq(traits), confidence: 'medium', reason: 'embedded command can modify files'};
+    }
+    traits.push('reads_files');
+    return {riskLevel: 'unknown', traits: uniq(traits), confidence: 'low', reason: 'find -exec / xargs runs an embedded command'};
+  }
+
   if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b)/)) {
     if (has(lower, /test|vitest|jest/)) traits.push('runs_tests');
     if (has(lower, /build|tsc|typecheck|lint|eslint/)) traits.push('runs_build');
