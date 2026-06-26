@@ -55,7 +55,14 @@ function frame(message: unknown): Buffer {
   return Buffer.from(`Content-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
 }
 
-/** Parse the JSON-RPC body out of an outgoing framed `stdin.write` payload. */
+/**
+ * Parse the JSON-RPC body out of an outgoing framed `stdin.write` payload.
+ *
+ * Returns `null` on a missing/incomplete header or a malformed JSON body. The
+ * production parser in `src/llm/lsp.ts` throws `LspError` in those cases; the
+ * test helper is intentionally permissive so it can stub responses without
+ * needing fully-formed frames for every assertion.
+ */
 function parseOutgoing(data: string): {id?: number; method: string} | null {
   const match = /Content-Length: \d+\r\n\r\n([\s\S]*)/.exec(data);
   if (!match) return null;
@@ -123,6 +130,7 @@ describe('lsp pure helpers', () => {
   });
 
   it('normalizes LSP ranges to 1-indexed positions', () => {
+    // Inputs are LSP-native (0-indexed); expected outputs are 1-indexed for Haze's display.
     expect(asRange({start: {line: 0, character: 2}, end: {line: 3, character: 5}})).toEqual({
       start: {line: 1, character: 3},
       end: {line: 4, character: 6},
