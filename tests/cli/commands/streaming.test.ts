@@ -249,6 +249,38 @@ describe('runAgentTurn: setup', () => {
     await runAgentTurn('raw', 'display', [], cb);
     expect(cb.messages[0]).toEqual({role: 'user', text: 'display'});
   });
+
+  it('forwards modelOverride to modelWithConfig', async () => {
+    const modelWithConfigCalls: Array<{modelSelector?: string} | undefined> = [];
+    vi.doMock('../../../src/llm/client.js', () => ({
+      modelWithConfig: vi.fn(async (opts?: {cwd?: string; modelSelector?: string}) => {
+        modelWithConfigCalls.push(opts);
+        return {
+          model: {id: 'mock'},
+          config: {providerName: 'openai', baseURL: 'https://x/v1', modelName: 'gpt-4o-mini', cacheKey: 'k', capabilities: {}},
+        };
+      }),
+      providerRequestSettings: () => ({}),
+    }));
+    vi.doMock('../../../src/llm/requestContext.js', () => ({
+      assembleRequestContext: vi.fn(async () => ({systemPrompt: '', availableTools: {}, toolCategories: new Map()})),
+    }));
+    vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: vi.fn(async () => undefined)}));
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      class NoopAgent {
+        stream() {
+          return {fullStream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []})};
+        }
+      }
+      return {...actual, ToolLoopAgent: NoopAgent, stepCountIs: (n: number) => ({steps: n})};
+    });
+    vi.resetModules();
+    const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
+    const cb = makeCallbacks();
+    await runAgentTurn('hi', undefined, [], cb, 0, false, false, undefined, 'openai:gpt-4o-mini');
+    expect(modelWithConfigCalls.some((c) => c?.modelSelector === 'openai:gpt-4o-mini')).toBe(true);
+  });
 });
 
 describe('runAgentTurn: no model', () => {

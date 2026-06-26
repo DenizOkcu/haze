@@ -63,6 +63,7 @@ export async function runAgentTurn(
   retryingExistingRequest = false,
   contextOverflowRecovered = false,
   session?: PromptSession,
+  modelOverride?: string,
 ): Promise<void> {
   const displayVal = displayValue ?? value;
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
@@ -85,7 +86,7 @@ export async function runAgentTurn(
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
 
   try {
-    const runtime = await modelWithConfig(session ? {cwd: session.cwd} : undefined);
+    const runtime = await modelWithConfig(session ? {cwd: session.cwd, modelSelector: modelOverride} : {modelSelector: modelOverride});
     if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
       turnStatus = 'complete';
@@ -358,7 +359,7 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-          await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session);
+          await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session, modelOverride);
           return;
         }
         callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
@@ -370,7 +371,7 @@ export async function runAgentTurn(
         callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
         await abortableDelay(delay, abortController.signal);
         if (abortController.signal.aborted) return;
-        await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session);
+        await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session, modelOverride);
         return;
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
