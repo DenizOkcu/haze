@@ -8,7 +8,7 @@ import {z} from 'zod';
 import {walkDir} from '../utils/fs.js';
 import {writeTasksTool} from './tools/taskTool.js';
 import {readToolOutputTool} from './tools/storedOutputTool.js';
-import {workspaceRoot, resolveWorkspacePath, assertRealPathInsideWorkspace, assertWritablePathInsideWorkspace} from '../utils/path.js';
+import {workspaceRoot} from '../utils/path.js';
 
 import type {ToolDiffLine} from './toolResultTypes.js';
 import {storeToolOutput} from '../core/agent/toolOutputStore.js';
@@ -16,10 +16,11 @@ import {reductionMetrics} from '../core/toolOutput/reduction.js';
 import {HazeToolError, structuredToolFailure} from './tools/failures.js';
 import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
 import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
-import {runDedupedTool, discoverScopedContext, withScopedContext, scopedContextMutationStop} from './tools/toolContext.js';
+import {runDedupedTool, discoverScopedContext, withScopedContext} from './tools/toolContext.js';
+import {prepareWorkspaceExisting, prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
-import {assertNotIgnored, DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
+import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 
 const execFile = promisify(execFileCallback);
 
@@ -36,9 +37,7 @@ export const hazeTools = {
     }),
     execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(dirPath);
-        await assertNotIgnored(absolutePath, dirPath, includeIgnored);
-        await assertRealPathInsideWorkspace(absolutePath, dirPath);
+        const absolutePath = await prepareWorkspaceRead(dirPath, includeIgnored);
         const entries: string[] = [];
         let ignoredSkipped = 0;
 
@@ -81,9 +80,7 @@ export const hazeTools = {
     }),
     execute: async ({path: filePath, offset, limit, mode, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, mode, allowIgnored}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(filePath);
-        await assertNotIgnored(absolutePath, filePath, allowIgnored);
-        await assertRealPathInsideWorkspace(absolutePath, filePath);
+        const absolutePath = await prepareWorkspaceRead(filePath, allowIgnored);
         const content = await fs.readFile(absolutePath, 'utf8');
         const lines = content.split(/\r?\n/);
         const start = offset == null ? 0 : offset - 1;
@@ -151,8 +148,7 @@ export const hazeTools = {
     }),
     execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(searchPath);
-        await assertRealPathInsideWorkspace(absolutePath, searchPath);
+        const absolutePath = await prepareWorkspaceExisting(searchPath);
         const args = [
           '--json', '--color=never',
           '--max-count', String(maxMatches),
@@ -266,11 +262,7 @@ export const hazeTools = {
     }),
     execute: async ({path: filePath, startLine, endLine, content, allowIgnored}, context) => runDedupedTool('replaceLines', {path: filePath, startLine, endLine, content, allowIgnored}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(filePath);
-        await assertNotIgnored(absolutePath, filePath, allowIgnored);
-        await assertRealPathInsideWorkspace(absolutePath, filePath);
-        const scopedContext = await discoverScopedContext(filePath, context);
-        const scopedStop = scopedContextMutationStop('replaceLines', filePath, scopedContext);
+        const {absolutePath, scopedStop} = await prepareWorkspaceMutation('replaceLines', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
         const original = await fs.readFile(absolutePath, 'utf8');
         const hasTrailingNewline = original.endsWith('\n');
@@ -312,21 +304,18 @@ export const hazeTools = {
     }),
     execute: async ({path: filePath, content, overwriteExisting, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, allowIgnored}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(filePath);
-        await assertNotIgnored(absolutePath, filePath, allowIgnored);
-        const scopedContext = await discoverScopedContext(filePath, context);
-        const scopedStop = scopedContextMutationStop('writeFile', filePath, scopedContext);
+        const {absolutePath, scopedStop, assertExistingInsideWorkspace, assertWritableInsideWorkspace} = await prepareWorkspaceWritePath('writeFile', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
         try {
           await fs.access(absolutePath);
-          await assertRealPathInsideWorkspace(absolutePath, filePath);
+          await assertExistingInsideWorkspace();
           if (!overwriteExisting) {
             throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code !== 'ENOENT') throw error;
-          await assertWritablePathInsideWorkspace(absolutePath, filePath);
+          await assertWritableInsideWorkspace();
         }
         await fs.mkdir(path.dirname(absolutePath), {recursive: true});
         await fs.writeFile(absolutePath, content, 'utf8');
@@ -349,11 +338,7 @@ export const hazeTools = {
     }),
     execute: async ({path: filePath, edits, allowIgnored}, context) => runDedupedTool('editFile', {path: filePath, edits, allowIgnored}, context, async () => {
       try {
-        const absolutePath = resolveWorkspacePath(filePath);
-        await assertNotIgnored(absolutePath, filePath, allowIgnored);
-        await assertRealPathInsideWorkspace(absolutePath, filePath);
-        const scopedContext = await discoverScopedContext(filePath, context);
-        const scopedStop = scopedContextMutationStop('editFile', filePath, scopedContext);
+        const {absolutePath, scopedStop} = await prepareWorkspaceMutation('editFile', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
         const original = await fs.readFile(absolutePath, 'utf8');
         const ranges = edits.map((edit, index) => {

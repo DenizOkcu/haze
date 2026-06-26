@@ -42,7 +42,8 @@ import {createSessionRecorder} from '../chat/sessionRecorder.js';
 import {startupProviderInfo} from '../chat/startupInfo.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
-import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES, YES_CONFIRMATION} from './wizardActions.js';
+import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
+import {commaList, commandParts, isValidUrl, isYesConfirmation} from './wizardInput.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -220,7 +221,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   function skillInvocation(value: string) {
     if (!value.startsWith('/')) return undefined;
-    const [name, ...args] = value.slice(1).trim().split(/\s+/).filter(Boolean);
+    const [name, ...args] = commandParts(value.slice(1));
     if (!name) return undefined;
     const skill = skills.find(candidate => candidate.name === name);
     // Disabled skills are not invocable: they are absent from the model catalog,
@@ -528,7 +529,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function appendModelsToProvider(modelsValue: string) {
     const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-    const models = modelsValue.split(',').map(model => model.trim()).filter(Boolean);
+    const models = commaList(modelsValue);
     if (!provider) {
       setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
       setMode('chat');
@@ -548,7 +549,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function finishProviderAdd(modelsValue: string) {
-    const models = modelsValue.split(',').map(model => model.trim()).filter(Boolean);
+    const models = commaList(modelsValue);
     if (!providerDraft.name || !providerDraft.url || models.length === 0) {
       setMessages(m => [...m, {role: 'system', text: 'Provider name, URL, and at least one model are required.'}]);
       setMode('chat');
@@ -642,7 +643,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function finishLspCustom(commandLine: string) {
     const name = lspDraft.name?.trim();
-    const parts = commandLine.trim().split(/\s+/).filter(Boolean);
+    const parts = commandParts(commandLine);
     const command = parts[0];
     if (!name || !command) {
       setMessages(m => [...m, {role: 'system', text: 'LSP server name and command are required.'}]);
@@ -937,7 +938,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
+      if (!isYesConfirmation(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. Skill not removed.'}]);
         setSelectedSkillName(undefined);
         setMode('chat');
@@ -997,9 +998,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
 
     if (mode === 'providerAddUrl') {
-      try {
-        new URL(value);
-      } catch {
+      if (!isValidUrl(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example http://localhost:1234/v1.'}]);
         return;
       }
@@ -1054,7 +1053,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      const toRemove = value.split(',').map(m => m.trim()).filter(Boolean);
+      const toRemove = commaList(value);
       if (toRemove.length === 0) {
         setMessages(m => [...m, {role: 'system', text: 'Enter at least one model name. Esc to cancel.'}]);
         return;
@@ -1089,7 +1088,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
+      if (!isYesConfirmation(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. Provider not removed.'}]);
         setSelectedProviderName(undefined);
         setMode('chat');
@@ -1144,7 +1143,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
+      if (!isYesConfirmation(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. LSP server not removed.'}]);
         setSelectedLspName(undefined);
         setMode('chat');
@@ -1202,9 +1201,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     if (mode === 'mcpAddUrl') {
-      try {
-        new URL(value);
-      } catch {
+      if (!isValidUrl(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example https://mcp.context7.com/mcp.'}]);
         return;
       }
@@ -1214,7 +1211,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     if (mode === 'mcpAddCommand') {
-      const parts = value.trim().split(/\s+/).filter(Boolean);
+      const parts = commandParts(value);
       if (parts.length === 0) {
         setMessages(m => [...m, {role: 'system', text: 'Command is required.'}]);
         return;
@@ -1237,7 +1234,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      if (value.trim().toLowerCase() !== YES_CONFIRMATION) {
+      if (!isYesConfirmation(value)) {
         setMessages(m => [...m, {role: 'system', text: 'Cancelled. MCP server not removed.'}]);
         setSelectedMcpName(undefined);
         setMode('chat');
