@@ -67,7 +67,7 @@ export function activeModel(settings: HazeSettings): {provider: HazeProviderSett
   if (!provider) return undefined;
   const model = settings.model && provider.models.includes(settings.model)
     ? settings.model
-    : settings.model ?? provider.models[0];
+    : provider.models[0];
   if (!model) return undefined;
   return {provider, model};
 }

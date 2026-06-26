@@ -62,6 +62,15 @@ describe('providers', () => {
     expect(activeModel(empty)).toBeUndefined();
   });
 
+  it('falls back to the provider default when the saved model is stale for the active provider', () => {
+    const settings = {
+      provider: 'local',
+      model: 'stale-model',
+      providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['llama3.1']}],
+    };
+    expect(activeModel(settings)).toMatchObject({provider: {name: 'local'}, model: 'llama3.1'});
+  });
+
   it('returns no active model when a provider has no models', () => {
     const settings = {providers: [{name: 'remote', url: 'https://example.com/v1', models: []}]};
     expect(activeModel(settings)).toBeUndefined();
