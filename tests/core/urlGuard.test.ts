@@ -133,6 +133,18 @@ describe('urlGuard validateUrl', () => {
       expect(result.ok).toBe(true);
     });
 
+    it('surfaces the resolved addresses on success for pinning', async () => {
+      const result = await validateUrl('http://multi.example', {lookup: async () => ['93.184.216.34', '1.1.1.1']});
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.resolvedAddresses).toEqual(['93.184.216.34', '1.1.1.1']);
+    });
+
+    it('does not surface resolved addresses for a literal-IP URL', async () => {
+      const result = await validateUrl('https://93.184.216.34/docs');
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.resolvedAddresses).toBeUndefined();
+    });
+
     it('rejects a hostname that does not resolve', async () => {
       const result = await validateUrl('http://nope.example', {lookup: async () => { throw new Error('ENOTFOUND'); }});
       expect(result.ok).toBe(false);
