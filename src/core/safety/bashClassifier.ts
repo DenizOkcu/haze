@@ -55,8 +55,9 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'mutating', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'command can modify files or repository state'};
   }
 
-  // `find -delete` removes matched files outright.
-  if (has(lower, /(\s|^)-delete\b/)) {
+  // `find -delete` removes matched files outright. `-delete` is a find-specific
+  // primary, so gate on `find` to avoid flagging unrelated single-dash flags.
+  if (has(lower, /\bfind\b/) && has(lower, /(\s|^)-delete\b/)) {
     traits.push('deletes_files');
     return {riskLevel: 'destructive', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'find -delete removes matched files'};
   }
@@ -69,6 +70,7 @@ export function classifyBashCommand(command: string): BashClassification {
     const payload = execMatch[1];
     if (has(payload, /\brm\b|git\s+clean|git\s+restore|drop\s+database|truncate\s+table/)) {
       if (has(payload, /\brm\b/)) traits.push('deletes_files');
+      if (has(payload, /\bgit\b/)) traits.push('changes_git_state');
       return {riskLevel: 'destructive', traits: uniq(traits), confidence: 'medium', reason: 'embedded command can delete files'};
     }
     if (has(payload, /\b(chmod|mv|cp|mkdir|touch|tee|sed\s+-i|perl\s+-pi)\b/) || has(payload, /\bgit\s+(add|commit|merge|rebase|checkout|restore)\b/)) {

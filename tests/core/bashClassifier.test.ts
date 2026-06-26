@@ -52,4 +52,16 @@ describe('bash classifier', () => {
     const result = classifyBashCommand('find . -name "*.ts" | xargs eslint');
     expect(result.riskLevel).not.toBe('read_only');
   });
+
+  it('classifies find -exec git clean as destructive with git-state trait', () => {
+    const result = classifyBashCommand('find . -type d -name node_modules -exec git clean -fdx {} +');
+    expect(result.riskLevel).toBe('destructive');
+    expect(result.traits).toContain('changes_git_state');
+  });
+
+  it('does not flag a -delete token when find is absent', () => {
+    // A single-dash -delete elsewhere should not be misread as find -delete.
+    const result = classifyBashCommand('mytool -delete --force ./out');
+    expect(result.traits).not.toContain('deletes_files');
+  });
 });
