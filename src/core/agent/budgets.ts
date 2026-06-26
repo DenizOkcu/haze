@@ -1,0 +1,6 @@
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
+export const IDLE_TIMEOUT_MS = 5 * 60_000;
+export const MAIN_STEP_LIMIT = 64;
+export const MAIN_TOOL_CALL_LIMIT = 120;
+export const MAIN_TOOL_ONLY_STEP_LIMIT = 24;
+export const ACTIVE_CONTEXT_TOKEN_BUDGET = 40_000;

@@ -2,7 +2,6 @@ import {describe, expect, it} from 'vitest';
 import {tool} from 'ai';
 import {z} from 'zod';
 import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateTextTokens} from '../../src/core/agent/contextBudget.js';
-import {toolRequestSettings} from '../../src/core/agent/requestAssembly.js';
 
 describe('context budget', () => {
   it('accounts for system, messages, project context, and exact tool schemas', () => {
@@ -32,11 +31,5 @@ describe('context budget', () => {
     expect(cacheHitRatio(1000, undefined)).toBeUndefined();
     expect(cacheHitRatio(0, 0)).toBeUndefined();
     expect(cacheHitRatio(1000, 0)).toBeUndefined();
-  });
-
-  it('omits tools entirely for text-only calls', () => {
-    const settings = toolRequestSettings({sample: {}}, false);
-    expect(settings).toEqual({});
-    expect(toolRequestSettings({sample: {}}, true)).toHaveProperty('tools');
   });
 });

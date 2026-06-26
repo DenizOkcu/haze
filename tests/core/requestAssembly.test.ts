@@ -1,17 +1,8 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
-import {compactToolHistory, stripSyntheticControls, toolRequestSettings, withSyntheticControl} from '../../src/core/agent/requestAssembly.js';
+import {compactToolHistory, stripSyntheticControls, withSyntheticControl} from '../../src/core/agent/requestAssembly.js';
 
-describe('toolRequestSettings', () => {
-  it('omits tool schemas when a continuation cannot call tools', () => {
-    expect(toolRequestSettings({readFile: {description: 'read'}} as never, false)).toEqual({});
-  });
-
-  it('attaches tools only to tool-capable requests', () => {
-    const tools = {readFile: {description: 'read'}} as never;
-    expect(toolRequestSettings(tools, true)).toEqual({tools, toolChoice: 'auto'});
-  });
-
+describe('requestAssembly', () => {
   it('replaces prior synthetic controls instead of persisting them', () => {
     const base: ModelMessage[] = [{role: 'user', content: 'real request'}];
     const first = withSyntheticControl(base, 'first nudge');

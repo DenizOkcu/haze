@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {isHiddenUnstartedFinalText, isShortUnfinishedBridgeBeforeTool, shouldStartAssistantStream} from '../../src/cli/commands/streaming.js';
+import {isHiddenUnstartedFinalText, isShortUnfinishedBridgeBeforeTool, shouldStartAssistantStream} from '../../src/cli/commands/streaming/assistantText.js';
 
 describe('assistant streaming fragment gating', () => {
   it('keeps incomplete markdown fragments hidden even after debounce', () => {

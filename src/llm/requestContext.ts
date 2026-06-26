@@ -11,6 +11,7 @@ import {buildSkillTools} from '../skills/skillTools.js';
 import {isSkillEnabled} from '../config/skillSettings.js';
 import {createSubagentTool} from '../core/subagent/subagentRunner.js';
 import type {ContextFile} from '../config/contextFiles.js';
+import {addCapabilityTools} from './capabilities.js';
 
 export type ToolCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
 
@@ -46,32 +47,15 @@ export async function assembleRequestContext(input: {
   const toolCategories = new Map<string, ToolCategory>();
   const availableTools: ToolSet = {};
 
-  for (const [name, value] of Object.entries(hazeTools)) {
-    toolCategories.set(name, 'builtin');
-    availableTools[name] = value;
-  }
-  if (hasInstalledLsp) {
-    for (const [name, value] of Object.entries(lspTools)) {
-      toolCategories.set(name, 'lsp');
-      availableTools[name] = value;
-    }
-  }
-  const subagentTool = createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session});
-  toolCategories.set('subagent', 'subagent');
-  availableTools.subagent = subagentTool;
-  const skillTools = buildSkillTools({skills: enabledSkills});
-  for (const [name, value] of Object.entries(skillTools)) {
-    toolCategories.set(name, 'skill');
-    availableTools[name] = value;
-  }
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'builtin', tools: hazeTools}});
+  if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: lspTools}});
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session})}}});
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills})}});
 
   const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
   const loadedMcp = mcpServers.length > 0 ? await loadMcpTools(mcpServers, new Set(Object.keys(availableTools))) : undefined;
   if (loadedMcp && Object.keys(loadedMcp.tools).length > 0) {
-    for (const [name, value] of Object.entries(loadedMcp.tools)) {
-      toolCategories.set(name, 'mcp');
-      availableTools[name] = value;
-    }
+    addCapabilityTools({availableTools, toolCategories, loaded: {category: 'mcp', tools: loadedMcp.tools}, skipCollisions: true});
   }
 
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);

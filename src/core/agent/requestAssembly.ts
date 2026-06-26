@@ -1,11 +1,8 @@
 import type {ModelMessage} from 'ai';
 import {estimateValueTokens} from './contextBudget.js';
+import {isFailedToolOutput} from './toolResults.js';
 
 export const SYNTHETIC_CONTROL_OPEN = '<haze_control>';
-
-export function toolRequestSettings<T extends Record<string, unknown>>(tools: T, allowTools: boolean) {
-  return allowTools ? {tools, toolChoice: 'auto' as const} : {};
-}
 
 export function isSyntheticControlMessage(message: ModelMessage) {
   return message.role === 'user'
@@ -35,7 +32,7 @@ function isFailedResult(output: unknown) {
   const type = (output as {type?: unknown}).type;
   if (type === 'error-text' || type === 'error-json' || type === 'execution-denied') return true;
   const value = resultValue(output);
-  return typeof value === 'object' && value != null && 'ok' in value && value.ok === false;
+  return isFailedToolOutput(value);
 }
 
 function compactJsonValue(value: unknown, toolName: string) {
