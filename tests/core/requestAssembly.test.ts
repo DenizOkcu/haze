@@ -67,6 +67,45 @@ describe('requestAssembly', () => {
     expect(JSON.stringify(result.messages[0])).toContain('"content":"hi"');
   });
 
+  it('compacts old editFile oldText/newText but keeps recent edits intact', () => {
+    const bigOld = 'aaaa'.repeat(400);
+    const bigNew = 'bbbb'.repeat(400);
+    const messages = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'old', toolName: 'editFile', input: {path: 'src/old.ts', edits: [{oldText: bigOld, newText: bigNew}]}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'old', toolName: 'editFile', output: {type: 'json', value: {ok: true, path: 'src/old.ts'}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'recent', toolName: 'editFile', input: {path: 'src/recent.ts', edits: [{oldText: bigOld, newText: bigNew}]}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'recent', toolName: 'editFile', output: {type: 'json', value: {ok: true, path: 'src/recent.ts'}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactToolHistory(messages, {keepRecentCalls: 1, minCallTokens: 50});
+    expect(result.compactedCalls).toBe(1);
+    const oldJson = JSON.stringify(result.messages[0]);
+    const recentJson = JSON.stringify(result.messages[2]);
+    expect(oldJson).toContain('[Compacted:');
+    expect(oldJson).toContain('src/old.ts');
+    expect(oldJson).not.toContain(bigOld);
+    expect(oldJson).not.toContain(bigNew);
+    expect(recentJson).toContain(bigOld);
+    expect(recentJson).toContain(bigNew);
+  });
+
+  it('compacts old replaceLines content but keeps recent ones intact', () => {
+    const bigContent = 'const x = ' + "'y'".repeat(800);
+    const messages = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'old', toolName: 'replaceLines', input: {path: 'src/old.ts', startLine: 1, endLine: 5, content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'old', toolName: 'replaceLines', output: {type: 'json', value: {ok: true, path: 'src/old.ts'}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'recent', toolName: 'replaceLines', input: {path: 'src/recent.ts', startLine: 1, endLine: 5, content: bigContent}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'recent', toolName: 'replaceLines', output: {type: 'json', value: {ok: true, path: 'src/recent.ts'}}}]},
+    ] as unknown as ModelMessage[];
+    const result = compactToolHistory(messages, {keepRecentCalls: 1, minCallTokens: 50});
+    expect(result.compactedCalls).toBe(1);
+    const oldJson = JSON.stringify(result.messages[0]);
+    const recentJson = JSON.stringify(result.messages[2]);
+    expect(oldJson).toContain('[Compacted:');
+    expect(oldJson).toContain('src/old.ts');
+    expect(oldJson).not.toContain(bigContent);
+    expect(recentJson).toContain(bigContent);
+  });
+
   it('compacts old bash tool-call commands but keeps short ones intact', () => {
     const longCommand = 'node -e "const x = ' + "'a'".repeat(300) + '; console.log(x);"';
     const messages = [
