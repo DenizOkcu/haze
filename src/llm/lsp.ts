@@ -16,7 +16,7 @@ export class LspError extends Error {
   }
 }
 
-function languageId(filePath: string) {
+export function languageId(filePath: string) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.ts') return 'typescript';
   if (ext === '.tsx') return 'typescriptreact';
@@ -28,20 +28,20 @@ function languageId(filePath: string) {
   return ext.replace(/^\./, '') || 'plaintext';
 }
 
-function toUri(absolutePath: string) {
+export function toUri(absolutePath: string) {
   return pathToFileURL(absolutePath).toString();
 }
 
-function fromUri(uri: string) {
+export function fromUri(uri: string) {
   if (!uri.startsWith('file://')) return uri;
   return workspaceRelativePath(new URL(uri).pathname);
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
 }
 
-function asRange(value: unknown) {
+export function asRange(value: unknown) {
   if (!isObject(value) || !isObject(value.start) || !isObject(value.end)) return undefined;
   const start = value.start as Record<string, unknown>;
   const end = value.end as Record<string, unknown>;
@@ -51,15 +51,15 @@ function asRange(value: unknown) {
   };
 }
 
-function locationToResult(value: unknown) {
+export function locationToResult(value: unknown) {
   if (!isObject(value)) return undefined;
-  const uri = typeof value.uri === 'string' ? value.uri : (isObject(value.targetUri) && typeof value.targetUri === 'string' ? value.targetUri : undefined);
+  const uri = typeof value.uri === 'string' ? value.uri : (typeof value.targetUri === 'string' ? value.targetUri : undefined);
   const range = asRange(value.range ?? value.targetSelectionRange ?? value.targetRange);
   if (!uri || !range) return undefined;
   return {path: fromUri(uri), range};
 }
 
-function flattenSymbols(symbols: unknown[], filePath: string, limit: number) {
+export function flattenSymbols(symbols: unknown[], filePath: string, limit: number) {
   const out: Array<{name: string; kind?: number; path: string; range?: ReturnType<typeof asRange>; selectionRange?: ReturnType<typeof asRange>}> = [];
   const visit = (items: unknown[]) => {
     for (const item of items) {
@@ -85,7 +85,7 @@ export function pickLspServer(servers: HazeLspServer[], filePath: string) {
   return servers.find(server => server.enabled !== false && (server.extensions ?? []).map(e => e.toLowerCase()).includes(ext));
 }
 
-class StdioLspClient {
+export class StdioLspClient {
   private id = 0;
   private buffer = Buffer.alloc(0);
   private pending = new Map<number, Pending>();
