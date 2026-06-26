@@ -15,6 +15,7 @@ import {storeToolOutput} from '../core/agent/toolOutputStore.js';
 import {reductionMetrics} from '../core/toolOutput/reduction.js';
 import {HazeToolError, structuredToolFailure} from './tools/failures.js';
 import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
+import {parseRipgrepJsonStream} from './tools/grepParse.js';
 import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
 import {runDedupedTool, discoverScopedContext, withScopedContext} from './tools/toolContext.js';
 import {prepareWorkspaceExisting, prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
@@ -176,48 +177,11 @@ export const hazeTools = {
           return withScopedContext({pattern, path: searchPath, glob: glob ?? null, caseInsensitive, matches: [], totalMatches: 0, truncated: false}, scopedContext);
         }
 
-        const lines = stdout.split('\n').filter(Boolean);
-        const matches: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
-        let totalMatches = 0;
-        let returnedMatches = 0;
-        let omittedMatches = 0;
-        let pendingContext: Array<{file: string; line: number; content: string; isContext: true}> = [];
-        let retainFollowingContext = false;
-        for (const line of lines) {
-          let event: {type?: string; data?: {path?: {text?: string}; line_number?: number; lines?: {text?: string}}};
-          try { event = JSON.parse(line) as typeof event; } catch { continue; }
-          if (event.type === 'begin' || event.type === 'end') {
-            pendingContext = [];
-            retainFollowingContext = false;
-            continue;
-          }
-          if (event.type !== 'match' && event.type !== 'context') continue;
-          const file = event.data?.path?.text;
-          const lineNumber = event.data?.line_number;
-          const content = event.data?.lines?.text?.replace(/\r?\n$/, '');
-          if (!file || lineNumber == null || content == null) continue;
-          const item = {file: path.relative(workspaceRoot(), file), line: lineNumber, content};
-          if (event.type === 'context') {
-            if (retainFollowingContext) {
-              matches.push({...item, isContext: true});
-              continue;
-            }
-            pendingContext.push({...item, isContext: true});
-            if (pendingContext.length > contextLines) pendingContext.shift();
-            continue;
-          }
-          totalMatches += 1;
-          if (returnedMatches >= maxMatches) {
-            omittedMatches += 1;
-            pendingContext = [];
-            retainFollowingContext = false;
-            continue;
-          }
-          matches.push(...pendingContext, {...item, isContext: false});
-          returnedMatches += 1;
-          pendingContext = [];
-          retainFollowingContext = true;
-        }
+        const parsed = parseRipgrepJsonStream(stdout, maxMatches, contextLines, absolute => path.relative(workspaceRoot(), absolute));
+        const matches = parsed.matches;
+        const totalMatches = parsed.totalMatches;
+        const returnedMatches = parsed.returnedMatches;
+        const omittedMatches = parsed.omittedMatches;
 
         const compacted = compactGrepMatches(matches);
         const outputTruncated = compacted.outputTruncated;

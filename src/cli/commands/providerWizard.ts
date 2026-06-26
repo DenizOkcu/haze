@@ -1,5 +1,7 @@
 import {configuredProviders, findProvider, upsertProvider} from '../../config/providers.js';
 import type {HazeProviderSettings, HazeSettings} from '../../config/settings.js';
+import type {Mode} from './chatModes.js';
+import {PROVIDER_ACTIONS} from './wizardActions.js';
 import {commaList} from './wizardInput.js';
 
 type WizardPatch = {
@@ -86,4 +88,33 @@ export function providerRemove(settings: HazeSettings, providerName: string | un
     },
     message: `Removed provider ${provider.name}.${wasActiveProvider ? ` Switched to ${providers[0]?.name ?? 'no provider'}.` : ''}`,
   };
+}
+
+export function providerSetKey(settings: HazeSettings, providerName: string | undefined, value: string): WizardPatch & {key?: string} {
+  const provider = providerName ? findProvider(settings, providerName) : undefined;
+  if (!provider) return {message: 'No provider selected.'};
+  const key = value.trim();
+  if (!key) return {provider, message: 'API key cannot be empty. Esc to cancel.'};
+  return {
+    provider,
+    key,
+    settingsPatch: {providers: upsertProvider(settings, {...provider, key})},
+    message: `API key updated for ${provider.name}.`,
+  };
+}
+
+export type ProviderActionResult = {
+  message: string;
+  mode?: Mode;
+  selectedName?: string;
+};
+
+export function providerActionResult(action: string, provider: HazeProviderSettings | undefined): ProviderActionResult {
+  if (!provider) return {message: '', mode: 'provider'};
+  if (action === PROVIDER_ACTIONS.useProvider) return {message: '', selectedName: undefined, mode: 'model'};
+  if (action === PROVIDER_ACTIONS.addModels) return {message: `Comma-separated model names to add to ${provider.name}?`, mode: 'providerAppendModels'};
+  if (action === PROVIDER_ACTIONS.setApiKey) return {message: `New API key for ${provider.name}? (current: ${provider.key ? 'saved' : 'not set'})`, mode: 'providerSetKey'};
+  if (action === PROVIDER_ACTIONS.removeModels) return {message: `Comma-separated model names to remove from ${provider.name}?\nCurrent models: ${provider.models.join(', ')}`, mode: 'providerRemoveModels'};
+  if (action === PROVIDER_ACTIONS.removeProvider) return {message: `Remove provider ${provider.name}? Type "yes" to confirm. Esc to cancel.`, mode: 'providerConfirmRemove'};
+  return {message: `Unknown provider action: ${action}`};
 }

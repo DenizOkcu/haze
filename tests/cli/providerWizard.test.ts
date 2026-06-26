@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from '../../src/cli/commands/providerWizard.js';
+import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from '../../src/cli/commands/providerWizard.js';
 
 const settings = {
   provider: 'local',
@@ -30,5 +30,15 @@ describe('provider wizard helpers', () => {
     const result = providerRemove(settings, 'local');
     expect(result.settingsPatch).toEqual({providers: [], provider: undefined, model: undefined});
     expect(result.message).toContain('Switched to no provider');
+  });
+
+  it('maps provider actions to modes and prompts', () => {
+    const provider = {name: 'p', url: 'http://x', models: ['a', 'b'], key: 'k'} as const;
+    expect(providerActionResult('add models', {...provider, models: ['a', 'b']})).toMatchObject({mode: 'providerAppendModels'});
+    expect(providerActionResult('set API key', {...provider, models: ['a', 'b']})).toMatchObject({mode: 'providerSetKey', message: expect.stringContaining('saved')});
+    expect(providerActionResult('remove models', {...provider, models: ['a', 'b']})).toMatchObject({mode: 'providerRemoveModels', message: expect.stringContaining('a, b')});
+    expect(providerActionResult('remove provider', {...provider, models: ['a', 'b']})).toMatchObject({mode: 'providerConfirmRemove'});
+    expect(providerActionResult('bogus', {...provider, models: ['a', 'b']})).toMatchObject({message: 'Unknown provider action: bogus'});
+    expect(providerActionResult('use provider', undefined)).toMatchObject({mode: 'provider'});
   });
 });

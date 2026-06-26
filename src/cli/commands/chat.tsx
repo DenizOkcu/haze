@@ -11,10 +11,10 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
-import {configuredLspServers, removeLspServer, type HazeLspServer} from '../../config/lspSettings.js';
-import {findMcpServer, removeMcpServer} from '../../config/mcpSettings.js';
-import {isSkillEnabled, removeSkillSetting} from '../../config/skillSettings.js';
+import {activeModel, findProvider, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {removeLspServer, type HazeLspServer} from '../../config/lspSettings.js';
+import {removeMcpServer} from '../../config/mcpSettings.js';
+import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
@@ -43,12 +43,15 @@ import {compactHomePath, displayMessagesFromConversation, estimateConversationTo
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
-import {MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
+import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
+import {captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from './wizardPrompts.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from './lspWizard.js';
 import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from './mcpWizard.js';
-import {providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from './providerWizard.js';
+import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from './providerWizard.js';
 import {selectSkillActionResult, selectSkillResult} from './skillWizard.js';
-import {commandParts, isValidUrl, isYesConfirmation} from './wizardInput.js';
+import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from './skillCreation.js';
+import {skillConfirmRemoveResult as skillConfirmRemove} from './skillConfirmRemove.js';
+import {commandParts, isYesConfirmation} from './wizardInput.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -441,27 +444,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       await useProvider(selectedProviderName);
       return;
     }
-    if (action === PROVIDER_ACTIONS.addModels) {
-      setMode('providerAppendModels');
-      setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to add to ${selectedProviderName}?`}]);
-      return;
-    }
-    if (action === PROVIDER_ACTIONS.setApiKey) {
-      setMode('providerSetKey');
-      setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedProviderName}? (current: ${provider.key ? 'saved' : 'not set'})`}]);
-      return;
-    }
-    if (action === PROVIDER_ACTIONS.removeModels) {
-      setMode('providerRemoveModels');
-      setMessages(m => [...m, {role: 'system', text: `Comma-separated model names to remove from ${selectedProviderName}?\nCurrent models: ${provider.models.join(', ')}`}]);
-      return;
-    }
-    if (action === PROVIDER_ACTIONS.removeProvider) {
-      setMode('providerConfirmRemove');
-      setMessages(m => [...m, {role: 'system', text: `Remove provider ${selectedProviderName}? Type "yes" to confirm. Esc to cancel.`}]);
-      return;
-    }
-    setMessages(m => [...m, {role: 'system', text: `Unknown provider action: ${action}`}]);
+    const actionResult = providerActionResult(action, provider);
+    if (actionResult.selectedName === undefined) setSelectedProviderName(undefined);
+    if (actionResult.mode) setMode(actionResult.mode);
+    showWizardMessage(actionResult.message);
   }
 
   async function selectModel(selector: string) {
@@ -645,32 +631,28 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function captureSkillDescription(value: string) {
-    const description = value.trim();
-    if (!description) {
-      setMessages(m => [...m, {role: 'system', text: 'Description is required. Try again, or press ESC to cancel.'}]);
-      return;
+    const result = captureSkillDescriptionResult(value, skillDraft.name);
+    if (result.message) {
+      const message = result.message;
+      setMessages(m => [...m, {role: 'system', text: message}]);
     }
-    const name = skillDraft.name;
-    if (!name) {
-      setMode('chat');
-      setSkillDraft({});
-      setMessages(m => [...m, {role: 'system', text: 'Skill wizard lost the name. Start over with /skills.'}]);
-      return;
-    }
-    setMode('chat');
-    setSkillDraft({});
-    setBusyLabel('Creating skill');
-    setBusy(true);
-    try {
-      const result = await createSkill({name, description});
-      setMessages(m => [...m, {role: 'system', text: `Created skill ${result.name} at ${result.file}. Invoke it with /${result.name}. Edit SKILL.md to refine its workflow.`}]);
-      await refreshSkills();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessages(m => [...m, {role: 'system', text: `Skill creation failed: ${text}`}]);
-    } finally {
-      setBusy(false);
-      setBusyLabel('Haze is thinking');
+    if (result.mode === 'chat') setMode('chat');
+    if (result.clearDraft) setSkillDraft({});
+    if (result.description && result.draftName) {
+      const name = result.draftName;
+      const description = result.description;
+      setBusyLabel(result.busyLabel ?? 'Creating skill');
+      setBusy(true);
+      try {
+        const created = await createSkill({name, description});
+        setMessages(m => [...m, {role: 'system', text: skillCreationMessage(created.name, created.file)}]);
+        await refreshSkills();
+      } catch (error) {
+        setMessages(m => [...m, {role: 'system', text: skillCreationFailure(error)}]);
+      } finally {
+        setBusy(false);
+        setBusyLabel('Haze is thinking');
+      }
     }
   }
 
@@ -697,30 +679,16 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     if (mode === 'skillsConfirmRemove') {
-      if (!selectedSkillName) {
-        setMode('chat');
-        return;
+      const result = skillConfirmRemove(settings, skills, selectedSkillName, value);
+      if (result.message) {
+        const message = result.message;
+        setMessages(m => [...m, {role: 'system', text: message}]);
       }
-      if (!isYesConfirmation(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Cancelled. Skill not removed.'}]);
-        setSelectedSkillName(undefined);
-        setMode('chat');
-        return;
-      }
-      const skill = skills.find(candidate => candidate.name === selectedSkillName);
-      if (!skill) {
-        setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} not found.`}]);
-        setSelectedSkillName(undefined);
-        setMode('chat');
-        return;
-      }
-      await fs.remove(skill.dir);
-      const next = await updateSettings({skills: removeSkillSetting(settings, selectedSkillName)});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `Removed skill ${selectedSkillName}.`}]);
-      setSelectedSkillName(undefined);
-      setMode('chat');
-      await refreshSkills();
+      if (result.selectedName === undefined) setSelectedSkillName(undefined);
+      if (result.mode === 'chat') setMode('chat');
+      if (result.removedDir) await fs.remove(result.removedDir);
+      if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+      if (result.removedDir) await refreshSkills();
       return;
     }
 
@@ -745,29 +713,26 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
 
     if (mode === 'providerAddName') {
-      const name = value.trim();
-      if (!name) {
-        setMessages(m => [...m, {role: 'system', text: 'Provider name is required.'}]);
+      const result = captureProviderName(settings, value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      if (settings.providers?.some(provider => provider.name === name)) {
-        setMessages(m => [...m, {role: 'system', text: `Provider ${name} already exists. Choose a unique name.`}]);
-        return;
-      }
-      setProviderDraft({name});
-      setMode('providerAddUrl');
-      setMessages(m => [...m, {role: 'system', text: 'OpenAI-compatible base URL? Example: https://openrouter.ai/api/v1 or http://localhost:1234/v1'}]);
+      if (result.draft) setProviderDraft({name: result.draft.name});
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
 
     if (mode === 'providerAddUrl') {
-      if (!isValidUrl(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example http://localhost:1234/v1.'}]);
+      const result = captureProviderUrl(value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      setProviderDraft(draft => ({...draft, url: value.trim()}));
-      setMode('providerAddKey');
-      setMessages(m => [...m, {role: 'system', text: 'API key? Leave blank for local/keyless providers.'}]);
+      if (result.draft) setProviderDraft(draft => ({...draft, ...result.draft}));
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
 
@@ -789,23 +754,20 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
 
     if (mode === 'providerSetKey') {
-      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-      if (!provider) {
-        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+      const result = providerSetKey(settings, selectedProviderName, value);
+      if (!result.provider) {
+        setMessages(m => [...m, {role: 'system', text: result.message}]);
         setMode('chat');
         return;
       }
-      const key = value.trim();
-      if (!key) {
-        setMessages(m => [...m, {role: 'system', text: 'API key cannot be empty. Esc to cancel.'}]);
+      if (!result.settingsPatch) {
+        setMessages(m => [...m, {role: 'system', text: result.message}]);
         return;
       }
-      const updated = {...provider, key};
-      const next = await updateSettings({providers: upsertProvider(settings, updated)});
-      setSettings(next);
+      setSettings(await updateSettings(result.settingsPatch));
       setSelectedProviderName(undefined);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `API key updated for ${provider.name}.`}]);
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       return;
     }
 
@@ -863,18 +825,14 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     if (mode === 'lspAddName') {
-      const name = value.trim();
-      if (!name) {
-        setMessages(m => [...m, {role: 'system', text: 'LSP server name is required.'}]);
+      const result = captureLspName(settings, value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      if (configuredLspServers(settings).some(s => s.name === name)) {
-        setMessages(m => [...m, {role: 'system', text: `LSP server ${name} already exists. Choose a unique name.`}]);
-        return;
-      }
-      setLspDraft({name});
-      setMode('lspAddCommand');
-      setMessages(m => [...m, {role: 'system', text: 'Command to run? Example: typescript-language-server --stdio'}]);
+      if (result.draft) setLspDraft({name: result.draft.name});
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
     if (mode === 'lspAddCommand') {
@@ -913,55 +871,47 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
     if (mode === 'mcpAddName') {
-      const name = value.trim();
-      if (!name) {
-        setMessages(m => [...m, {role: 'system', text: 'MCP server name is required.'}]);
+      const result = captureMcpName(settings, value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      if (findMcpServer(settings, name)) {
-        setMessages(m => [...m, {role: 'system', text: `MCP server ${name} already exists. Choose a unique name.`}]);
-        return;
-      }
-      setMcpDraft({name});
-      setMode('mcpAddTransport');
-      setMessages(m => [...m, {role: 'system', text: 'Transport type? http (Streamable HTTP), sse (Server-Sent Events), or stdio (local process).'}]);
+      if (result.draft) setMcpDraft({name: result.draft.name});
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
     if (mode === 'mcpAddTransport') {
-      const transport = value.trim().toLowerCase();
-      if (transport !== MCP_TRANSPORTS.http && transport !== MCP_TRANSPORTS.sse && transport !== MCP_TRANSPORTS.stdio) {
-        setMessages(m => [...m, {role: 'system', text: 'Enter http, sse, or stdio.'}]);
+      const result = captureMcpTransport(value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      setMcpDraft(draft => ({...draft, transport: transport as HazeMcpServer['transport']}));
-      if (transport === MCP_TRANSPORTS.stdio) {
-        setMode('mcpAddCommand');
-        setMessages(m => [...m, {role: 'system', text: 'Command to run? Example: npx -y @modelcontextprotocol/server-filesystem .'}]);
-      } else {
-        setMode('mcpAddUrl');
-        setMessages(m => [...m, {role: 'system', text: `MCP server URL? Example: https://mcp.context7.com/mcp for ${transport}.`}]);
-      }
+      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
     if (mode === 'mcpAddUrl') {
-      if (!isValidUrl(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Enter a valid URL, for example https://mcp.context7.com/mcp.'}]);
+      const result = captureMcpUrl(value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      setMcpDraft(draft => ({...draft, url: value.trim()}));
-      setMode('mcpAddKey');
-      setMessages(m => [...m, {role: 'system', text: 'Optional API key or auth header value? (Leave blank to skip — Enter works.) Sent as Authorization: Bearer <value>.'}]);
+      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
     if (mode === 'mcpAddCommand') {
-      const parts = commandParts(value);
-      if (parts.length === 0) {
-        setMessages(m => [...m, {role: 'system', text: 'Command is required.'}]);
+      const result = captureMcpCommand(value);
+      if (result.message) {
+        showWizardMessage(result.message);
         return;
       }
-      setMcpDraft(draft => ({...draft, command: parts[0], args: parts.slice(1)}));
-      setMode('mcpAddKey');
-      setMessages(m => [...m, {role: 'system', text: 'Optional API key or auth header value? (Leave blank to skip — Enter works.) Sent as Authorization: Bearer <value>.'}]);
+      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
+      if (result.nextMode) setMode(result.nextMode as typeof mode);
+      showWizardMessage(result.systemMessage);
       return;
     }
     if (mode === 'mcpAddKey') {
