@@ -23,9 +23,13 @@ describe('compact', () => {
     expect(compact({key: 'value'})).toBe('{"key":"value"}');
   });
 
-  it('returns String(value) for empty stringify', () => {
+  it('returns String(value) for null/undefined', () => {
     expect(compact(undefined)).toBe('undefined');
     expect(compact(null)).toBe('null');
+  });
+
+  it('returns an empty string for empty objects (avoiding [object Object])', () => {
+    expect(compact({})).toBe('');
   });
 
   it('replaces Error instances nested in objects', () => {
@@ -54,6 +58,19 @@ describe('toolCallSummary', () => {
 
   it('formats writeFile', () => {
     expect(toolCallSummary('writeFile', {path: 'bar.ts'})).toBe('writeFile bar.ts');
+  });
+
+  it('renders path-using tools with just the tool name when input is missing/empty (e.g. tool-input-start)', () => {
+    expect(toolCallSummary('writeFile', {})).toBe('writeFile');
+    expect(toolCallSummary('writeFile', undefined)).toBe('writeFile');
+    expect(toolCallSummary('readFile', {})).toBe('readFile');
+    expect(toolCallSummary('editFile', {})).toBe('editFile');
+    expect(toolCallSummary('replaceLines', {})).toBe('replaceLines');
+  });
+
+  it('does not leak [object Object] into tool summaries when input is malformed', () => {
+    expect(toolCallSummary('writeFile', {path: undefined})).not.toContain('[object Object]');
+    expect(toolCallSummary('writeFile', {})).not.toContain('[object Object]');
   });
 
   it('formats editFile with edit count', () => {

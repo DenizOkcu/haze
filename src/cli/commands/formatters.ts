@@ -7,7 +7,8 @@ export function compact(value: unknown, maxLength = 180) {
   } else {
     text = JSON.stringify(value, (_key, nestedValue) => nestedValue instanceof Error ? nestedValue.message : nestedValue);
   }
-  if (!text || text === '{}') return String(value);
+  if (!text) return value === null ? 'null' : value === undefined ? 'undefined' : '';
+  if (text === '{}') return ''; // empty object: nothing useful to render; avoid "[object Object]"
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
@@ -23,12 +24,16 @@ export function toolCallSummary(toolName: string, input: unknown) {
     return `grep "${data.pattern}"${path}${glob}`;
   }
   if (toolName === 'listFiles' && typeof data?.path === 'string') return `listFiles ${data.path}`;
-  if ((toolName === 'readFile' || toolName === 'writeFile') && typeof data?.path === 'string') return `${toolName} ${data.path}`;
+  if ((toolName === 'readFile' || toolName === 'writeFile')) {
+    if (typeof data?.path === 'string') return `${toolName} ${data.path}`;
+    if (data == null || (typeof data === 'object' && Object.keys(data as object).length === 0)) return toolName; // input not yet streamed (tool-input-start) or empty
+  }
   if (toolName === 'editFile' && typeof data?.path === 'string') {
     const edits = Array.isArray(data.edits) ? ` (${data.edits.length} edit${data.edits.length === 1 ? '' : 's'})` : '';
     return `${toolName} ${data.path}${edits}`;
   }
   if (toolName === 'replaceLines' && typeof data?.path === 'string') return `replaceLines ${data.path}:${data.startLine}-${data.endLine}`;
+  if ((toolName === 'editFile' || toolName === 'replaceLines') && (data == null || (typeof data === 'object' && Object.keys(data as object).length === 0))) return toolName;
   if (toolName === 'subagent' && typeof data?.task === 'string') {
     const taskPreview = data.task.length > 60 ? `${data.task.slice(0, 60).trimEnd()}…` : data.task;
     return `subagent "${taskPreview}"`;

@@ -38,6 +38,8 @@ function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
   return count;
 }
 
+export const internals = {toolSummary, toolOnlyStepCount};
+
 export async function runSubagent(
   task: string,
   options: {

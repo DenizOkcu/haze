@@ -289,4 +289,4 @@ export async function createSkill(input: CreateSkillInput) {
   return {name: finalName, dir, file: skillFile};
 }
 
-export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements, withSkillName, withSkillDescription, normalizeSkillDescription, toSkillDirName};
+export const internals = {SKILL_CREATOR_SKILL, STANDARD_SKILL_REQUIREMENTS, parseGeneratedSkill, fallbackSkill, withStandardRequirements, withSkillName, withSkillDescription, normalizeSkillDescription, toSkillDirName, slug, assertSafeGeneratedFile};
