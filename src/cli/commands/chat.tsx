@@ -12,9 +12,9 @@ import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
-import {configuredLspServers, lspPreset, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
-import {findMcpPreset, findMcpServer, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
-import {isSkillEnabled, removeSkillSetting, setSkillEnabled} from '../../config/skillSettings.js';
+import {configuredLspServers, removeLspServer, type HazeLspServer} from '../../config/lspSettings.js';
+import {findMcpServer, removeMcpServer} from '../../config/mcpSettings.js';
+import {isSkillEnabled, removeSkillSetting} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
@@ -43,8 +43,11 @@ import {compactHomePath, displayMessagesFromConversation, estimateConversationTo
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
-import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
+import {MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
+import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from './lspWizard.js';
+import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from './mcpWizard.js';
 import {providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from './providerWizard.js';
+import {selectSkillActionResult, selectSkillResult} from './skillWizard.js';
 import {commandParts, isValidUrl, isYesConfirmation} from './wizardInput.js';
 
 interface ChatOptions {
@@ -516,297 +519,113 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   // --- LSP wizard handlers (mirror the provider wizard) ---
 
+  function showWizardMessage(message: string | undefined) {
+    if (message) setMessages(m => [...m, {role: 'system', text: message}]);
+  }
+
   async function selectLspServer(serverName: string) {
-    if (serverName === SERVER_CHOICES.addServer) {
-      setLspDraft({});
-      setMode('lspAddPreset');
-      setMessages(m => [...m, {role: 'system', text: 'Choose an LSP preset, or select "custom" to enter a name and command manually.'}]);
-      return;
-    }
-    const server = configuredLspServers(settings).find(s => s.name === serverName);
-    if (!server) {
-      setMessages(m => [...m, {role: 'system', text: `No LSP server named ${serverName}. Use /lsp and choose add server.`}]);
-      setMode('chat');
-      return;
-    }
-    setSelectedLspName(server.name);
-    setMode('lspAction');
-    setMessages(m => [...m, {role: 'system', text: `${server.name}: choose an action.`}]);
+    const result = selectLspServerResult(settings, serverName);
+    if (result.clearDraft) setLspDraft({});
+    if (serverName === SERVER_CHOICES.addServer) setMode('lspAddPreset');
+    else if (result.mode) setMode(result.mode);
+    if (result.selectedName !== undefined) setSelectedLspName(result.selectedName);
+    showWizardMessage(result.message);
   }
 
   async function selectLspPreset(presetId: string) {
-    if (presetId === SERVER_CHOICES.custom) {
-      setLspDraft({});
-      setMode('lspAddName');
-      setMessages(m => [...m, {role: 'system', text: 'LSP server name? Example: typescript, rust, my-lsp.'}]);
-      return;
-    }
-    const preset = lspPreset(presetId);
-    if (!preset) {
-      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
-      return;
-    }
-    if (configuredLspServers(settings).some(s => s.name === preset.name)) {
-      setMessages(m => [...m, {role: 'system', text: `LSP server ${preset.name} already exists. Use /lsp to manage existing servers.`}]);
-      setMode('chat');
-      return;
-    }
-    const next = await updateSettings({lspServers: upsertLspServer(settings, preset)});
-    setSettings(next);
-    setMode('chat');
-    setMessages(m => [...m, {role: 'system', text: `Added LSP preset ${preset.name}. Ensure ${preset.command} is installed and on PATH; tools appear once it is.`}]);
+    const result = selectLspPresetResult(settings, presetId);
+    if (result.clearDraft) setLspDraft({});
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function selectLspAction(action: string) {
-    if (!selectedLspName) {
-      setMode('lsp');
-      return;
-    }
-    const server = configuredLspServers(settings).find(s => s.name === selectedLspName);
-    if (!server) {
-      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} not found.`}]);
-      setMode('chat');
-      setSelectedLspName(undefined);
-      return;
-    }
-    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
-      const next = await updateSettings({lspServers: setLspServerEnabled(settings, selectedLspName, action === COMMON_ACTIONS.enable)});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `LSP server ${selectedLspName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
-      setSelectedLspName(undefined);
-      setMode('chat');
-      return;
-    }
-    if (action === LSP_ACTIONS.removeServer) {
-      setMode('lspConfirmRemove');
-      setMessages(m => [...m, {role: 'system', text: `Remove LSP server ${selectedLspName}? Type "yes" to confirm. Esc to cancel.`}]);
-      return;
-    }
-    setMessages(m => [...m, {role: 'system', text: `Unknown LSP action: ${action}`}]);
+    const result = selectLspActionResult(settings, selectedLspName, action);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if ('selectedName' in result) setSelectedLspName(result.selectedName);
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function finishLspCustom(commandLine: string) {
-    const name = lspDraft.name?.trim();
-    const parts = commandParts(commandLine);
-    const command = parts[0];
-    if (!name || !command) {
-      setMessages(m => [...m, {role: 'system', text: 'LSP server name and command are required.'}]);
-      setMode('chat');
-      setLspDraft({});
-      return;
-    }
-    const server: HazeLspServer = {name, command, args: parts.slice(1), extensions: [], rootPatterns: ['.git'], enabled: true};
-    const next = await updateSettings({lspServers: upsertLspServer(settings, server)});
-    setSettings(next);
-    setLspDraft({});
-    setMode('chat');
-    setMessages(m => [...m, {role: 'system', text: `Added LSP server ${name} (${command}${parts.length > 1 ? ` ${parts.slice(1).join(' ')}` : ''}). Add extensions in ~/.haze/settings.json so tools can auto-select it.`}]);
+    const result = finishLspCustomResult(settings, lspDraft.name, commandLine);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if (result.clearDraft) setLspDraft({});
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   // --- MCP wizard handlers (mirror the provider wizard) ---
 
   async function selectMcpServer(serverName: string) {
-    if (serverName === SERVER_CHOICES.addServer) {
-      setMcpDraft({});
-      setMode('mcpAddPreset');
-      setMessages(m => [...m, {role: 'system', text: 'Choose an MCP preset, or select "custom" to enter details manually.'}]);
-      return;
-    }
-    const server = findMcpServer(settings, serverName);
-    if (!server) {
-      setMessages(m => [...m, {role: 'system', text: `No MCP server named ${serverName}. Use /mcp and choose add server.`}]);
-      setMode('chat');
-      return;
-    }
-    setSelectedMcpName(server.name);
-    setMode('mcpAction');
-    setMessages(m => [...m, {role: 'system', text: `${server.name}: choose an action.`}]);
+    const result = selectMcpServerResult(settings, serverName);
+    if (result.clearDraft) setMcpDraft({});
+    if (serverName === SERVER_CHOICES.addServer) setMode('mcpAddPreset');
+    else if (result.mode) setMode(result.mode);
+    if (result.selectedName !== undefined) setSelectedMcpName(result.selectedName);
+    showWizardMessage(result.message);
   }
 
   async function selectMcpPreset(presetId: string) {
-    if (presetId === SERVER_CHOICES.custom) {
-      setMcpDraft({});
-      setMode('mcpAddName');
-      setMessages(m => [...m, {role: 'system', text: 'MCP server name? Example: context7, github, filesystem.'}]);
-      return;
-    }
-    const preset = findMcpPreset(presetId);
-    if (!preset) {
-      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
-      return;
-    }
-    if (findMcpServer(settings, presetId)) {
-      setMessages(m => [...m, {role: 'system', text: `MCP server ${presetId} already exists. Use /mcp to manage existing servers.`}]);
-      setMode('chat');
-      return;
-    }
-    setMcpDraft({name: presetId, transport: preset.transport, ...(preset.url ? {url: preset.url} : {})});
-    setMode('mcpAddKey');
-    setMessages(m => [...m, {role: 'system', text: `Adding ${presetId} (${preset.transport}${preset.url ? `, ${preset.url}` : ''}).\nOptional API key or auth header value? (Leave blank to skip — Enter works.)`}]);
+    const result = selectMcpPresetResult(settings, presetId);
+    if (result.clearDraft) setMcpDraft({});
+    if (result.draft) setMcpDraft(result.draft);
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function selectMcpAction(action: string) {
-    if (!selectedMcpName) {
-      setMode('mcp');
-      return;
-    }
-    const server = findMcpServer(settings, selectedMcpName);
-    if (!server) {
-      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} not found.`}]);
-      setMode('chat');
-      setSelectedMcpName(undefined);
-      return;
-    }
-    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
-      const toggled = toggleMcpServer(settings, selectedMcpName, action === COMMON_ACTIONS.enable);
-      const next = await updateSettings({mcpServers: toggled ?? []});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
-      setSelectedMcpName(undefined);
-      setMode('chat');
-      return;
-    }
-    if (action === MCP_ACTIONS.setApiKey) {
-      setMode('mcpSetKey');
-      setMessages(m => [...m, {role: 'system', text: `New API key for ${selectedMcpName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`}]);
-      return;
-    }
-    if (action === MCP_ACTIONS.removeServer) {
-      setMode('mcpConfirmRemove');
-      setMessages(m => [...m, {role: 'system', text: `Remove MCP server ${selectedMcpName}? Type "yes" to confirm. Esc to cancel.`}]);
-      return;
-    }
-    setMessages(m => [...m, {role: 'system', text: `Unknown MCP action: ${action}`}]);
+    const result = selectMcpActionResult(settings, selectedMcpName, action);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function finishMcpCustom(keyValue?: string) {
-    const name = mcpDraft.name?.trim();
-    const transport = mcpDraft.transport;
-    if (!name || !transport) {
-      setMessages(m => [...m, {role: 'system', text: 'MCP server name and transport are required.'}]);
-      setMode('chat');
-      setMcpDraft({});
-      return;
-    }
-    const headers = keyValue?.trim() ? [{name: 'Authorization', value: `Bearer ${keyValue.trim()}`}] : undefined;
-    const server: HazeMcpServer = transport === MCP_TRANSPORTS.stdio
-      ? {name, transport, command: mcpDraft.command, args: mcpDraft.args, ...(headers ? {headers} : {}), enabled: true}
-      : {name, transport, url: mcpDraft.url, ...(headers ? {headers} : {}), enabled: true};
-    // Re-validate the transport-specific required field.
-    if (transport === MCP_TRANSPORTS.stdio && !server.command) {
-      setMessages(m => [...m, {role: 'system', text: 'Command is required for stdio transport.'}]);
-      setMode('chat');
-      setMcpDraft({});
-      return;
-    }
-    if (transport !== MCP_TRANSPORTS.stdio && !server.url) {
-      setMessages(m => [...m, {role: 'system', text: `URL is required for ${transport} transport.`}]);
-      setMode('chat');
-      setMcpDraft({});
-      return;
-    }
-    const next = await updateSettings({mcpServers: upsertMcpServer(settings, server)});
-    setSettings(next);
-    setMcpDraft({});
-    setMode('chat');
-    const location = transport === MCP_TRANSPORTS.stdio ? `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''}` : server.url;
-    setMessages(m => [...m, {role: 'system', text: `Added MCP server ${name} (${transport}, ${location}). Tools load on the next turn.`}]);
+    const result = finishMcpCustomResult(settings, mcpDraft, keyValue);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if (result.clearDraft) setMcpDraft({});
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function setMcpServerKey(keyValue: string) {
-    if (!selectedMcpName) {
-      setMode('mcp');
-      return;
-    }
-    const server = findMcpServer(settings, selectedMcpName);
-    if (!server) {
-      setMessages(m => [...m, {role: 'system', text: `MCP server ${selectedMcpName} not found.`}]);
-      setMode('chat');
-      setSelectedMcpName(undefined);
-      return;
-    }
-    const key = keyValue.trim();
-    if (!key) {
-      setMessages(m => [...m, {role: 'system', text: 'API key cannot be empty. Esc to cancel.'}]);
-      return;
-    }
-    const headers = (server.headers ?? []).filter(header => header.name !== 'Authorization');
-    headers.push({name: 'Authorization', value: `Bearer ${key}`});
-    const next = await updateSettings({mcpServers: upsertMcpServer(settings, {...server, headers})});
-    setSettings(next);
-    setSelectedMcpName(undefined);
-    setMode('chat');
-    setMessages(m => [...m, {role: 'system', text: `API key updated for ${server.name}.`}]);
+    const result = setMcpServerKeyResult(settings, selectedMcpName, keyValue);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   // --- Skills wizard handlers (mirror the provider/LSP/MCP wizards) ---
 
   async function selectSkill(name: string) {
-    if (name === SKILL_CHOICES.addSkill) {
-      setSkillDraft({});
-      setMode('skillsAddName');
-      setMessages(m => [...m, {role: 'system', text: 'Name the skill (kebab-case, e.g. security-review). ESC cancels.'}]);
-      return;
-    }
-    const skill = skills.find(candidate => candidate.name === name);
-    if (!skill) {
-      setMessages(m => [...m, {role: 'system', text: `No skill named ${name}. Use /skills and choose add skill.`}]);
-      setMode('chat');
-      return;
-    }
-    setSelectedSkillName(skill.name);
-    setMode('skillsAction');
-    setMessages(m => [...m, {role: 'system', text: `${skill.name}: choose an action.`}]);
+    const result = selectSkillResult(skills, name);
+    if (result.clearDraft) setSkillDraft({});
+    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
+    if (result.mode) setMode(result.mode);
+    showWizardMessage(result.message);
   }
 
   async function selectSkillAction(action: string) {
-    if (!selectedSkillName) {
-      setMode('skills');
-      return;
-    }
-    const skill = skills.find(candidate => candidate.name === selectedSkillName);
-    if (!skill) {
-      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} not found.`}]);
-      setMode('chat');
-      setSelectedSkillName(undefined);
-      return;
-    }
-    if (action === COMMON_ACTIONS.enable || action === COMMON_ACTIONS.disable) {
-      const next = await updateSettings({skills: setSkillEnabled(settings, selectedSkillName, action === COMMON_ACTIONS.enable)});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `Skill ${selectedSkillName} ${action === COMMON_ACTIONS.enable ? 'enabled' : 'disabled'}.`}]);
-      setSelectedSkillName(undefined);
-      setMode('chat');
-      return;
-    }
-    if (action === SKILL_ACTIONS.showInfo) {
-      setMessages(m => [...m, {role: 'system', text: [
-        `${skill.name}`,
-        skill.description,
-        '',
-        `References: ${skill.references.length}`,
-        `Path: ${skill.dir}`,
-        `State: ${isSkillEnabled(settings, skill.name) ? 'enabled' : 'disabled'}`,
-      ].join('\n')}]);
-      return;
-    }
-    if (action === SKILL_ACTIONS.validate) {
+    const result = selectSkillActionResult(settings, skills, selectedSkillName, action);
+    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
+    if (result.mode) setMode(result.mode);
+    if (result.validate && result.skill) {
       const {loadSkill} = await import('../../skills/SkillLoader.js');
       try {
-        const loaded = await loadSkill(skill.dir, 'global');
-        setMessages(m => [...m, {role: 'system', text: loaded ? `Valid: ${loaded.name}` : 'No SKILL.md found'}]);
+        const loaded = await loadSkill(result.skill.dir, 'global');
+        showWizardMessage(loaded ? `Valid: ${loaded.name}` : 'No SKILL.md found');
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
-        setMessages(m => [...m, {role: 'system', text: `Invalid skill: ${text}`}]);
+        showWizardMessage(`Invalid skill: ${text}`);
       }
       return;
     }
-    if (action === SKILL_ACTIONS.removeSkill) {
-      setMode('skillsConfirmRemove');
-      setMessages(m => [...m, {role: 'system', text: `Remove skill ${selectedSkillName}? This deletes ~/.haze/skills/${selectedSkillName}. Type "yes" to confirm. Esc to cancel.`}]);
-      return;
-    }
-    setMessages(m => [...m, {role: 'system', text: `Unknown skill action: ${action}`}]);
+    showWizardMessage(result.message);
   }
 
   async function captureSkillName(value: string) {
