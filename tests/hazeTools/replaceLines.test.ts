@@ -50,6 +50,23 @@ describe('replaceLines tool', () => {
     expect(result.reasonCode).toBe('invalid_line_range');
   });
 
+  it('rejects symlinks that resolve outside the workspace', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
+    try {
+      const outsideFile = path.join(outsideDir, 'secret.txt');
+      await fs.writeFile(outsideFile, 'line1\nline2\n');
+      await fs.symlink(outsideFile, path.join(tmp, 'link.txt'));
+
+      const result = await replaceLines({path: 'link.txt', startLine: 1, endLine: 1, content: 'changed'});
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('line1\nline2\n');
+    } finally {
+      await fs.remove(outsideDir);
+    }
+  });
+
   it('returns structured failure for startLine beyond file length', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'only one\n');

@@ -66,6 +66,26 @@ describe('editFile tool', () => {
     expect(result.suggestedNextStep).toContain('Read the file again');
   });
 
+  it('rejects symlinks that resolve outside the workspace', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
+    try {
+      const outsideFile = path.join(outsideDir, 'secret.txt');
+      await fs.writeFile(outsideFile, 'hello world\n');
+      await fs.symlink(outsideFile, path.join(tmp, 'link.txt'));
+
+      const result = await editFile({
+        path: 'link.txt',
+        edits: [{oldText: 'world', newText: 'universe'}],
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('hello world\n');
+    } finally {
+      await fs.remove(outsideDir);
+    }
+  });
+
   it('accepts line-numbered oldText copied from readFile output', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'alpha\nbeta\ngamma\n');

@@ -46,7 +46,6 @@
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.52",
     "@ai-sdk/openai": "3.0.73",
-    "@inquirer/prompts": "8.5.2",
     "@vscode/ripgrep": "1.18.0",
     "ai": "6.0.208",
     "cli-highlight": "2.1.11",

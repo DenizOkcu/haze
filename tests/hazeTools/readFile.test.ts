@@ -114,6 +114,21 @@ describe('readFile tool', () => {
     expect(second).not.toHaveProperty('applicableProjectInstructions');
   });
 
+  it('rejects symlinks that resolve outside the workspace', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
+    try {
+      await fs.writeFile(path.join(outsideDir, 'secret.txt'), 'outside');
+      await fs.symlink(path.join(outsideDir, 'secret.txt'), path.join(tmp, 'link.txt'));
+
+      const result = await readFile({path: 'link.txt'});
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+    } finally {
+      await fs.remove(outsideDir);
+    }
+  });
+
   it('returns structured failure for nonexistent file', async () => {
     const result = await readFile({path: 'nope.txt'});
     expect(result.ok).toBe(false);
@@ -164,6 +179,38 @@ describe('writeFile tool', () => {
     await writeFile({path: 'existing.txt', content: 'new', overwriteExisting: true});
     const content = await fs.readFile(path.join(tmp, 'existing.txt'), 'utf8');
     expect(content).toBe('new');
+  });
+
+  it('rejects overwriting symlinks that resolve outside the workspace', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
+    try {
+      const outsideFile = path.join(outsideDir, 'secret.txt');
+      await fs.writeFile(outsideFile, 'outside');
+      await fs.symlink(outsideFile, path.join(tmp, 'link.txt'));
+
+      const result = await writeFile({path: 'link.txt', content: 'new', overwriteExisting: true});
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.readFile(outsideFile, 'utf8')).resolves.toBe('outside');
+    } finally {
+      await fs.remove(outsideDir);
+    }
+  });
+
+  it('rejects writes through symlinked parent directories outside the workspace', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
+    try {
+      await fs.symlink(outsideDir, path.join(tmp, 'outside-link'));
+
+      const result = await writeFile({path: 'outside-link/new.txt', content: 'new'});
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.pathExists(path.join(outsideDir, 'new.txt'))).resolves.toBe(false);
+    } finally {
+      await fs.remove(outsideDir);
+    }
   });
 
   it('creates parent directories', async () => {

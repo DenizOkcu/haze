@@ -1,4 +1,4 @@
-import {execFile as execFileCallback, spawn} from 'node:child_process';
+import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,382 +6,22 @@ import {tool} from 'ai';
 import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
 import {walkDir} from '../utils/fs.js';
-import {generateTaskId, saveTasks} from '../core/tasks/taskStorage.js';
-import type {Task, TaskStatus} from '../core/tasks/taskStorage.js';
-import {workspaceRoot, resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
-import {classifyBashCommand, isValidationClassification} from '../core/safety/bashClassifier.js';
-import {parseValidationOutput} from '../core/validation/outputParser.js';
-import {filterBashOutput} from '../core/bashOutput/registry.js';
-import type {ToolDiffLine, ToolFailureReasonCode} from './toolResultTypes.js';
-import {readToolOutput as readStoredToolOutput, storeToolOutput} from '../core/agent/toolOutputStore.js';
-import {fetchUrlContent, BlockedUrlError} from './webFetch.js';
+import {writeTasksTool} from './tools/taskTool.js';
+import {readToolOutputTool} from './tools/storedOutputTool.js';
+import {workspaceRoot, resolveWorkspacePath, assertRealPathInsideWorkspace, assertWritablePathInsideWorkspace} from '../utils/path.js';
+
+import type {ToolDiffLine} from './toolResultTypes.js';
+import {storeToolOutput} from '../core/agent/toolOutputStore.js';
 import {reductionMetrics} from '../core/toolOutput/reduction.js';
-import {readScopedContextFilesForPath, type ContextFile} from '../config/contextFiles.js';
+import {HazeToolError, structuredToolFailure} from './tools/failures.js';
+import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
+import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
+import {runDedupedTool, discoverScopedContext, withScopedContext, scopedContextMutationStop} from './tools/toolContext.js';
+import {fetchTool} from './tools/fetchTool.js';
+import {bashTool} from './tools/bashTool.js';
+import {assertNotIgnored, DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 
-const MAX_OUTPUT_CHARS = 50_000;
-const DEFAULT_READ_LINES = 300;
-const COMPACT_COMMAND_CHARS = 12_000;
-const SHORT_VALIDATION_CHARS = 2_000;
-const GREP_MAX_OUTPUT_CHARS = 30_000;
-const GREP_MAX_LINE_CHARS = 500;
 const execFile = promisify(execFileCallback);
-
-async function isGitIgnored(absolutePath: string) {
-  const relative = workspaceRelativePath(absolutePath);
-  if (relative === '.') return false;
-  try {
-    await execFile('git', ['-C', workspaceRoot(), 'check-ignore', '-q', '--', relative]);
-    return true;
-  } catch (error) {
-    const status = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
-    if (status === 1 || status === 128) return false;
-    return false;
-  }
-}
-
-class HazeToolError extends Error {
-  reasonCode: ToolFailureReasonCode;
-  recoveryTool?: string;
-  recoveryInput?: unknown;
-
-  constructor(message: string, reasonCode: ToolFailureReasonCode, options?: {recoveryTool?: string; recoveryInput?: unknown}) {
-    super(message);
-    this.name = 'HazeToolError';
-    this.reasonCode = reasonCode;
-    this.recoveryTool = options?.recoveryTool;
-    this.recoveryInput = options?.recoveryInput;
-  }
-}
-
-async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean) {
-  if (!allowIgnored && await isGitIgnored(absolutePath)) {
-    throw new HazeToolError(`Path is ignored by .gitignore: ${inputPath}. Set allowIgnored=true only if you explicitly need to access ignored files.`, 'ignored_path', {recoveryTool: 'listFiles'});
-  }
-}
-
-function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS) {
-  if (text.length <= maxChars) return {text, truncated: false};
-  const handle = storeToolOutput(text);
-  const headChars = Math.floor(maxChars * 0.4);
-  const tailChars = maxChars - headChars;
-  return {
-    text: `${text.slice(0, headChars)}\n\n[... ${text.length - maxChars} characters omitted; use readToolOutput with handle ${handle} ...]\n\n${text.slice(-tailChars)}`,
-    truncated: true,
-    omittedChars: text.length - maxChars,
-    handle,
-  };
-}
-
-function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
-  if (text.length <= maxChars) return {text, truncated: false};
-  return {text: `${text.slice(0, Math.max(0, maxChars - 22))}[line truncated]`, truncated: true};
-}
-
-function renderGrepMatches(matches: Array<{file: string; line: number; content: string; isContext: boolean}>) {
-  return matches.map(match => `${match.file}:${match.line}:${match.isContext ? '-' : ''}${match.content}`).join('\n');
-}
-
-function compactGrepMatches(matches: Array<{file: string; line: number; content: string; isContext: boolean}>, maxChars = GREP_MAX_OUTPUT_CHARS) {
-  const compacted: Array<{file: string; line: number; content: string; isContext: boolean}> = [];
-  let lineTruncated = false;
-  let omittedResultLines = 0;
-  for (const match of matches) {
-    const line = compactLine(match.content);
-    lineTruncated = lineTruncated || line.truncated;
-    const next = {...match, content: line.text};
-    const estimated = JSON.stringify([...compacted, next]).length;
-    if (estimated > maxChars) {
-      omittedResultLines = matches.length - compacted.length;
-      break;
-    }
-    compacted.push(next);
-  }
-  return {matches: compacted, lineTruncated, omittedResultLines, outputTruncated: omittedResultLines > 0 || lineTruncated};
-}
-
-function stripLineNumberPrefixes(text: string) {
-  return text.replace(/^\s*\d+\s+\| ?/gm, '');
-}
-
-function lineStartOffsets(text: string) {
-  const offsets = [0];
-  for (let index = 0; index < text.length; index++) {
-    if (text[index] === '\n') offsets.push(index + 1);
-  }
-  return offsets;
-}
-
-function findLineTrimmedRange(original: string, oldText: string) {
-  const wantedLines = oldText.replace(/\r\n/g, '\n').split('\n').map(line => line.trimEnd());
-  if (wantedLines.at(-1) === '') wantedLines.pop();
-  if (wantedLines.length === 0) return undefined;
-
-  const originalLines = original.replace(/\r\n/g, '\n').split('\n');
-  const hasTrailingNewline = original.endsWith('\n');
-  if (hasTrailingNewline) originalLines.pop();
-  const offsets = lineStartOffsets(original);
-  const matches: Array<{start: number; end: number}> = [];
-
-  for (let lineIndex = 0; lineIndex <= originalLines.length - wantedLines.length; lineIndex++) {
-    const window = originalLines.slice(lineIndex, lineIndex + wantedLines.length).map(line => line.trimEnd());
-    if (window.every((line, index) => line === wantedLines[index])) {
-      const start = offsets[lineIndex] ?? 0;
-      const endLineIndex = lineIndex + wantedLines.length;
-      const end = endLineIndex < offsets.length ? (offsets[endLineIndex] ?? original.length) : original.length;
-      matches.push({start, end});
-    }
-  }
-
-  if (matches.length !== 1) return undefined;
-  return matches[0];
-}
-
-function findEditRange(original: string, oldText: string) {
-  const candidates = [oldText, stripLineNumberPrefixes(oldText)].filter((candidate, index, all) => candidate.length > 0 && all.indexOf(candidate) === index);
-  for (const candidate of candidates) {
-    const first = original.indexOf(candidate);
-    if (first !== -1) {
-      const second = original.indexOf(candidate, first + candidate.length);
-      if (second !== -1) return {kind: 'multiple' as const};
-      return {kind: 'found' as const, start: first, end: first + candidate.length, approximate: candidate !== oldText};
-    }
-  }
-  for (const candidate of candidates) {
-    const range = findLineTrimmedRange(original, candidate);
-    if (range) return {kind: 'found' as const, ...range, approximate: true};
-  }
-  return {kind: 'missing' as const};
-}
-
-type ToolExecutionContext = {
-  abortSignal?: AbortSignal;
-  experimental_context?: unknown;
-};
-
-type HazeToolContext = {
-  inFlightToolCalls?: Map<string, Promise<unknown>>;
-  completedToolCalls?: Map<string, number>;
-  mutationEpoch?: number;
-  failedMutationPaths?: Set<string>;
-  failedMutationReasons?: Map<string, ToolFailureReasonCode | undefined>;
-  pathsReadAfterFailedMutation?: Set<string>;
-  inFlightMutationPaths?: Set<string>;
-  loadedContextFilePaths?: Set<string>;
-};
-
-function toolCallKey(toolName: string, input: unknown) {
-  return `${toolName}:${JSON.stringify(input)}`;
-}
-
-function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
-  return typeof context.experimental_context === 'object' && context.experimental_context != null
-    ? context.experimental_context as HazeToolContext
-    : undefined;
-}
-
-async function discoverScopedContext(filePath: string, context: ToolExecutionContext) {
-  const ctx = hazeContext(context);
-  const loaded = ctx?.loadedContextFilePaths ?? new Set<string>();
-  const files = await readScopedContextFilesForPath(filePath, {cwd: workspaceRoot(), alreadyLoadedPaths: loaded});
-  if (ctx && !ctx.loadedContextFilePaths) ctx.loadedContextFilePaths = loaded;
-  for (const file of files) loaded.add(file.path);
-  return files;
-}
-
-function withScopedContext<T extends Record<string, unknown>>(result: T, files: ContextFile[]): T & {applicableProjectInstructions?: ContextFile[]} {
-  return files.length > 0 ? {...result, applicableProjectInstructions: files} : result;
-}
-
-function scopedContextMutationStop(toolName: string, filePath: string, files: ContextFile[]) {
-  if (files.length === 0) return undefined;
-  return {
-    ok: false,
-    toolName,
-    path: filePath,
-    error: `Scoped project instructions apply to ${filePath}: ${files.map(file => file.path).join(', ')}. Review them before mutating this path.`,
-    reasonCode: 'scoped_instructions_discovered' as const,
-    recoverable: true,
-    suggestedNextStep: `Read the applicableProjectInstructions returned in this result, then retry ${toolName} only if the change follows those scoped instructions.`,
-    applicableProjectInstructions: files,
-  };
-}
-
-function isMutatingTool(toolName: string) {
-  return ['editFile', 'replaceLines', 'writeFile'].includes(toolName);
-}
-
-function isReadOnlyFileTool(toolName: string) {
-  return ['listFiles', 'readFile', 'grep'].includes(toolName);
-}
-
-function isDeduplicableReadOnlyTool(toolName: string) {
-  // Read-only tools that participate in completed-call deduplication within a
-  // turn (no side effects). File tools + bash + fetch; fetch has no path and is
-  // network-side-effect-free for the agent's purposes.
-  return isReadOnlyFileTool(toolName) || toolName === 'bash' || toolName === 'fetch';
-}
-
-function inputPath(input: unknown) {
-  return typeof input === 'object' && input != null && 'path' in input && typeof (input as {path?: unknown}).path === 'string'
-    ? (input as {path: string}).path
-    : undefined;
-}
-
-function isStructuredFailure(value: unknown) {
-  return typeof value === 'object' && value != null && 'ok' in value && (value as {ok?: unknown}).ok === false;
-}
-
-function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown}) {
-  const message = error instanceof Error ? error.message : String(error);
-  const hazeError = error instanceof HazeToolError ? error : undefined;
-  return {
-    ok: false,
-    toolName,
-    path: pathForError,
-    error: message,
-    reasonCode: options?.reasonCode ?? hazeError?.reasonCode,
-    recoverable: true,
-    suggestedNextStep,
-    recoveryTool: options?.recoveryTool ?? hazeError?.recoveryTool,
-    recoveryInput: options?.recoveryInput ?? hazeError?.recoveryInput,
-  };
-}
-
-const INLINE_DIFF_LINE_LIMIT = 20;
-
-const SOURCE_OUTLINE_PATTERNS = [
-  /^\s*(?:import|from|export|package|namespace|module|using)\b/,
-  /^\s*#\s*include\b/,
-  /^\s*(?:public|private|protected|internal|static|async|final|open|sealed|abstract|export\s+)?\s*(?:class|interface|struct|enum|type|trait|record|protocol)\b/,
-  /^\s*(?:export\s+)?(?:async\s+)?function\b/,
-  /^\s*(?:def|func|fn)\s+[A-Za-z_]/,
-  /^\s*(?:pub\s+)?(?:async\s+)?fn\s+[A-Za-z_]/,
-  /^\s*(?:public|private|protected|internal|static|async|final|override|virtual|abstract)\s+[^=;{}]+\([^)]*\)\s*(?:\{|;|=>)?\s*$/,
-];
-
-function sourceOutlineEntries(lines: string[], startLine: number) {
-  return lines
-    .map((line, index) => ({lineNumber: startLine + index, text: line}))
-    .filter(entry => SOURCE_OUTLINE_PATTERNS.some(pattern => pattern.test(entry.text)));
-}
-
-function splitDiffLines(text: string) {
-  const lines = text.split(/\r?\n/);
-  if (text.endsWith('\n') || text.endsWith('\r\n')) lines.pop();
-  return lines;
-}
-
-function lineNumberAtOffset(text: string, offset: number) {
-  let line = 1;
-  for (let index = 0; index < offset; index++) {
-    if (text.charCodeAt(index) === 10) line += 1;
-  }
-  return line;
-}
-
-function replacementDiff(
-  oldText: string,
-  newText: string,
-  oldStartLine: number,
-  newStartLine: number,
-  context?: {before?: {oldLine: number; newLine: number; text: string}; after?: {oldLine: number; newLine: number; text: string}},
-): {diff: ToolDiffLine[]; addedLines: number; removedLines: number} {
-  const oldLines = splitDiffLines(oldText);
-  const newLines = splitDiffLines(newText);
-  const diff: ToolDiffLine[] = [];
-  if (context?.before) diff.push({type: 'context', ...context.before});
-  diff.push(
-    ...oldLines.map((text, index) => ({type: 'remove' as const, oldLine: oldStartLine + index, text})),
-    ...newLines.map((text, index) => ({type: 'add' as const, newLine: newStartLine + index, text})),
-  );
-  if (context?.after) diff.push({type: 'context', ...context.after});
-  return {diff, addedLines: newLines.length, removedLines: oldLines.length};
-}
-
-async function runDedupedTool<T>(toolName: string, input: unknown, context: ToolExecutionContext, execute: () => Promise<T>): Promise<T | {ok: true; duplicateSkipped: true; toolName: string; reason: string}> {
-  const ctx = hazeContext(context);
-  if (!ctx) return execute();
-  ctx.inFlightToolCalls ??= new Map();
-  ctx.completedToolCalls ??= new Map();
-  ctx.failedMutationPaths ??= new Set();
-  ctx.failedMutationReasons ??= new Map();
-  ctx.pathsReadAfterFailedMutation ??= new Set();
-  ctx.inFlightMutationPaths ??= new Set();
-  ctx.mutationEpoch ??= 0;
-  const key = toolCallKey(toolName, input);
-  const pathForInput = inputPath(input);
-  if (isMutatingTool(toolName) && pathForInput && ctx.inFlightMutationPaths.has(pathForInput)) {
-    return {
-      ok: true,
-      duplicateSkipped: true,
-      toolName,
-      reason: `Skipped concurrent mutation for ${pathForInput}. Read the file again, then make one editFile call with all non-overlapping replacements or one replaceLines call based on the latest line numbers.`,
-    };
-  }
-  if (isMutatingTool(toolName) && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput)) {
-    const reason = ctx.failedMutationReasons.get(pathForInput);
-    throw new HazeToolError(`Read ${pathForInput} before attempting another edit after the previous edit failure${reason ? ` (${reason})` : ''}.`, reason ?? 'io_error', {recoveryTool: 'readFile', recoveryInput: {path: pathForInput}});
-  }
-  const completedAt = ctx.completedToolCalls.get(key);
-  const readAfterFailedMutation = toolName === 'readFile' && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput);
-  if ((isDeduplicableReadOnlyTool(toolName)) && completedAt === ctx.mutationEpoch && !readAfterFailedMutation) {
-    return {
-      ok: true,
-      duplicateSkipped: true,
-      toolName,
-      reason: toolName === 'bash'
-        ? 'Skipped duplicate bash command; no files changed since the previous run.'
-        : toolName === 'fetch'
-          ? 'Skipped duplicate fetch with identical URL; no files changed since the previous call.'
-          : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
-    };
-  }
-  if (ctx.inFlightToolCalls.has(key)) {
-    return {
-      ok: true,
-      duplicateSkipped: true,
-      toolName,
-      reason: 'Skipped duplicate in-flight tool call with identical input.',
-    };
-  }
-
-  if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths.add(pathForInput);
-  const promise = execute();
-  ctx.inFlightToolCalls.set(key, promise);
-  try {
-    const result = await promise;
-    if (isStructuredFailure(result)) {
-      if (isMutatingTool(toolName) && pathForInput) {
-        ctx.failedMutationPaths.add(pathForInput);
-        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as ToolFailureReasonCode | undefined : undefined;
-        ctx.failedMutationReasons.set(pathForInput, reasonCode);
-        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
-      }
-      return result;
-    }
-    if (toolName === 'readFile' && pathForInput) ctx.pathsReadAfterFailedMutation.add(pathForInput);
-    if (isMutatingTool(toolName)) {
-      ctx.mutationEpoch += 1;
-      if (pathForInput) {
-        ctx.failedMutationPaths.delete(pathForInput);
-        ctx.failedMutationReasons.delete(pathForInput);
-        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
-      }
-    }
-    ctx.completedToolCalls.set(key, ctx.mutationEpoch);
-    return result;
-  } catch (error) {
-    if (isMutatingTool(toolName) && pathForInput) {
-      ctx.failedMutationPaths.add(pathForInput);
-      ctx.failedMutationReasons.set(pathForInput, error instanceof HazeToolError ? error.reasonCode : undefined);
-      ctx.pathsReadAfterFailedMutation.delete(pathForInput);
-    }
-    throw error;
-  } finally {
-    ctx.inFlightToolCalls.delete(key);
-    if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths?.delete(pathForInput);
-  }
-}
 
 export const hazeTools = {
   listFiles: tool({
@@ -398,6 +38,7 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(dirPath);
         await assertNotIgnored(absolutePath, dirPath, includeIgnored);
+        await assertRealPathInsideWorkspace(absolutePath, dirPath);
         const entries: string[] = [];
         let ignoredSkipped = 0;
 
@@ -442,6 +83,7 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        await assertRealPathInsideWorkspace(absolutePath, filePath);
         const content = await fs.readFile(absolutePath, 'utf8');
         const lines = content.split(/\r?\n/);
         const start = offset == null ? 0 : offset - 1;
@@ -453,17 +95,23 @@ export const hazeTools = {
         const numberedLines: string[] = [];
         let includedLines = 0;
         let lineTruncated = false;
+        let outputChars = 0;
         for (const entry of displayLines) {
           const prefix = `${String(entry.lineNumber).padStart(4, ' ')} | `;
-          const remaining = MAX_OUTPUT_CHARS - numberedLines.join('\n').length - (numberedLines.length > 0 ? 1 : 0);
+          const separatorChars = numberedLines.length > 0 ? 1 : 0;
+          const remaining = MAX_OUTPUT_CHARS - outputChars - separatorChars;
           if (remaining <= prefix.length) break;
           if (prefix.length + entry.text.length > remaining) {
-            numberedLines.push(`${prefix}${entry.text.slice(0, Math.max(0, remaining - prefix.length - 26))}[line content truncated]`);
+            const line = `${prefix}${entry.text.slice(0, Math.max(0, remaining - prefix.length - 26))}[line content truncated]`;
+            numberedLines.push(line);
+            outputChars += separatorChars + line.length;
             includedLines += 1;
             lineTruncated = true;
             break;
           }
-          numberedLines.push(`${prefix}${entry.text}`);
+          const line = `${prefix}${entry.text}`;
+          numberedLines.push(line);
+          outputChars += separatorChars + line.length;
           includedLines += 1;
         }
         const endLine = mode === 'outline'
@@ -504,6 +152,7 @@ export const hazeTools = {
     execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context, async () => {
       try {
         const absolutePath = resolveWorkspacePath(searchPath);
+        await assertRealPathInsideWorkspace(absolutePath, searchPath);
         const args = [
           '--json', '--color=never',
           '--max-count', String(maxMatches),
@@ -619,6 +268,7 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        await assertRealPathInsideWorkspace(absolutePath, filePath);
         const scopedContext = await discoverScopedContext(filePath, context);
         const scopedStop = scopedContextMutationStop('replaceLines', filePath, scopedContext);
         if (scopedStop) return scopedStop;
@@ -669,12 +319,14 @@ export const hazeTools = {
         if (scopedStop) return scopedStop;
         try {
           await fs.access(absolutePath);
+          await assertRealPathInsideWorkspace(absolutePath, filePath);
           if (!overwriteExisting) {
             throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code !== 'ENOENT') throw error;
+          await assertWritablePathInsideWorkspace(absolutePath, filePath);
         }
         await fs.mkdir(path.dirname(absolutePath), {recursive: true});
         await fs.writeFile(absolutePath, content, 'utf8');
@@ -699,6 +351,7 @@ export const hazeTools = {
       try {
         const absolutePath = resolveWorkspacePath(filePath);
         await assertNotIgnored(absolutePath, filePath, allowIgnored);
+        await assertRealPathInsideWorkspace(absolutePath, filePath);
         const scopedContext = await discoverScopedContext(filePath, context);
         const scopedStop = scopedContextMutationStop('editFile', filePath, scopedContext);
         if (scopedStop) return scopedStop;
@@ -750,164 +403,14 @@ export const hazeTools = {
     }),
   }),
 
-  writeTasks: tool({
-    description: 'Replace the task list for substantial work. Update at meaningful phase changes, blockers, and completion; pass the complete list.',
-    inputSchema: z.object({
-      tasks: z.array(z.object({
-        title: z.string().max(200).describe('Short task description'),
-        status: z.enum(['pending', 'in_progress', 'completed']).optional().describe('Task status (defaults to pending)'),
-      })).describe('Complete task list. Replaces any existing tasks. Pass an empty array to clear.'),
-    }),
-    execute: async ({tasks: inputTasks}) => {
-      if (!Array.isArray(inputTasks)) {
-        return {ok: false, error: 'Tasks must be an array. Pass an empty array to clear the list.'};
-      }
-      for (let i = 0; i < inputTasks.length; i++) {
-        const title = inputTasks[i]?.title?.trim();
-        if (!title) return {ok: false, error: `Task ${i + 1}: title cannot be empty.`};
-        if (title.length > 200) return {ok: false, error: `Task ${i + 1}: title is too long (max 200 characters).`};
-      }
-      const now = new Date().toISOString();
-      const tasks: Task[] = inputTasks.map((input: {title: string; status?: TaskStatus}) => ({
-        id: generateTaskId(),
-        title: input.title.trim(),
-        status: input.status ?? 'pending',
-        createdAt: now,
-        updatedAt: now,
-      }));
-      await saveTasks(tasks);
-      if (tasks.length === 0) return {ok: true, taskCount: 0, summary: 'Task list cleared.'};
-      const counts = {
-        pending: tasks.filter(t => t.status === 'pending').length,
-        in_progress: tasks.filter(t => t.status === 'in_progress').length,
-        completed: tasks.filter(t => t.status === 'completed').length,
-      };
-      return {ok: true, taskCount: tasks.length, counts, summary: `Tasks: ${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed.`};
-    },
-  }),
+  writeTasks: writeTasksTool,
 
-  readToolOutput: tool({
-    description: 'Read another page of oversized output previously returned by a tool handle.',
-    inputSchema: z.object({
-      handle: z.string().min(1).describe('Output handle from a prior tool result'),
-      offset: z.number().int().nonnegative().default(0).describe('Character offset to start reading'),
-      limit: z.number().int().positive().max(20_000).default(12_000).describe('Maximum characters to return'),
-      query: z.string().optional().describe('Optional case-insensitive substring search within the stored output instead of reading by offset'),
-      contextLines: z.number().int().nonnegative().max(20).default(2).describe('Lines of context around query matches'),
-    }),
-    execute: async ({handle, offset, limit, query, contextLines}) => {
-      const page = readStoredToolOutput(handle, offset, limit, {query, contextLines});
-      return page ?? {ok: false, error: `Unknown or expired tool output handle: ${handle}`};
-    },
-  }),
+  readToolOutput: readToolOutputTool,
 
-  fetch: tool({
-    description: 'Fetch a public http(s) URL and return readable content. Use for current docs, API references, error lookups, or CI logs. Private/loopback/metadata hosts are blocked.',
-    inputSchema: z.object({
-      url: z.string().url().describe('Absolute http(s) URL to fetch'),
-      format: z.enum(['auto', 'text']).default('auto').describe('auto = markdown for HTML, pretty for JSON, passthrough for text; text = raw text only'),
-    }),
-    execute: async ({url, format}, context) => runDedupedTool('fetch', {url, format}, context, async () => {
-      try {
-        const result = await fetchUrlContent(url, {signal: context.abortSignal, format});
-        const capped = compactStoredOutput(result.content, MAX_OUTPUT_CHARS);
-        const extractionMethod = format === 'text' ? 'text' as const : result.extractionMethod;
-        const fetchMetrics = reductionMetrics(result.content, capped.text);
-        return {
-          ok: true,
-          url: result.url,
-          status: result.status,
-          statusText: result.statusText,
-          contentType: result.contentType,
-          bytes: result.bytes,
-          redirected: result.redirected,
-          extractionMethod,
-          truncated: capped.truncated,
-          content: capped.text,
-          reducerName: extractionMethod === 'markdown' ? 'web-html-extract' : 'web-content-cap',
-          contentKind: 'web',
-          lossy: capped.truncated || extractionMethod === 'markdown',
-          parseTier: 'full',
-          ...fetchMetrics,
-          ...(capped.handle ? {handle: capped.handle, rawHandle: capped.handle, omittedChars: capped.omittedChars} : {omittedChars: 0}),
-        };
-      } catch (error) {
-        const reasonCode = error instanceof BlockedUrlError ? 'blocked_url' as const : undefined;
-        return structuredToolFailure('fetch', error, 'Check the URL is correct and public. Private/localhost/metadata hosts and non-http(s) schemes are blocked.', url, {reasonCode});
-      }
-    }),
-  }),
+  fetch: fetchTool,
 
-  bash: tool({
-    description: 'Run workspace tests, builds, validation, or inspection. Use file tools for edits.',
-    inputSchema: z.object({
-      command: z.string().min(1).describe('Command to execute with bash -lc'),
-      timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
-      allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Commands run without confirmation; retained for compatibility.'),
-    }),
-    execute: async ({command, timeoutSeconds, allowMutation}, context) => runDedupedTool('bash', {command, timeoutSeconds, allowMutation}, context, async () => {
-      const cwd = workspaceRoot();
-      const classification = classifyBashCommand(command);
-      const timeoutMs = (timeoutSeconds ?? 60) * 1000;
-      const startedAt = Date.now();
-      return await new Promise(resolve => {
-        const child = spawn('bash', ['-lc', command], {cwd, stdio: ['ignore', 'pipe', 'pipe']});
-        let stdout = '';
-        let stderr = '';
-        let settled = false;
-        let timedOut = false;
-        const timer = setTimeout(() => {
-          if (!settled) {
-            timedOut = true;
-            child.kill('SIGTERM');
-          }
-        }, timeoutMs);
-        const abort = () => child.kill('SIGTERM');
-        context.abortSignal?.addEventListener('abort', abort, {once: true});
-        child.stdout.on('data', data => stdout += data.toString());
-        child.stderr.on('data', data => stderr += data.toString());
-        child.on('close', code => {
-          settled = true;
-          clearTimeout(timer);
-          context.abortSignal?.removeEventListener('abort', abort);
-          const validationSummary = isValidationClassification(classification)
-            ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: stdout.length > COMPACT_COMMAND_CHARS, stderrTruncated: stderr.length > COMPACT_COMMAND_CHARS, classification})
-            : undefined;
-          const validationPassed = validationSummary?.status === 'passed';
-          const output = filterBashOutput({
-            command,
-            code,
-            stdout,
-            stderr,
-            timedOut,
-            classification,
-            validationSummary,
-            storeRawOutput: storeToolOutput,
-            fallbackCompact: compactStoredOutput,
-            compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS,
-          });
-          resolve({
-            ok: code === 0 && !timedOut,
-            code,
-            command,
-            cwd,
-            classification,
-            durationMs: Date.now() - startedAt,
-            timedOut,
-            stdout: output.stdout,
-            stderr: output.stderr,
-            validationSummary,
-          });
-        });
-        child.on('error', error => {
-          settled = true;
-          clearTimeout(timer);
-          context.abortSignal?.removeEventListener('abort', abort);
-          resolve({ok: false, command, cwd, classification, durationMs: Date.now() - startedAt, error: error.message});
-        });
-      });
-    }),
-  }),
+  bash: bashTool,
+
 };
 
 export type HazeTools = typeof hazeTools;
