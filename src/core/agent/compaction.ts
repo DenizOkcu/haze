@@ -44,7 +44,7 @@ export function compactModelMessages(
   const recent = messages.slice(recentStart);
   const oldText = older.map(message => {
     const text = modelMessageText(message).replace(/\s+/g, ' ').trim();
-    return text ? `- ${message.role}: ${text.slice(0, 500)}` : '';
+    return text ? `- ${message.role}: ${text}` : '';
   }).filter(Boolean).join('\n');
   const summary = [
     'Compacted prior Haze conversation. Treat this as continuity context, not a new user request.',
