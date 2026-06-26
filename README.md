@@ -205,6 +205,17 @@ haze --continue    # resume the latest saved session for this workspace
 haze --no-session  # run without durable session storage
 ```
 
+Non-interactive / print mode:
+
+```bash
+haze -p "refactor utils.ts to remove the unused export"
+haze -p "summarize this repo" --model openai:gpt-4o-mini
+haze -p "list the top 3 bugs in src/api.ts" --output json
+echo "what does this project do?" | haze
+```
+
+`-p` / `--prompt` runs a single agentic turn (with the full tool set and guardrails) and prints the final assistant text. `--model` overrides the active model for that one run without changing `~/.haze/settings.json` — accepts a bare model name or `provider:name`. `--output json` prints `{"type":"result","status":...,"result":...,"usage":...}` instead of plain text. When `-p` is omitted and stdin is piped, the prompt is read from stdin. A one-shot run never starts or resumes a durable session; `--continue` is ignored in this mode.
+
 By default, Haze does **not** write the detailed LLM log files under `~/.haze/logs/` (they capture full prompts, messages, and tool I/O). File logging is only enabled with `haze --debug`, which also turns on the on-screen debug panel. Use the `/logs` command to review past log files once logging has been enabled.
 
 ## Agent tools
