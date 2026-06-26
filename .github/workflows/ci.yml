@@ -22,3 +22,37 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  coverage:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          path: head
+      - name: Checkout PR base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Coverage on base (${{ github.event.pull_request.base.ref }})
+        working-directory: base
+        run: |
+          npm ci
+          npx vitest run --coverage --coverage.include='src/**/*.ts' --coverage.reporter=json --coverage.reportsDirectory=./coverage
+      - name: Coverage on head
+        working-directory: head
+        run: |
+          npm ci
+          npm run coverage
+      - name: Enforce no coverage regression
+        run: node head/.github/scripts/compare-coverage.mjs base/coverage/coverage-final.json head/coverage/coverage-final.json
+      - name: Upload head coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-head
+          path: head/coverage/
