@@ -1,4 +1,7 @@
-import {validateUrl, type UrlValidation} from '../core/safety/urlGuard.js';
+import http from 'node:http';
+import https from 'node:https';
+import {Readable} from 'node:stream';
+import {validateUrl, type UrlValidation, type DnsLookupFn} from '../core/safety/urlGuard.js';
 
 /**
  * Bounded HTTP fetch + content extraction for the `fetch` tool.
@@ -21,7 +24,23 @@ export interface FetchOptions {
   maxRedirects?: number;
   signal?: AbortSignal;
   format?: 'auto' | 'text';
+  /** @internal custom DNS resolver forwarded to validateUrl (testing seam). */
+  lookup?: DnsLookupFn;
+  /** @internal transport override (testing seam); defaults to pinnedFetch. */
+  fetcher?: PinnedFetcher;
 }
+
+/**
+ * Transport signature: fetch `url`, pinning the TCP connection to `pinnedIp`
+ * when set (hostname URL whose DNS was already resolved+ validated by the
+ * caller). When `pinnedIp` is undefined (literal-IP URL), the transport falls
+ * back to the global fetch — no DNS-rebinding surface exists for a literal IP.
+ */
+export type PinnedFetcher = (
+  url: URL,
+  pinnedIp: string | undefined,
+  init: RequestInit,
+) => Promise<Response>;
 
 export interface FetchResult {
   url: string;
@@ -159,6 +178,60 @@ async function readBodyCapped(
 }
 
 /**
+ * Perform an HTTP(S) request with the TCP connection pinned to `pinnedIp`.
+ *
+ * This closes the DNS-rebinding TOCTOU: `validateUrl` resolved the hostname and
+ * verified every address is public, but the global `fetch` would re-resolve the
+ * hostname at connect time — an attacker-controlled DNS server can return a
+ * public IP for the validation lookup and a private/internal IP for the connect
+ * lookup. By connecting directly to the already-validated IP (`hostname:
+ * pinnedIp`) while keeping the original `Host` header and TLS `servername`
+ * (`url.hostname`), the connection target is fixed to what we validated, with no
+ * second DNS lookup. TLS certificate verification still runs against the original
+ * hostname via `servername`, so pinning does not weaken identity checks.
+ *
+ * Literal-IP URLs carry no DNS-rebinding surface (`pinnedIp` is undefined), so
+ * they fall through to the global `fetch` — which also keeps the test mocks that
+ * stub `globalThis.fetch` working for that path.
+ */
+export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: RequestInit): Promise<Response> {
+  if (!pinnedIp) return globalThis.fetch(url, init);
+
+  const isTls = url.protocol === 'https:';
+  const port = url.port ? Number(url.port) : (isTls ? 443 : 80);
+  const path = url.pathname + url.search;
+  const headers: Record<string, string> = {...(init.headers as Record<string, string> | undefined)};
+  // Preserve the original host in the request line; node would otherwise send
+  // the pinned IP as the Host header.
+  headers.host = url.host;
+  const lib = isTls ? https : http;
+
+  return new Promise<Response>((resolve, reject) => {
+    const req = lib.request(
+      {
+        method: init.method ?? 'GET',
+        hostname: pinnedIp,
+        port,
+        path,
+        headers,
+        ...(isTls ? {servername: url.hostname, rejectUnauthorized: true} : {}),
+        signal: init.signal as AbortSignal | undefined,
+      },
+      (res) => {
+        const body = Readable.toWeb(res) as unknown as ReadableStream<Uint8Array>;
+        resolve(new Response(body, {
+          status: res.statusCode ?? 200,
+          statusText: res.statusMessage ?? '',
+          headers: res.headers as Record<string, string>,
+        }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/**
  * Fetch a public http(s) URL and return readable content.
  *
  * Non-2xx responses are still returned (with status text in the content) so the
@@ -169,11 +242,17 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = opts?.maxBytes ?? DEFAULT_MAX_BYTES;
   const maxRedirects = opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const fetcher = opts?.fetcher ?? pinnedFetch;
+  const validateOpts = opts?.lookup ? {lookup: opts.lookup} : undefined;
 
-  const initial = await validateUrl(input);
+  const initial = await validateUrl(input, validateOpts);
   if (!initial.ok) throw new BlockedUrlError(initial);
 
   let currentUrl: URL = initial.url;
+  // Pin the connection to the address we just validated — the validated IP
+  // flows from validateUrl straight into the transport, with no second DNS
+  // lookup in between (that gap was the rebinding window).
+  let currentPinnedIp: string | undefined = initial.resolvedAddresses?.[0];
   let response: Response | undefined;
   const visited: string[] = [];
 
@@ -188,7 +267,7 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
     const combined = AbortSignal.any([timeoutSignal, abortController.signal]);
 
     try {
-      response = await fetch(currentUrl, {
+      response = await fetcher(currentUrl, currentPinnedIp, {
         redirect: 'manual',
         signal: combined,
         headers: {accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.5,*/*;q=0.1', 'user-agent': USER_AGENT},
@@ -222,13 +301,14 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
       if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
         throw new BlockedUrlError({ok: false, reasonCode: 'blocked_scheme', reason: `Redirect to non-http(s) scheme '${nextUrl.protocol}' is blocked.`});
       }
-      const redirectValidation = await validateUrl(nextUrl.href);
+      const redirectValidation = await validateUrl(nextUrl.href, validateOpts);
       if (!redirectValidation.ok) throw new BlockedUrlError(redirectValidation);
       if (visited.includes(nextUrl.href)) {
         throw new Error(`Redirect loop detected fetching ${input}`);
       }
       visited.push(currentUrl.href);
       currentUrl = nextUrl;
+      currentPinnedIp = redirectValidation.resolvedAddresses?.[0];
       continue;
     }
     break;
@@ -236,9 +316,10 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
 
   if (!response) throw new Error(`No response fetching ${input}`);
 
-  // Belt-and-suspenders: re-validate the final URL after redirects.
-  const finalValidation = await validateUrl(currentUrl.href);
-  if (!finalValidation.ok) throw new BlockedUrlError(finalValidation);
+  // No post-fetch re-validation: every hop (including the final response) was
+  // validated and connection-pinned at fetch time. Re-resolving the final URL
+  // here would only reopen a rebinding race against a connection that already
+  // used a safe, pinned IP.
 
   const abortController = new AbortController();
   const onAbort = () => abortController.abort();

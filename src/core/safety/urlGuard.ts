@@ -13,7 +13,7 @@ import {promises as dns} from 'node:dns';
  */
 
 export type UrlValidation =
-  | {ok: true; url: URL}
+  | {ok: true; url: URL; resolvedAddresses?: string[]}
   | {
       ok: false;
       reasonCode: 'invalid_url' | 'blocked_scheme' | 'blocked_host' | 'blocked_address';
@@ -214,6 +214,8 @@ export async function validateUrl(
   }
 
   // If the host is a literal IP, check ranges directly (no DNS needed).
+  // No resolvedAddresses: literal IPs carry no DNS-rebinding surface, so the
+  // caller can connect to the URL as-is without pinning.
   if (hostLooksLikeIp(host)) {
     if (isBlockedIp(host)) {
       return {ok: false, reasonCode: 'blocked_address', reason: `Address '${host}' is private, loopback, link-local, or otherwise blocked.`};
@@ -239,5 +241,8 @@ export async function validateUrl(
     }
   }
 
-  return {ok: true, url};
+  // Surface the validated addresses so the caller can pin the connection to
+  // one of them, closing the DNS-rebinding TOCTOU between this check and the
+  // actual connect (a public hostname that later re-resolves to an internal IP).
+  return {ok: true, url, resolvedAddresses: addresses};
 }
