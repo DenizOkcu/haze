@@ -1,6 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
-import os from 'node:os';
 import {promisify} from 'node:util';
 import fs from 'fs-extra';
 import {Box, render, Static, Text, useApp, useStdout} from 'ink';
@@ -12,7 +11,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, configuredProviders, findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {activeModel, findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {configuredLspServers, lspPreset, removeLspServer, setLspServerEnabled, upsertLspServer, type HazeLspServer} from '../../config/lspSettings.js';
 import {findMcpPreset, findMcpServer, removeMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
 import {isSkillEnabled, removeSkillSetting, setSkillEnabled} from '../../config/skillSettings.js';
@@ -28,7 +27,7 @@ import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js'
 import {findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
-import {compactModelMessages, modelMessageText} from '../../core/agent/compaction.js';
+import {compactModelMessages} from '../../core/agent/compaction.js';
 import {contextBreakdown} from '../../core/agent/contextBudget.js';
 import {stripSyntheticControls} from '../../core/agent/requestAssembly.js';
 import {modelWithConfig} from '../../llm/client.js';
@@ -40,10 +39,13 @@ import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
 import {createSessionRecorder} from '../chat/sessionRecorder.js';
 import {startupProviderInfo} from '../chat/startupInfo.js';
+import {compactHomePath, displayMessagesFromConversation, estimateConversationTokens, formatTokenCount, toolCallCount} from '../chat/chatMetrics.js';
+import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
-import {commaList, commandParts, isValidUrl, isYesConfirmation} from './wizardInput.js';
+import {providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from './providerWizard.js';
+import {commandParts, isValidUrl, isYesConfirmation} from './wizardInput.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -53,7 +55,6 @@ interface ChatOptions {
 }
 
 const execFile = promisify(execFileCallback);
-const EMPTY_TOKEN_USAGE: TokenUsage = {inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: undefined};
 
 async function currentBranchName() {
   try {
@@ -62,55 +63,6 @@ async function currentBranchName() {
   } catch {
     return undefined;
   }
-}
-
-function toolCallCount(messages: Message[]) {
-  return messages.reduce((total, message) => {
-    if (message.role !== 'tool') return total;
-    const headerCount = /Tools: (\d+) calls?/.exec(message.text)?.[1];
-    if (headerCount) return total + Number(headerCount);
-    const rows = message.text.split('\n').filter(line => /^\s+[✓✗…]\s/.test(line));
-    return total + rows.reduce((rowTotal, row) => rowTotal + Number(/×(\d+)/.exec(row)?.[1] ?? 1), 0);
-  }, 0);
-}
-
-function estimateTokens(text: string) {
-  return Math.ceil(text.length / 4);
-}
-
-function compactHomePath(filePath: string) {
-  const home = os.homedir();
-  if (filePath === home) return '~';
-  return filePath.startsWith(`${home}/`) ? `~/${filePath.slice(home.length + 1)}` : filePath;
-}
-
-function formatTokenCount(tokens: number) {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}m`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1).replace(/\.0$/, '')}k`;
-  return String(tokens);
-}
-
-function displayMessagesFromConversation(conversation: ModelMessage[]): Message[] {
-  return conversation.flatMap(message => {
-    if (message.role !== 'user' && message.role !== 'assistant') return [];
-    const text = modelMessageText(message).trim();
-    return text ? [{role: message.role, text} satisfies Message] : [];
-  });
-}
-
-function estimateConversationTokens(messages: Message[]) {
-  const inputText = messages
-    .filter(message => message.role === 'user' || message.role === 'tool')
-    .map(message => message.text)
-    .join('\n');
-  const outputText = messages
-    .filter(message => message.role === 'assistant')
-    .map(message => message.text)
-    .join('\n');
-  return {
-    input: estimateTokens(inputText),
-    output: estimateTokens(outputText),
-  };
 }
 
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
@@ -528,46 +480,38 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function appendModelsToProvider(modelsValue: string) {
-    const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-    const models = commaList(modelsValue);
-    if (!provider) {
-      setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+    const result = providerAppendModels(settings, selectedProviderName, modelsValue);
+    if (!result.provider) {
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       setMode('chat');
       return;
     }
-    if (models.length === 0) {
-      setMessages(m => [...m, {role: 'system', text: 'Enter at least one model name.'}]);
+    if (!result.settingsPatch) {
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       return;
     }
-    const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])]};
-    const next = await updateSettings({providers: upsertProvider(settings, nextProvider), provider: provider.name});
+    const next = await updateSettings(result.settingsPatch);
     setSettings(next);
     setSelectedProviderName(undefined);
-    setModelProviderFilter(provider.name);
+    setModelProviderFilter(result.provider.name);
     setMode('model');
-    setMessages(m => [...m, {role: 'system', text: `Added ${models.length} model${models.length === 1 ? '' : 's'} to ${provider.name}. Choose a model.`}]);
+    setMessages(m => [...m, {role: 'system', text: result.message}]);
   }
 
   async function finishProviderAdd(modelsValue: string) {
-    const models = commaList(modelsValue);
-    if (!providerDraft.name || !providerDraft.url || models.length === 0) {
-      setMessages(m => [...m, {role: 'system', text: 'Provider name, URL, and at least one model are required.'}]);
+    const result = providerFinishAdd(settings, providerDraft, modelsValue);
+    if (!result.provider || !result.settingsPatch) {
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       setMode('chat');
       setProviderDraft({});
       return;
     }
-    const provider: HazeProviderSettings = {
-      name: providerDraft.name,
-      url: providerDraft.url,
-      ...(providerDraft.key ? {key: providerDraft.key} : {}),
-      models: [...new Set(models)],
-    };
-    const next = await updateSettings({providers: upsertProvider(settings, provider), provider: provider.name});
+    const next = await updateSettings(result.settingsPatch);
     setSettings(next);
     setProviderDraft({});
-    setModelProviderFilter(provider.name);
+    setModelProviderFilter(result.provider.name);
     setMode('model');
-    setMessages(m => [...m, {role: 'system', text: `Added provider ${provider.name}. Choose a model.`}]);
+    setMessages(m => [...m, {role: 'system', text: result.message}]);
   }
 
   // --- LSP wizard handlers (mirror the provider wizard) ---
@@ -1047,37 +991,21 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
 
     if (mode === 'providerRemoveModels') {
-      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-      if (!provider) {
-        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
+      const result = providerRemoveModels(settings, selectedProviderName, value);
+      if (!result.provider) {
+        setMessages(m => [...m, {role: 'system', text: result.message}]);
         setMode('chat');
         return;
       }
-      const toRemove = commaList(value);
-      if (toRemove.length === 0) {
-        setMessages(m => [...m, {role: 'system', text: 'Enter at least one model name. Esc to cancel.'}]);
+      if (!result.settingsPatch) {
+        setMessages(m => [...m, {role: 'system', text: result.message}]);
         return;
       }
-      const remaining = provider.models.filter(m => !toRemove.includes(m));
-      if (remaining.length === 0) {
-        setMessages(m => [...m, {role: 'system', text: 'A provider must have at least one model. Remove the provider instead.'}]);
-        return;
-      }
-      const removed = provider.models.filter(m => toRemove.includes(m));
-      const notFound = toRemove.filter(m => !provider.models.includes(m));
-      const updated = {...provider, models: remaining};
-      const wasActive = settings.model && provider.models.includes(settings.model) && !remaining.includes(settings.model);
-      const next = await updateSettings({
-        providers: upsertProvider(settings, updated),
-        ...(wasActive ? {model: remaining[0]} : {}),
-      });
+      const next = await updateSettings(result.settingsPatch);
       setSettings(next);
       setSelectedProviderName(undefined);
       setMode('chat');
-      const parts = [`Removed ${removed.join(', ')} from ${provider.name}.`];
-      if (notFound.length) parts.push(`Not found: ${notFound.join(', ')}.`);
-      if (wasActive) parts.push(`Active model updated to ${remaining[0]}.`);
-      setMessages(m => [...m, {role: 'system', text: parts.join(' ')}]);
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       return;
     }
 
@@ -1094,16 +1022,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMode('chat');
         return;
       }
-      const providers = configuredProviders(settings).filter(p => p.name !== selectedProviderName);
-      const wasActiveProvider = settings.provider === selectedProviderName || (!settings.provider && configuredProviders(settings)[0]?.name === selectedProviderName);
-      const next = await updateSettings({
-        providers,
-        ...(wasActiveProvider ? {provider: providers[0]?.name, model: providers[0]?.models[0]} : {}),
-      });
+      const result = providerRemove(settings, selectedProviderName);
+      const next = await updateSettings(result.settingsPatch ?? {});
       setSettings(next);
       setSelectedProviderName(undefined);
       setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: `Removed provider ${provider.name}.${wasActiveProvider ? ` Switched to ${providers[0]?.name ?? 'no provider'}.` : ''}`}]);
+      setMessages(m => [...m, {role: 'system', text: result.message}]);
       return;
     }
 
@@ -1305,7 +1229,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     // When every task is already completed, start the new turn with a clean
     // slate: the task bar clears (nothing shown for simple questions) and the
     // model may create fresh todos via writeTasks if the new question warrants.
-    if (visibleTasks.length > 0 && visibleTasks.every(t => t.status === 'completed')) {
+    if (shouldClearCompletedTasks(visibleTasks)) {
       setVisibleTasks([]);
       setTasksExpanded(false);
       setTaskBarPadding(0);
@@ -1371,20 +1295,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
       compactConversation,
       recordTokenUsage: usage => {
-        setTokenUsage(current => ({
-          inputTokens: (current.inputTokens ?? 0) + (usage.inputTokens ?? 0) || usage.inputTokens,
-          outputTokens: (current.outputTokens ?? 0) + (usage.outputTokens ?? 0) || usage.outputTokens,
-          systemPrompt: current.systemPrompt + usage.systemPrompt,
-          messages: current.messages + usage.messages,
-          toolSchemas: current.toolSchemas + usage.toolSchemas,
-          outputEstimate: current.outputEstimate + usage.outputEstimate,
-          cacheReadTokens: current.cacheReadTokens + usage.cacheReadTokens,
-          cacheWriteTokens: current.cacheWriteTokens + usage.cacheWriteTokens,
-          noCacheTokens: current.noCacheTokens + usage.noCacheTokens,
-          reasoningTokens: current.reasoningTokens + usage.reasoningTokens,
-          logicalInputEstimate: current.logicalInputEstimate + usage.logicalInputEstimate,
-          effectiveNonCachedInput: (current.effectiveNonCachedInput ?? 0) + (usage.effectiveNonCachedInput ?? 0) || usage.effectiveNonCachedInput,
-        }));
+        setTokenUsage(current => accumulateTokenUsage(current, usage));
       },
       onEvent: event => {
         sessionRecorder.recordEvent(event);
