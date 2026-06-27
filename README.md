@@ -187,6 +187,8 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /session
 /resume
 /new
+/doctor
+/doctor --full
 /compact [instructions]
 /clear
 /exit
