@@ -58,7 +58,7 @@ On first run, create or choose a provider, then choose your first model:
 /model
 ```
 
-`/provider` opens provider setup for any OpenAI-compatible endpoint — e.g. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. Haze will ask for a provider name, base URL, optional API key, and model names.
+`/provider` opens provider setup. Choose a preset (OpenRouter, OpenAI, Anthropic, Google Gemini, Mistral, Ollama, LM Studio, and more) or enter a custom OpenAI-compatible endpoint. Haze will ask for a provider name, base URL when needed, optional API key, and model names.
 
 `/model` selects the model Haze should use. You can also set one directly:
 
