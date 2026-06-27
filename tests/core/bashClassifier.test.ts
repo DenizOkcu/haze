@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {classifyBashCommand} from '../../src/core/safety/bashClassifier';
+import {classifyBashCommand} from '../../src/core/safety/bashClassifier.js';
 
 describe('bash classifier', () => {
   describe('destructive commands', () => {

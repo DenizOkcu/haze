@@ -41,7 +41,7 @@ type ClassifierRule = {
   resolve: (ctx: ResolveContext) => Resolved;
 };
 const DESTRUCTIVE_TRIGGER =
-  /(^|[;&|]\s*)(rm\b|rm\s+-|git\s+reset\s+--hard\b|git\s+clean\b|git\s+restore\s+\.|git\s+checkout\s+--(?:\s|$))|push\b.*--force|drop\s+database|truncate\s+table/;
+  /(^|[;&|]\s*)(rm\b|rm\s+-|git\s+reset\s+--hard\b|git\s+clean\b|git\s+restore\s+\.|git\s+checkout\s+--(?:\b|\s|$))|push\b.*--force|drop\s+database|truncate\s+table/;
 const NETWORK_TRIGGER =
   /(^|[;&|]\s*)(curl\b|wget\b|scp\b|ssh\b|npm\s+(install|i|add)\b|pnpm\s+(install|add)\b|yarn\s+(add|install)\b|pip\s+install\b|brew\s+install\b)/;
 const WRITES_REDIRECT = /(^|\s)(>|>>)(\s|\S)/;
@@ -53,6 +53,8 @@ const VALIDATION_TRIGGER =
 const READ_TRIGGER =
   /(^|[;&|]\s*)(git\s+(status|diff|log|show|branch)\b|rg\b|grep\b|find\b|ls\b|pwd\b|cat\b|head\b|tail\b|node\s+--version|npm\s+--version|which\b)/;
 const COMPLEX_TRIGGER = /[`$()]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/;
+const EXEC_DESTRUCTIVE_PAYLOAD = /\brm\b|git\s+clean|git\s+restore|drop\s+database|truncate\s+table/;
+const EXEC_MUTATING_PAYLOAD = /\b(chmod|mv|cp|mkdir|touch|tee|sed\s+-i|perl\s+-pi)\b|git\s+(add|commit|merge|rebase|checkout|restore)/;
 const onLower = (pattern: RegExp): TriggerFn => (_trimmed, lower) => pattern.test(lower);
 const RULES: ClassifierRule[] = [
   {
@@ -84,19 +86,19 @@ const RULES: ClassifierRule[] = [
   {
     trigger: (_trimmed, lower) => /(?:\s|^)(?:-exec(?:dir)?|xargs)\s/.test(lower),
     traits: [
-      {trait: 'deletes_files', pattern: /\brm\b|git\s+clean|git\s+restore|drop\s+database|truncate\s+table/},
+      {trait: 'deletes_files', pattern: EXEC_DESTRUCTIVE_PAYLOAD},
       {trait: 'changes_git_state', pattern: /\bgit\b/},
       {trait: 'changes_permissions', pattern: /\bchmod\b/},
-      {trait: 'writes_files', pattern: /\b(chmod|mv|cp|mkdir|touch|tee|sed\s+-i|perl\s+-pi)\b|git\s+(add|commit|merge|rebase|checkout|restore)/},
+      {trait: 'writes_files', pattern: EXEC_MUTATING_PAYLOAD},
       {trait: 'reads_files'},
     ],
     resolve: ({lower}) => {
       const execMatch = /(?:\s|^)(?:-exec(?:dir)?|xargs)\s+(.*)$/.exec(lower);
       const payload = execMatch ? execMatch[1] : lower;
-      if (/\brm\b|git\s+clean|git\s+restore|drop\s+database|truncate\s+table/.test(payload)) {
+      if (EXEC_DESTRUCTIVE_PAYLOAD.test(payload)) {
         return {riskLevel: 'destructive', reason: 'embedded command can delete files', confidence: 'medium'};
       }
-      if (/\b(chmod|mv|cp|mkdir|touch|tee|sed\s+-i|perl\s+-pi)\b/.test(payload) || /\bgit\s+(add|commit|merge|rebase|checkout|restore)\b/.test(payload)) {
+      if (EXEC_MUTATING_PAYLOAD.test(payload)) {
         return {riskLevel: 'mutating', reason: 'embedded command can modify files', confidence: 'medium'};
       }
       return {riskLevel: 'unknown', reason: 'find -exec / xargs runs an embedded command', confidence: 'low'};
