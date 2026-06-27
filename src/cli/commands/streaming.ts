@@ -249,7 +249,11 @@ export async function runAgentTurn(
           break;
         }
         case 'tool-input-start': {
-          if (currentAssistantText.trim().length > 0 || assistantStarted) finalizeAssistantSegment({beforeTool: true});
+          if (currentAssistantText.trim().length > 0 || assistantStarted) {
+            const pending = assistantDisplayText(currentAssistantText);
+            const shown = finalizeAssistantSegment({beforeTool: true});
+            if (!shown && pending) toolDisplay.setGroupCaption(pending);
+          }
           const toolCall = {toolCallId: part.id, toolName: part.toolName, input: {}};
           latestToolCalls.set(part.id, toolCall);
           startedTools.set(part.id, Date.now());
@@ -257,7 +261,11 @@ export async function runAgentTurn(
           break;
         }
         case 'tool-call': {
-          if (currentAssistantText.trim().length > 0 || assistantStarted) finalizeAssistantSegment({beforeTool: true});
+          if (currentAssistantText.trim().length > 0 || assistantStarted) {
+            const pending = assistantDisplayText(currentAssistantText);
+            const shown = finalizeAssistantSegment({beforeTool: true});
+            if (!shown && pending) toolDisplay.setGroupCaption(pending);
+          }
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input};
           latestToolCalls.set(part.toolCallId, toolCall);
           if (!startedTools.has(part.toolCallId)) startedTools.set(part.toolCallId, Date.now());

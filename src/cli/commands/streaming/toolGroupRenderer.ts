@@ -12,7 +12,7 @@ import {toolCallSummary, compact, formatElapsedTimeWhole, formatSeconds} from '.
 export type NativeToolCall = {toolCallId: string; toolName: string; input: unknown};
 
 export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number};
-type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean};
+type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean; caption?: string};
 
 export interface ToolGroupRendererDeps {
   addMessage: (msg: {id: string; role: 'tool'; text: string; streaming: boolean}) => void;
@@ -33,6 +33,8 @@ export interface ToolGroupRenderer {
   finalizeToolGroup: () => void;
   /** Stop the 1s refresh timer. */
   stopToolTimer: () => void;
+  /** Attach a dim caption line above the next tool group. */
+  setGroupCaption: (text: string) => void;
 }
 
 function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
@@ -44,6 +46,8 @@ const createToolGroup = (): ToolDisplayGroup => ({id: `tools-${Date.now()}-${Mat
 export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupRenderer {
   let toolGroup = createToolGroup();
   let toolTimer: ReturnType<typeof setInterval> | undefined;
+  let pendingCaption: string | undefined;
+  const setGroupCaption = (text: string) => { pendingCaption = text.trim() || undefined; };
 
   const renderToolGroup = (group: ToolDisplayGroup) => {
     const running = group.items.some(item => item.status === 'running');
@@ -55,11 +59,12 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
     const summaryParts = [`${group.items.length} calls`, `${changes} changes`];
     if (failures > 0) summaryParts.push(`${failures} failed`);
     summaryParts.push(formatElapsedTimeWhole(elapsedMs));
-    return [summaryParts.join(' · '), ...group.items.map(item => {
+    const lines = [summaryParts.join(' · '), ...group.items.map(item => {
       const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
       const result = item.status === 'running' ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
       return `  ${icon} ${item.summary}${result}`;
-    })].join('\n');
+    })];
+    return (group.caption ? [group.caption, ...lines] : lines).join('\n');
   };
 
   const updateToolGroup = (streaming = true, group: ToolDisplayGroup = toolGroup) => {
@@ -95,6 +100,7 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
 
   const ensureToolItem = (toolCall: NativeToolCall): ToolDisplayItem => {
     if (toolGroup.finalized) toolGroup = createToolGroup();
+    if (pendingCaption && toolGroup.items.length === 0) { toolGroup.caption = pendingCaption; pendingCaption = undefined; }
     let item = toolGroup.items.find(candidate => candidate.id === toolCall.toolCallId);
     if (!item) {
       item = {id: toolCall.toolCallId, summary: toolCallSummary(toolCall.toolName, toolCall.input), status: 'running', startedAt: Date.now()};
@@ -114,5 +120,5 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
     toolGroup = createToolGroup();
   };
 
-  return {ensureToolItem, updateToolGroup, startFreshToolGroup, finalizeToolGroup, stopToolTimer};
+  return {ensureToolItem, updateToolGroup, startFreshToolGroup, finalizeToolGroup, stopToolTimer, setGroupCaption};
 }
