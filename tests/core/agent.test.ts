@@ -67,6 +67,17 @@ describe('agent compaction', () => {
     expect(modelMessageText(message)).toBe('hello');
   });
 
+  it('preserves the full text of older messages without truncation', () => {
+    const longText = 'x'.repeat(1200);
+    const result = compactModelMessages([
+      msg('user', longText),
+      msg('assistant', 'answer'),
+      msg('user', 'recent'),
+    ], {keepRecentMessages: 1});
+    expect(result.compacted).toBe(true);
+    expect(result.summary).toContain(longText);
+  });
+
   it('does not split a retained tool result from its preceding tool call', () => {
     const messages = [
       msg('user', 'old request '.repeat(100)),
