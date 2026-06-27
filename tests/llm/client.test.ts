@@ -250,4 +250,39 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient();
     expect(await modelWithConfig({modelSelector: 'no-such-model'})).toBeUndefined();
   });
+
+  it('resolves the lightweight slot when configured', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+      models: {lightweight: 'gpt-4o-mini'},
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig({slot: 'lightweight'});
+    expect(runtime!.config.modelName).toBe('gpt-4o-mini');
+  });
+
+  it('falls back lightweight to primary when the slot is unset', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig({slot: 'lightweight'});
+    expect(runtime!.config.modelName).toBe('gpt-4o');
+  });
+
+  it('still prefers an explicit modelSelector over a slot', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+      models: {lightweight: 'gpt-4o-mini'},
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig({slot: 'lightweight', modelSelector: 'openai:gpt-4o'});
+    expect(runtime!.config.modelName).toBe('gpt-4o');
+  });
 });
