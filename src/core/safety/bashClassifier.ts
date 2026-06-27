@@ -94,6 +94,69 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like command with complex shell syntax' : 'read-only inspection command'};
   }
 
+  // GitHub CLI read-only subcommands
+  if (has(lower, /\bgh\b/)) {
+    // Explicitly reject known mutating subcommands before trusting anything else.
+    const mutating = [
+      ['pr', 'merge'],
+      ['pr', 'create'],
+      ['pr', 'edit'],
+      ['pr', 'close'],
+      ['pr', 'reopen'],
+      ['pr', 'review'],
+      ['issue', 'create'],
+      ['issue', 'edit'],
+      ['issue', 'close'],
+      ['issue', 'reopen'],
+      ['run', 'rerun'],
+      ['run', 'watch'],
+      ['run', 'cancel'],
+      ['release', 'create'],
+      ['release', 'edit'],
+      ['release', 'delete'],
+      ['repo', 'create'],
+      ['repo', 'fork'],
+      ['repo', 'delete'],
+      ['gist', 'create'],
+      ['gist', 'edit'],
+      ['gist', 'delete'],
+    ];
+    if (mutating.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
+      return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh subcommand'};
+    }
+
+    // gh api is ambiguous unless it is explicitly GET or has no method.
+    if (has(lower, /\bapi\b/)) {
+      if (/\s(-X|--method)\s+(POST|PATCH|PUT|DELETE)\b/i.test(lower)) {
+        return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh api method'};
+      }
+      traits.push('reads_files');
+      return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'read-only gh api call'};
+    }
+
+    const readOnlySubcommands = [
+      ['pr', 'list'],
+      ['pr', 'view'],
+      ['pr', 'diff'],
+      ['pr', 'status'],
+      ['pr', 'checks'],
+      ['pr', 'comment'],
+      ['issue', 'list'],
+      ['issue', 'view'],
+      ['issue', 'comment'],
+      ['run', 'list'],
+      ['run', 'view'],
+      ['repo', 'view'],
+      ['repo', 'list'],
+      ['gist', 'list'],
+      ['gist', 'view'],
+    ];
+    if (readOnlySubcommands.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
+      traits.push('reads_files');
+      return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'read-only gh subcommand'};
+    }
+  }
+
   return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'command did not match known safe patterns'};
 }
 
