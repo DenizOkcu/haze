@@ -1,5 +1,5 @@
 import {describe, expect, it, beforeEach, vi} from 'vitest';
-import type {ToolSet} from 'ai';
+import type {Tool, ToolExecutionOptions, ToolSet} from 'ai';
 import type {HazeMcpServer} from '../../src/config/settings.js';
 
 // `vi.mock` factories run before top-level bindings initialise, so the mock fn
@@ -31,6 +31,14 @@ function fakeClient(tools: ToolSet, closeImpl: () => unknown = () => undefined):
 
 function httpServer(name: string): HazeMcpServer {
   return {name, transport: 'http', url: `https://${name}.example/mcp`};
+}
+
+function fakeExecutableTool(name: string, result: unknown): Tool {
+  return {
+    description: `tool ${name}`,
+    parameters: {type: 'object', properties: {}},
+    execute: vi.fn().mockResolvedValue(result),
+  } as unknown as Tool;
 }
 
 beforeEach(() => {
@@ -133,6 +141,28 @@ describe('loadMcpTools', () => {
     expect(result.tools).toEqual({});
     expect(result.clients).toEqual([]);
     expect(result.errors).toEqual([]);
+  });
+
+  it('wraps string MCP tool results in an external-content envelope', async () => {
+    const docsTool = fakeExecutableTool('docs', 'Context7 result');
+    mocks.createMCPClient.mockReturnValueOnce(fakeClient({docs: docsTool} as unknown as ToolSet));
+    const result = await loadMcpTools([httpServer('ctx7')]);
+    const wrapped = result.tools.docs as Tool;
+    const output = await wrapped.execute!({}, {} as ToolExecutionOptions);
+    expect(output).toContain('<external-content type="mcp-tool" server="ctx7">');
+    expect(output).toContain('Context7 result');
+    expect(output).toContain('</external-content>');
+  });
+
+  it('serializes and wraps non-string MCP tool results', async () => {
+    const docsTool = fakeExecutableTool('docs', {foo: 'bar'});
+    mocks.createMCPClient.mockReturnValueOnce(fakeClient({docs: docsTool} as unknown as ToolSet));
+    const result = await loadMcpTools([httpServer('ctx7')]);
+    const wrapped = result.tools.docs as Tool;
+    const output = await wrapped.execute!({}, {} as ToolExecutionOptions);
+    expect(output).toContain('<external-content type="mcp-tool" server="ctx7">');
+    expect(output).toContain('"foo": "bar"');
+    expect(output).toContain('</external-content>');
   });
 });
 
