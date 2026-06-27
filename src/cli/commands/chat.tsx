@@ -227,7 +227,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     if (continueSession) {
       const session = await latestSession();
       if (session) {
-        const conversation = await restoreConversation(session);
+        const {messages: conversation, parseErrors: conversationErrors} = await restoreConversation(session);
         sessionRef.current = session;
         sessionStartRef.current = new Date();
         conversationRef.current = conversation;
@@ -235,7 +235,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setLiveMessagesState(() => []);
         const restoredMessages = displayMessagesFromConversation(conversation);
         setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
-        workStateRef.current = await restoreWorkState(session);
+        const {state: workState, parseErrors: workStateErrors} = await restoreWorkState(session);
+        workStateRef.current = workState;
+        for (const error of [...conversationErrors, ...workStateErrors]) {
+          debugLog(`Session parse error: ${error}`);
+        }
         setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...restoredMessages]);
         await startNewLog();
         return;
@@ -279,11 +283,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMessages(m => [...m, {role: 'system', text: 'No previous session found for this workspace.'}]);
       return;
     }
-    const conversation = await restoreConversation(session);
+    const {messages: conversation, parseErrors: conversationErrors} = await restoreConversation(session);
+    const {state: workState, parseErrors: workStateErrors} = await restoreWorkState(session);
+    for (const error of [...conversationErrors, ...workStateErrors]) {
+      debugLog(`Session parse error: ${error}`);
+    }
     clearToolOutputs();
     sessionRef.current = session;
     conversationRef.current = conversation;
-    workStateRef.current = await restoreWorkState(session);
+    workStateRef.current = workState;
     setSessionLabel(session.id);
     setTokenUsage({...EMPTY_TOKEN_USAGE});
     setLiveMessagesState(() => []);

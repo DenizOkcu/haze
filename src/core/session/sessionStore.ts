@@ -61,27 +61,53 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
   await fs.appendFile(session.file, `${JSON.stringify(entry)}\n`, 'utf8');
 }
 
-export async function readSessionEntries(session: HazeSession): Promise<SessionEntry[]> {
+export interface ReadSessionEntriesResult {
+  entries: SessionEntry[];
+  /** Per-line parse failures, e.g. `Line 3: Unexpected token...`. Empty when every line parsed. */
+  parseErrors: string[];
+}
+
+/**
+ * Read a session file and parse each non-empty line as a JSONL entry.
+ *
+ * Malformed lines are not silently discarded: they are reported in
+ * `parseErrors` (with their 1-based line number) so callers can surface the
+ * loss in debug mode instead of silently dropping messages.
+ */
+export async function readSessionEntries(session: HazeSession): Promise<ReadSessionEntriesResult> {
   const raw = await fs.readFile(session.file, 'utf8');
-  return raw.split('\n').filter(Boolean).flatMap(line => {
+  const entries: SessionEntry[] = [];
+  const parseErrors: string[] = [];
+  raw.split('\n').filter(Boolean).forEach((line, index) => {
     try {
-      return [JSON.parse(line) as SessionEntry];
-    } catch {
-      return [];
+      entries.push(JSON.parse(line) as SessionEntry);
+    } catch (error) {
+      parseErrors.push(`Line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
+  return {entries, parseErrors};
 }
 
-export async function restoreConversation(session: HazeSession): Promise<ModelMessage[]> {
-  const entries = await readSessionEntries(session);
+export interface RestoreConversationResult {
+  messages: ModelMessage[];
+  parseErrors: string[];
+}
+
+export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
+  const {entries, parseErrors} = await readSessionEntries(session);
   const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'conversation_snapshot'}> => entry.type === 'conversation_snapshot');
-  return snapshots.at(-1)?.messages ?? [];
+  return {messages: snapshots.at(-1)?.messages ?? [], parseErrors};
 }
 
-export async function restoreWorkState(session: HazeSession): Promise<WorkState | undefined> {
-  const entries = await readSessionEntries(session);
+export interface RestoreWorkStateResult {
+  state: WorkState | undefined;
+  parseErrors: string[];
+}
+
+export async function restoreWorkState(session: HazeSession): Promise<RestoreWorkStateResult> {
+  const {entries, parseErrors} = await readSessionEntries(session);
   const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'work_state_snapshot'}> => entry.type === 'work_state_snapshot');
-  return snapshots.at(-1)?.state;
+  return {state: snapshots.at(-1)?.state, parseErrors};
 }
 
 export function formatSession(session: HazeSession) {
