@@ -1,3 +1,4 @@
+import {describe, expect, it} from 'vitest';
 import {classifyBashCommand} from '../../src/core/safety/bashClassifier';
 
 describe('bash classifier', () => {

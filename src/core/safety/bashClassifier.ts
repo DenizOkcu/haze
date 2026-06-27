@@ -41,7 +41,7 @@ type ClassifierRule = {
   resolve: (ctx: ResolveContext) => Resolved;
 };
 const DESTRUCTIVE_TRIGGER =
-  /(^|[;&|]\s*)(rm\b|rm\s+-|git\s+reset\s+--hard\b|git\s+clean\b|git\s+restore\s+\.|git\s+checkout\s+--\b)|push\b.*--force|drop\s+database|truncate\s+table/;
+  /(^|[;&|]\s*)(rm\b|rm\s+-|git\s+reset\s+--hard\b|git\s+clean\b|git\s+restore\s+\.|git\s+checkout\s+--(?:\s|$))|push\b.*--force|drop\s+database|truncate\s+table/;
 const NETWORK_TRIGGER =
   /(^|[;&|]\s*)(curl\b|wget\b|scp\b|ssh\b|npm\s+(install|i|add)\b|pnpm\s+(install|add)\b|yarn\s+(add|install)\b|pip\s+install\b|brew\s+install\b)/;
 const WRITES_REDIRECT = /(^|\s)(>|>>)(\s|\S)/;
