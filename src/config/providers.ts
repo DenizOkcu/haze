@@ -1,6 +1,8 @@
 import type {HazeSettings, HazeProviderSettings} from './settings.js';
 import {findByName, upsertByName} from '../utils/collections.js';
 
+export type ModelSlotName = 'primary' | 'lightweight' | 'fallback';
+
 // Used only to migrate legacy single-provider OpenRouter settings (apiKey/baseURL)
 // into the providers array. There is no default provider or model anymore: users
 // must configure a provider themselves via /provider.
@@ -71,6 +73,28 @@ export function activeModel(settings: HazeSettings): {provider: HazeProviderSett
     : provider.models[0];
   if (!model) return undefined;
   return {provider, model};
+}
+
+export function resolveModelSlot(settings: HazeSettings, slot: ModelSlotName): ModelResolution {
+  const selector = settings.models?.[slot]?.trim();
+  if (selector) {
+    const resolved = resolveModelSelector(settings, selector);
+    if (resolved.status !== 'missing') return resolved;
+    // An explicitly configured but invalid selector is reported as missing so
+    // callers can surface the configuration problem instead of silently using
+    // the primary model.
+    return {status: 'missing'};
+  }
+  if (slot === 'primary') {
+    const active = activeModel(settings);
+    if (active) return {status: 'found', provider: active.provider, model: active.model};
+    return {status: 'missing'};
+  }
+  return resolveModelSlot(settings, 'primary');
+}
+
+export function sameModelResolution(a: ModelResolution, b: ModelResolution): boolean {
+  return a.status === 'found' && b.status === 'found' && a.provider.name === b.provider.name && a.model === b.model;
 }
 
 export function resolveModelSelector(settings: HazeSettings, selector: string): ModelResolution {
