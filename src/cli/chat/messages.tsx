@@ -4,6 +4,7 @@ import Spinner from 'ink-spinner';
 import type {Message} from '../commands/streaming.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../commands/formatters.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
+import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
 
 function fullWidthLines(text: string, width: number, leftPadding = 0) {
@@ -52,8 +53,9 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
   </Box>;
 }
 
-function messageElapsedLabel(message: Message) {
+export function messageElapsedLabel(message: Message) {
   if (message.startedAt == null) return '';
+  if (message.role === 'assistant' && !message.streaming && !isSubstantiveAssistantText(message.text)) return '';
   const end = message.finishedAt ?? (message.streaming ? Date.now() : message.startedAt);
   const elapsed = end - message.startedAt;
   if (message.role === 'assistant' && !message.streaming && message.tokensPerSecond != null) {
