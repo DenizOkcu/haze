@@ -56,11 +56,21 @@ export async function appendUsageEntry(
 
 export async function readUsageEntries(options?: {date?: Date; baseDir?: string}): Promise<UsageLedgerEntry[]> {
   const file = filePath(options?.date ?? new Date(), options?.baseDir);
-  const raw = await fs.readFile(file, 'utf8').catch(() => '');
-  return raw.split('\n').filter(Boolean).flatMap(line => {
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    console.error(`Failed to read usage ledger ${file}: ${error}`);
+    throw error;
+  }
+  return raw.split('\n').filter(Boolean).flatMap((line, index) => {
     try {
       return [JSON.parse(line) as UsageLedgerEntry];
     } catch {
+      console.error(`Malformed usage ledger line ${index + 1} in ${file}: ${line.slice(0, 120)}`);
       return [];
     }
   });

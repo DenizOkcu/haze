@@ -1089,10 +1089,14 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
             const active = activeModel(settings);
             if (!active) return;
             const runtime = {providerName: active.provider.name, modelName: active.model};
-            const warning = await checkBudget({settings, sessionUsage: next, runtime, baseDir: HAZE_DIR});
-            if (warning && !budgetWarningsRef.current.has(warning.key)) {
-              budgetWarningsRef.current.add(warning.key);
-              setMessages(m => [...m, {role: 'system', text: warning.message}]);
+            try {
+              const warning = await checkBudget({settings, sessionUsage: next, runtime, baseDir: HAZE_DIR});
+              if (warning && !budgetWarningsRef.current.has(warning.key)) {
+                budgetWarningsRef.current.add(warning.key);
+                setMessages(m => [...m, {role: 'system', text: warning.message}]);
+              }
+            } catch (error) {
+              debugLog(`Budget check error: ${error}`);
             }
           })();
           return next;
@@ -1100,9 +1104,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         void (async () => {
           const active = activeModel(settings);
           if (!active) return;
-          const price = await priceForModel(active.provider.name, active.model);
-          if (price) {
-            setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
+          try {
+            const price = await priceForModel(active.provider.name, active.model);
+            if (price) {
+              setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
+            }
+          } catch (error) {
+            debugLog(`Session cost update error: ${error}`);
           }
         })();
       },

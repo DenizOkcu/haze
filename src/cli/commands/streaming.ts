@@ -241,7 +241,9 @@ export async function runAgentTurn(
           logicalInputEstimate: inputBreakdown.logicalInputEstimate,
           effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
         };
-        void appendUsageEntry(runtime.config, fullUsage, {sessionStart: session?.start}).catch(() => undefined);
+        void appendUsageEntry(runtime.config, fullUsage, {sessionStart: session?.start}).catch(error => {
+          callbacks.debugLog(`usage ledger write error: ${error instanceof Error ? error.message : String(error)}`);
+        });
         callbacks.recordTokenUsage?.(fullUsage);
         const accumulated = [...stripSyntheticControls(requestMessages), ...event.response.messages];
         const compacted = compactToolHistory(accumulated);
@@ -321,7 +323,9 @@ export async function runAgentTurn(
           const nestedTokens = subagentTokenEstimate(part.output);
           if (nestedTokens) {
             const subUsage: TokenUsage = {inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input};
-            void appendUsageEntry(runtime.config, subUsage, {sessionStart: session?.start}).catch(() => undefined);
+            void appendUsageEntry(runtime.config, subUsage, {sessionStart: session?.start}).catch(error => {
+              callbacks.debugLog(`usage ledger write error (subagent): ${error instanceof Error ? error.message : String(error)}`);
+            });
             callbacks.recordTokenUsage?.(subUsage);
           }
           toolDisplay.updateToolGroup(true);
