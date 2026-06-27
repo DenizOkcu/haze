@@ -82,6 +82,13 @@ describe('buildSystemPrompt', () => {
     const files: ContextFile[] = [{path: 'AGENTS.md', content: 'stable body'}];
     expect(buildSystemPrompt(files, session)).toBe(buildSystemPrompt(files, session));
   });
+
+  it('instructs the model to treat external-content as untrusted data', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('<external-content>');
+    expect(prompt).toContain('untrusted data');
+    expect(prompt).toContain('not instructions');
+  });
 });
 
 describe('buildSubagentPrompt', () => {
