@@ -214,7 +214,26 @@ haze -p "list the top 3 bugs in src/api.ts" --output json
 echo "what does this project do?" | haze
 ```
 
-`-p` / `--prompt` runs a single agentic turn (with the full tool set and guardrails) and prints the final assistant text. `--model` overrides the active model for that one run without changing `~/.haze/settings.json` — accepts a bare model name or `provider:name`. `--output json` prints `{"type":"result","status":...,"result":...,"usage":...}` instead of plain text. When `-p` is omitted and stdin is piped, the prompt is read from stdin. A one-shot run never starts or resumes a durable session; `--continue` is ignored in this mode.
+`-p` / `--prompt` runs a single agentic turn (with the full tool set and guardrails) and prints the final assistant text. `--model` overrides the active model for that one run without changing `~/.haze/settings.json` — accepts a bare model name or `provider:name`. The selected model must already be registered under a provider's `models` (add it once via `/provider`); an unknown or ambiguous selector exits non-zero with a precise error on stderr. When `-p` is omitted and stdin is piped, the prompt is read from stdin. A one-shot run never starts or resumes a durable session; `--continue` is ignored in this mode. Headless runs do **not** auto-compact on context overflow, so very large CI prompts may fail rather than recover — keep prompts within the model's window. Add `--debug` to also write a detailed JSONL log under `~/.haze/logs/`.
+
+`--output json` prints a single-line envelope instead of plain text:
+
+```json
+{
+  "type": "result",
+  "status": "complete",            // "complete" (exit 0) | "aborted" | "failed" (both exit non-zero)
+  "result": "the final assistant text",
+  "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "reasoningTokens": 0
+  }
+}
+```
+
+The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A `complete` run with an empty `result` means the model produced no visible text — distinct from a `failed` run.
 
 By default, Haze does **not** write the detailed LLM log files under `~/.haze/logs/` (they capture full prompts, messages, and tool I/O). File logging is only enabled with `haze --debug`, which also turns on the on-screen debug panel. Use the `/logs` command to review past log files once logging has been enabled.
 

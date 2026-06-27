@@ -8,7 +8,7 @@
 
 ## 0.6.x
 
-- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped.
+- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped. The exit code and JSON `status` are driven by the agent's authoritative terminal state (`complete`/`aborted`/`failed`) rather than by parsing the reply, so CI gating on the exit code is reliable. A bad or ambiguous `--model` selector reports a precise error and exits non-zero, `--debug` writes a JSONL log under `~/.haze/logs/`, and the `--output json` `usage` object is pinned to a documented set of fields.
 
 ## 0.6.0 - 2026-06-21
 

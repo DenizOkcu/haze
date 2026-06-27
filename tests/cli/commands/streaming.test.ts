@@ -231,10 +231,11 @@ describe('runAgentTurn: setup', () => {
       responseMessages: [{role: 'assistant', content: 'done'}],
     });
     const cb = makeCallbacks();
-    await runAgentTurn('hello', undefined, [], cb);
+    const outcome = await runAgentTurn('hello', undefined, [], cb);
     expect(cb.events[0]?.type).toBe('turn_start');
     expect(cb.messages[0]).toEqual({role: 'user', text: 'hello'});
     expect(cb.events.at(-1)?.type).toBe('turn_end');
+    expect(outcome).toEqual({status: 'complete'});
   });
 
   it('uses displayValue when provided instead of the raw value', async () => {
@@ -250,8 +251,8 @@ describe('runAgentTurn: setup', () => {
     expect(cb.messages[0]).toEqual({role: 'user', text: 'display'});
   });
 
-  it('forwards modelOverride to modelWithConfig', async () => {
-    const modelWithConfigCalls: Array<{modelSelector?: string} | undefined> = [];
+  it('forwards modelOverride (and cwd) to modelWithConfig for both the session and no-session branches', async () => {
+    const modelWithConfigCalls: Array<{cwd?: string; modelSelector?: string} | undefined> = [];
     vi.doMock('../../../src/llm/client.js', () => ({
       modelWithConfig: vi.fn(async (opts?: {cwd?: string; modelSelector?: string}) => {
         modelWithConfigCalls.push(opts);
@@ -277,9 +278,13 @@ describe('runAgentTurn: setup', () => {
     });
     vi.resetModules();
     const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
-    const cb = makeCallbacks();
-    await runAgentTurn('hi', undefined, [], cb, 0, false, false, undefined, 'openai:gpt-4o-mini');
-    expect(modelWithConfigCalls.some((c) => c?.modelSelector === 'openai:gpt-4o-mini')).toBe(true);
+    // No session: cwd must still be forwarded (undefined) alongside the selector so the
+    // cache-seed behavior matches the no-override path.
+    await runAgentTurn('hi', undefined, [], makeCallbacks(), 0, false, false, undefined, 'openai:gpt-4o-mini');
+    expect(modelWithConfigCalls[0]).toEqual({cwd: undefined, modelSelector: 'openai:gpt-4o-mini'});
+    // Session present: its cwd is forwarded.
+    await runAgentTurn('hi', undefined, [], makeCallbacks(), 0, false, false, {start: new Date(), cwd: '/work'}, 'openai:gpt-4o-mini');
+    expect(modelWithConfigCalls[1]).toEqual({cwd: '/work', modelSelector: 'openai:gpt-4o-mini'});
   });
 });
 
@@ -398,8 +403,9 @@ describe('runAgentTurn: error paths', () => {
     const cb = makeCallbacks();
     const promise = runAgentTurn('exhaust', undefined, [], cb, 2, true);
     await vi.runAllTimersAsync();
-    await promise;
+    const outcome = await promise;
     expect(cb.messages.some((m) => /Model call failed/.test(m.text))).toBe(true);
+    expect(outcome).toEqual({status: 'failed'});
     vi.useRealTimers();
   });
 });
@@ -421,8 +427,9 @@ describe('runAgentTurn: abort', () => {
     const promise = runAgentTurn('quit', undefined, [], cb);
     await new Promise<void>((resolve) => setTimeout(resolve, 30));
     abortControllerRef?.abort();
-    await promise;
+    const outcome = await promise;
     expect(cb.messages.some((m) => m.role === 'system' && /aborted/i.test(m.text))).toBe(true);
+    expect(outcome).toEqual({status: 'aborted'});
   });
 });
 

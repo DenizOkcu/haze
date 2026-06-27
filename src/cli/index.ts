@@ -49,7 +49,10 @@ program.action(async () => {
       output: opts.output === 'json' ? 'json' : 'text',
       debug: Boolean(opts.debug),
     });
-    process.exit(code);
+    // Set the exit code and return instead of process.exit(code): the latter does not wait
+    // for stdout to drain and can truncate piped/redirected output (e.g. `haze -p ... | jq`).
+    process.exitCode = code;
+    return;
   }
   await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), noSession: opts.session === false, version: pkg.version});
 });
