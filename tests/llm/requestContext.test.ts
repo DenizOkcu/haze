@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   installedLspServers: vi.fn(),
   configuredMcpServers: vi.fn(),
   loadMcpTools: vi.fn(),
+  modelWithConfig: vi.fn(),
 }));
 
 vi.mock('../../src/config/settings.js', async () => {
@@ -20,6 +21,7 @@ vi.mock('../../src/skills/SkillRegistry.js', () => ({loadSkillRegistry: mocks.lo
 vi.mock('../../src/config/lspSettings.js', () => ({installedLspServers: mocks.installedLspServers, configuredLspServers: mocks.configuredMcpServers}));
 vi.mock('../../src/config/mcpSettings.js', () => ({configuredMcpServers: mocks.configuredMcpServers}));
 vi.mock('../../src/llm/mcp.js', () => ({loadMcpTools: mocks.loadMcpTools}));
+vi.mock('../../src/llm/client.js', () => ({modelWithConfig: mocks.modelWithConfig}));
 
 const {assembleRequestContext} = await import('../../src/llm/requestContext.js');
 
@@ -33,6 +35,7 @@ function skill(name: string): LoadedSkill {
 describe('assembleRequestContext', () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) mock.mockReset();
+    mocks.modelWithConfig.mockResolvedValue(undefined);
   });
 
   it('registers built-in and subagent tools when no LSP/MCP/skills are configured', async () => {
