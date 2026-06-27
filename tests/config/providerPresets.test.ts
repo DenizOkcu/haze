@@ -7,9 +7,11 @@ describe('providerPresets', () => {
     expect(PROVIDER_PRESETS.some(p => p.category === 'local')).toBe(true);
   });
 
-  it('every preset has a valid URL', () => {
+  it('every preset with a baseUrl has a valid URL', () => {
     for (const preset of PROVIDER_PRESETS) {
-      expect(() => new URL(preset.baseUrl)).not.toThrow();
+      if (preset.baseUrl) {
+        expect(() => new URL(preset.baseUrl)).not.toThrow();
+      }
     }
   });
 
@@ -36,6 +38,8 @@ describe('providerPresets', () => {
 
   it('finds a preset by id', () => {
     expect(findPreset('openrouter')).toMatchObject({name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1'});
+    expect(findPreset('anthropic')).toMatchObject({name: 'Anthropic Claude'});
+    expect(findPreset('anthropic')).not.toHaveProperty('baseUrl');
   });
 
   it('returns undefined for unknown preset id', () => {

@@ -44,6 +44,7 @@
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "3.0.73",
     "@ai-sdk/mcp": "^1.0.52",
     "@ai-sdk/openai": "3.0.73",
     "@vscode/ripgrep": "1.18.0",

@@ -44,12 +44,12 @@ export function presetSuggestions(): TextInputSuggestion[] {
   return [
     ...cloudPresets.map(preset => ({
       value: preset.id,
-      description: `${preset.baseUrl}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
+      description: `${preset.baseUrl ?? 'native provider'}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
       kind: 'provider' as const,
     })),
     ...localPresets.map(preset => ({
       value: preset.id,
-      description: `${preset.baseUrl} · local, no API key needed`,
+      description: `${preset.baseUrl ?? 'native provider'} · local, no API key needed`,
       kind: 'provider' as const,
     })),
     {value: PROVIDER_CHOICES.custom, description: 'Enter provider name, URL, and API key manually', kind: 'provider' as const},
