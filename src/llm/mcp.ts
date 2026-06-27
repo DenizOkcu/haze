@@ -52,6 +52,15 @@ export async function loadMcpTools(servers: HazeMcpServer[], reserved: ReadonlyS
   return {tools, clients, errors};
 }
 
+/**
+ * Transport-dispatching wrapper around `createMCPClient` (imported from
+ * `@ai-sdk/mcp`, capitalised). Translates a `HazeMcpServer` config into the
+ * transport shape the SDK expects — stdio (via `Experimental_StdioMCPTransport`)
+ * vs HTTP/SSE — and validates required fields before opening a transport.
+ *
+ * Not dead code: `loadMcpTools` calls this lowercase wrapper, not the imported
+ * `createMCPClient` directly (the import cannot take a `HazeMcpServer`).
+ */
 async function createMcpClient(server: HazeMcpServer): Promise<MCPClient> {
   if (server.transport === 'stdio') {
     if (!server.command) throw new Error('missing command for stdio transport');
