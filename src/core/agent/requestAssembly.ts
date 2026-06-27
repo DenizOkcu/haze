@@ -80,7 +80,7 @@ function compactResultOutput(output: unknown, toolName: string) {
   return output;
 }
 
-const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'bash']);
+const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'editFile', 'replaceLines', 'bash']);
 const BASH_COMMAND_TRUNCATE_THRESHOLD = 200;
 const BASH_COMMAND_KEEP_CHARS = 150;
 
@@ -88,6 +88,29 @@ function compactToolCallInput(input: unknown, toolName: string): unknown {
   if (typeof input !== 'object' || input == null) return input;
   const source = input as Record<string, unknown>;
   if (toolName === 'writeFile' && typeof source.content === 'string') {
+    const bytes = source.content.length;
+    const path = typeof source.path === 'string' ? source.path : '<unknown>';
+    return {
+      ...source,
+      content: `[Compacted: original ${bytes} bytes. Use readFile on "${path}" to inspect.]`,
+    };
+  }
+  if (toolName === 'editFile' && Array.isArray(source.edits)) {
+    const path = typeof source.path === 'string' ? source.path : '<unknown>';
+    const edits = source.edits.map(edit => {
+      if (typeof edit !== 'object' || edit == null) return edit;
+      const entry = edit as {oldText?: unknown; newText?: unknown};
+      const oldBytes = typeof entry.oldText === 'string' ? entry.oldText.length : 0;
+      const newBytes = typeof entry.newText === 'string' ? entry.newText.length : 0;
+      return {
+        ...entry,
+        oldText: `[Compacted: original ${oldBytes} bytes.]`,
+        newText: `[Compacted: original ${newBytes} bytes. Use readFile on "${path}" to inspect.]`,
+      };
+    });
+    return {...source, edits};
+  }
+  if (toolName === 'replaceLines' && typeof source.content === 'string') {
     const bytes = source.content.length;
     const path = typeof source.path === 'string' ? source.path : '<unknown>';
     return {
