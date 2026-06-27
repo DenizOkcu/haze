@@ -103,4 +103,38 @@ describe('assembleRequestContext', () => {
     expect(mocks.loadMcpTools).not.toHaveBeenCalled();
     expect(result.loadedMcp).toBeUndefined();
   });
+
+  it('uses the lightweight slot for the subagent tool when configured', async () => {
+    mocks.readSettings.mockResolvedValue({provider: 'openai', model: 'gpt-4o'});
+    mocks.modelWithConfig.mockImplementation(async ({slot}) => {
+      return slot === 'lightweight'
+        ? {model: {modelId: 'gpt-4o-mini'}, config: {providerName: 'openai', modelName: 'gpt-4o-mini'}}
+        : {model: {modelId: 'gpt-4o'}, config: {providerName: 'openai', modelName: 'gpt-4o'}};
+    });
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+
+    vi.resetModules();
+    const {assembleRequestContext} = await import('../../src/llm/requestContext.js');
+    const result = await assembleRequestContext({contextFiles: [], model: {modelId: 'gpt-4o'} as any});
+
+    expect(mocks.modelWithConfig).toHaveBeenCalledWith({slot: 'lightweight'});
+    expect(result.availableTools.subagent).toBeDefined();
+  });
+
+  it('falls back to the primary model when the lightweight slot is unresolved', async () => {
+    mocks.readSettings.mockResolvedValue({provider: 'openai', model: 'gpt-4o'});
+    mocks.modelWithConfig.mockResolvedValue(undefined);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+
+    vi.resetModules();
+    const {assembleRequestContext} = await import('../../src/llm/requestContext.js');
+    const primary = {modelId: 'gpt-4o'};
+    const result = await assembleRequestContext({contextFiles: [], model: primary as any});
+
+    expect(result.availableTools.subagent).toBeDefined();
+  });
 });

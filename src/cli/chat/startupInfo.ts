@@ -46,6 +46,8 @@ export function startupProviderInfo(settings: HazeSettings) {
   const provider = selection.provider.name;
   const lightweight = resolveModelSlot(settings, 'lightweight');
   const fallback = resolveModelSlot(settings, 'fallback');
+  const slotLine = (label: string, resolution: ReturnType<typeof resolveModelSlot>) =>
+    `${label}: ${resolution.status === 'found' ? `${resolution.provider.name}:${resolution.model}` : 'same as primary'}`;
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
