@@ -83,7 +83,7 @@ export function setLspServerEnabled(settings: HazeSettings, name: string, enable
   return configuredLspServers(settings).map(server => server.name === name ? {...server, enabled} : server);
 }
 
-async function commandExists(command: string) {
+export async function commandExists(command: string) {
   const candidates = command.includes('/') || command.includes('\\')
     ? [command]
     : (process.env.PATH ?? '').split(path.delimiter).filter(Boolean).map(dir => path.join(dir, command));
