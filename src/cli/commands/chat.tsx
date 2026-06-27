@@ -24,6 +24,7 @@ import {formatContextReport} from './formatters.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
+import {runStartupSanity} from '../doctor/sanity.js';
 import {findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
@@ -150,6 +151,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     readInputHistory().then(setInputHistory).catch(() => undefined);
     refreshSkills().catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
+    runStartupSanity()
+      .then(actions => {
+        if (actions.length === 0) return;
+        const lines = actions.map(a => `• ${a.action}: ${a.detail}`);
+        setMessages(m => [...m, {role: 'system', text: `Startup sanity:\n${lines.join('\n')}`}]);
+      })
+      .catch(() => undefined);
     if (version) {
       checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'})
         .then(result => {
