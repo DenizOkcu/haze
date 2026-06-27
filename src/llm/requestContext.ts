@@ -59,7 +59,7 @@ export async function assembleRequestContext(input: {
   }
 
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
-  const systemPrompt = buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable});
+  const systemPrompt = await buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable});
 
   return {systemPrompt, availableTools, toolCategories, loadedMcp};
 }
