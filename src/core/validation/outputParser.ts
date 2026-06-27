@@ -115,6 +115,62 @@ export function parseValidationOutput(input: {
       failedFiles.push(file ?? '');
       continue;
     }
+
+    // Python pytest
+    const pytestFail = line.match(/^FAILED\s+(\S+?::\S+)\s+-/);
+    if (pytestFail) {
+      const test = pytestFail[1] ?? '';
+      failedTests.push(test);
+      const file = test.split('::')[0];
+      if (file) failedFiles.push(file);
+      continue;
+    }
+    const pytestFailShort = line.match(/^(\S+?::\S+)\s+FAILED$/);
+    if (pytestFailShort) {
+      const test = pytestFailShort[1] ?? '';
+      failedTests.push(test);
+      const file = test.split('::')[0];
+      if (file) failedFiles.push(file);
+      continue;
+    }
+
+    // Python unittest
+    const unittestFail = line.match(/^FAIL:\s+(.+)$/);
+    if (unittestFail) {
+      failedTests.push(unittestFail[1] ?? '');
+      continue;
+    }
+
+    // Python mypy
+    const mypyDiag = line.match(/^(\S+\.py):(\d+):\s*(error|warning|note):\s*(.+)$/);
+    if (mypyDiag) {
+      const [, file, lineNo, severity, message] = mypyDiag;
+      if (severity !== 'note') {
+        diagnostics.push({
+          file,
+          line: Number(lineNo),
+          severity: severity === 'warning' ? 'warning' : 'error',
+          message: message ?? '',
+        });
+        failedFiles.push(file ?? '');
+      }
+      continue;
+    }
+
+    // Python ruff
+    const ruffDiag = line.match(/^(\S+\.py):(\d+):(\d+):\s*([A-Z]\d+)\s*(.+)$/);
+    if (ruffDiag) {
+      const [, file, lineNo, column, code, message] = ruffDiag;
+      diagnostics.push({
+        file,
+        line: Number(lineNo),
+        column: Number(column),
+        severity: 'error',
+        message: `${code} ${message}`,
+      });
+      failedFiles.push(file ?? '');
+      continue;
+    }
   }
 
   const uniqueFiles = uniq(failedFiles).slice(0, 10);

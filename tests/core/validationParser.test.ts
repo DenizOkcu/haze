@@ -107,4 +107,69 @@ describe('validation output parser', () => {
     expect(summary.diagnostics[0]).toMatchObject({file: 'calc.go', line: 15, column: 5, severity: 'error'});
     expect(summary.diagnostics[1]).toMatchObject({file: 'calc.go', line: 20, column: undefined, severity: 'error'});
   });
+
+  it('extracts pytest failures in verbose and short form', () => {
+    const stdout = [
+      'tests/test_foo.py::test_bar FAILED',
+      'tests/test_foo.py::test_baz PASSED',
+      '',
+      '=========================== short test summary info ============================',
+      'FAILED tests/test_foo.py::test_qux - AssertionError: 1 != 2',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'pytest -v', code: 1, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('failed');
+    expect(summary.failedTests).toContain('tests/test_foo.py::test_bar');
+    expect(summary.failedTests).toContain('tests/test_foo.py::test_qux');
+    expect(summary.failedFiles).toContain('tests/test_foo.py');
+  });
+
+  it('extracts mypy diagnostics', () => {
+    const stdout = [
+      'src/foo.py:10: error: Incompatible return value type (got "str", expected "int")',
+      'src/bar.py:5: error: Name "x" is not defined',
+      'src/bar.py:7: note: Perhaps you meant "y"',
+      'Found 2 errors in 2 files (checked 5 source files)',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'mypy src', code: 1, stdout, stderr: ''});
+    expect(summary.kind).toBe('typecheck');
+    expect(summary.status).toBe('failed');
+    expect(summary.diagnostics).toHaveLength(2);
+    expect(summary.diagnostics[0]).toMatchObject({file: 'src/foo.py', line: 10, severity: 'error'});
+  });
+
+  it('extracts ruff diagnostics', () => {
+    const stdout = 'src/foo.py:10:5: E501 Line too long (120 > 88)\n';
+    const summary = parseValidationOutput({command: 'ruff check src', code: 1, stdout, stderr: ''});
+    expect(summary.kind).toBe('lint');
+    expect(summary.status).toBe('failed');
+    expect(summary.diagnostics[0]).toMatchObject({
+      file: 'src/foo.py',
+      line: 10,
+      column: 5,
+      severity: 'error',
+      message: expect.stringContaining('E501'),
+    });
+  });
+
+  it('extracts python unittest failure names', () => {
+    const stdout = [
+      '======================================================================',
+      'FAIL: test_bar (tests.test_foo.TestFoo)',
+      '----------------------------------------------------------------------',
+      'Traceback (most recent call last):',
+      '  File "/path/tests/test_foo.py", line 10, in test_bar',
+      '    self.assertEqual(1, 2)',
+      'AssertionError: 1 != 2',
+      '',
+      '----------------------------------------------------------------------',
+      'Ran 1 test in 0.000s',
+      '',
+      'FAILED (failures=1)',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'python -m unittest', code: 1, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('failed');
+    expect(summary.failedTests).toContain('test_bar (tests.test_foo.TestFoo)');
+  });
 });
