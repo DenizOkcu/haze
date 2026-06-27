@@ -14,12 +14,31 @@ program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
   .version(pkg.version)
-  .option('--debug', 'show simple model/tool debug logs in the chat UI')
+  .option('--debug', 'show model/tool debug logs and write a detailed JSONL log to ~/.haze/logs/')
   .option('-c, --continue', 'resume the latest saved session for this workspace')
   .option('--no-session', 'run without saving or resuming a durable session')
-  .option('-p, --prompt <text>', 'run a single non-interactive turn and print the result')
-  .option('-m, --model <selector>', 'override the model for this run (name or provider:name)')
-  .addOption(new Option('--output <format>', 'output format for -p').choices(['text', 'json']).default('text'));
+  .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
+  .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
+  .addOption(new Option('--output <format>', 'print-mode output: plain text or a JSON result envelope').choices(['text', 'json']).default('text'));
+
+program.addHelpText('after', `
+Examples:
+  $ haze                                           start the interactive chat
+  $ haze -p "explain src/cli/index.ts"             print mode: run one turn and print the reply
+  $ echo "what does this repo do?" | haze          read the prompt from piped stdin
+  $ haze -p "list the top 3 bugs" --output json    emit a JSON envelope { type, status, result, usage }
+  $ haze -p "summarize" --model openai:gpt-4o-mini override the model for this run only
+  $ haze -p "audit auth.ts" --debug                also write a detailed JSONL log to ~/.haze/logs/
+
+Print mode (-p):
+  Runs a single agentic turn with the full toolset and guardrails, prints the final assistant
+  text, then exits (0 = complete; non-zero = aborted/failed, so CI can gate on the exit code).
+  The prompt comes from -p, otherwise from piped stdin. With --output json the reply is wrapped
+  in a single-line { type, status, result, usage } envelope. --model overrides the model for this
+  run only (no settings change) and must already be registered under a provider (add it once via
+  the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
+  saved, and there is no automatic context-overflow recovery.
+`);
 
 async function readStdinPrompt(): Promise<string | undefined> {
   // Only read stdin when it is piped (non-TTY); never hang waiting on an interactive terminal.
