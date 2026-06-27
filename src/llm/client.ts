@@ -1,6 +1,6 @@
 import {createOpenAI} from '@ai-sdk/openai';
 import crypto from 'node:crypto';
-import {readSettings, type HazeProviderSettings} from '../config/settings.js';
+import {readSettings} from '../config/settings.js';
 import {resolveModelSelector, resolveModelSlot, type ModelResolution, type ModelSlotName} from '../config/providers.js';
 
 export interface ProviderCapabilities {
