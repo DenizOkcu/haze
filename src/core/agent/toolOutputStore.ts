@@ -17,10 +17,11 @@ const MAX_STORED_OUTPUTS = 100;
 export function storeToolOutput(content: string) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
   outputs.set(handle, content);
-  while (outputs.size > MAX_STORED_OUTPUTS) {
-    const oldest = outputs.keys().next().value as string | undefined;
-    if (!oldest) break;
-    outputs.delete(oldest);
+  // Synchronous, so the check+delete is atomic across async callers — no race.
+  // Each call inserts exactly one entry, so a single eviction restores the cap.
+  if (outputs.size > MAX_STORED_OUTPUTS) {
+    const oldest = outputs.keys().next().value;
+    if (oldest) outputs.delete(oldest);
   }
   return handle;
 }
