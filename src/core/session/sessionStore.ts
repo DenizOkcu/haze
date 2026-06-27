@@ -88,16 +88,26 @@ export async function readSessionEntries(session: HazeSession): Promise<ReadSess
   return {entries, parseErrors};
 }
 
-export async function restoreConversation(session: HazeSession): Promise<ModelMessage[]> {
-  const {entries} = await readSessionEntries(session);
-  const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'conversation_snapshot'}> => entry.type === 'conversation_snapshot');
-  return snapshots.at(-1)?.messages ?? [];
+export interface RestoreConversationResult {
+  messages: ModelMessage[];
+  parseErrors: string[];
 }
 
-export async function restoreWorkState(session: HazeSession): Promise<WorkState | undefined> {
-  const {entries} = await readSessionEntries(session);
+export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
+  const {entries, parseErrors} = await readSessionEntries(session);
+  const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'conversation_snapshot'}> => entry.type === 'conversation_snapshot');
+  return {messages: snapshots.at(-1)?.messages ?? [], parseErrors};
+}
+
+export interface RestoreWorkStateResult {
+  state: WorkState | undefined;
+  parseErrors: string[];
+}
+
+export async function restoreWorkState(session: HazeSession): Promise<RestoreWorkStateResult> {
+  const {entries, parseErrors} = await readSessionEntries(session);
   const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'work_state_snapshot'}> => entry.type === 'work_state_snapshot');
-  return snapshots.at(-1)?.state;
+  return {state: snapshots.at(-1)?.state, parseErrors};
 }
 
 export function formatSession(session: HazeSession) {

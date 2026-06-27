@@ -45,7 +45,7 @@ describe('sessionStore', () => {
     const latest: ModelMessage[] = [{role: 'user', content: 'new'}, {role: 'assistant', content: 'done'}];
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: first});
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: latest});
-    await expect(restoreConversation(session)).resolves.toEqual(latest);
+    await expect(restoreConversation(session)).resolves.toEqual({messages: latest, parseErrors: []});
   });
 
   it('restores the latest structured work-state snapshot', async () => {
@@ -55,7 +55,7 @@ describe('sessionStore', () => {
     latest.nextAction = 'Run npm test.';
     await appendSessionEntry(session, {type: 'work_state_snapshot', at: '1', state: first});
     await appendSessionEntry(session, {type: 'work_state_snapshot', at: '2', state: latest});
-    await expect(restoreWorkState(session)).resolves.toEqual(latest);
+    await expect(restoreWorkState(session)).resolves.toEqual({state: latest, parseErrors: []});
   });
 
   it('returns the latest session for a cwd', async () => {
