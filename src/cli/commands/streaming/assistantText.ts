@@ -49,7 +49,7 @@ function isNonSubstantiveAssistantText(text: string) {
   return wordCount(text) === 0;
 }
 
-function isSubstantiveAssistantText(text: string) {
+export function isSubstantiveAssistantText(text: string) {
   const trimmed = text.trim();
   const words = wordCount(trimmed);
   if (words === 0) return false;
@@ -70,9 +70,19 @@ function isLikelyUnfinishedMarkdownFragment(text: string) {
   return last === '-' || last === '*' || last === '#' || last === '`' || last === '>';
 }
 
-export function isShortUnfinishedBridgeBeforeTool(text: string) {
+export function isShortLeadInBeforeTool(text: string) {
   const trimmed = text.trim();
-  return trimmed.length > 0 && wordCount(trimmed) <= 12 && !endsWithSentenceBoundary(trimmed) && !isLikelyUnfinishedMarkdownFragment(trimmed);
+  return trimmed.length > 0 && wordCount(trimmed) <= 12 && !isLikelyUnfinishedMarkdownFragment(trimmed);
+}
+
+export function isShortUnfinishedLeadIn(text: string) {
+  const trimmed = text.trim();
+  const words = wordCount(trimmed);
+  return words >= 3
+    && words <= 4
+    && !isSubstantiveAssistantText(trimmed)
+    && !endsWithSentenceBoundary(trimmed)
+    && !isLikelyUnfinishedMarkdownFragment(trimmed);
 }
 
 function isHiddenAssistantText(text: string) {

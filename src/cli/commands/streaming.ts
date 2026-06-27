@@ -20,7 +20,7 @@ import {compactModelMessages} from '../../core/agent/compaction.js';
 import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT} from '../../core/agent/budgets.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
-import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortUnfinishedBridgeBeforeTool} from './streaming/assistantText.js';
+import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
@@ -150,7 +150,10 @@ export async function runAgentTurn(
     const finalizeAssistantSegment = (options: {beforeTool?: boolean} = {}) => {
       const finalText = assistantDisplayText(currentAssistantText);
       const normalized = normalizeAssistantText(finalText);
-      const hidden = (assistantStarted ? isHiddenAssistantFragment(finalText) : isHiddenUnstartedFinalText(finalText)) || (options.beforeTool === true && isShortUnfinishedBridgeBeforeTool(finalText)) || (normalized.length > 0 && visibleAssistantTexts.has(normalized));
+      const hidden = (assistantStarted ? isHiddenAssistantFragment(finalText) : isHiddenUnstartedFinalText(finalText))
+        || (options.beforeTool === true && isShortLeadInBeforeTool(finalText))
+        || (options.beforeTool !== true && isShortUnfinishedLeadIn(finalText))
+        || (normalized.length > 0 && visibleAssistantTexts.has(normalized));
       if (assistantStarted) {
         if (!hidden) rememberVisibleAssistantText(finalText);
         callbacks.onEvent?.(agentEvent({type: 'message_end', id: currentAssistantId, text: finalText, hidden}));
