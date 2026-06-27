@@ -71,39 +71,52 @@ describe('compaction', () => {
     });
 
     it('summarises stdout/stderr streams via the shared reduction-metadata contract', () => {
+      const streamBase = {
+        handle: 'output-1',
+        rawHandle: 'output-1',
+        filterName: 'node-test',
+        reducerName: 'validation',
+        contentKind: 'log',
+        lossy: false,
+        parseTier: 'degraded',
+        truncated: true,
+        omittedChars: 42,
+        rawTokensEstimate: 100,
+        returnedTokensEstimate: 20,
+        estimatedSavedTokens: 80,
+        savingsPct: 80,
+        warning: 'parser hit fallback path',
+        rawChars: 400, // not part of the stream contract
+        content: 'NOISE'.repeat(1000), // raw content, must be dropped
+      };
       const value = {
         ok: true,
-        stdout: {
-          handle: 'output-1',
-          rawHandle: 'output-1',
-          filterName: 'node-test',
-          reducerName: 'validation',
-          contentKind: 'log',
-          lossy: false,
-          truncated: true,
-          omittedChars: 42,
-          rawTokensEstimate: 100,
-          returnedTokensEstimate: 20,
-          estimatedSavedTokens: 80,
-          savingsPct: 80,
-          rawChars: 400, // not part of the stream contract
-          content: 'NOISE'.repeat(1000), // raw content, must be dropped
-        },
+        stdout: streamBase,
+        stderr: {...streamBase, handle: 'output-2', warning: 'stderr warning'},
       };
-      const compacted = compactJsonValue(value, 'bash') as {stdout: Record<string, unknown>};
-      const stream = compacted.stdout;
-      expect(stream.handle).toBe('output-1');
-      expect(stream.rawHandle).toBe('output-1');
-      expect(stream.filterName).toBe('node-test');
-      expect(stream.reducerName).toBe('validation');
-      expect(stream.contentKind).toBe('log');
-      expect(stream.lossy).toBe(false);
-      expect(stream.truncated).toBe(true);
-      expect(stream.omittedChars).toBe(42);
-      expect(stream.estimatedSavedTokens).toBe(80);
-      expect(stream.savingsPct).toBe(80);
-      expect(stream.rawChars).toBeUndefined();
-      expect(stream.content).toBeUndefined();
+      const compacted = compactJsonValue(value, 'bash') as {
+        stdout: Record<string, unknown>;
+        stderr: Record<string, unknown>;
+      };
+      for (const [name, stream] of [
+        ['stdout', compacted.stdout],
+        ['stderr', compacted.stderr],
+      ] as const) {
+        expect(stream.handle).toBe(name === 'stdout' ? 'output-1' : 'output-2');
+        expect(stream.rawHandle).toBe('output-1');
+        expect(stream.filterName).toBe('node-test');
+        expect(stream.reducerName).toBe('validation');
+        expect(stream.contentKind).toBe('log');
+        expect(stream.lossy).toBe(false);
+        expect(stream.parseTier).toBe('degraded');
+        expect(stream.truncated).toBe(true);
+        expect(stream.omittedChars).toBe(42);
+        expect(stream.estimatedSavedTokens).toBe(80);
+        expect(stream.savingsPct).toBe(80);
+        expect(stream.warning).toBe(name === 'stdout' ? 'parser hit fallback path' : 'stderr warning');
+        expect(stream.rawChars).toBeUndefined();
+        expect(stream.content).toBeUndefined();
+      }
     });
 
     it('skips streams that are not objects', () => {
@@ -146,11 +159,19 @@ describe('compaction', () => {
         handle: 'output-1',
         truncated: true,
         omittedChars: 9,
+        parseTier: 'degraded',
+        warning: 'ignored? no, kept',
         lossy: 'yes', // wrong type → dropped
         content: 'NOISE',
         unknown: 'ignored',
       });
-      expect(picked).toEqual({handle: 'output-1', truncated: true, omittedChars: 9});
+      expect(picked).toEqual({
+        handle: 'output-1',
+        truncated: true,
+        omittedChars: 9,
+        parseTier: 'degraded',
+        warning: 'ignored? no, kept',
+      });
     });
 
     it('every reduction-metadata key is selectable with the right type', () => {
@@ -161,12 +182,14 @@ describe('compaction', () => {
         reducerName: 'r',
         contentKind: 'log',
         lossy: true,
+        parseTier: 'degraded',
         truncated: false,
         omittedChars: 1,
         rawTokensEstimate: 2,
         returnedTokensEstimate: 3,
         estimatedSavedTokens: 4,
         savingsPct: 5,
+        warning: 'w',
       };
       const picked = pickReductionMetadata(full);
       for (const key of REDUCTION_METADATA_KEYS) {

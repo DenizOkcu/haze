@@ -18,12 +18,14 @@ export const REDUCTION_METADATA_KEYS = [
   'reducerName',
   'contentKind',
   'lossy',
+  'parseTier',
   'truncated',
   'omittedChars',
   'rawTokensEstimate',
   'returnedTokensEstimate',
   'estimatedSavedTokens',
   'savingsPct',
+  'warning',
 ] as const;
 
 const REDUCTION_METADATA_TYPES: Record<(typeof REDUCTION_METADATA_KEYS)[number], 'string' | 'boolean' | 'number'> = {
@@ -33,12 +35,14 @@ const REDUCTION_METADATA_TYPES: Record<(typeof REDUCTION_METADATA_KEYS)[number],
   reducerName: 'string',
   contentKind: 'string',
   lossy: 'boolean',
+  parseTier: 'string',
   truncated: 'boolean',
   omittedChars: 'number',
   rawTokensEstimate: 'number',
   returnedTokensEstimate: 'number',
   estimatedSavedTokens: 'number',
   savingsPct: 'number',
+  warning: 'string',
 };
 
 /**
