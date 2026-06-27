@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
   return {
     assembledCalls: [] as unknown[],
     closeMcpCalls: [] as unknown[],
+    appendUsageEntry: vi.fn(async () => undefined),
     assembleContextResult: null as null | {
       systemPrompt: string;
       availableTools: Record<string, unknown>;
@@ -43,6 +44,10 @@ const mocks = vi.hoisted(() => {
     },
   };
 });
+
+vi.mock('../../../src/core/usage/usageLedger.js', () => ({
+  appendUsageEntry: mocks.appendUsageEntry,
+}));
 
 function makeAgent(parts: FakeFullStreamPart[], responseMessages: unknown[]): FakeAgent {
   const agent: FakeAgent = {
@@ -109,6 +114,10 @@ async function loadStreaming(config: MocksConfig) {
         this._fake.prepareStep = this.prepareStep;
         this._fake.onStepFinish = this.onStepFinish;
         this._fake.onFinish = this.onFinish;
+        const wrappedStream = async function* (source: AsyncIterable<FakeFullStreamPart>, onFinish: ((event: {totalUsage?: {inputTokens: number; outputTokens: number}; response: {messages: unknown[]}}) => void) | undefined) {
+          for await (const part of source) yield part;
+          onFinish?.({totalUsage: {inputTokens: 1500, outputTokens: 700}, response: {messages: responseMessages}});
+        };
         if (config.hangUntilAbort) {
           let onAbort: (() => void) | undefined;
           const aborted = new Error('aborted');
@@ -153,7 +162,11 @@ async function loadStreaming(config: MocksConfig) {
             response: Promise.reject(error),
           };
         }
-        return {...this._fake, fullStream: this._fake.fullStream, response: this._fake.response};
+        return {
+          ...this._fake,
+          fullStream: wrappedStream(this._fake.fullStream, this.onFinish as (event: {response: {messages: unknown[]}}) => void),
+          response: this._fake.response,
+        };
       }
     }
     return {
@@ -213,6 +226,7 @@ beforeEach(() => {
   mocks.assembledCalls.length = 0;
   mocks.closeMcpCalls.length = 0;
   mocks.assembleContextResult = null;
+  mocks.appendUsageEntry.mockClear();
 });
 
 afterEach(() => {
@@ -347,6 +361,43 @@ describe('runAgentTurn: stream handling', () => {
     await runAgentTurn('run', undefined, [], cb);
     expect(cb.events.find((e) => e.type === 'tool_start')).toBeDefined();
     expect(cb.events.filter((e) => e.type === 'tool_end')).toHaveLength(1);
+  });
+
+  it('appends a ledger entry when a turn finishes', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'openai', baseURL: 'http://x', modelName: 'gpt-4o-mini', cacheKey: 'k', capabilities: {}},
+      },
+      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('go', undefined, [], cb, 0, false, false, {start: new Date(), cwd: process.cwd()});
+    expect(mocks.appendUsageEntry).toHaveBeenCalled();
+    const [config, usage] = mocks.appendUsageEntry.mock.calls[0];
+    expect(config.providerName).toBe('openai');
+    expect(config.modelName).toBe('gpt-4o-mini');
+  });
+
+  it('appends a ledger entry for subagent usage inside a tool-result', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'openai', baseURL: 'http://x', modelName: 'gpt-4o-mini', cacheKey: 'k', capabilities: {}},
+      },
+      fullStreamParts: [
+        {type: 'tool-input-start', id: 't1', toolName: 'bash'},
+        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, tokens: {in: 1200, out: 400}}},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+      responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('go', undefined, [], cb, 0, false, false, {start: new Date(), cwd: process.cwd()});
+    const subagentCalls = mocks.appendUsageEntry.mock.calls.filter(([_, u]) => u.inputTokens === 1200 && u.outputTokens === 400);
+    expect(subagentCalls).toHaveLength(1);
   });
 });
 
