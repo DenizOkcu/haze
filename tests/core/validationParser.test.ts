@@ -50,4 +50,44 @@ describe('validation output parser', () => {
     const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
     expect(summary.status).toBe('passed');
   });
+
+  it('extracts cargo test failures', () => {
+    const stdout = [
+      'running 2 tests',
+      'test tests::it_works ... ok',
+      'test tests::it_fails ... FAILED',
+      '',
+      'failures:',
+      '',
+      '---- tests::it_fails stdout ----',
+      'thread panicked',
+      '',
+      'failures:',
+      '    tests::it_fails',
+      '',
+      'test result: FAILED. 1 passed; 1 failed; 0 ignored',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'cargo test', code: 101, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('failed');
+    expect(summary.failedTests).toContain('tests::it_fails');
+    expect(summary.summaryText).toContain('1 failed test');
+  });
+
+  it('extracts cargo clippy diagnostics', () => {
+    const stdout = [
+      'error[E0499]: cannot borrow `x` as mutable more than once at a time',
+      ' --> src/lib.rs:10:5',
+      '  |',
+      '10 |     x.push(1);',
+      '   |     ^^^^^^^^^',
+      '',
+      'error: could not compile `foo`',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'cargo clippy', code: 101, stdout, stderr: ''});
+    expect(summary.kind).toBe('lint');
+    expect(summary.status).toBe('failed');
+    expect(summary.diagnostics[0]).toMatchObject({file: 'src/lib.rs', line: 10, column: 5, severity: 'error'});
+    expect(summary.failedFiles).toContain('src/lib.rs');
+  });
 });

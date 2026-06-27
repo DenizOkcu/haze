@@ -7,10 +7,10 @@ function uniq(values: string[]) {
 
 function inferKind(command: string, classification?: BashClassification): ValidationKind {
   const lower = command.toLowerCase();
-  if (/typecheck|\btsc\b/.test(lower)) return 'typecheck';
-  if (/\beslint\b|\blint\b/.test(lower)) return 'lint';
+  if (/typecheck|\btsc\b|\bmypy\b/.test(lower)) return 'typecheck';
+  if (/\beslint\b|\blint\b|\bclippy\b|\bgo\s+vet\b|\bpylint\b|\bruff\s+(check|format\s+--check)\b|\bcargo\s+check\b/.test(lower)) return 'lint';
   if (/\bbuild\b/.test(lower) || classification?.traits.includes('runs_build')) return 'build';
-  if (/\b(test|vitest|jest)\b/.test(lower) || classification?.traits.includes('runs_tests')) return 'test';
+  if (/\b(test|vitest|jest|pytest|unittest)\b/.test(lower) || classification?.traits.includes('runs_tests')) return 'test';
   return 'generic';
 }
 
@@ -31,7 +31,11 @@ export function parseValidationOutput(input: {
   const failedFiles: string[] = [];
   const kind = inferKind(input.command, input.classification);
 
-  for (const line of lines) {
+  let cargoErrorMessage: string | undefined;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+
     const ts = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
     if (ts) {
       const [, file, lineNo, column, severity, message] = ts;
@@ -42,7 +46,7 @@ export function parseValidationOutput(input: {
     const eslint = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\s*$/);
     if (eslint) {
       const currentFile = eslint[1] ?? '';
-      const next = lines[lines.indexOf(line) + 1];
+      const next = lines[i + 1];
       if (next && /^\s*\d+:\d+\s+/.test(next)) failedFiles.push(currentFile);
     }
     const eslintDiag = line.match(/^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}\S+)?$/);
@@ -60,6 +64,36 @@ export function parseValidationOutput(input: {
       const [, file, lineNo, column] = genericFile;
       failedFiles.push(file ?? '');
       diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: /warn/i.test(line) ? 'warning' : 'error', message: line.trim()});
+    }
+
+    // Rust cargo test
+    const cargoTest = line.match(/^\s*test\s+(\S+?)\s+\.\.\.\s+FAILED$/);
+    if (cargoTest) {
+      failedTests.push(cargoTest[1] ?? '');
+      continue;
+    }
+    if (/^\s*test result: FAILED\b/i.test(line)) {
+      continue;
+    }
+
+    // Rust cargo check/clippy diagnostics
+    const cargoError = line.match(/^\s*error\[E(\d+)\]:\s*(.*)$/);
+    if (cargoError) {
+      cargoErrorMessage = cargoError[2] ?? 'rustc error';
+      continue;
+    }
+    if (cargoErrorMessage) {
+      const loc = line.match(/^\s*-->\s+(.+?):(\d+):(\d+)\s*$/);
+      if (loc) {
+        const [, file, lineNo, column] = loc;
+        diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: 'error', message: cargoErrorMessage});
+        failedFiles.push(file ?? '');
+        cargoErrorMessage = undefined;
+        continue;
+      }
+      if (!line.trim() || /^\s*error\[E\d+\]:/.test(line)) {
+        cargoErrorMessage = undefined;
+      }
     }
   }
 
