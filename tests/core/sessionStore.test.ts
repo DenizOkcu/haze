@@ -83,6 +83,20 @@ describe('sessionStore', () => {
     expect(parseErrors[0]).toContain('Line 3');
   });
 
+  it('reports parse errors with true file line numbers even when blank lines precede them', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'first'});
+    // Inject a stray blank line (a form of corruption), then a malformed line on what is now line 4.
+    await fs.appendFile(session.file, '\n{not valid json\n', 'utf8');
+    await appendSessionEntry(session, {type: 'ui_message', at: '2', role: 'user', text: 'after'});
+
+    const {entries, parseErrors} = await readSessionEntries(session);
+    expect(entries).toHaveLength(3);
+    // The malformed line is on file line 4 (header=1, first=2, blank=3, corrupt=4), not line 3.
+    expect(parseErrors).toHaveLength(1);
+    expect(parseErrors[0]).toContain('Line 4');
+  });
+
   it('returns no parse errors for a clean session file', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: 'now', role: 'user', text: 'hello'});

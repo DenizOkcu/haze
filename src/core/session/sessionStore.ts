@@ -78,13 +78,18 @@ export async function readSessionEntries(session: HazeSession): Promise<ReadSess
   const raw = await fs.readFile(session.file, 'utf8');
   const entries: SessionEntry[] = [];
   const parseErrors: string[] = [];
-  raw.split('\n').filter(Boolean).forEach((line, index) => {
+  // Number by true file position: a stray blank line (e.g. from corruption) must not shift
+  // the reported line number away from where the malformed line actually sits.
+  const lines = raw.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue; // skip blank lines (e.g. the trailing newline)
     try {
       entries.push(JSON.parse(line) as SessionEntry);
     } catch (error) {
-      parseErrors.push(`Line ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      parseErrors.push(`Line ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
     }
-  });
+  }
   return {entries, parseErrors};
 }
 

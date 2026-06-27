@@ -70,9 +70,17 @@ function isLikelyUnfinishedMarkdownFragment(text: string) {
   return last === '-' || last === '*' || last === '#' || last === '`' || last === '>';
 }
 
+// Procedural pre-tool lead-ins (e.g. "Confirmed:", "Files written.", "Now let me",
+// "I checked the tests.") are short preambles the model emits before calling a tool; they
+// should stay hidden so they don't surface as standalone bubbles. The ceiling is kept well
+// below the length of genuine multi-segment answer content: a substantive sentence of ~12
+// words preceding a tool call is real answer text and must be preserved (see the
+// multi-segment headless integration test). Empirically procedural lead-ins are <=5 words,
+// so 6 catches them while leaving real content visible.
+const LEAD_IN_WORD_CEILING = 6;
 export function isShortLeadInBeforeTool(text: string) {
   const trimmed = text.trim();
-  return trimmed.length > 0 && wordCount(trimmed) <= 12 && !isLikelyUnfinishedMarkdownFragment(trimmed);
+  return trimmed.length > 0 && wordCount(trimmed) <= LEAD_IN_WORD_CEILING && !isLikelyUnfinishedMarkdownFragment(trimmed);
 }
 
 export function isShortUnfinishedLeadIn(text: string) {
