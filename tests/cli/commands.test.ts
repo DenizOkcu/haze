@@ -90,6 +90,50 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
   });
 
+  it('sets the lightweight slot with /model lightweight <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model lightweight gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      models: {lightweight: 'openai:gpt-4o-mini'},
+    }));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('lightweight slot'));
+  });
+
+  it('sets the fallback slot with /model fallback <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model fallback openai:gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      models: {fallback: 'openai:gpt-4o-mini'},
+    }));
+  });
+
+  it('still sets primary via flat provider/model for bare /model <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+    }));
+  });
+
   it('enters provider mode for /provider', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/provider', ctx)).toBe('handled');

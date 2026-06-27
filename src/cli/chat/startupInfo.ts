@@ -1,4 +1,4 @@
-import {activeModel, configuredProviders, providerHasKey} from '../../config/providers.js';
+import {activeModel, configuredProviders, providerHasKey, resolveModelSlot} from '../../config/providers.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
@@ -44,11 +44,14 @@ export function startupProviderInfo(settings: HazeSettings) {
   const baseURL = selection.provider.url;
   const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
   const provider = selection.provider.name;
-
+  const lightweight = resolveModelSlot(settings, 'lightweight');
+  const fallback = resolveModelSlot(settings, 'fallback');
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
+    `- Lightweight slot: ${slotLine('Lightweight', lightweight)}`,
+    `- Fallback slot: ${slotLine('Fallback', fallback)}`,
     `- Base URL: ${baseURL} (settings)`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
     `- Configured providers: ${configuredCount}`,
