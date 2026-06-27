@@ -30,12 +30,15 @@ function debug(line: string) {
 }
 
 function pinnedUsage(usage: TokenUsage): HeadlessUsage {
+  // Normalize every field to a number: TokenUsage seeds most fields to 0 but
+  // inputTokens/outputTokens may be undefined until the first report. A uniform ?? 0
+  // keeps the documented CI contract literal (all five fields always present).
   return {
     inputTokens: usage.inputTokens ?? 0,
     outputTokens: usage.outputTokens ?? 0,
-    cacheReadTokens: usage.cacheReadTokens,
-    cacheWriteTokens: usage.cacheWriteTokens,
-    reasoningTokens: usage.reasoningTokens,
+    cacheReadTokens: usage.cacheReadTokens ?? 0,
+    cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+    reasoningTokens: usage.reasoningTokens ?? 0,
   };
 }
 

@@ -91,6 +91,9 @@ describe('runHeadless: output', () => {
     // Internal estimation fields must not leak into the CI parse contract.
     expect(parsed.usage).not.toHaveProperty('systemPrompt');
     expect(parsed.usage).not.toHaveProperty('logicalInputEstimate');
+    // The documented CI contract is exactly these five keys — no undefined leakage via
+    // JSON.stringify drop, no extra fields. Guards the pinnedUsage normalization.
+    expect(Object.keys(parsed.usage).sort()).toEqual(['cacheReadTokens', 'cacheWriteTokens', 'inputTokens', 'outputTokens', 'reasoningTokens']);
   });
 
   it('treats an empty assistant response as status complete with an empty result', async () => {
@@ -99,6 +102,10 @@ describe('runHeadless: output', () => {
     const code = await runHeadless({prompt: 'do it', output: 'json'});
     const parsed = JSON.parse(writes.join(''));
     expect(parsed).toMatchObject({status: 'complete', result: ''});
+    // Even with no token reports, the usage envelope must be the full documented shape
+    // (all five fields present as 0, no undefined dropped by JSON.stringify).
+    expect(parsed.usage).toEqual({inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0});
+    expect(Object.keys(parsed.usage).sort()).toEqual(['cacheReadTokens', 'cacheWriteTokens', 'inputTokens', 'outputTokens', 'reasoningTokens']);
     expect(code).toBe(0);
   });
 
