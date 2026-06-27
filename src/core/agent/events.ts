@@ -7,6 +7,7 @@ export type AgentEvent =
   | {type: 'tool_start'; id: string; name: string; input: unknown; at: string}
   | {type: 'tool_end'; id: string; name: string; success: boolean; output?: unknown; error?: unknown; durationMs: number; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'fallback'; provider: string; model: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
 export type AgentEventSink = (event: AgentEvent) => void;
