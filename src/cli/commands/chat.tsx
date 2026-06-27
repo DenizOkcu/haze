@@ -1101,7 +1101,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           const active = activeModel(settings);
           if (!active) return;
           const price = await priceForModel(active.provider.name, active.model);
-          const runtime = {providerName: active.provider.name, modelName: active.model};
           if (price) {
             setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
           }
