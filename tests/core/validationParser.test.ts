@@ -90,4 +90,21 @@ describe('validation output parser', () => {
     expect(summary.diagnostics[0]).toMatchObject({file: 'src/lib.rs', line: 10, column: 5, severity: 'error'});
     expect(summary.failedFiles).toContain('src/lib.rs');
   });
+
+  it('extracts go test failures and diagnostics', () => {
+    const stdout = [
+      '--- FAIL: TestAdd (0.00s)',
+      '    calc_test.go:10: expected 3, got 4',
+      'FAIL',
+      'exit status 1',
+      'FAIL\texample.com/foo\t0.001s',
+    ].join('\n');
+    const stderr = 'calc.go:15:5: undefined: add\ncalc.go:20: undefined: sub\n';
+    const summary = parseValidationOutput({command: 'go test ./...', code: 1, stdout, stderr});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('failed');
+    expect(summary.failedTests).toContain('TestAdd');
+    expect(summary.diagnostics[0]).toMatchObject({file: 'calc.go', line: 15, column: 5, severity: 'error'});
+    expect(summary.diagnostics[1]).toMatchObject({file: 'calc.go', line: 20, column: undefined, severity: 'error'});
+  });
 });

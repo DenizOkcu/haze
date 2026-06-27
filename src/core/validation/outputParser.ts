@@ -95,6 +95,26 @@ export function parseValidationOutput(input: {
         cargoErrorMessage = undefined;
       }
     }
+
+    // Go test
+    const goFail = line.match(/^---\s+FAIL:\s+(\S+)/);
+    if (goFail) {
+      failedTests.push(goFail[1] ?? '');
+      continue;
+    }
+    const goDiag = line.match(/^(\S+\.go):(\d+)(?::(\d+))?:\s*(.+)$/);
+    if (goDiag) {
+      const [, file, lineNo, column, message] = goDiag;
+      diagnostics.push({
+        file,
+        line: Number(lineNo),
+        column: column ? Number(column) : undefined,
+        severity: /warning/i.test(line) ? 'warning' : 'error',
+        message: message ?? '',
+      });
+      failedFiles.push(file ?? '');
+      continue;
+    }
   }
 
   const uniqueFiles = uniq(failedFiles).slice(0, 10);
