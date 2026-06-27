@@ -1,4 +1,4 @@
-function clip(line: string, max = 220) {
+export function clip(line: string, max = 220) {
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }
 

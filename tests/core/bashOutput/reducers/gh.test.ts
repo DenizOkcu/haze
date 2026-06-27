@@ -40,6 +40,17 @@ describe('reduceGhOutput', () => {
     expect(JSON.parse(result!).jsonSummary.type).toBe('array');
   });
 
+  it('returns undefined for gh pr diff so the unified-diff reducer takes over', () => {
+    const diff = Array.from({length: 40}, (_, i) => `+added line ${i}`).join('\n');
+    expect(reduceGhOutput('gh pr diff 8', diff, '')).toBeUndefined();
+  });
+
+  it('returns undefined for gh run view --log so the generic log reducer takes over', () => {
+    const log = Array.from({length: 200}, (_, i) => `step ${i} ok`).join('\n');
+    expect(reduceGhOutput('gh run view 12 --log', log, '')).toBeUndefined();
+    expect(reduceGhOutput('gh run view 12 --log-failed', log, '')).toBeUndefined();
+  });
+
   it('falls back to stderr when stdout is empty', () => {
     const rows = Array.from({length: 20}, (_, i) => `${i}\tRun ${i}\tcompleted`).join('\n');
     expect(reduceGhOutput('gh run list', '', rows)).toContain('gh run list: 20 rows');

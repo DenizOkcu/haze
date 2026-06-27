@@ -1,5 +1,5 @@
 import {commandCandidates} from '../command.js';
-import {reduceJsonOutput} from './content.js';
+import {clip, reduceJsonOutput} from './content.js';
 
 const GH_GROUPS = new Set(['pr', 'issue', 'run', 'release', 'repo', 'workflow']);
 const READ_ONLY = new Set([
@@ -9,10 +9,6 @@ const READ_ONLY = new Set([
   'release list', 'release view',
   'repo view',
 ]);
-
-function clip(line: string, max = 220) {
-  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
-}
 
 // Extract "<group> <action>" (e.g. "pr list") from a gh command, skipping flags.
 function ghSubcommand(command: string): string | undefined {
@@ -61,6 +57,9 @@ function reduceGhView(subcommand: string, text: string): string | undefined {
 }
 
 export function reduceGhOutput(command: string, stdout: string, stderr: string): string | undefined {
+  // `gh run view --log[-failed]` emits raw CI logs (no key/value + `--` body); let
+  // the generic log reducer extract end-of-log error signal instead of dropping it.
+  if (/\s--log(?:-failed)?\b/.test(command)) return undefined;
   const subcommand = ghSubcommand(command);
   if (!subcommand || !READ_ONLY.has(subcommand)) return undefined;
   const text = stdout || stderr;
