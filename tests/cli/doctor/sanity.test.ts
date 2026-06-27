@@ -23,8 +23,8 @@ describe('runStartupSanity', () => {
     const logsDir = path.join(tmp, 'logs');
     await fs.ensureDir(logsDir);
     const logFile = path.join(logsDir, '2026-06-27T00-00-00-000Z.jsonl');
-    const longLine = JSON.stringify({type: 'request', stream: 'main', at: new Date().toISOString()});
-    await fs.writeFile(logFile, `${longLine}\n`.repeat(20_000));
+    const longLine = JSON.stringify({type: 'request', stream: 'main', payload: 'x'.repeat(200), at: new Date().toISOString()});
+    await fs.writeFile(logFile, `${longLine}\n`.repeat(200_000));
     const actions = await runStartupSanity();
     expect(actions.some(a => a.action === 'rotated log')).toBe(true);
   });
