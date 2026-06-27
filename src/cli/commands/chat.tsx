@@ -33,6 +33,9 @@ import {stripSyntheticControls} from '../../core/agent/requestAssembly.js';
 import {modelWithConfig} from '../../llm/client.js';
 import {assembleRequestContext} from '../../llm/requestContext.js';
 import {closeMcpClients} from '../../llm/mcp.js';
+import {checkBudget} from '../../core/usage/budget.js';
+import {costForUsage, priceForModel} from '../../core/usage/pricing.js';
+import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
@@ -118,6 +121,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [, setSessionLabel] = useState<string | undefined>();
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
+  const [sessionCost, setSessionCost] = useState<number | undefined>(undefined);
+  const budgetWarningsRef = useRef<Set<string>>(new Set());
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
@@ -986,6 +991,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         return next;
       },
       getContextReport: async () => buildContextReport(),
+      sessionStart: sessionStartRef.current,
     };
     let result;
     try {
@@ -1077,7 +1083,29 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
       compactConversation,
       recordTokenUsage: usage => {
-        setTokenUsage(current => accumulateTokenUsage(current, usage));
+        setTokenUsage(current => {
+          const next = accumulateTokenUsage(current, usage);
+          void (async () => {
+            const active = activeModel(settings);
+            if (!active) return;
+            const runtime = {providerName: active.provider.name, modelName: active.model};
+            const warning = await checkBudget({settings, sessionUsage: next, runtime, baseDir: HAZE_DIR});
+            if (warning && !budgetWarningsRef.current.has(warning.key)) {
+              budgetWarningsRef.current.add(warning.key);
+              setMessages(m => [...m, {role: 'system', text: warning.message}]);
+            }
+          })();
+          return next;
+        });
+        void (async () => {
+          const active = activeModel(settings);
+          if (!active) return;
+          const price = await priceForModel(active.provider.name, active.model);
+          const runtime = {providerName: active.provider.name, modelName: active.model};
+          if (price) {
+            setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
+          }
+        })();
       },
       onEvent: event => {
         sessionRecorder.recordEvent(event);
@@ -1119,7 +1147,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const inputEstimated = providerInput == null || effectiveInput !== providerInput;
   const outputEstimated = tokenUsage.outputTokens == null;
   const enabledSkills = skills.filter(skill => isSkillEnabled(settings, skill.name));
-  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
+  const costLabel = sessionCost != null ? ` / ~$${sessionCost.toFixed(4)}` : '';
+  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)}${costLabel} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [

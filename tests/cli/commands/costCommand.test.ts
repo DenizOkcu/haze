@@ -2,8 +2,8 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import type {CommandContext} from '../../src/cli/commands/commands.js';
-import {handleCostCommand} from '../../src/cli/commands/costCommand.js';
+import type {CommandContext} from '../../../src/cli/commands/commands.js';
+import {handleCostCommand} from '../../../src/cli/commands/costCommand.js';
 
 function mockContext(overrides?: Partial<CommandContext>): CommandContext {
   return {
