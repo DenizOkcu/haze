@@ -247,7 +247,7 @@ Haze exposes a deliberately small toolset:
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
-- `bash` — run tests, builds, git commands, inspections, scripts, installs, and other shell workflows with command-aware output reduction and compact validation output.
+- `bash` — run tests, builds, git/gh commands, inspections, scripts, installs, and other shell workflows with command-aware output reduction (git, gh, search, JSON, diffs, logs) and compact validation output.
 - `readToolOutput` — page through full/raw output omitted from an oversized or reduced tool result.
 - `fetch` — read a public `http(s)` URL and return readable content (Markdown for docs, pretty JSON, or text). Private/loopback/metadata hosts and non-`http(s)` schemes are blocked; output is bounded and retrievable via `readToolOutput`.
 - `writeTasks` — replace the task list at meaningful phase changes; completed lists auto-clear on the next user turn.
