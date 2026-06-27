@@ -48,11 +48,22 @@ describe('formatSettingsSummary', () => {
     const out = await formatSettingsSummary(baseSettings, []);
     expect(out).toContain('Provider: openrouter');
     expect(out).toContain('Model: gpt-4o');
-    expect(out).toContain('Lightweight slot: openrouter:gpt-4o');
-    expect(out).toContain('Fallback slot: openrouter:gpt-4o');
+    expect(out).toContain('Lightweight slot: not set (inherits primary)');
+    expect(out).toContain('Fallback slot: not set (inherits primary)');
     expect(out).toContain('Base URL: https://openrouter.ai/api/v1');
     expect(out).toContain('API key: saved');
     expect(out).toContain('Configured providers: openrouter, local');
+  });
+
+  it('shows configured slots as provider:model and inherits primary when unset', async () => {
+    mocks.loadSkillRegistry.mockResolvedValue(skills());
+    const settings: HazeSettings = {
+      ...baseSettings,
+      models: {lightweight: 'local:llama3.1', fallback: 'openrouter:gpt-4o'},
+    };
+    const out = await formatSettingsSummary(settings, []);
+    expect(out).toContain('Lightweight slot: local:llama3.1');
+    expect(out).toContain('Fallback slot: openrouter:gpt-4o');
   });
 
   it('falls back to not configured when no provider is set', async () => {

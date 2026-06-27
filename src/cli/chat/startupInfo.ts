@@ -1,4 +1,4 @@
-import {activeModel, configuredProviders, providerHasKey, resolveModelSlot} from '../../config/providers.js';
+import {activeModel, configuredProviders, providerHasKey, resolveModelSlot, type ModelSlotName} from '../../config/providers.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
@@ -25,11 +25,21 @@ export function startupProviderInfo(settings: HazeSettings) {
   const mcpLine = enabledMcp.length > 0
     ? `- MCP: ${enabledMcp.length} configured (${enabledMcp.map(server => server.name).join(', ')}; tools load each turn)`
     : '- MCP: none configured (optional: /mcp add context7 for up-to-date library docs)';
+  const slotLine = (label: string, slot: ModelSlotName) => {
+    const configured = settings.models?.[slot]?.trim();
+    if (!configured) return `${label}: not set (inherits primary)`;
+    const resolved = resolveModelSlot(settings, slot);
+    return resolved.status === 'found'
+      ? `${label}: ${resolved.provider.name}:${resolved.model}`
+      : `${label}: ${configured} (not found)`;
+  };
   if (!selection) {
     return [
       'Provider configuration',
       '- Provider: not configured',
       '- Model: not set',
+      `- ${slotLine('Lightweight slot', 'lightweight')}`,
+      `- ${slotLine('Fallback slot', 'fallback')}`,
       '- Base URL: not configured',
       '- API key: missing',
       `- Configured providers: ${configuredCount}`,
@@ -44,16 +54,12 @@ export function startupProviderInfo(settings: HazeSettings) {
   const baseURL = selection.provider.url;
   const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
   const provider = selection.provider.name;
-  const lightweight = resolveModelSlot(settings, 'lightweight');
-  const fallback = resolveModelSlot(settings, 'fallback');
-  const slotLine = (label: string, resolution: ReturnType<typeof resolveModelSlot>) =>
-    `${label}: ${resolution.status === 'found' ? `${resolution.provider.name}:${resolution.model}` : 'same as primary'}`;
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
-    `- Lightweight slot: ${slotLine('Lightweight', lightweight)}`,
-    `- Fallback slot: ${slotLine('Fallback', fallback)}`,
+    `- ${slotLine('Lightweight slot', 'lightweight')}`,
+    `- ${slotLine('Fallback slot', 'fallback')}`,
     `- Base URL: ${baseURL} (settings)`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
     `- Configured providers: ${configuredCount}`,

@@ -2,7 +2,7 @@ import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/
 import type {ContextFile} from '../../config/contextFiles.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
-import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey, resolveModelSlot} from '../../config/providers.js';
+import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey, resolveModelSlot, type ModelSlotName} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
@@ -26,15 +26,19 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
   const lspServers = configuredLspServers(settings);
   const installedSkills = [...(await loadSkillRegistry()).skills.values()];
   const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(settings, skill.name) ? '' : ' (disabled)'}`).join(', ');
-  const lightweight = resolveModelSlot(settings, 'lightweight');
-  const fallback = resolveModelSlot(settings, 'fallback');
-  const slotLine = (label: string, resolution: ReturnType<typeof resolveModelSlot>) =>
-    `${label}: ${resolution.status === 'found' ? `${resolution.provider.name}:${resolution.model}` : 'not set'}`;
+  const slotLine = (label: string, slot: ModelSlotName) => {
+    const configured = settings.models?.[slot]?.trim();
+    if (!configured) return `${label}: not set (inherits primary)`;
+    const resolved = resolveModelSlot(settings, slot);
+    return resolved.status === 'found'
+      ? `${label}: ${resolved.provider.name}:${resolved.model}`
+      : `${label}: ${configured} (not found)`;
+  };
   const lines = [
     `Provider: ${activeProvider?.name ?? 'not configured'}`,
     `Model: ${settings.model ?? 'not set'}`,
-    slotLine('Lightweight slot', lightweight),
-    slotLine('Fallback slot', fallback),
+    slotLine('Lightweight slot', 'lightweight'),
+    slotLine('Fallback slot', 'fallback'),
     `Base URL: ${activeProvider?.url ?? settings.baseURL ?? 'not configured'}`,
     `API key: ${activeProvider && providerHasKey(settings, activeProvider) ? 'saved' : 'missing'}`,
     `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,

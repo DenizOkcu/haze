@@ -406,6 +406,7 @@ export async function runAgentTurn(
         const fallbackResolution = resolveModelSlot(settings, 'fallback');
         const hasDistinctFallback =
           !fallbackUsed &&
+          !modelOverride &&
           primaryResolution.status === 'found' &&
           fallbackResolution.status === 'found' &&
           !sameModelResolution(primaryResolution, fallbackResolution);
