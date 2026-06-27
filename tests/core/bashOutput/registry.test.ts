@@ -150,4 +150,21 @@ describe('bash output filter registry', () => {
     expect(result.stdout.text).toContain('ERROR failed to connect');
     expect(result.stdout.text).toContain('1 failed, 120 passed');
   });
+
+  it('summarizes large gh pr list output and labels it with the gh filter', () => {
+    const rows = Array.from({length: 40}, (_, i) => `${i}\tTitle ${i}\tkoan/branch-${i}\tOPEN`).join('\n');
+    const result = base({command: 'gh pr list --limit 100', stdout: rows});
+    expect(result.stdout.filtered).toBe(true);
+    expect(result.stdout.filterName).toBe('gh');
+    expect(result.stdout.contentKind).toBe('generic');
+    expect(result.stdout.text).toContain('gh pr list: 40 rows');
+  });
+
+  it('routes gh --json output through the json content kind', () => {
+    const stdout = JSON.stringify(Array.from({length: 20}, (_, i) => ({number: i, state: 'OPEN', repeated: 'same'})));
+    const result = base({command: 'gh run list --json databaseId,status', stdout});
+    expect(result.stdout.filterName).toBe('gh');
+    expect(result.stdout.contentKind).toBe('json');
+    expect(result.stdout.text).toContain('"items": 20');
+  });
 });

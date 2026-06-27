@@ -3,6 +3,7 @@ import type {LineFilterDefinition} from './lineFilter.js';
 import {applyLineFilter, findLineFilter} from './lineFilter.js';
 import {renderValidationReduction} from './reducers/validation.js';
 import {reduceGitOutput} from './reducers/git.js';
+import {reduceGhOutput} from './reducers/gh.js';
 import {reduceSearchOutput} from './reducers/search.js';
 import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from './reducers/content.js';
 import {isInflating, reductionMetrics, retrievalHint, type ReductionContentKind} from '../toolOutput/reduction.js';
@@ -78,11 +79,17 @@ export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilter
       stderr = makeReduction(input.stderr, '', input.stderr.length > 0, filterName, input, undefined, 'validation');
     } else {
       const git = reduceGitOutput(input.command, input.stdout, input.stderr);
+      const gh = git == null ? reduceGhOutput(input.command, input.stdout, input.stderr) : undefined;
       if (git != null) {
         filterName = 'git';
         const kind: ReductionContentKind = /^git (?:diff|show):/.test(git) ? 'diff' : 'generic';
         stdout = makeReduction(input.stdout, input.stdout ? git : '', true, filterName, input, undefined, kind);
         stderr = makeReduction(input.stderr, input.stdout ? '' : git, true, filterName, input, undefined, kind);
+      } else if (gh != null) {
+        filterName = 'gh';
+        const kind: ReductionContentKind = gh.trimStart().startsWith('{') ? 'json' : 'generic';
+        stdout = makeReduction(input.stdout, input.stdout ? gh : '', true, filterName, input, undefined, kind);
+        stderr = makeReduction(input.stderr, input.stdout ? '' : gh, true, filterName, input, undefined, kind);
       } else {
         const search = reduceSearchOutput(input.command, input.stdout, input.stderr);
         if (search != null) {
