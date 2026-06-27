@@ -6,6 +6,10 @@
 
 - **Closed a DNS-rebinding TOCTOU in the `fetch` tool.** `urlGuard.validateUrl` resolved a hostname and confirmed every address was public, but the subsequent global `fetch` re-resolved the hostname at connect time, so an attacker-controlled DNS server could answer validation with a public IP and connect with an internal/cloud-metadata IP — fully bypassing the SSRF guard that exists precisely to stop that. `fetchUrlContent` now pins each connection (and each redirect hop) to the already-validated IP via a small stdlib transport that preserves the original `Host` header and TLS `servername`/cert verification, with no second DNS lookup between validation and connect. The post-fetch re-validation was removed as it re-resolved DNS against an already-pinned connection and only reopened the race. Literal-IP URLs keep using the global `fetch` (no rebinding surface).
 
+## 0.6.x
+
+- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped. The exit code and JSON `status` are driven by the agent's authoritative terminal state (`complete`/`aborted`/`failed`) rather than by parsing the reply, so CI gating on the exit code is reliable. A bad or ambiguous `--model` selector reports a precise error and exits non-zero, `--debug` writes a JSONL log under `~/.haze/logs/`, and the `--output json` `usage` object is pinned to a documented set of fields.
+
 ## 0.6.0 - 2026-06-21
 
 ### Added

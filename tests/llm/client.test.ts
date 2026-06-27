@@ -214,4 +214,40 @@ describe('modelWithConfig', () => {
     expect(runtimeA!.config.cacheKey).not.toBe(runtimeB!.config.cacheKey);
     expect(runtimeA!.config.cacheKey).toHaveLength(32);
   });
+
+  it('resolves a model override via resolveModelSelector (provider:model)', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig({modelSelector: 'openai:gpt-4o-mini'});
+    expect(runtime).toBeDefined();
+    expect(runtime!.config.modelName).toBe('gpt-4o-mini');
+    expect(runtime!.config.providerName).toBe('openai');
+  });
+
+  it('returns undefined for an ambiguous model override', async () => {
+    await writeSettings({
+      providers: [
+        {name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['shared']},
+        {name: 'proxy', url: 'https://proxy.test/v1', key: 'k', models: ['shared']},
+      ],
+      provider: 'openai',
+      model: 'shared',
+    });
+    const {modelWithConfig} = await loadClient();
+    expect(await modelWithConfig({modelSelector: 'shared'})).toBeUndefined();
+  });
+
+  it('returns undefined for a missing model override', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+    const {modelWithConfig} = await loadClient();
+    expect(await modelWithConfig({modelSelector: 'no-such-model'})).toBeUndefined();
+  });
 });

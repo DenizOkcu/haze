@@ -1846,6 +1846,32 @@
               <td class="cmd-c"><code>/&lt;skill-name&gt;</code></td>
               <td class="cmd-d">Invoke any installed skill directly — e.g. <code>/code-review</code>. The model can also invoke skills on its own.</td>
             </tr>
+
+            <tr class="cmd-cat"><td colspan="2">Terminal flags (run <code>haze --help</code>)</td></tr>
+            <tr>
+              <td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td>
+              <td class="cmd-d">Print mode: run a single non-interactive turn with the full toolset, print the final reply, and exit (<code>0</code> = complete; non-zero = aborted/failed). Reads the prompt from <code>-p</code>, else from piped stdin (e.g. <code>echo "…" | haze</code>). Non-durable: <code>--continue</code> is ignored and no session is saved.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze --output &lt;text|json&gt;</code></td>
+              <td class="cmd-d">Print-mode output format. <code>json</code> emits a single-line envelope <code>{ type, status, result, usage }</code> for scripting/CI; the <code>status</code> and exit code are authoritative.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td>
+              <td class="cmd-d">Override the model for this run only (no settings change) — a registered model <code>name</code> or <code>provider:name</code>. Must already be added under a provider via <code>/provider</code>; an unknown or ambiguous selector exits non-zero with a precise error.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze -c, --continue</code></td>
+              <td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze --no-session</code></td>
+              <td class="cmd-d">Run without saving or resuming a durable session.</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze --debug</code></td>
+              <td class="cmd-d">Show model/tool debug logs and write a detailed JSONL log to <code>~/.haze/logs/</code> (works in both interactive and print mode).</td>
+            </tr>
           </tbody>
         </table>
 

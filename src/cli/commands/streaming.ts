@@ -28,6 +28,13 @@ export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
 
+export type TurnStatus = 'complete' | 'aborted' | 'failed';
+
+/** Authoritative outcome of a turn, so callers (esp. headless/CI) need not sniff message text. */
+export interface TurnResult {
+  status: TurnStatus;
+}
+
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
 
 function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
@@ -63,7 +70,8 @@ export async function runAgentTurn(
   retryingExistingRequest = false,
   contextOverflowRecovered = false,
   session?: PromptSession,
-): Promise<void> {
+  modelOverride?: string,
+): Promise<TurnResult> {
   const displayVal = displayValue ?? value;
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
   callbacks.setBusy(true);
@@ -85,11 +93,11 @@ export async function runAgentTurn(
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
 
   try {
-    const runtime = await modelWithConfig(session ? {cwd: session.cwd} : undefined);
+    const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride});
     if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
       turnStatus = 'complete';
-      return;
+      return {status: turnStatus};
     }
 
     let activeContextFiles = contextFiles;
@@ -358,8 +366,7 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-          await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session);
-          return;
+          return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session, modelOverride);
         }
         callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
       }
@@ -369,9 +376,11 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
         callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
         await abortableDelay(delay, abortController.signal);
-        if (abortController.signal.aborted) return;
-        await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session);
-        return;
+        if (abortController.signal.aborted) {
+          turnStatus = 'aborted';
+          return {status: turnStatus};
+        }
+        return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session, modelOverride);
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
     }
@@ -385,4 +394,5 @@ export async function runAgentTurn(
     callbacks.setBusyLabel?.('Haze is thinking');
     callbacks.setBusy(false);
   }
+  return {status: turnStatus};
 }
