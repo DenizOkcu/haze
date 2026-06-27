@@ -141,7 +141,9 @@ export async function extractSymbolsViaLsp(
   return results.slice(0, limit);
 }
 
-const CACHE_FILE = path.join(os.homedir(), '.haze', 'repo-map-cache.json');
+const CACHE_FILE = process.env.HAZE_REPO_MAP_CACHE
+  ? path.resolve(process.env.HAZE_REPO_MAP_CACHE)
+  : path.join(os.homedir(), '.haze', 'repo-map-cache.json');
 
 interface RepoMapCacheEntry {
   mtime: number;
@@ -206,7 +208,7 @@ export function rankSymbols(
   });
 
   scored.sort((a, b) => (b.score - a.score) || a.name.localeCompare(b.name));
-  return scored.slice(0, maxSymbols);
+  return scored.slice(0, maxSymbols).map(({score: _score, ...symbol}) => symbol);
 }
 
 export async function computeReferenceCounts(
@@ -251,7 +253,7 @@ export async function buildRepoMap(options: RepoMapOptions = {}): Promise<RepoMa
   if (source === 'regex') {
     const entries = await walkDir(scopeRoot, {
       recursive: true,
-      filter: async entry => entry.isFile && !await isGitIgnored(entry.absolutePath),
+      filter: async entry => !await isGitIgnored(entry.absolutePath),
     });
 
     for (const entry of entries) {
@@ -271,14 +273,13 @@ export async function buildRepoMap(options: RepoMapOptions = {}): Promise<RepoMa
     }
 
     await saveCache(cache);
-  } else {
-    for (const symbol of symbols) {
-      const absolutePath = path.join(workspaceRoot(), symbol.path);
-      if (!fileContents.has(symbol.path)) {
-        const content = await fs.readFile(absolutePath, 'utf8').catch(() => '');
-        fileContents.set(symbol.path, content);
-      }
-    }
+  }
+
+  for (const symbol of symbols) {
+    if (fileContents.has(symbol.path)) continue;
+    const absolutePath = path.join(workspaceRoot(), symbol.path);
+    const content = await fs.readFile(absolutePath, 'utf8').catch(() => '');
+    fileContents.set(symbol.path, content);
   }
 
   const referenceCounts = await computeReferenceCounts(symbols, fileContents);
