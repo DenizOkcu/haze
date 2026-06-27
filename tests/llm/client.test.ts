@@ -7,7 +7,10 @@ import {cacheKeyFor, providerRequestSettings, type ModelRuntimeConfig} from '../
 let tmp = '';
 let settingsFile = '';
 
-async function loadClient(createOpenAIImpl?: (options: unknown) => unknown) {
+async function loadClient(
+  createOpenAIImpl?: (options: unknown) => unknown,
+  createAnthropicImpl?: (options: unknown) => unknown,
+) {
   vi.doMock('../../src/config/paths.js', () => ({
     HAZE_DIR: tmp,
     GLOBAL_SKILLS_DIR: path.join(tmp, 'skills'),
@@ -15,11 +18,14 @@ async function loadClient(createOpenAIImpl?: (options: unknown) => unknown) {
   vi.doMock('@ai-sdk/openai', () => ({
     createOpenAI: vi.fn(createOpenAIImpl ?? ((options: unknown) => ({chat: () => options}))),
   }));
+  vi.doMock('@ai-sdk/anthropic', () => ({
+    createAnthropic: vi.fn(createAnthropicImpl ?? ((options: unknown) => ({chat: () => options}))),
+  }));
   vi.resetModules();
   return import('../../src/llm/client.js');
 }
 
-function config(capabilities: Partial<ModelRuntimeConfig['capabilities']>): ModelRuntimeConfig {
+function config(overrides: Partial<ModelRuntimeConfig> & Partial<ModelRuntimeConfig['capabilities']> = {}): ModelRuntimeConfig {
   return {
     providerName: 'test',
     baseURL: 'https://example.test/v1',
@@ -32,6 +38,7 @@ function config(capabilities: Partial<ModelRuntimeConfig['capabilities']>): Mode
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
+      supportsExtendedThinking: false,
       ...capabilities,
     },
   };
@@ -71,6 +78,28 @@ describe('providerRequestSettings', () => {
       providerOptions: {openai: {promptCacheKey: 'stable-cache-key'}},
       headers: {'x-session-id': 'stable-cache-key'},
     });
+  });
+
+  it('enables Anthropic extended thinking for claude-3-7-sonnet models', () => {
+    const cfg = config({
+      supportsExtendedThinking: true,
+      supportsPromptCacheKey: false,
+      supportsTextVerbosity: false,
+      modelName: 'claude-3-7-sonnet-20250219',
+    });
+    expect(providerRequestSettings(cfg)).toEqual({
+      providerOptions: {
+        anthropic: {thinking: {type: 'enabled', budgetTokens: 8000}},
+      },
+    });
+  });
+
+  it('does not enable extended thinking for other Anthropic models', () => {
+    const cfg = config({
+      supportsExtendedThinking: true,
+      modelName: 'claude-opus-4-8',
+    });
+    expect(providerRequestSettings(cfg)).toEqual({});
   });
 });
 
@@ -199,7 +228,26 @@ describe('modelWithConfig', () => {
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
+      supportsExtendedThinking: false,
     });
+  });
+
+  it('uses createAnthropic for the Anthropic preset and reports native capabilities', async () => {
+    const createAnthropic = vi.fn((options: unknown) => ({chat: () => options}));
+    await writeSettings({
+      providers: [{name: 'Anthropic Claude', url: 'https://api.anthropic.com/v1', key: 'sk-ant-test', models: ['claude-3-7-sonnet-20250219']}],
+      provider: 'Anthropic Claude',
+      model: 'claude-3-7-sonnet-20250219',
+    });
+    const {modelWithConfig} = await loadClient(undefined, createAnthropic);
+    const runtime = await modelWithConfig();
+    expect(runtime).toBeDefined();
+    expect(createAnthropic).toHaveBeenCalledWith({apiKey: 'sk-ant-test'});
+    expect((runtime!.model as unknown as {apiKey?: string}).apiKey).toBe('sk-ant-test');
+    expect(runtime!.config.capabilities.supportsExtendedThinking).toBe(true);
+    expect(runtime!.config.capabilities.reportsCacheUsage).toBe(true);
+    expect(runtime!.config.capabilities.supportsPromptCacheKey).toBe(false);
+    expect(runtime!.config.capabilities.supportsTextVerbosity).toBe(false);
   });
 
   it('uses the session cwd for the cache key when provided', async () => {
