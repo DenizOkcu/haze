@@ -43,6 +43,7 @@ jobs:
         working-directory: base
         run: |
           npm ci
+          npm install --no-save @vitest/coverage-v8@4
           npx vitest run --coverage --coverage.include='src/**/*.ts' --coverage.reporter=json --coverage.reportsDirectory=./coverage
       - name: Coverage on head
         working-directory: head
