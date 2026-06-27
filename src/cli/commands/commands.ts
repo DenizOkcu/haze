@@ -5,6 +5,7 @@ import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/sett
 import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
+import {handleCostCommand} from './costCommand.js';
 import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
@@ -25,6 +26,7 @@ export type CommandContext = {
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
   getContextReport?: () => Promise<string>;
+  sessionStart?: Date;
 };
 
 export type CommandResult = 'handled' | 'unhandled' | 'exit';
@@ -74,6 +76,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exact('/settings'), run: async (_args, ctx) => { ctx.addSystemMessage(await formatSettingsSummary(ctx.settings, ctx.contextFiles)); return HANDLED; }},
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},
+  {match: exactOrArgs('/cost'), run: async (args, ctx) => await handleCostCommand(args, ctx)},
+  {match: exactOrArgs('/usage'), run: async (args, ctx) => await handleCostCommand(args, ctx)},
   {match: exact('/skills'), run: (_args, ctx) => { ctx.setMode('skills'); ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.'); return HANDLED; }},
 ];
 
