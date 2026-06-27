@@ -331,3 +331,24 @@ describe('handleSlashCommand /logs', () => {
     expect(msg).toContain('/logs');
   });
 });
+
+describe('handleSlashCommand /doctor', () => {
+  it('handles /doctor', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/doctor', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Doctor report'));
+  });
+
+  it('handles /doctor --full', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/doctor --full', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Doctor report'));
+  });
+
+  it('lists /doctor in /help', async () => {
+    const ctx = mockContext();
+    await handleSlashCommand('/help', ctx);
+    const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(msg).toContain('/doctor');
+  });
+});
