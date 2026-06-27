@@ -1,0 +1,31 @@
+name: 🔍 Request Review
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const bots = ['Koan-Bot', 'BabyKoan'];
+            const author = context.payload.pull_request.user.login;
+
+            for (const bot of bots) {
+              if (bot === author) continue;
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: context.issue.number,
+                  reviewers: [bot]
+                });
+                break;
+              } catch (e) {}
+            }
