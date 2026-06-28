@@ -211,10 +211,11 @@ Non-interactive / print mode:
 haze -p "refactor utils.ts to remove the unused export"
 haze -p "summarize this repo" --model openai:gpt-4o-mini
 haze -p "list the top 3 bugs in src/api.ts" --output json
+haze -p "audit src/auth.ts" --output stream-json   # live NDJSON events, then the result envelope
 echo "what does this project do?" | haze
 ```
 
-`-p` / `--prompt` runs a single agentic turn (with the full tool set and guardrails) and prints the final assistant text. `--model` overrides the active model for that one run without changing `~/.haze/settings.json` — accepts a bare model name or `provider:name`. The selected model must already be registered under a provider's `models` (add it once via `/provider`); an unknown or ambiguous selector exits non-zero with a precise error on stderr. When `-p` is omitted and stdin is piped, the prompt is read from stdin. A one-shot run never starts or resumes a durable session; `--continue` is ignored in this mode. Headless runs do **not** auto-compact on context overflow, so very large CI prompts may fail rather than recover — keep prompts within the model's window. Add `--debug` to also write a detailed JSONL log under `~/.haze/logs/`.
+`-p` / `--prompt` runs a single agentic turn (with the full tool set and guardrails) and prints the final assistant text. `--model` overrides the active model for that one run without changing `~/.haze/settings.json` — accepts a bare model name or `provider:name`. The selected model must already be registered under a provider's `models` (add it once via `/provider`); an unknown or ambiguous selector exits non-zero with a precise error on stderr. When `-p` is omitted and stdin is piped, the prompt is read from stdin. A one-shot run never starts or resumes a durable session; `--continue` is ignored in this mode. Headless runs do **not** auto-compact on context overflow, so very large CI prompts may fail rather than recover — keep prompts within the model's window. Add `--debug` to also write a detailed JSONL log under `~/.haze/logs/`. `--output` selects how the run is reported: `text` (default), `json` (a single final envelope), or `stream-json` (a live NDJSON event stream ending in that envelope) — see below.
 
 `--output json` prints a single-line envelope instead of plain text:
 
@@ -234,6 +235,21 @@ echo "what does this project do?" | haze
 ```
 
 The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A `complete` run with an empty `result` means the model produced no visible text — distinct from a `failed` run.
+
+`--output stream-json` streams the run as it happens instead of staying silent until the end. Each agent event is written to stdout as one newline-delimited JSON object (NDJSON) the moment it fires, and the **last** line is the exact same `{ type: "result", status, result, usage }` envelope as `--output json` — so a consumer can render live progress and still parse the final line identically:
+
+```jsonc
+{"type":"turn_start","request":"audit src/auth.ts","at":"2026-06-27T22:00:00.000Z"}
+{"type":"message_start","id":"a1","role":"assistant","at":"..."}
+{"type":"message_update","id":"a1","text":"Reading the auth module…","at":"..."}
+{"type":"tool_start","id":"t1","name":"readFile","input":{"path":"src/auth.ts"},"at":"..."}
+{"type":"tool_end","id":"t1","name":"readFile","success":true,"durationMs":12,"at":"..."}
+{"type":"message_end","id":"a1","text":"Here are the findings…","at":"..."}
+{"type":"turn_end","request":"audit src/auth.ts","status":"complete","at":"..."}
+{"type":"result","status":"complete","result":"Here are the findings…","usage":{"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0}}
+```
+
+Every line is standalone valid JSON, so the stream pipes cleanly through `jq -c .`. The event types are `turn_start`, `message_start` / `message_update` / `message_end`, `tool_start` / `tool_end`, `retry`, `context_overflow`, and `turn_end`; each carries an ISO-8601 `at` timestamp. This mode is intended for harnesses driving Haze autonomously: the incremental, ever-changing output lets a supervisor show live progress and run stdout-based stagnation/loop detection, while the trailing `result` envelope remains the single source of truth for status, text, and usage. `text` and `json` outputs are unchanged.
 
 By default, Haze does **not** write the detailed LLM log files under `~/.haze/logs/` (they capture full prompts, messages, and tool I/O). File logging is only enabled with `haze --debug`, which also turns on the on-screen debug panel. Use the `/logs` command to review past log files once logging has been enabled.
 
