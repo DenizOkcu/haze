@@ -7,7 +7,7 @@ import {readSettings} from '../../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 
-export type HeadlessOutput = 'text' | 'json';
+export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
 export interface HeadlessOptions {
   prompt: string;
@@ -109,6 +109,13 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     recordTokenUsage: (u: TokenUsage) => {
       usage = accumulateTokenUsage(usage, u);
     },
+    // In stream-json mode, forward each agent event to stdout as one NDJSON line the moment it
+    // fires (turn_start, message_*, tool_*, retry, turn_end). This gives harnesses live progress
+    // and an ever-changing stdout tail for stagnation detection; the final result envelope is still
+    // printed below. Purely additive — segments/usage above still build that envelope.
+    onEvent: options.output === 'stream-json'
+      ? (event) => process.stdout.write(JSON.stringify(event) + '\n')
+      : undefined,
     log,
   };
 
@@ -124,7 +131,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     if (log) await endLog(log).catch(() => undefined);
   }
 
-  if (options.output === 'json') {
+  if (options.output === 'json' || options.output === 'stream-json') {
+    // For stream-json the agent events have already streamed above; this is the terminal line.
+    // It is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
     process.stdout.write(JSON.stringify({type: 'result', status, result, usage: pinnedUsage(usage)}) + '\n');
   } else if (status === 'complete') {
     process.stdout.write(result + (result.endsWith('\n') ? '' : '\n'));
