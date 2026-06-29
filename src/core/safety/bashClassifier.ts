@@ -30,7 +30,7 @@ export function classifyBashCommand(command: string): BashClassification {
   const trimmed = command.trim();
   const traits: BashTrait[] = [];
   const lower = trimmed.toLowerCase();
-  const complex = /[`$()]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/.test(trimmed);
+  const complex = /[`$()|]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/.test(trimmed);
 
   if (!trimmed) {
     return {riskLevel: 'unknown', traits: [], confidence: 'high', reason: 'empty command'};
