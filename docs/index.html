@@ -1310,12 +1310,12 @@
       <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
       <div class="head-meta" aria-hidden="true">
         <span>HAZE-CLI-001</span>
-        <span>REV 0.6.0</span>
+        <span>REV 0.7.0</span>
         <span>MIT</span>
       </div>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.6.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.7.0</a>
       </nav>
     </div>
   </header>
@@ -1327,7 +1327,7 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.6.0</div>
+            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.7.0</div>
             <h1 class="hero-h1">
               A CLI agent for Experts
               <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
@@ -1515,7 +1515,8 @@
             <p>Skills are handed over to the model.<br><strong>The LLM decides when to use a skill.</strong></p>
             <p>Skills are tools written by you.<br><strong>Create a skill if you have to do it multiple times.</strong></p>
             <p>Failures and repeated identical tool calls get recovery hints.<br><strong>Reuse what already happened, change inputs, or stop cleanly.</strong></p>
-            <p>Project instructions follow the files being touched.<br><strong>Global CLAUDE.md and AGENTS.md are loaded up front; nested files are discovered only inside their subtree.</strong></p>
+            <p>Project instructions follow the files being touched.<br><strong>Global CLAUDE.md and AGENTS.md are loaded up front; nested files are injected when discovered and reread when changed.</strong></p>
+            <p>Durable sessions stay useful without ballooning.<br><strong>Streaming updates are skipped on disk; large tool outputs become compact previews.</strong></p>
           </div>
         </div>
         <div class="specimen reveal" aria-label="Example tool block">
@@ -1652,7 +1653,7 @@
                 <span class="comp-name">fetch</span>
                 <span class="comp-part">HAZE-N-001</span>
               </div>
-              <p class="comp-desc">Read public http(s) URLs as Markdown, pretty JSON, or text with scheme, DNS, redirect, and private-address SSRF guards.</p>
+              <p class="comp-desc">Read public http(s) URLs as Markdown, pretty JSON, or text with scheme, redirect, private-address, and DNS-rebinding guards that pin validated connection IPs.</p>
             </div>
           </div>
 
@@ -1853,8 +1854,8 @@
               <td class="cmd-d">Print mode: run a single non-interactive turn with the full toolset, print the final reply, and exit (<code>0</code> = complete; non-zero = aborted/failed). Reads the prompt from <code>-p</code>, else from piped stdin (e.g. <code>echo "…" | haze</code>). Non-durable: <code>--continue</code> is ignored and no session is saved.</td>
             </tr>
             <tr>
-              <td class="cmd-c"><code>haze --output &lt;text|json&gt;</code></td>
-              <td class="cmd-d">Print-mode output format. <code>json</code> emits a single-line envelope <code>{ type, status, result, usage }</code> for scripting/CI; the <code>status</code> and exit code are authoritative.</td>
+              <td class="cmd-c"><code>haze --output &lt;text|json|stream-json&gt;</code></td>
+              <td class="cmd-d">Print-mode output format. <code>json</code> emits a single-line envelope <code>{ type, status, result, usage }</code> for scripting/CI; <code>stream-json</code> emits live NDJSON progress events and ends with the same result envelope. The <code>status</code> and exit code are authoritative.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td>
@@ -1885,7 +1886,7 @@
   <footer>
     <div class="container footer-grid">
       <div class="footer-colophon">
-        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.6.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
+        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.7.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 20</div>
         <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
       </div>
       <nav class="footer-links" aria-label="Footer">

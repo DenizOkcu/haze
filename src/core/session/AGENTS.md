@@ -15,11 +15,18 @@ Current entry types are:
 
 - `header` — session metadata.
 - `ui_message` — display message history.
-- `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state.
+- `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state, slimmed before write so large tool results become previews/metadata.
 - `work_state_snapshot` — structured work state.
 - `event` — lightweight structured lifecycle/tool/message events.
 
 Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt files.
+
+## Size policy
+
+- `appendSessionEntry` is the choke point for durable writes; keep session-size policy centralized there or in `sessionSlimming.ts`.
+- Do not persist streaming `message_update` events by default. They are UI progress, not durable resume state.
+- Keep completed messages, tool lifecycle events, work-state snapshots, and conversation snapshots useful for resume.
+- Large persisted tool outputs/errors should be replaced with previews, byte counts, and omission metadata. Active in-memory model context can stay richer than the persisted JSONL audit trail.
 
 ## Restore behavior
 
@@ -29,4 +36,4 @@ Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt 
 
 ## Tests
 
-Update `tests/core/sessionStore.test.ts` for persistence, restore, malformed-line, cwd hashing, and formatting changes.
+Update `tests/core/sessionStore.test.ts` for persistence, restore, malformed-line, cwd hashing, session slimming, and formatting changes.

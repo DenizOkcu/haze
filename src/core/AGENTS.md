@@ -14,7 +14,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `bashOutput/` — command-aware reduction of bash stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
 - `goal/` — user-request classification, session-goal state, completion/continuation prompts.
 - `safety/` — bash command trait/risk classification and URL SSRF guard.
-- `session/` — durable JSONL session store and restore helpers.
+- `session/` — durable JSONL session store, restore helpers, and disk-size slimming for streaming events/large tool outputs.
 - `subagent/` — independent tool-loop runner used by the `subagent` tool.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.

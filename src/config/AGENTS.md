@@ -8,7 +8,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types.
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
 - `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly.
-- `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files.
+- `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.
 - `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations.
 - `inputHistory.ts` persists prompt history.
 - `updateCheck.ts` checks npm/latest version; keep it non-fatal.
@@ -25,6 +25,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 
 - Startup order: `~/.claude/CLAUDE.md`, `~/.haze/AGENTS.md`, then ancestor `CLAUDE.md`/`AGENTS.md` from filesystem root to cwd.
 - Nested files below cwd are loaded lazily by `readScopedContextFilesForPath` when file tools operate in their subtree.
+- Context files carry optional `signature` values (`size:mtimeMs`) so callers can skip unchanged scoped guidance and reread changed guidance.
 - Each file is capped by `MAX_CONTEXT_FILE_CHARS` and diagnostics estimate tokens/hash duplicate content.
 - Display paths should be stable and user-friendly (`~`, relative cwd paths) because they appear in UI and model context.
 

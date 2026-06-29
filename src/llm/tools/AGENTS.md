@@ -18,8 +18,9 @@ Implementation helpers for Haze built-in tools.
 - Prevents concurrent mutations of the same path.
 - Tracks failed mutations and forces a fresh `readFile` before retry.
 - Lazily discovers nested `CLAUDE.md`/`AGENTS.md` instructions for touched subtrees.
+- Tracks loaded context-file signatures, serializes concurrent scoped discovery, queues newly discovered scoped files in `pendingContextFiles`, and notifies the UI when instruction files are read.
 
-Do not persist this state; it is valid only for one agent turn.
+Do not persist this state; it is valid only for one agent turn. If scoped context behavior changes, keep `config/contextFiles.ts`, `streaming.ts`, and tool-result tests aligned.
 
 ## Editing helpers
 

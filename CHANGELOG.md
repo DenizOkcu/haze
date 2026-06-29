@@ -2,17 +2,22 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-06-29
+
 ### Added
 
 - **`--output stream-json` for print mode.** `haze -p "…" --output stream-json` streams the run as newline-delimited JSON: public progress events (`turn_start`, `message_start`/`message_update`/`message_end`, `tool_start`/`tool_end`, `retry`, `context_overflow`, `turn_end`, each with an ISO-8601 `at` timestamp) are written to stdout as they happen, and the final line is the same `{type,status,result,usage}` envelope as `--output json`. Tool events omit raw inputs/outputs so captured stdout stays suitable for harness and CI logs. Previously print mode stayed silent until the end and emitted only that single envelope, so harnesses driving Haze headlessly had no live progress and could not run stdout-based stagnation/loop detection on a silent-but-alive run. Every line is standalone valid JSON (pipeable through `jq -c .`). `text` and `json` outputs are unchanged.
+- **Startup context visibility.** The interactive startup message now lists the context files sent with the system prompt, making it easier to verify whether global `CLAUDE.md`/`AGENTS.md` and workspace instructions were loaded.
+
+### Changed
+
+- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped. The exit code and JSON `status` are driven by the agent's authoritative terminal state (`complete`/`aborted`/`failed`) rather than by parsing the reply, so CI gating on the exit code is reliable. A bad or ambiguous `--model` selector reports a precise error and exits non-zero, `--debug` writes a JSONL log under `~/.haze/logs/`, and the `--output json` `usage` object is pinned to a documented set of fields.
+- **Scoped context refresh during turns.** Nested `CLAUDE.md`/`AGENTS.md` files discovered by file tools are injected into the next model step, tracked by signature, and reread when they change. Concurrent scoped-context discovery is serialized so unchanged instruction files are read once while still surfacing newly changed guidance.
+- **Smaller durable session files.** Session persistence now drops streaming `message_update` events and slims large tool outputs/errors in persisted `tool_end` events and `conversation_snapshot` tool results to previews plus byte counts. Sessions remain resumable while avoiding runaway JSONL growth from repeated streamed text or large file reads.
 
 ### Security
 
 - **Closed a DNS-rebinding TOCTOU in the `fetch` tool.** `urlGuard.validateUrl` resolved a hostname and confirmed every address was public, but the subsequent global `fetch` re-resolved the hostname at connect time, so an attacker-controlled DNS server could answer validation with a public IP and connect with an internal/cloud-metadata IP — fully bypassing the SSRF guard that exists precisely to stop that. `fetchUrlContent` now pins each connection (and each redirect hop) to the already-validated IP via a small stdlib transport that preserves the original `Host` header and TLS `servername`/cert verification, with no second DNS lookup between validation and connect. The post-fetch re-validation was removed as it re-resolved DNS against an already-pinned connection and only reopened the race. Literal-IP URLs keep using the global `fetch` (no rebinding surface).
-
-## 0.6.x
-
-- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped. The exit code and JSON `status` are driven by the agent's authoritative terminal state (`complete`/`aborted`/`failed`) rather than by parsing the reply, so CI gating on the exit code is reliable. A bad or ambiguous `--model` selector reports a precise error and exits non-zero, `--debug` writes a JSONL log under `~/.haze/logs/`, and the `--output json` `usage` object is pinned to a documented set of fields.
 
 ## 0.6.0 - 2026-06-21
 

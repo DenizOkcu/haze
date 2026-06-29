@@ -2,20 +2,19 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.6.0
+## What's new in 0.7.0
 
-Haze 0.6.0 adds an AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, MCP server support, and a unified config-picker UX.
+Haze 0.7.0 focuses on headless observability, safer web fetches, more reliable scoped project instructions, and durable sessions that stay small enough to keep.
 
-- **MCP servers.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers with `/mcp` and expose their tools alongside the built-ins. A Context7 preset ships built-in for up-to-date library docs; custom `http`/`sse`/`stdio` servers are supported too. Clients open per turn and close when it ends, a failing server is isolated, and MCP tools never shadow built-ins.
-- **Optional LSP navigation.** Configure stdio language servers with `/lsp` (TypeScript, Rust, Python, Go, and PHP presets). Read-only `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, and `lspReferences` tools are exposed only when an enabled server command is on `PATH`; otherwise Haze falls back to `grep`, `listFiles`, and `readFile`.
-- **Unified config pickers.** `/provider`, `/lsp`, `/mcp`, and `/skills` are now interactive pickers with autocomplete, presets, and masked API-key entry, replacing the old subcommand syntax.
-- **ToolLoopAgent core.** The main turn runs on the AI SDK v6 `ToolLoopAgent` while preserving compact terminal tool/text rendering and the loop guardrails (idle timeout, tool-loop detection, edit recovery, context-overflow auto-compact).
-- **Cleaner transcripts.** Assistant text and tool blocks alternate cleanly during multi-step turns.
-- **Context breakdown.** `/context` shows estimated system-prompt, project-context, tool (including MCP), and message tokens for the current request.
-- **Startup update check.** Haze quietly surfaces a newer published version when one exists.
+- **Live print-mode JSON streams.** `haze -p "…" --output stream-json` emits newline-delimited progress events (`turn_start`, message events, tool events, retries, context overflow, `turn_end`) as they happen, then finishes with the same result envelope as `--output json`. Tool event payloads omit raw inputs/outputs so CI logs stay safe and compact.
+- **Pinned-connection `fetch` safety.** Public URL fetching now pins each request and redirect hop to the IP address that passed validation, preserving the original `Host`/TLS server name and closing a DNS-rebinding race between URL validation and connection.
+- **Scoped instructions refresh during a turn.** When file tools discover nested `CLAUDE.md`/`AGENTS.md`, Haze injects those instructions into the next model step, tracks file signatures, and rereads changed scoped guidance instead of assuming the first version stays valid forever.
+- **Smaller durable sessions.** Session JSONL no longer persists every streaming `message_update`, and large tool outputs in persisted events/snapshots are replaced with previews plus size metadata. Resume remains useful while `~/.haze/sessions` avoids runaway growth.
+- **Startup context visibility.** The opening system message now lists which context files were sent with the system prompt, making global/project instruction loading easier to verify.
 
 Previous releases:
 
+- **0.6.0** — AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, MCP server support, unified config pickers, cleaner transcripts, `/context`, and startup update checks.
 - **0.5.0** — `fetch` tool for public URLs (Markdown/JSON/text, SSRF-protected), removed all provider env vars (config via `/provider`/`/model`/`/settings`), debug-only LLM logs, command-aware output reduction, Markdown rendering in the CLI, scoped nested context files, and auto-clearing completed tasks.
 - **0.4.0** — 3-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, leaner command surface, docs site additions.
 - **0.3.0** — Docs site redesign, task bar moves above the activity spinner, tasks auto-clear between sessions.
@@ -297,6 +296,8 @@ Use them for parallel investigation across separate areas of a codebase. Do not 
 
 Haze saves durable workspace sessions in `~/.haze/sessions`. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
 
+Session files are optimized for resume and audit, not token-by-token playback: completed user/assistant messages, tool lifecycle events, conversation snapshots, and work-state snapshots are persisted, but streaming `message_update` events are skipped. Large persisted tool outputs are replaced with previews and byte counts so a resumed model can reread current files instead of carrying stale megabytes forward.
+
 Long turns use bounded tool slices. Older successful tool results are compacted while failures and recent evidence remain verbatim, synthetic Haze control nudges are not persisted as user requests, and token-pressure compaction preserves the structured work state.
 
 Haze loads project instructions from:
@@ -305,7 +306,7 @@ Haze loads project instructions from:
 - `~/.haze/AGENTS.md`
 - `CLAUDE.md` / `AGENTS.md` files from filesystem root to the current workspace
 
-At the same scope, `AGENTS.md` overrides `CLAUDE.md`; global Haze guidance in `~/.haze/AGENTS.md` overrides global Claude guidance in `~/.claude/CLAUDE.md`. Nested `CLAUDE.md` / `AGENTS.md` files below the workspace are scoped: Haze surfaces them only when file tools operate inside that directory or its subdirectories, and mutating tools stop once so the model can review newly discovered scoped instructions before editing.
+At the same scope, `AGENTS.md` overrides `CLAUDE.md`; global Haze guidance in `~/.haze/AGENTS.md` overrides global Claude guidance in `~/.claude/CLAUDE.md`. Nested `CLAUDE.md` / `AGENTS.md` files below the workspace are scoped: Haze surfaces them only when file tools operate inside that directory or its subdirectories, injects newly discovered scoped guidance into the next model step, and mutating tools stop once so the model can review it before editing. Scoped context files are tracked by signature, so changed nested guidance can be read again later in the same session.
 
 Use `AGENTS.md` for project conventions, commands, architecture notes, and things future-you does not want to re-explain. `/init` is intentionally budget-aware: it does one small discovery pass, preserves useful existing guidance, and asks for a compact file because context files are injected into every request.
 
@@ -315,7 +316,7 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and thing
 - File tools follow `.gitignore` by default.
 - Ignored files require an explicit override.
 - Bash commands are classified and shown with working-directory metadata, but Haze does not use command confirmation gates.
-- The `fetch` tool reads public `http(s)` URLs only; private, loopback, link-local, and cloud-metadata hosts and non-`http(s)` schemes are blocked, re-checked on every redirect and after DNS resolution.
+- The `fetch` tool reads public `http(s)` URLs only; private, loopback, link-local, and cloud-metadata hosts and non-`http(s)` schemes are blocked, and each redirect hop is connected to the already validated public IP to avoid DNS-rebinding races.
 - Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.
 - Haze is powerful enough to help and dumb enough to deserve supervision. Ideal software, basically.
 

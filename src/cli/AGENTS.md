@@ -5,7 +5,7 @@ CLI and terminal UI orchestration instructions.
 ## Responsibilities
 
 - `index.ts` is the Commander entrypoint: parse flags, load package version, and dispatch to chat or headless command mode.
-- `commands/chat.tsx` owns the interactive Ink screen, session lifecycle, slash command wiring, mode/picker state, input history, context refresh, tasks display, token display, abort handling, and debug logging.
+- `commands/chat.tsx` owns the interactive Ink screen, session lifecycle, slash command wiring, mode/picker state, input history, context refresh/signature tracking, tasks display, token display, abort handling, and debug logging.
 - `commands/runCommand.ts` is the non-interactive/headless path; keep behavior aligned with interactive turns where practical.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
 - `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, and `wizardSuggestions.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests.
@@ -15,7 +15,7 @@ CLI and terminal UI orchestration instructions.
 
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.
 - Keep refs for mutable turn/session machinery (`conversationRef`, abort controllers, logs, work state) when React rerenders must not reset them.
-- `messages` and `liveMessages` are display state. Durable model conversation is `ModelMessage[]` in the conversation ref/session snapshots.
+- `messages` and `liveMessages` are display state. Durable model conversation is `ModelMessage[]` in the conversation ref/session snapshots; session persistence may slim large values for disk without changing active in-memory turn state.
 - Preserve display ordering when adding/updating messages; tests rely on stable ordering.
 - Do not expose provider keys or secret settings in UI text.
 
@@ -32,6 +32,7 @@ CLI and terminal UI orchestration instructions.
 - `runAgentTurn` is called with callbacks from `chat.tsx`; keep callback contracts stable.
 - Interactive and headless paths should both inspect `TurnResult.status` instead of sniffing assistant text.
 - Abort should stop the current turn cleanly and restore user control without corrupting session snapshots.
+- Scoped context files discovered by tools are injected into the next model step through `runAgentTurn`; keep startup context display, signature maps, and tool UI “understanding:” rows in sync.
 - Follow-up queue behavior must preserve user-submitted text and not lose messages during busy turns.
 
 ## Tests

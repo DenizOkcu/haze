@@ -71,8 +71,8 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 - No default provider/model. Users configure providers via `/provider`; no user-facing env vars for provider/model settings.
 - File tools are confined to `process.cwd()`, respect `.gitignore` by default, and skip `.git`/`node_modules` walking.
 - Output is aggressively bounded/reduced but raw large outputs may be retrievable by handle.
-- Session state is JSONL under `~/.haze/sessions`; file LLM logging under `~/.haze/logs` is enabled only by `--debug`.
-- Context files: global `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`; ancestor `CLAUDE.md`/`AGENTS.md` load at startup; nested subtree files load lazily when tools touch that subtree.
+- Session state is JSONL under `~/.haze/sessions`; persisted sessions skip streaming `message_update` spam and slim large tool outputs, while file LLM logging under `~/.haze/logs` is enabled only by `--debug`.
+- Context files: global `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`; ancestor `CLAUDE.md`/`AGENTS.md` load at startup; nested subtree files load lazily when tools touch that subtree and are reread when their signature changes.
 - Skills are Markdown instruction packages under `~/.haze/skills/<name>/SKILL.md`; they do not execute code.
 
 ## Testing expectations
