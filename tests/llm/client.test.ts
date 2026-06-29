@@ -26,11 +26,12 @@ async function loadClient(
 }
 
 function config(overrides: Partial<ModelRuntimeConfig> & Partial<ModelRuntimeConfig['capabilities']> = {}): ModelRuntimeConfig {
+  const {providerName, baseURL, modelName, cacheKey, ...capabilityOverrides} = overrides;
   return {
-    providerName: 'test',
-    baseURL: 'https://example.test/v1',
-    modelName: 'test-model',
-    cacheKey: 'stable-cache-key',
+    providerName: providerName ?? 'test',
+    baseURL: baseURL ?? 'https://example.test/v1',
+    modelName: modelName ?? 'test-model',
+    cacheKey: cacheKey ?? 'stable-cache-key',
     capabilities: {
       reportsCacheUsage: false,
       supportsPromptCacheKey: false,
@@ -39,7 +40,7 @@ function config(overrides: Partial<ModelRuntimeConfig> & Partial<ModelRuntimeCon
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
       supportsExtendedThinking: false,
-      ...capabilities,
+      ...capabilityOverrides,
     },
   };
 }
