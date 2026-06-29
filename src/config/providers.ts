@@ -97,6 +97,15 @@ export function sameModelResolution(a: ModelResolution, b: ModelResolution): boo
   return a.status === 'found' && b.status === 'found' && a.provider.name === b.provider.name && a.model === b.model;
 }
 
+export function formatModelSlot(settings: HazeSettings, label: string, slot: ModelSlotName): string {
+  const configured = settings.models?.[slot]?.trim();
+  if (!configured) return `${label}: not set (inherits primary)`;
+  const resolved = resolveModelSlot(settings, slot);
+  return resolved.status === 'found'
+    ? `${label}: ${resolved.provider.name}:${resolved.model}`
+    : `${label}: ${configured} (not found)`;
+}
+
 export function resolveModelSelector(settings: HazeSettings, selector: string): ModelResolution {
   const trimmed = selector.trim();
   if (!trimmed) return {status: 'missing'};

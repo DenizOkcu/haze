@@ -70,10 +70,23 @@ describe('formatSettingsSummary', () => {
     mocks.loadSkillRegistry.mockResolvedValue(skills());
     const out = await formatSettingsSummary({model: 'm'}, []);
     expect(out).toContain('Provider: not configured');
-    expect(out).toContain('Model: m');
+    expect(out).toContain('Model: not set');
     expect(out).toContain('Base URL: not configured');
     expect(out).toContain('API key: missing');
     expect(out).toContain('Configured providers: none');
+  });
+
+  it('uses models.primary when set for provider and model lines', async () => {
+    mocks.loadSkillRegistry.mockResolvedValue(skills());
+    const settings: HazeSettings = {
+      ...baseSettings,
+      provider: 'openai',
+      model: 'gpt-4o',
+      models: {primary: 'local:llama3.1'},
+    };
+    const out = await formatSettingsSummary(settings, []);
+    expect(out).toContain('Provider: local');
+    expect(out).toContain('Model: llama3.1');
   });
 
   it('marks disabled skills and servers', async () => {

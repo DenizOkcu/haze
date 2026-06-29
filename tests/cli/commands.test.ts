@@ -90,6 +90,19 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
   });
 
+  it('rejects /model lightweight without a selector', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model lightweight', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Provide a model selector'));
+  });
+
   it('sets the lightweight slot with /model lightweight <selector>', async () => {
     const ctx = mockContext({
       settings: {

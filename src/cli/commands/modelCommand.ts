@@ -3,10 +3,11 @@ import type {CommandContext, CommandResult} from './commands.js';
 
 const SLOT_NAMES: ModelSlotName[] = ['primary', 'lightweight', 'fallback'];
 
-function parseModelCommandArgs(value: string): {slot: ModelSlotName; selector: string} {
+function parseModelCommandArgs(value: string): {slot: ModelSlotName; selector: string} | undefined {
   const args = value.slice('/model '.length).trim();
   const parts = args.split(/\s+/);
-  if (parts.length >= 2 && SLOT_NAMES.includes(parts[0] as ModelSlotName)) {
+  if (SLOT_NAMES.includes(parts[0] as ModelSlotName)) {
+    if (parts.length < 2) return undefined;
     return {slot: parts[0] as ModelSlotName, selector: parts.slice(1).join(' ')};
   }
   return {slot: 'primary', selector: args};
@@ -26,7 +27,12 @@ export async function handleModelCommand(value: string, ctx: CommandContext): Pr
   }
   if (!value.startsWith('/model ')) return undefined;
 
-  const {slot, selector} = parseModelCommandArgs(value);
+  const parsed = parseModelCommandArgs(value);
+  if (!parsed) {
+    ctx.addSystemMessage('Provide a model selector, e.g. /model lightweight openai:gpt-4o-mini.');
+    return 'handled';
+  }
+  const {slot, selector} = parsed;
   const resolved = resolveModelSelector(ctx.settings, selector);
   if (resolved.status === 'ambiguous') {
     ctx.addSystemMessage(`Model ${resolved.model} exists on multiple providers: ${resolved.providers.map(provider => modelSelector(provider, resolved.model)).join(', ')}`);
