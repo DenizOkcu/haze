@@ -1,0 +1,46 @@
+# src/llm/tools/AGENTS.md
+
+Implementation helpers for Haze built-in tools.
+
+## Shared filesystem/path rules
+
+- Use `workspaceFile.ts` and `utils/path.ts` helpers for every workspace path. Do not manually join unchecked user paths to cwd.
+- Respect `.gitignore` by default. Only honor ignored paths when the tool input explicitly allows it.
+- Keep path values in results workspace-relative and stable for model/UI consumption.
+- Mutating helpers must call scoped-context mutation checks before writing.
+
+## Turn-scoped tool context
+
+`toolContext.ts` owns per-turn execution state on AI SDK `experimental_context`:
+
+- Deduplicates identical read-only tool calls until a mutation epoch changes.
+- Deduplicates identical in-flight calls.
+- Prevents concurrent mutations of the same path.
+- Tracks failed mutations and forces a fresh `readFile` before retry.
+- Lazily discovers nested `CLAUDE.md`/`AGENTS.md` instructions for touched subtrees.
+
+Do not persist this state; it is valid only for one agent turn.
+
+## Editing helpers
+
+- `editMatch.ts` implements unique exact replacements with tolerances for readFile line prefixes and trailing-whitespace-only differences when still unique.
+- Multiple replacements in one file should be one `editFile` call; overlapping edits must be rejected.
+- `replaceLines` is the recovery path when exact text is stale or ambiguous.
+- Diff output should be compact and line-limited by `INLINE_DIFF_LINE_LIMIT`.
+
+## Bash/fetch/output helpers
+
+- `bashTool.ts` runs `bash -lc`, classifies commands, parses validation output, reduces stdout/stderr, stores raw handles where needed, and returns structured metadata.
+- `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
+- `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
+- `grepParse.ts` parses ripgrep JSON; prefer structured matches over plain text.
+
+## Failure results
+
+- Use `HazeToolError` and `structuredToolFailure` for recoverable/actionable failures.
+- Include `reasonCode`, `recoverable`, and `suggestedNextStep` when the model can retry safely.
+- Avoid throwing raw filesystem/process errors directly to tool output.
+
+## Tests
+
+Most behavior here is covered by `tests/hazeTools/**` plus focused `tests/llm/**` tests. Add regression tests for every new edge case in editing, path safety, output capping, or deduplication.
