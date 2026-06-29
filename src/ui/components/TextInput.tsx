@@ -35,6 +35,8 @@ export function TextInput({
   onCancel,
   onEscape,
   onToggleTasks,
+  onTogglePlanMode,
+  accentColor,
   onSubmit
 }: {
   placeholder?: string;
@@ -50,6 +52,8 @@ export function TextInput({
   onCancel?: () => void;
   onEscape?: () => void;
   onToggleTasks?: () => void;
+  onTogglePlanMode?: () => void;
+  accentColor?: string;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -154,6 +158,11 @@ export function TextInput({
       draft.current = '';
       nextPasteId.current = 1;
       onEscape?.();
+      return;
+    }
+
+    if (key.shift && key.tab) {
+      onTogglePlanMode?.();
       return;
     }
 
@@ -269,7 +278,7 @@ export function TextInput({
       </Text>)}
     </Box>}
     {value.length === 0 ? <Text wrap="truncate-end">
-      <Text color={theme.purple}>› </Text>
+      <Text color={accentColor ?? theme.purple}>› </Text>
       <Text inverse> </Text>
       <Text color={theme.muted} dimColor> {placeholder ?? 'Type a message...'}</Text>
     </Text> : visibleLines.map((line, index) => {
@@ -280,7 +289,7 @@ export function TextInput({
       const cursorChar = isCursorLine ? line.text[lineCursor] ?? ' ' : '';
       const afterCursor = isCursorLine ? line.text.slice(lineCursor + 1) : '';
       return <Text key={`${line.start}-${absoluteLineIndex}`} wrap="truncate-end">
-        <Text color={absoluteLineIndex === 0 ? theme.purple : theme.muted}>{absoluteLineIndex === 0 ? '› ' : '  '}</Text>
+        <Text color={absoluteLineIndex === 0 ? (accentColor ?? theme.purple) : theme.muted}>{absoluteLineIndex === 0 ? '› ' : '  '}</Text>
         {isCursorLine ? <>
           {beforeCursor}
           <Text inverse>{cursorChar}</Text>
