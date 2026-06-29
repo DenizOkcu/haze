@@ -1,4 +1,4 @@
-import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
@@ -244,6 +244,54 @@ describe('handleSlashCommand', () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/compact', ctx)).toBe('handled');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Compaction is unavailable'));
+  });
+});
+
+describe('handleSlashCommand /memory', () => {
+  let memoryTmp: string;
+  let originalCwd: string;
+
+  beforeEach(async () => {
+    memoryTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-memory-cmd-'));
+    originalCwd = process.cwd();
+    process.chdir(memoryTmp);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    await fs.remove(memoryTmp);
+  });
+
+  it('lists memory entries for the current workspace', async () => {
+    const {storeMemory} = await import('../../src/core/memory/memoryStore.js');
+    await storeMemory({key: 'convention', value: 'Use async/await everywhere.', tags: ['style']});
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/memory', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('convention'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Use async/await everywhere.'));
+  });
+
+  it('clears workspace memory for /memory --clear', async () => {
+    const {storeMemory, listMemory} = await import('../../src/core/memory/memoryStore.js');
+    await storeMemory({key: 'delete-me', value: 'x', tags: []});
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/memory --clear', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith('Workspace memory cleared.');
+    expect(await listMemory()).toHaveLength(0);
+  });
+
+  it('reports no entries when memory is empty', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/memory', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('No memory entries'));
+  });
+
+  it('/memory appears in help', async () => {
+    const ctx = mockContext();
+    await handleSlashCommand('/help', ctx);
+    const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(msg).toContain('/memory');
+    expect(msg).toContain('/memory --clear');
   });
 });
 

@@ -4,6 +4,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
 import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
+import {clearMemory, formatMemoryList, listMemory} from '../../core/memory/memoryStore.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
 import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
@@ -75,6 +76,16 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},
   {match: exact('/skills'), run: (_args, ctx) => { ctx.setMode('skills'); ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.'); return HANDLED; }},
+  {match: value => value === '/memory' ? {args: ''} : value.startsWith('/memory ') ? {args: value.slice('/memory '.length).trim()} : false, run: async (args, ctx) => {
+    if (args === '--clear') {
+      await clearMemory();
+      ctx.addSystemMessage('Workspace memory cleared.');
+      return HANDLED;
+    }
+    const entries = await listMemory();
+    ctx.addSystemMessage(formatMemoryList(entries));
+    return HANDLED;
+  }},
 ];
 
 export async function handleSlashCommand(

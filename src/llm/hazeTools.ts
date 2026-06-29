@@ -22,6 +22,7 @@ import {prepareWorkspaceExisting, prepareWorkspaceMutation, prepareWorkspaceRead
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
+import {searchMemory, storeMemory} from '../core/memory/memoryStore.js';
 
 const execFile = promisify(execFileCallback);
 
@@ -359,6 +360,34 @@ export const hazeTools = {
   fetch: fetchTool,
 
   bash: bashTool,
+
+  memory: tool({
+    description: 'Persistent workspace memory. Store facts a future session would not derive from AGENTS.md or the codebase directly: user corrections, project conventions, and recurring architectural decisions. Search returns substring matches across keys, values, and tags.',
+    inputSchema: z.discriminatedUnion('operation', [
+      z.object({
+        operation: z.literal('store'),
+        key: z.string().min(1).describe('Short label for the memory entry'),
+        value: z.string().min(1).describe('The fact, convention, or correction to remember'),
+        tags: z.array(z.string()).optional().describe('Optional lowercase tags to improve searchability, e.g. ["convention", "testing"]'),
+      }),
+      z.object({
+        operation: z.literal('search'),
+        query: z.string().min(1).describe('Search query matched against key, value, and tags'),
+      }),
+    ]),
+    execute: async input => {
+      try {
+        if (input.operation === 'store') {
+          const entry = await storeMemory({key: input.key, value: input.value, tags: input.tags});
+          return {ok: true, operation: 'store', entry};
+        }
+        const entries = await searchMemory(input.query);
+        return {ok: true, operation: 'search', entries};
+      } catch (error) {
+        return structuredToolFailure('memory', error, 'Retry or use /memory to inspect workspace memory.', undefined);
+      }
+    },
+  }),
 
 };
 

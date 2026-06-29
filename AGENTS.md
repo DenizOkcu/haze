@@ -75,7 +75,8 @@ Notes:
   - `llm/` — model client, prompts, and tool definitions.
     - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
-    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`.
+    - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`, `memory`.
+- `core/memory/memoryStore.ts` persists workspace memory as JSONL under `~/.haze/memory/<cwd-hash>/memory.jsonl` with atomic writes and a 200-entry cap; `systemPrompt.ts` injects the last 20 entries at session start.
     - `lspTools.ts`/`lsp.ts` provide optional read-only LSP navigation via installed stdio language servers.
     - `mcp.ts` loads tools from configured Model Context Protocol servers (`@ai-sdk/mcp`) into the toolset per turn.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.
@@ -231,12 +232,5 @@ If validation is skipped, state clearly why in the final response.
 - `~/.haze/settings.json` may contain provider keys; do not read or print it unless the user explicitly asks and understands the sensitivity.
 - This repo’s local `.haze/` runtime data is ignored for a reason; avoid inspecting ignored runtime files unless explicitly requested.
 - Haze intentionally has no confirmation gates around bash; commands are classified and displayed, but agents should still avoid irrelevant destructive actions.
-
-## Useful references while working
-
-- README sections: “Agent tools”, “Subagents”, “Context files”, “Safety model”, “Local development”, “Release”.
-- `src/llm/systemPrompt.ts` for the model-facing operating contract.
-- `src/llm/initPrompt.ts` for how `/init` should analyze and update this file.
-- `tests/` for expected behavior; many modules expose small internals specifically to make tests practical.
 
 Update this file whenever project conventions, scripts, architecture, tool contracts, or release process materially change.

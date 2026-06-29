@@ -31,7 +31,7 @@ if (traceIndex >= 0) {
   const messages = raw.messages ?? [];
   const pruned = compactToolHistory(messages);
   const compacted = compactModelMessages(pruned.messages, {tokenBudget: 4_000});
-  const system = buildSystemPrompt([], reportSession);
+  const system = await buildSystemPrompt([], reportSession);
   process.stdout.write(`${JSON.stringify({
     trace: tracePath,
     before: contextBreakdown({system, messages, tools: hazeTools}),
@@ -45,7 +45,7 @@ if (traceIndex >= 0) {
 }
 
 const files = await loadFiles(args);
-const system = buildSystemPrompt(files, reportSession);
+const system = await buildSystemPrompt(files, reportSession);
 const breakdown = contextBreakdown({system, contextFiles: files, messages: [], tools: hazeTools});
 const summary = summarizeContextDiagnostics(files);
 process.stdout.write(`${JSON.stringify({breakdown, summary}, null, 2)}\n`);

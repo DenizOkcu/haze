@@ -8,7 +8,8 @@ Haze 0.6.0 adds an AI SDK-native ToolLoopAgent core, optional LSP semantic navig
 
 - **MCP servers.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers with `/mcp` and expose their tools alongside the built-ins. A Context7 preset ships built-in for up-to-date library docs; custom `http`/`sse`/`stdio` servers are supported too. Clients open per turn and close when it ends, a failing server is isolated, and MCP tools never shadow built-ins.
 - **Optional LSP navigation.** Configure stdio language servers with `/lsp` (TypeScript, Rust, Python, Go, and PHP presets). Read-only `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, and `lspReferences` tools are exposed only when an enabled server command is on `PATH`; otherwise Haze falls back to `grep`, `listFiles`, and `readFile`.
-- **Unified config pickers.** `/provider`, `/lsp`, `/mcp`, and `/skills` are now interactive pickers with autocomplete, presets, and masked API-key entry, replacing the old subcommand syntax.
+- **Persistent workspace memory.** Haze stores user corrections, project conventions, and recurring architectural decisions in `~/.haze/memory/<cwd-hash>/memory.jsonl` and injects the last 20 entries into the system prompt on each session start. Use the `memory` tool from within a turn, or `/memory` and `/memory --clear` to inspect or reset entries.
+- **Unified config pickers.** `/provider`, `/lsp`, `/mcp`, `/skills`, and `/memory` are interactive pickers or inspect commands with autocomplete, presets, and masked API-key entry where applicable, replacing the old subcommand syntax.
 - **ToolLoopAgent core.** The main turn runs on the AI SDK v6 `ToolLoopAgent` while preserving compact terminal tool/text rendering and the loop guardrails (idle timeout, tool-loop detection, edit recovery, context-overflow auto-compact).
 - **Cleaner transcripts.** Assistant text and tool blocks alternate cleanly during multi-step turns.
 - **Context breakdown.** `/context` shows estimated system-prompt, project-context, tool (including MCP), and message tokens for the current request.
@@ -83,7 +84,7 @@ API keys are entered in a masked prompt and sent as `Authorization: Bearer <valu
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
-Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/skills` (an interactive picker: generate a custom skill from a description, then enable/disable, validate, or remove it). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
+Haze is intentionally minimal: chat, local tools, context files, sessions, persistent workspace memory, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/skills` (an interactive picker: generate a custom skill from a description, then enable/disable, validate, or remove it). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
 ## Get productive immediately
 
@@ -181,6 +182,8 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /settings
 /settings open
 /logs [id]
+/memory
+/memory --clear
 /lsp
 /mcp
 /init
