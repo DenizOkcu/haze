@@ -53,8 +53,9 @@ describe('handleCostCommand', () => {
   it('shows per-model breakdown when entries exist', async () => {
     const usageDir = path.join(tmp, 'usage');
     await fs.ensureDir(usageDir);
+    const today = new Date();
     const entry = {
-      ts: new Date().toISOString(),
+      ts: today.toISOString(),
       provider: 'openai',
       model: 'gpt-4o-mini',
       inputTokens: 2000,
@@ -64,7 +65,8 @@ describe('handleCostCommand', () => {
       reasoningTokens: 0,
       cost: 0.45,
     };
-    await fs.appendFile(path.join(usageDir, '2026-06-27.jsonl'), `${JSON.stringify(entry)}\n`, 'utf8');
+    const fileName = `${today.toISOString().slice(0, 10)}.jsonl`;
+    await fs.appendFile(path.join(usageDir, fileName), `${JSON.stringify(entry)}\n`, 'utf8');
     const ctx = mockContext();
     await handleCostCommand('today', ctx, {baseDir: tmp});
     const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
