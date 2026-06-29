@@ -28,6 +28,10 @@ export type HazeToolContext = {
   pathsReadAfterFailedMutation?: Set<string>;
   inFlightMutationPaths?: Set<string>;
   loadedContextFilePaths?: Set<string>;
+  loadedContextFileSignatures?: Map<string, string>;
+  pendingContextFiles?: ContextFile[];
+  scopedContextDiscovery?: Promise<void>;
+  onContextFileRead?: (path: string) => void;
 };
 
 function stableJsonStringify(value: unknown): string {
@@ -58,11 +62,26 @@ export function hazeContext(context: ToolExecutionContext): HazeToolContext | un
  */
 export async function discoverScopedContext(filePath: string, context: ToolExecutionContext) {
   const ctx = hazeContext(context);
-  const loaded = ctx?.loadedContextFilePaths ?? new Set<string>();
-  const files = await readScopedContextFilesForPath(filePath, {cwd: workspaceRoot(), alreadyLoadedPaths: loaded});
-  if (ctx && !ctx.loadedContextFilePaths) ctx.loadedContextFilePaths = loaded;
-  for (const file of files) loaded.add(file.path);
-  return files;
+  const previousDiscovery = ctx?.scopedContextDiscovery;
+  let releaseDiscovery: () => void = () => undefined;
+  const currentDiscovery = new Promise<void>(resolve => { releaseDiscovery = resolve; });
+  if (ctx) ctx.scopedContextDiscovery = previousDiscovery ? previousDiscovery.catch(() => undefined).then(() => currentDiscovery) : currentDiscovery;
+  await previousDiscovery?.catch(() => undefined);
+
+  try {
+    const loaded = ctx?.loadedContextFilePaths ?? new Set<string>();
+    const signatures = ctx?.loadedContextFileSignatures;
+    const files = await readScopedContextFilesForPath(filePath, {cwd: workspaceRoot(), alreadyLoadedPaths: loaded, alreadyLoadedSignatures: signatures, onContextFileRead: ctx?.onContextFileRead});
+    if (ctx && !ctx.loadedContextFilePaths) ctx.loadedContextFilePaths = loaded;
+    for (const file of files) {
+      loaded.add(file.path);
+      if (file.signature) signatures?.set(file.path, file.signature);
+    }
+    if (ctx && files.length > 0) ctx.pendingContextFiles = [...(ctx.pendingContextFiles ?? []), ...files];
+    return files;
+  } finally {
+    releaseDiscovery();
+  }
 }
 
 /** Attach discovered scoped instructions to a tool result, if any. */

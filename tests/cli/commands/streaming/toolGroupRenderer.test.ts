@@ -119,6 +119,17 @@ describe('createToolGroupRenderer', () => {
     expect(lastText).toContain('12 lines');
   });
 
+  it('renders AGENTS.md and CLAUDE.md reads inside the active tool group without a result suffix', () => {
+    const deps = fakeDeps();
+    const r = createToolGroupRenderer(deps);
+    r.addContextFileRead('src/AGENTS.md');
+    r.addContextFileRead('src/CLAUDE.md');
+    const text = deps.updates.at(-1)?.update.text ?? '';
+    expect(text).toContain('  ✓ understanding: src/AGENTS.md');
+    expect(text).toContain('  ✓ understanding: src/CLAUDE.md');
+    expect(text).not.toContain('completed');
+  });
+
   it('stopToolTimer is safe to call repeatedly', () => {
     const deps = fakeDeps();
     const r = createToolGroupRenderer(deps);

@@ -110,7 +110,7 @@ describe('readFile tool', () => {
     const first = await readFile({path: 'pkg/src/a.ts'}, context);
     const second = await readFile({path: 'pkg/src/a.ts'}, context);
 
-    expect(first.applicableProjectInstructions).toEqual([{path: 'pkg/CLAUDE.md', content: 'pkg rules'}]);
+    expect(first.applicableProjectInstructions).toEqual([expect.objectContaining({path: 'pkg/CLAUDE.md', content: 'pkg rules'})]);
     expect(second).not.toHaveProperty('applicableProjectInstructions');
   });
 
@@ -228,7 +228,7 @@ describe('writeFile tool', () => {
 
     expect(result.ok).toBe(false);
     expect(result.reasonCode).toBe('scoped_instructions_discovered');
-    expect(result.applicableProjectInstructions).toEqual([{path: 'pkg/AGENTS.md', content: 'pkg rules'}]);
+    expect(result.applicableProjectInstructions).toEqual([expect.objectContaining({path: 'pkg/AGENTS.md', content: 'pkg rules'})]);
     expect(await fs.pathExists(path.join(tmp, 'pkg/src/a.ts'))).toBe(false);
   });
 

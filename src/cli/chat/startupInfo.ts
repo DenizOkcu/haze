@@ -2,6 +2,15 @@ import {activeModel, configuredProviders, providerHasKey} from '../../config/pro
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
+import type {ContextFile} from '../../config/contextFiles.js';
+
+export function startupContextInfo(contextFiles: ContextFile[]) {
+  const lines = contextFiles.map(file => `- ${file.path}`);
+  return [
+    'Context files sent with the system prompt',
+    ...(lines.length > 0 ? lines : ['- none']),
+  ].join('\n');
+}
 
 export function startupProviderInfo(settings: HazeSettings) {
   const selection = activeModel(settings);

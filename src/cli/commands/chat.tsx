@@ -38,7 +38,7 @@ import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
 import {createSessionRecorder} from '../chat/sessionRecorder.js';
-import {startupProviderInfo} from '../chat/startupInfo.js';
+import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {compactHomePath, displayMessagesFromConversation, estimateConversationTokens, formatTokenCount, toolCallCount} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
@@ -104,6 +104,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const sessionStartRef = useRef<Date>(new Date());
   const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
+  const contextFileSignaturesRef = useRef<Map<string, string>>(new Map());
   const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
@@ -131,24 +132,22 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [mcpDraft, setMcpDraft] = useState<Partial<HazeMcpServer>>({});
 
   useEffect(() => {
-    Promise.all([readSettings(), currentBranchName()]).then(([next, branch]) => {
+    Promise.all([
+      readSettings().catch(() => ({} as HazeSettings)),
+      currentBranchName().catch(() => undefined),
+      readContextFiles().catch(() => [] as ContextFile[]),
+    ]).then(([next, branch, files]) => {
       setSettings(next);
       setBranchName(branch);
-      setMessages(m => [...m, {role: 'system', text: startupProviderInfo(next)}]);
-    }).catch(() => {
-      currentBranchName().then(branch => {
-        setBranchName(branch);
-        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
-      }).catch(() => {
-        setMessages(m => [...m, {role: 'system', text: startupProviderInfo({})}]);
-      });
-    });
+      setContextFiles(files);
+      contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+      setMessages(m => [...m, {role: 'system', text: `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
+    }).catch(() => undefined);
     initializeSession().catch(error => {
       const text = error instanceof Error ? error.message : String(error);
       setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
     });
     readInputHistory().then(setInputHistory).catch(() => undefined);
-    readContextFiles().then(setContextFiles).catch(() => undefined);
     refreshSkills().catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
     if (version) {
@@ -204,6 +203,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function startNewSession(message = 'Started a new session.') {
     clearToolOutputs();
+    contextFileSignaturesRef.current = new Map(contextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
     workStateRef.current = undefined;
     sessionStartRef.current = new Date();
     if (noSession) {
@@ -974,7 +974,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
       compactConversation,
       runAgentTurn: (prompt, displayValue) => doAgentTurn(prompt, displayValue),
-      refreshContextFiles: async () => { const files = await readContextFiles().catch(() => contextFiles); setContextFiles(files); return files; },
+      refreshContextFiles: async () => {
+        const files = await readContextFiles().catch(() => contextFiles);
+        setContextFiles(files);
+        contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+        return files;
+      },
       updateSettings: async patch => {
         const next = await updateSettings(patch);
         setSettings(next);
@@ -1078,6 +1083,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         sessionRecorder.recordEvent(event);
       },
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
+      contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
     }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()});
   }

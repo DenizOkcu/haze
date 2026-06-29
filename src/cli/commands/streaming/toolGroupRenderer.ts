@@ -11,7 +11,7 @@ import {toolCallSummary, compact, formatElapsedTimeWhole, formatSeconds} from '.
 
 export type NativeToolCall = {toolCallId: string; toolName: string; input: unknown};
 
-export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number};
+export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number; showResult?: boolean};
 type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean; caption?: string};
 
 export interface ToolGroupRendererDeps {
@@ -35,6 +35,8 @@ export interface ToolGroupRenderer {
   stopToolTimer: () => void;
   /** Attach a dim caption line above the next tool group. */
   setGroupCaption: (text: string) => void;
+  /** Add a scoped context-file read to the active tool group display. */
+  addContextFileRead: (path: string) => void;
 }
 
 function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
@@ -61,7 +63,7 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
     summaryParts.push(formatElapsedTimeWhole(elapsedMs));
     const lines = [summaryParts.join(' · '), ...group.items.map(item => {
       const icon = item.status === 'running' ? '…' : item.status === 'success' ? '✓' : '✗';
-      const result = item.status === 'running' ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
+      const result = item.status === 'running' || item.showResult === false ? '' : ` — ${item.result ?? item.status}${item.durationMs == null ? '' : ` in ${formatSeconds(item.durationMs)}`}`;
       return `  ${icon} ${item.summary}${result}`;
     })];
     return (group.caption ? [group.caption, ...lines] : lines).join('\n');
@@ -120,5 +122,13 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
     toolGroup = createToolGroup();
   };
 
-  return {ensureToolItem, updateToolGroup, startFreshToolGroup, finalizeToolGroup, stopToolTimer, setGroupCaption};
+  const addContextFileRead = (path: string) => {
+    if (toolGroup.finalized) toolGroup = createToolGroup();
+    if (pendingCaption && toolGroup.items.length === 0) { toolGroup.caption = pendingCaption; pendingCaption = undefined; }
+    const now = Date.now();
+    toolGroup.items.push({id: `context-file-${now}-${Math.random().toString(36).slice(2)}`, summary: `understanding: ${path}`, status: 'success', startedAt: now, finishedAt: now, durationMs: 0, showResult: false});
+    updateToolGroup(true);
+  };
+
+  return {ensureToolItem, updateToolGroup, startFreshToolGroup, finalizeToolGroup, stopToolTimer, setGroupCaption, addContextFileRead};
 }

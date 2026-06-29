@@ -40,6 +40,35 @@ describe('readScopedContextFilesForPath', () => {
 
     expect(files.map(file => file.path)).toEqual(['packages/mobile/CLAUDE.md']);
   });
+
+  it('notifies when scoped context files are read', async () => {
+    await fs.outputFile(path.join(tmp, 'packages/api/CLAUDE.md'), 'api claude');
+    await fs.outputFile(path.join(tmp, 'packages/api/AGENTS.md'), 'api agents');
+    process.chdir(tmp);
+    const readPaths: string[] = [];
+
+    await readScopedContextFilesForPath('packages/api/src/server.ts', {onContextFileRead: path => readPaths.push(path)});
+
+    expect(readPaths).toEqual(['packages/api/CLAUDE.md', 'packages/api/AGENTS.md']);
+  });
+
+  it('skips already loaded scoped instructions until the file changes', async () => {
+    const agentsPath = path.join(tmp, 'packages/api/AGENTS.md');
+    await fs.outputFile(agentsPath, 'api agents');
+    process.chdir(tmp);
+    const first = await readScopedContextFilesForPath('packages/api/src/server.ts');
+    const signatures = new Map(first.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+
+    expect(await readScopedContextFilesForPath('packages/api/src/server.ts', {alreadyLoadedSignatures: signatures})).toEqual([]);
+
+    await fs.outputFile(agentsPath, 'api agents changed');
+    const changedTime = new Date(Date.now() + 2000);
+    await fs.utimes(agentsPath, changedTime, changedTime);
+    const changed = await readScopedContextFilesForPath('packages/api/src/server.ts', {alreadyLoadedSignatures: signatures});
+
+    expect(changed.map(file => file.path)).toEqual(['packages/api/AGENTS.md']);
+    expect(changed[0]?.content).toBe('api agents changed');
+  });
 });
 
 describe('contextFileDiagnostics', () => {

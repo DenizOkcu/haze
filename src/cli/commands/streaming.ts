@@ -3,7 +3,7 @@ import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {assembleRequestContext} from '../../llm/requestContext.js';
-import {type PromptSession} from '../../llm/systemPrompt.js';
+import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {toolCallSummary, toolResultSummary, formatSeconds} from './formatters.js';
@@ -24,6 +24,7 @@ import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, sho
 import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
+import type {HazeToolContext} from '../../llm/tools/toolContext.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -39,6 +40,16 @@ type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: un
 
 function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
   if (log) void logAppend(log, entry).catch(() => undefined);
+}
+
+function withScopedContextSystem(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
+  const files = context.pendingContextFiles ?? [];
+  if (files.length === 0) return messages;
+  context.pendingContextFiles = [];
+  return [
+    ...messages,
+    {role: 'system', content: `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`},
+  ];
 }
 
 export interface StreamCallbacks {
@@ -59,6 +70,7 @@ export interface StreamCallbacks {
   setWorkState?: (state: WorkState) => void;
   onTasksChanged?: () => void;
   log?: LlmLog;
+  contextFileSignatures?: Map<string, string>;
 }
 
 export async function runAgentTurn(
@@ -137,7 +149,8 @@ export async function runAgentTurn(
       callbacks.setLastAssistantText(text);
     };
 
-    const toolExecutionContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path))};
+    const contextFileSignatures = callbacks.contextFileSignatures ?? new Map(activeContextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+    const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path)};
     const startedTools = new Map<string, number>();
     const latestToolCalls = new Map<string, NativeToolCall>();
     let latestAccumulatedResponseMessages: ModelMessage[] = [];
@@ -188,20 +201,22 @@ export async function runAgentTurn(
       prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
         const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
-        if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return {toolChoice: 'none'};
-        if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) return {activeTools: ['readFile'] as Array<keyof typeof availableTools>};
+        const scopedMessages = withScopedContextSystem(messages, toolExecutionContext);
+        const messagesChanged = scopedMessages !== messages;
+        if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
+        if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof availableTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof availableTools>};
         if (repeatedToolNames.length > 0) {
           const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as string));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
           return activeTools.length > 0
-            ? {activeTools, messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))}
-            : {toolChoice: 'none', messages: withSyntheticControl(messages, repeatedToolCallPrompt(repeatedToolNames))};
+            ? {activeTools, messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
+            : {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
         }
         if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || toolOnlyStepCount(steps) >= MAIN_TOOL_ONLY_STEP_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
-          return {toolChoice: 'none', messages: withSyntheticControl(messages, toolLoopBudgetPrompt())};
+          return {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, toolLoopBudgetPrompt())};
         }
-        return undefined;
+        return messagesChanged ? {messages: scopedMessages} : undefined;
       },
       onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];

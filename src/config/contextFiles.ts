@@ -7,6 +7,12 @@ import {HAZE_DIR} from './paths.js';
 export interface ContextFile {
   path: string;
   content: string;
+  signature?: string;
+}
+
+export interface ReadContextFileOptions {
+  onContextFileRead?: (path: string) => void;
+  alreadyLoadedSignatures?: ReadonlyMap<string, string>;
 }
 
 export interface ContextFileDiagnostic {
@@ -37,6 +43,10 @@ function resolveBudgetThreshold(explicit?: number) {
 
 const CONTEXT_FILE_NAMES = ['CLAUDE.md', 'AGENTS.md'];
 
+function contextFileSignature(stat: {size: number; mtimeMs: number}) {
+  return `${stat.size}:${stat.mtimeMs}`;
+}
+
 /** Maximum characters of a context file included in every request's system context. */
 export const MAX_CONTEXT_FILE_CHARS = 20_000;
 
@@ -60,7 +70,7 @@ function displayPath(filePath: string) {
   return filePath;
 }
 
-async function readContextCandidates(candidates: string[], seen = new Set<string>()): Promise<ContextFile[]> {
+async function readContextCandidates(candidates: string[], seen = new Set<string>(), options: ReadContextFileOptions = {}): Promise<ContextFile[]> {
   const contextFiles: ContextFile[] = [];
   for (const candidate of candidates) {
     const absolute = path.resolve(candidate);
@@ -69,13 +79,20 @@ async function readContextCandidates(candidates: string[], seen = new Set<string
     if (!await fs.pathExists(absolute)) continue;
     const stat = await fs.stat(absolute).catch(() => null);
     if (!stat?.isFile()) continue;
+    const displayedPath = displayPath(absolute);
+    const signature = contextFileSignature(stat);
+    const loadedSignature = options.alreadyLoadedSignatures?.get(displayedPath) ?? options.alreadyLoadedSignatures?.get(absolute);
+    if (loadedSignature === signature) continue;
+    options.onContextFileRead?.(displayedPath);
     const content = await fs.readFile(absolute, 'utf8');
-    contextFiles.push({
-      path: displayPath(absolute),
+    const file = {
+      path: displayedPath,
       content: content.length > MAX_CONTEXT_FILE_CHARS
         ? `${content.slice(0, MAX_CONTEXT_FILE_CHARS)}\n\n[Context file truncated: ${content.length - MAX_CONTEXT_FILE_CHARS} characters omitted]`
         : content,
-    });
+      signature,
+    };
+    contextFiles.push(file);
   }
   return contextFiles;
 }
@@ -96,7 +113,7 @@ async function scopedDirsForPath(targetPath: string, cwd: string) {
   return dirs.reverse();
 }
 
-export async function readContextFiles(cwd = process.cwd()): Promise<ContextFile[]> {
+export async function readContextFiles(cwd = process.cwd(), options: ReadContextFileOptions = {}): Promise<ContextFile[]> {
   const candidates: string[] = [
     path.join(os.homedir(), '.claude', 'CLAUDE.md'),
     path.join(HAZE_DIR, 'AGENTS.md'),
@@ -106,10 +123,10 @@ export async function readContextFiles(cwd = process.cwd()): Promise<ContextFile
     for (const name of CONTEXT_FILE_NAMES) candidates.push(path.join(dir, name));
   }
 
-  return await readContextCandidates(candidates);
+  return await readContextCandidates(candidates, undefined, options);
 }
 
-export async function readScopedContextFilesForPath(targetPath: string, options: {cwd?: string; alreadyLoadedPaths?: Iterable<string>} = {}): Promise<ContextFile[]> {
+export async function readScopedContextFilesForPath(targetPath: string, options: {cwd?: string; alreadyLoadedPaths?: Iterable<string>; alreadyLoadedSignatures?: ReadonlyMap<string, string>; onContextFileRead?: (path: string) => void} = {}): Promise<ContextFile[]> {
   const cwd = options.cwd ?? process.cwd();
   const loaded = new Set(options.alreadyLoadedPaths ?? []);
   const candidates: string[] = [];
@@ -117,11 +134,13 @@ export async function readScopedContextFilesForPath(targetPath: string, options:
     for (const name of CONTEXT_FILE_NAMES) candidates.push(path.join(dir, name));
   }
   const alreadySeen = new Set<string>();
-  for (const loadedPath of loaded) {
-    if (loadedPath.startsWith('~/')) alreadySeen.add(path.resolve(os.homedir(), loadedPath.slice(2)));
-    else alreadySeen.add(path.resolve(cwd, loadedPath));
+  if (!options.alreadyLoadedSignatures) {
+    for (const loadedPath of loaded) {
+      if (loadedPath.startsWith('~/')) alreadySeen.add(path.resolve(os.homedir(), loadedPath.slice(2)));
+      else alreadySeen.add(path.resolve(cwd, loadedPath));
+    }
   }
-  return await readContextCandidates(candidates, alreadySeen);
+  return await readContextCandidates(candidates, alreadySeen, options);
 }
 
 export function contextFileDiagnostics(files: ContextFile[]): ContextFileDiagnostic[] {
