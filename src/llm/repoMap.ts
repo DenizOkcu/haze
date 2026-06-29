@@ -123,6 +123,7 @@ export async function extractSymbolsViaLsp(
     try {
       const values = await lspWorkspaceSymbols(server, query, limit);
       for (const value of values) {
+        if (!value.path) continue;
         results.push({
           name: value.name,
           kind: lspKindToSymbolKind(value.kind),
