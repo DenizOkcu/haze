@@ -5,15 +5,29 @@ import {dirname, join} from 'node:path';
 import {Command, Option} from 'commander';
 import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
+import {formatVersion} from '../utils/version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
+const rootDir = join(__dirname, '..', '..');
+const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'));
+
+// Dev/local builds carry a stamped commit in build-info.json (written by `npm run
+// build-info`/`build`) → decorate the version (e.g. 0.6.0@e5c03c0). Published releases
+// exclude that file, so they show the plain version. Missing/malformed → no suffix.
+let commit: string | undefined;
+try {
+  const info = JSON.parse(readFileSync(join(rootDir, 'build-info.json'), 'utf8')) as {commit?: unknown};
+  if (typeof info.commit === 'string' && info.commit) commit = info.commit;
+} catch {
+  // No build-info.json (published release or unbuilt checkout) → plain version.
+}
+const displayVersion = formatVersion(pkg.version, commit);
 
 const program = new Command();
 program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
-  .version(pkg.version)
+  .version(displayVersion)
   .option('--debug', 'show model/tool debug logs and write a detailed JSONL log to ~/.haze/logs/')
   .option('-c, --continue', 'resume the latest saved session for this workspace')
   .option('--no-session', 'run without saving or resuming a durable session')
@@ -73,7 +87,7 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
-  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), noSession: opts.session === false, version: pkg.version});
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), noSession: opts.session === false, version: displayVersion, baseVersion: pkg.version});
 });
 
 program.parseAsync().catch((error) => {
