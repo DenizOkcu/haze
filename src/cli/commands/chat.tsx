@@ -56,6 +56,7 @@ import {commandParts, isYesConfirmation} from './wizardInput.js';
 interface ChatOptions {
   debug?: boolean;
   version?: string;
+  baseVersion?: string;
   continueSession?: boolean;
   noSession?: boolean;
 }
@@ -71,7 +72,7 @@ async function currentBranchName() {
   }
 }
 
-function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
+function ChatScreen({debug = false, version, baseVersion, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const width = stdout.columns ?? process.stdout.columns ?? 80;
@@ -152,7 +153,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     refreshSkills().catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
     if (version) {
-      checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'})
+      checkForUpdate({currentVersion: baseVersion ?? version, packageName: '@denizokcu/haze'})
         .then(result => {
           if (result?.isOutdated) {
             setMessages(m => [...m, {role: 'system', text: `A new version of Haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
@@ -1200,7 +1201,7 @@ export async function chatCommand(options: ChatOptions = {}) {
     process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
   }
   await clearTasksFromStore().catch(() => undefined);
-  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} noSession={options.noSession} />);
+  const app = render(<ChatScreen debug={options.debug} version={options.version} baseVersion={options.baseVersion} continueSession={options.continueSession} noSession={options.noSession} />);
   await app.waitUntilExit();
   await clearTasksFromStore().catch(() => undefined);
 }

@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {compareVersions, isNewer, parseVersion} from '../../src/utils/version.js';
+import {compareVersions, formatVersion, isNewer, parseVersion} from '../../src/utils/version.js';
 
 describe('parseVersion', () => {
   it('parses a simple release', () => {
@@ -80,5 +80,20 @@ describe('isNewer', () => {
 
   it('is false when latest is a prerelease of the current release', () => {
     expect(isNewer('1.0.0-beta.1', '1.0.0')).toBe(false);
+  });
+});
+
+describe('formatVersion', () => {
+  it('decorates with a short commit for dev/local builds', () => {
+    expect(formatVersion('0.6.0', 'e5c03c0')).toBe('0.6.0@e5c03c0');
+  });
+
+  it('returns the plain version when there is no commit', () => {
+    expect(formatVersion('0.6.0')).toBe('0.6.0');
+    expect(formatVersion('0.6.0', undefined)).toBe('0.6.0');
+  });
+
+  it('ignores an empty commit string', () => {
+    expect(formatVersion('0.6.0', '')).toBe('0.6.0');
   });
 });

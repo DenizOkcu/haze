@@ -76,3 +76,16 @@ export function compareVersions(a: string, b: string): number {
 export function isNewer(latest: string, current: string): boolean {
   return compareVersions(latest, current) > 0;
 }
+
+/**
+ * Decorate a release version with a short commit for dev/local builds
+ * (e.g. `0.6.0` → `0.6.0@e5c03c0`). Published builds pass no commit and get the
+ * plain version back. Trivial and pure so it is unit-testable in isolation.
+ *
+ * Note: the `@`-decorated form is for human display only — it is NOT valid semver
+ * and must not reach `isNewer`/`parseVersion` (they would mis-parse it). Callers keep
+ * the base version for the update check.
+ */
+export function formatVersion(base: string, commit?: string): string {
+  return commit ? `${base}@${commit}` : base;
+}

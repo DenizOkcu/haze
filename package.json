@@ -30,9 +30,10 @@
     "examples"
   ],
   "scripts": {
-    "dev": "tsx src/cli/index.ts",
+    "dev": "npm run build-info && tsx src/cli/index.ts",
     "clean": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\"",
-    "build": "npm run clean && tsc",
+    "build-info": "node scripts/build-info.mjs",
+    "build": "npm run clean && npm run build-info && tsc",
     "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,7 +41,7 @@
     "lint:fix": "eslint src/ --fix",
     "typecheck": "tsc --noEmit",
     "context:report": "node --import tsx src/cli/contextReport.ts",
-    "haze": "tsx src/cli/index.ts",
+    "haze": "npm run build-info && tsx src/cli/index.ts",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
