@@ -233,11 +233,4 @@ If validation is skipped, state clearly why in the final response.
 - This repo’s local `.haze/` runtime data is ignored for a reason; avoid inspecting ignored runtime files unless explicitly requested.
 - Haze intentionally has no confirmation gates around bash; commands are classified and displayed, but agents should still avoid irrelevant destructive actions.
 
-## Useful references while working
-
-- README sections: “Agent tools”, “Subagents”, “Context files”, “Safety model”, “Local development”, “Release”.
-- `src/llm/systemPrompt.ts` for the model-facing operating contract.
-- `src/llm/initPrompt.ts` for how `/init` should analyze and update this file.
-- `tests/` for expected behavior; many modules expose small internals specifically to make tests practical.
-
 Update this file whenever project conventions, scripts, architecture, tool contracts, or release process materially change.
