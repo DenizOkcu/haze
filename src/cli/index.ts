@@ -19,7 +19,7 @@ program
   .option('--no-session', 'run without saving or resuming a durable session')
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
-  .addOption(new Option('--output <format>', 'print-mode output: plain text or a JSON result envelope').choices(['text', 'json']).default('text'));
+  .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'));
 
 program.addHelpText('after', `
 Examples:
@@ -27,6 +27,7 @@ Examples:
   $ haze -p "explain src/cli/index.ts"             print mode: run one turn and print the reply
   $ echo "what does this repo do?" | haze          read the prompt from piped stdin
   $ haze -p "list the top 3 bugs" --output json    emit a JSON envelope { type, status, result, usage }
+  $ haze -p "audit src/" --output stream-json       stream NDJSON events live, then the final result envelope
   $ haze -p "summarize" --model openai:gpt-4o-mini override the model for this run only
   $ haze -p "audit auth.ts" --debug                also write a detailed JSONL log to ~/.haze/logs/
 
@@ -34,7 +35,10 @@ Print mode (-p):
   Runs a single agentic turn with the full toolset and guardrails, prints the final assistant
   text, then exits (0 = complete; non-zero = aborted/failed, so CI can gate on the exit code).
   The prompt comes from -p, otherwise from piped stdin. With --output json the reply is wrapped
-  in a single-line { type, status, result, usage } envelope. --model overrides the model for this
+  in a single-line { type, status, result, usage } envelope. With --output stream-json haze streams
+  one NDJSON agent event per line (turn_start, message_*, tool_*, retry, turn_end) as the run
+  progresses, then prints that same { type:'result', ... } envelope as the final line — giving
+  harnesses live progress and stagnation detection. --model overrides the model for this
   run only (no settings change) and must already be registered under a provider (add it once via
   the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
   saved, and there is no automatic context-overflow recovery.
@@ -65,7 +69,9 @@ program.action(async () => {
     const code = await runHeadless({
       prompt,
       modelOverride: opts.model,
-      output: opts.output === 'json' ? 'json' : 'text',
+      // commander validates --output against the choices above, so opts.output is one of
+      // 'text' | 'json' | 'stream-json'; default to text for piped/stdin runs without the flag.
+      output: opts.output === 'json' || opts.output === 'stream-json' ? opts.output : 'text',
       debug: Boolean(opts.debug),
     });
     // Set the exit code and return instead of process.exit(code): the latter does not wait

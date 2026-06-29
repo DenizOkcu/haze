@@ -6,8 +6,9 @@ import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
+import type {AgentEvent} from '../../core/agent/events.js';
 
-export type HeadlessOutput = 'text' | 'json';
+export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
 export interface HeadlessOptions {
   prompt: string;
@@ -25,6 +26,17 @@ export interface HeadlessUsage {
   reasoningTokens: number;
 }
 
+type HeadlessStreamEvent =
+  | {type: 'turn_start'; request: string; at: string}
+  | {type: 'turn_end'; request: string; status: TurnStatus; at: string}
+  | {type: 'message_start'; id: string; role: 'assistant'; at: string}
+  | {type: 'message_update'; id: string; text: string; at: string}
+  | {type: 'message_end'; id: string; text: string; hidden?: boolean; at: string}
+  | {type: 'tool_start'; id: string; name: string; at: string}
+  | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; error?: string; at: string}
+  | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
+
 function debug(line: string) {
   if (process.env.HAZE_DEBUG) process.stderr.write(`[haze] ${line}\n`);
 }
@@ -40,6 +52,38 @@ function pinnedUsage(usage: TokenUsage): HeadlessUsage {
     cacheWriteTokens: usage.cacheWriteTokens ?? 0,
     reasoningTokens: usage.reasoningTokens ?? 0,
   };
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefined {
+  switch (event.type) {
+    case 'turn_start':
+      return {type: 'turn_start', request: event.request, at: event.at};
+    case 'turn_end':
+      return {type: 'turn_end', request: event.request, status: event.status, at: event.at};
+    case 'message_start':
+      return {type: 'message_start', id: event.id, role: event.role, at: event.at};
+    case 'message_update':
+      return {type: 'message_update', id: event.id, text: event.text, at: event.at};
+    case 'message_end':
+      return {...(event.hidden === undefined ? {} : {hidden: event.hidden}), type: 'message_end', id: event.id, text: event.text, at: event.at};
+    case 'tool_start':
+      // Intentionally omit raw tool input: stdout is often persisted by harnesses/CI.
+      return {type: 'tool_start', id: event.id, name: event.name, at: event.at};
+    case 'tool_end':
+      return {type: 'tool_end', id: event.id, name: event.name, success: event.success, durationMs: event.durationMs, ...(event.error === undefined ? {} : {error: errorText(event.error)}), at: event.at};
+    case 'retry':
+      return {type: 'retry', attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, error: event.error, at: event.at};
+    case 'context_overflow':
+      return {type: 'context_overflow', recovered: event.recovered, error: event.error, at: event.at};
+  }
+}
+
+function writeNdjson(value: unknown) {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
 /**
@@ -84,6 +128,21 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   let usage: TokenUsage = {...EMPTY_TOKEN_USAGE};
   let log: LlmLog | undefined;
   if (options.debug) log = await createLog();
+  let emittedTurnStart = false;
+  const emitStreamEvent = options.output === 'stream-json'
+    ? (event: AgentEvent) => {
+        // runAgentTurn emits nested turn_start/turn_end pairs for retries; expose one clean
+        // headless turn and emit the authoritative turn_end after the run settles.
+        if (event.type === 'turn_start') {
+          if (emittedTurnStart) return;
+          emittedTurnStart = true;
+        } else if (event.type === 'turn_end') {
+          return;
+        }
+        const headlessEvent = toHeadlessStreamEvent(event);
+        if (headlessEvent) writeNdjson(headlessEvent);
+      }
+    : undefined;
 
   const callbacks: StreamCallbacks = {
     addMessage: (msg: Message) => {
@@ -109,6 +168,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     recordTokenUsage: (u: TokenUsage) => {
       usage = accumulateTokenUsage(usage, u);
     },
+    onEvent: emitStreamEvent,
     log,
   };
 
@@ -124,8 +184,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     if (log) await endLog(log).catch(() => undefined);
   }
 
-  if (options.output === 'json') {
-    process.stdout.write(JSON.stringify({type: 'result', status, result, usage: pinnedUsage(usage)}) + '\n');
+  if (options.output === 'json' || options.output === 'stream-json') {
+    if (options.output === 'stream-json') writeNdjson({type: 'turn_end', request: options.prompt, status, at: new Date().toISOString()});
+    // For stream-json the agent events have already streamed above; this is the terminal line.
+    // It is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
+    writeNdjson({type: 'result', status, result, usage: pinnedUsage(usage)});
   } else if (status === 'complete') {
     process.stdout.write(result + (result.endsWith('\n') ? '' : '\n'));
   } else {

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **`--output stream-json` for print mode.** `haze -p "…" --output stream-json` streams the run as newline-delimited JSON: public progress events (`turn_start`, `message_start`/`message_update`/`message_end`, `tool_start`/`tool_end`, `retry`, `context_overflow`, `turn_end`, each with an ISO-8601 `at` timestamp) are written to stdout as they happen, and the final line is the same `{type,status,result,usage}` envelope as `--output json`. Tool events omit raw inputs/outputs so captured stdout stays suitable for harness and CI logs. Previously print mode stayed silent until the end and emitted only that single envelope, so harnesses driving Haze headlessly had no live progress and could not run stdout-based stagnation/loop detection on a silent-but-alive run. Every line is standalone valid JSON (pipeable through `jq -c .`). `text` and `json` outputs are unchanged.
+
 ### Security
 
 - **Closed a DNS-rebinding TOCTOU in the `fetch` tool.** `urlGuard.validateUrl` resolved a hostname and confirmed every address was public, but the subsequent global `fetch` re-resolved the hostname at connect time, so an attacker-controlled DNS server could answer validation with a public IP and connect with an internal/cloud-metadata IP — fully bypassing the SSRF guard that exists precisely to stop that. `fetchUrlContent` now pins each connection (and each redirect hop) to the already-validated IP via a small stdlib transport that preserves the original `Host` header and TLS `servername`/cert verification, with no second DNS lookup between validation and connect. The post-fetch re-validation was removed as it re-resolved DNS against an already-pinned connection and only reopened the race. Literal-IP URLs keep using the global `fetch` (no rebinding surface).
