@@ -22,6 +22,16 @@ export function usageDir(baseDir = HAZE_DIR) {
   return path.join(baseDir, 'usage');
 }
 
+const corruptedLedgerFiles = new Set<string>();
+
+export function getCorruptedLedgerFiles(): string[] {
+  return [...corruptedLedgerFiles];
+}
+
+export function clearCorruptedLedgerFiles(): void {
+  corruptedLedgerFiles.clear();
+}
+
 function dateFileId(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
@@ -70,6 +80,7 @@ export async function readUsageEntries(options?: {date?: Date; baseDir?: string}
     try {
       return [JSON.parse(line) as UsageLedgerEntry];
     } catch {
+      corruptedLedgerFiles.add(file);
       console.error(`Malformed usage ledger line ${index + 1} in ${file}: ${line.slice(0, 120)}`);
       return [];
     }

@@ -20,11 +20,12 @@ export async function priceForModel(providerName: string, modelName: string): Pr
   const settings = await readSettings();
   const overrides = settings.priceOverrides;
   const qualified = pricingKey(providerName, modelName);
-  if (overrides?.[qualified]) {
-    return {input: overrides[qualified].input ?? 0, output: overrides[qualified].output ?? 0};
-  }
-  if (overrides?.[modelName]) {
-    return {input: overrides[modelName].input ?? 0, output: overrides[modelName].output ?? 0};
+  const override = overrides?.[qualified] ?? overrides?.[modelName];
+  if (override) {
+    if (override.input == null || override.output == null) {
+      return undefined;
+    }
+    return {input: override.input, output: override.output};
   }
   return DEFAULT_PRICING[modelName] ?? DEFAULT_PRICING[qualified] ?? undefined;
 }

@@ -53,6 +53,13 @@ function withScopedContextSystem(messages: ModelMessage[], context: HazeToolCont
   ];
 }
 
+function logUsageLedgerError(label: string, error: unknown, callbacks: StreamCallbacks) {
+  const text = error instanceof Error ? error.message : String(error);
+  const message = `Usage ledger write error${label ? ` (${label})` : ''}: ${text}`;
+  console.error(message);
+  callbacks.addMessage({role: 'system', text: message});
+}
+
 export interface StreamCallbacks {
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
@@ -242,7 +249,7 @@ export async function runAgentTurn(
           effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
         };
         void appendUsageEntry(runtime.config, fullUsage, {sessionStart: session?.start}).catch(error => {
-          callbacks.debugLog(`usage ledger write error: ${error instanceof Error ? error.message : String(error)}`);
+          logUsageLedgerError('turn', error, callbacks);
         });
         callbacks.recordTokenUsage?.(fullUsage);
         const accumulated = [...stripSyntheticControls(requestMessages), ...event.response.messages];
@@ -324,7 +331,7 @@ export async function runAgentTurn(
           if (nestedTokens) {
             const subUsage: TokenUsage = {inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input};
             void appendUsageEntry(runtime.config, subUsage, {sessionStart: session?.start}).catch(error => {
-              callbacks.debugLog(`usage ledger write error (subagent): ${error instanceof Error ? error.message : String(error)}`);
+              logUsageLedgerError('subagent', error, callbacks);
             });
             callbacks.recordTokenUsage?.(subUsage);
           }

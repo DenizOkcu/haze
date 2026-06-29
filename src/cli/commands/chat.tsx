@@ -122,7 +122,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [, setSessionLabel] = useState<string | undefined>();
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [sessionCost, setSessionCost] = useState<number | undefined>(undefined);
+  const [costUnavailable, setCostUnavailable] = useState(false);
   const budgetWarningsRef = useRef<Set<string>>(new Set());
+  const budgetCheckErrorRef = useRef(false);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
@@ -1096,7 +1098,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
                 setMessages(m => [...m, {role: 'system', text: warning.message}]);
               }
             } catch (error) {
-              debugLog(`Budget check error: ${error}`);
+              const text = error instanceof Error ? error.message : String(error);
+              console.error(`Budget check error: ${text}`);
+              if (!budgetCheckErrorRef.current) {
+                budgetCheckErrorRef.current = true;
+                setMessages(m => [...m, {role: 'system', text: `Budget monitoring unavailable: ${text}`}]);
+              }
             }
           })();
           return next;
@@ -1107,10 +1114,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           try {
             const price = await priceForModel(active.provider.name, active.model);
             if (price) {
+              setCostUnavailable(false);
               setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
             }
           } catch (error) {
-            debugLog(`Session cost update error: ${error}`);
+            const text = error instanceof Error ? error.message : String(error);
+            console.error(`Session cost update error: ${text}`);
+            setCostUnavailable(true);
           }
         })();
       },
@@ -1154,7 +1164,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const inputEstimated = providerInput == null || effectiveInput !== providerInput;
   const outputEstimated = tokenUsage.outputTokens == null;
   const enabledSkills = skills.filter(skill => isSkillEnabled(settings, skill.name));
-  const costLabel = sessionCost != null ? ` / ~$${sessionCost.toFixed(4)}` : '';
+  const costLabel = costUnavailable ? ' / cost unavailable' : sessionCost != null ? ` / ~$${sessionCost.toFixed(4)}` : '';
   const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)}${costLabel} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, selectedSkillName, selectedLspName, selectedMcpName});

@@ -1,4 +1,4 @@
-import {readUsageEntries, readUsageRange, type UsageLedgerEntry} from '../../core/usage/usageLedger.js';
+import {readUsageEntries, readUsageRange, getCorruptedLedgerFiles, clearCorruptedLedgerFiles, type UsageLedgerEntry} from '../../core/usage/usageLedger.js';
 import {formatTokenCount} from '../chat/chatMetrics.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
@@ -57,6 +57,7 @@ export async function handleCostCommand(
   ctx: CommandContext,
   options?: {baseDir?: string},
 ): Promise<CommandResult> {
+  clearCorruptedLedgerFiles();
   const scope = args.trim().toLowerCase();
   const now = new Date();
 
@@ -90,6 +91,11 @@ export async function handleCostCommand(
     lines.push('', 'Last 7 days');
     lines.push(`  ${formatCompact(weekAgg.total)}`);
     lines.push(...modelRows(weekAgg.byKey));
+  }
+
+  const corrupted = getCorruptedLedgerFiles();
+  if (corrupted.length) {
+    lines.push('', `Warning: ${corrupted.length} usage ledger file(s) contained corrupted lines and were partially skipped.`);
   }
 
   ctx.addSystemMessage(lines.join('\n'));
