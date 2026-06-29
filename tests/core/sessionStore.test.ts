@@ -103,4 +103,47 @@ describe('sessionStore', () => {
     const {parseErrors} = await readSessionEntries(session);
     expect(parseErrors).toEqual([]);
   });
+
+  it('does not persist streaming message_update events', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'event', at: '1', name: 'message_update', text: JSON.stringify({type: 'message_update', id: 'a', text: 'partial', at: '1'})});
+    await appendSessionEntry(session, {type: 'event', at: '2', name: 'message_end', text: JSON.stringify({type: 'message_end', id: 'a', text: 'done', at: '2'})});
+
+    const {entries} = await readSessionEntries(session);
+    expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'message_end']);
+  });
+
+  it('slims large tool_end event outputs before writing', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const largeOutput = {content: 'x'.repeat(40_000)};
+    await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_end', text: JSON.stringify({type: 'tool_end', id: 'call', name: 'readFile', success: true, output: largeOutput, durationMs: 1, at: '1'})});
+
+    const {entries} = await readSessionEntries(session);
+    const eventEntry = entries[1];
+    expect(eventEntry).toMatchObject({type: 'event', name: 'tool_end'});
+    const event = JSON.parse(eventEntry.type === 'event' ? eventEntry.text ?? '{}' : '{}') as {output: {omitted?: boolean; originalBytes?: number; preview?: string}};
+    expect(event.output.omitted).toBe(true);
+    expect(event.output.originalBytes).toBeGreaterThan(32_000);
+    expect(event.output.preview?.length).toBeLessThan(10_000);
+  });
+
+  it('slims large tool results in conversation snapshots', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const messages: ModelMessage[] = [{
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'call',
+        toolName: 'readFile',
+        output: {type: 'json', value: {content: 'x'.repeat(40_000)}},
+      }],
+    }];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
+
+    const restored = await restoreConversation(session);
+    const content = restored.messages[0]?.content;
+    const toolResult = Array.isArray(content) ? content[0] as {output?: {omitted?: boolean; originalBytes?: number}} : undefined;
+    expect(toolResult?.output?.omitted).toBe(true);
+    expect(toolResult?.output?.originalBytes).toBeGreaterThan(32_000);
+  });
 });

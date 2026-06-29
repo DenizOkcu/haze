@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
+import {prepareSessionEntryForWrite} from './sessionSlimming.js';
 
 export type SessionEntry =
   | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string}
@@ -57,8 +58,10 @@ export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_S
 }
 
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
+  const prepared = prepareSessionEntryForWrite(entry);
+  if (!prepared) return;
   await fs.ensureDir(path.dirname(session.file));
-  await fs.appendFile(session.file, `${JSON.stringify(entry)}\n`, 'utf8');
+  await fs.appendFile(session.file, `${JSON.stringify(prepared)}\n`, 'utf8');
 }
 
 export interface ReadSessionEntriesResult {
