@@ -76,10 +76,12 @@ describe('bash classifier', () => {
       ['gh pr diff', 'read_only'],
       ['gh pr status', 'read_only'],
       ['gh pr checks', 'read_only'],
-      ['gh issue comment 123', 'read_only'],
       ['gh run list', 'read_only'],
+      ['gh run watch 1234', 'read_only'],
       ['gh repo list', 'read_only'],
       ['gh api --method GET repos/owner/repo/issues', 'read_only'],
+      ['gh api --method=GET repos/owner/repo/issues', 'read_only'],
+      ['gh api -XGET repos/owner/repo/issues', 'read_only'],
     ])('classifies %s as read_only', (cmd, expected) => {
       const result = classifyBashCommand(cmd);
       expect(result.riskLevel).toBe(expected);
@@ -93,12 +95,13 @@ describe('bash classifier', () => {
       'gh pr close 123',
       'gh pr reopen 123',
       'gh pr review --approve',
+      'gh pr comment 123',
       'gh issue create --title new',
       'gh issue edit 123 --title new',
       'gh issue close 123',
       'gh issue reopen 123',
+      'gh issue comment 123',
       'gh run rerun 1234',
-      'gh run watch 1234',
       'gh run cancel 1234',
       'gh release create v1.0.0',
       'gh release edit v1.0.0',
@@ -111,11 +114,17 @@ describe('bash classifier', () => {
       'gh gist delete abc123',
       'gh api --method PATCH repos/owner/repo/issues/1',
       'gh api --method POST repos/owner/repo/issues',
+      'gh api --method=POST repos/owner/repo/issues',
       'gh api --method PUT repos/owner/repo/pulls/1',
       'gh api --method DELETE repos/owner/repo/issues/1',
       'gh api -X POST repos/owner/repo/issues',
+      'gh api -XPOST repos/owner/repo/issues',
     ])('does not classify %s as read_only', (cmd) => {
       expect(classifyBashCommand(cmd).riskLevel).not.toBe('read_only');
+    });
+
+    it('does not promise read-only for complex gh subcommands', () => {
+      expect(classifyBashCommand('gh pr view 123 | cat').riskLevel).not.toBe('read_only');
     });
   });
 });

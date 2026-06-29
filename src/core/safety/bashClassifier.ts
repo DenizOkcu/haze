@@ -104,12 +104,13 @@ export function classifyBashCommand(command: string): BashClassification {
       ['pr', 'close'],
       ['pr', 'reopen'],
       ['pr', 'review'],
+      ['pr', 'comment'],
       ['issue', 'create'],
       ['issue', 'edit'],
       ['issue', 'close'],
       ['issue', 'reopen'],
+      ['issue', 'comment'],
       ['run', 'rerun'],
-      ['run', 'watch'],
       ['run', 'cancel'],
       ['release', 'create'],
       ['release', 'edit'],
@@ -127,11 +128,11 @@ export function classifyBashCommand(command: string): BashClassification {
 
     // gh api is ambiguous unless it is explicitly GET or has no method.
     if (has(lower, /\bapi\b/)) {
-      if (/\s(-X|--method)\s+(POST|PATCH|PUT|DELETE)\b/i.test(lower)) {
+      if (/\s(-X|--method)(=|\s*)(POST|PATCH|PUT|DELETE)\b/i.test(lower)) {
         return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh api method'};
       }
       traits.push('reads_files');
-      return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'read-only gh api call'};
+      return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like gh api call with complex shell syntax' : 'read-only gh api call'};
     }
 
     const readOnlySubcommands = [
@@ -140,12 +141,11 @@ export function classifyBashCommand(command: string): BashClassification {
       ['pr', 'diff'],
       ['pr', 'status'],
       ['pr', 'checks'],
-      ['pr', 'comment'],
       ['issue', 'list'],
       ['issue', 'view'],
-      ['issue', 'comment'],
       ['run', 'list'],
       ['run', 'view'],
+      ['run', 'watch'],
       ['repo', 'view'],
       ['repo', 'list'],
       ['gist', 'list'],
@@ -153,7 +153,7 @@ export function classifyBashCommand(command: string): BashClassification {
     ];
     if (readOnlySubcommands.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
       traits.push('reads_files');
-      return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'read-only gh subcommand'};
+      return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like gh subcommand with complex shell syntax' : 'read-only gh subcommand'};
     }
   }
 
