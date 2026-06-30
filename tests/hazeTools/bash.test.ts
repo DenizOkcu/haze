@@ -71,4 +71,26 @@ describe('bash tool safety', () => {
     expect(page.content).toContain('1234: line 1233');
     expect(page.content).toContain('1236: line 1235');
   });
+
+  it('bounds runaway command output without hanging the reduction pipeline', async () => {
+    // Emits ~2 MB of stdout. The reduction pipeline caps the raw output it
+    // scans, so a huge or pathological command output cannot pin the event loop
+    // and freeze the agent (whose idle-timeout shares the same loop). The final
+    // rendered output stays within the compact ceiling regardless of input size.
+    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(400000))\"");
+    expect(result.ok).toBe(true);
+    expect(result.stdout.text.length).toBeLessThan(20_000);
+  }, 15_000);
+
+  it('keeps the full raw output retrievable even when it exceeds the raw cap', async () => {
+    // Outputs larger than MAX_RAW_OUTPUT_CHARS are reduced from a capped *copy*,
+    // but the full raw must still be stored behind the readToolOutput handle so
+    // the model can page into the middle. Regression: an earlier version capped
+    // before storage and permanently lost everything past the ceiling.
+    const script = "let s='a'.repeat(250000); s=s+'NEEDLE_END'+'b'.repeat(5000); process.stdout.write(s)";
+    const result = await bash(`node -e "${script}"`);
+    expect(result.stdout.handle).toMatch(/^output-/);
+    const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 250000, limit: 50}, {abortSignal: undefined});
+    expect(page.content).toContain('NEEDLE_END');
+  }, 15_000);
 });

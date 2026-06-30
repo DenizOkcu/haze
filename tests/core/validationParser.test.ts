@@ -1,3 +1,4 @@
+import {performance} from 'node:perf_hooks';
 import {describe, expect, it} from 'vitest';
 import {parseValidationOutput} from '../../src/core/validation/outputParser.js';
 
@@ -50,4 +51,62 @@ describe('validation output parser', () => {
     const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
     expect(summary.status).toBe('passed');
   });
+
+  it('detects eslint file headers even when a filename repeats (indexOf lookahead regression)', () => {
+    // The parser used `lines[lines.indexOf(line) + 1]` to peek at the line after
+    // an eslint file header. `indexOf` returns the *first* matching index, so a
+    // repeated header peeked at the wrong neighbour and missed the real
+    // diagnostic on the later occurrence. Index-based lookahead fixes both this
+    // correctness bug and the O(n²) cost of the scan.
+    const stdout = ['src/a.ts', 'not-a-diagnostic-line', 'src/a.ts', '  1:5  error  no-undef', ''].join('\n');
+    const summary = parseValidationOutput({command: 'npm run lint', code: 1, stdout, stderr: ''});
+    expect(summary.failedFiles).toContain('src/a.ts');
+  });
+
+  it('stays linear on large eslint output (O(n²) indexOf regression)', () => {
+    // A *ratio* between two input sizes — not an absolute wall-clock budget —
+    // makes the linearity guard machine-independent: runner load, virtualization,
+    // and Node-version differences slow the small and large parse by the same
+    // factor, so the ratio is invariant to them. Only an algorithmic regression
+    // (O(n) → O(n²)) shifts it. We take the best of a few runs so a one-off
+    // GC/scheduler spike on either measurement can't skew the ratio, and use
+    // sub-millisecond `performance.now()` so the small sample isn't dominated by
+    // `Date.now()`'s 1ms granularity.
+    //
+    // Headers are UNIQUE (so a reintroduced `lines.indexOf(line)` really scans to
+    // the current position each time, not the first match) and the inputs stay
+    // UNDER the parser's raw cap, so the measured cost is pure per-line parsing
+    // rather than the cap — an earlier 50k-header variant got capped to ~200k
+    // chars before parsing, which hid a reintroduced quadratic scan entirely.
+    const build = (count: number) => {
+      const out: string[] = [];
+      for (let index = 0; index < count; index++) {
+        out.push(`f${index}.ts`);
+        out.push(`  ${index + 1}:1 error e${index}`);
+      }
+      return out.join('\n');
+    };
+    const parse = (stdout: string) => parseValidationOutput({command: 'npm run lint', code: 1, stdout, stderr: ''});
+    const bestMs = (fn: () => unknown, runs = 4) => {
+      let best = Infinity;
+      for (let run = 0; run < runs; run++) {
+        const start = performance.now();
+        fn();
+        best = Math.min(best, performance.now() - start);
+      }
+      return best;
+    };
+
+    const smallCount = 500;
+    const largeCount = 6_500; // 13x more headers; ~170k chars, under the raw cap
+    const large = parse(build(largeCount)); // correctness (untimed)
+    const tSmall = bestMs(() => parse(build(smallCount)));
+    const tLarge = bestMs(() => parse(build(largeCount)));
+
+    expect(large.failedFiles).toContain('f0.ts'); // correctness anchor
+    // 13x input ⇒ linear ratio ≈ 13, quadratic ratio ≈ 169. A 50 threshold sits
+    // ~3.8x above the linear baseline (immune to multiplicative CI slowdown) and
+    // well below quadratic, so only a real complexity regression crosses it.
+    expect(tLarge / tSmall).toBeLessThan(50);
+  }, 15_000);
 });

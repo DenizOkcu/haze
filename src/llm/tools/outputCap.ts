@@ -6,6 +6,15 @@ export const COMPACT_COMMAND_CHARS = 12_000;
 export const GREP_MAX_OUTPUT_CHARS = 30_000;
 /** Default ceiling for a single grep match line. */
 export const GREP_MAX_LINE_CHARS = 500;
+/**
+ * Hard ceiling on *raw* command output (stdout/stderr) before any synchronous
+ * regex/reducer in the bash-output pipeline sees it. Bounds the worst-case cost
+ * of that pipeline so a single huge or pathological command output cannot pin
+ * the event loop and freeze the agent (whose idle-timeout shares the same loop
+ * and therefore can never fire while it is blocked). Generous enough that normal
+ * outputs pass through untouched.
+ */
+export const MAX_RAW_OUTPUT_CHARS = 200_000;
 
 /**
  * Cap a string to `maxChars` characters, keeping a head + tail and storing the
@@ -28,6 +37,19 @@ export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHA
 export function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
   if (text.length <= maxChars) return {text, truncated: false};
   return {text: `${text.slice(0, Math.max(0, maxChars - 22))}[line truncated]`, truncated: true};
+}
+
+/**
+ * Truncate *raw* command output to `maxChars` (head + tail + marker) before it
+ * enters the synchronous reduction/regex pipeline. Unlike {@link compactStoredOutput}
+ * this stores nothing behind a handle — it is a pure safety bound whose only job
+ * is to keep the event loop responsive regardless of what a command emitted.
+ */
+export function capRawOutput(text: string, maxChars = MAX_RAW_OUTPUT_CHARS) {
+  if (text.length <= maxChars) return text;
+  const head = Math.floor(maxChars * 0.5);
+  const tail = maxChars - head;
+  return `${text.slice(0, head)}\n[... ${text.length - maxChars} characters of raw output truncated to bound processing cost ...]\n${text.slice(-tail)}`;
 }
 
 /** Render structured grep matches as `file:line:content` lines (context flagged with `-`). */

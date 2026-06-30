@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {compactGrepMatches, renderGrepMatches} from '../../../src/llm/tools/outputCap.js';
+import {compactGrepMatches, renderGrepMatches, capRawOutput, MAX_RAW_OUTPUT_CHARS} from '../../../src/llm/tools/outputCap.js';
 
 type Match = {file: string; line: number; content: string; isContext: boolean};
 
@@ -55,5 +55,30 @@ describe('compactGrepMatches', () => {
     const result = compactGrepMatches(matches, 2000);
     const rendered = renderGrepMatches(result.matches);
     expect(rendered.length).toBeLessThanOrEqual(2000);
+  });
+});
+
+describe('capRawOutput', () => {
+  it('passes output through unchanged when at or under the ceiling', () => {
+    expect(capRawOutput('')).toBe('');
+    expect(capRawOutput('x'.repeat(100))).toBe('x'.repeat(100));
+    expect(capRawOutput('x'.repeat(MAX_RAW_OUTPUT_CHARS))).toBe('x'.repeat(MAX_RAW_OUTPUT_CHARS));
+  });
+
+  it('truncates over-long output to head + tail plus a marker, within the bound', () => {
+    const text = 'A'.repeat(500);
+    const capped = capRawOutput(text, 100);
+    expect(capped.length).toBeLessThan(text.length);
+    expect(capped).toContain('truncated');
+    expect(capped.startsWith('A'.repeat(50))).toBe(true); // head
+    expect(capped.endsWith('A'.repeat(50))).toBe(true); // tail
+  });
+
+  it('honours a custom maxChars split as half head / half tail', () => {
+    // maxChars 5 -> head 2, tail 3
+    const capped = capRawOutput('0123456789', 5);
+    expect(capped.startsWith('01')).toBe(true);
+    expect(capped.endsWith('789')).toBe(true);
+    expect(capped).toContain('5 characters');
   });
 });

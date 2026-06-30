@@ -1,5 +1,6 @@
 import type {BashClassification} from '../safety/bashClassifier.js';
 import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
+import {capRawOutput} from '../../llm/tools/outputCap.js';
 
 function uniq(values: string[]) {
   return [...new Set(values.filter(Boolean))];
@@ -24,14 +25,22 @@ export function parseValidationOutput(input: {
   stderrTruncated?: boolean;
   classification?: BashClassification;
 }): ValidationSummary {
-  const text = `${input.stdout}\n${input.stderr}`;
+  // Cap the parsing copy so a huge validation log cannot pin the event loop in
+  // the per-line regex scan below. The full raw is still stored behind the
+  // readToolOutput handle by filterBashOutput, so nothing is lost.
+  const text = `${capRawOutput(input.stdout)}\n${capRawOutput(input.stderr)}`;
   const lines = text.split(/\r?\n/);
   const diagnostics: ValidationSummary['diagnostics'] = [];
   const failedTests: string[] = [];
   const failedFiles: string[] = [];
   const kind = inferKind(input.command, input.classification);
 
-  for (const line of lines) {
+  // Iterate by index: `lines[index + 1]` is O(1). A previous version used
+  // `lines[lines.indexOf(line) + 1]`, which is O(n) per line (O(n²) overall on
+  // large logs) and also wrong when the same line text repeats — `indexOf`
+  // returns the *first* match, so the lookahead landed on the wrong neighbor.
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     const ts = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
     if (ts) {
       const [, file, lineNo, column, severity, message] = ts;
@@ -42,7 +51,7 @@ export function parseValidationOutput(input: {
     const eslint = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\s*$/);
     if (eslint) {
       const currentFile = eslint[1] ?? '';
-      const next = lines[lines.indexOf(line) + 1];
+      const next = lines[index + 1];
       if (next && /^\s*\d+:\d+\s+/.test(next)) failedFiles.push(currentFile);
     }
     const eslintDiag = line.match(/^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}\S+)?$/);
