@@ -89,11 +89,6 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};
   }
 
-  if (has(lower, /(^|[;&|]\s*)(git\s+(status|diff|log|show|branch)\b|rg\b|grep\b|find\b|ls\b|pwd\b|cat\b|head\b|tail\b|node\s+--version|npm\s+--version|which\b)/)) {
-    traits.push('reads_files');
-    return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like command with complex shell syntax' : 'read-only inspection command'};
-  }
-
   // GitHub CLI read-only subcommands
   if (has(lower, /\bgh\b/)) {
     // Explicitly reject known mutating subcommands before trusting anything else.
@@ -162,6 +157,11 @@ export function classifyBashCommand(command: string): BashClassification {
       traits.push('reads_files');
       return {riskLevel: ghComplex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: ghComplex ? 'low' : 'high', reason: ghComplex ? 'read-like gh subcommand with complex shell syntax' : 'read-only gh subcommand'};
     }
+  }
+
+  if (has(lower, /(^|[;&|]\s*)(git\s+(status|diff|log|show|branch)\b|rg\b|grep\b|find\b|ls\b|pwd\b|cat\b|head\b|tail\b|node\s+--version|npm\s+--version|which\b)/)) {
+    traits.push('reads_files');
+    return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like command with complex shell syntax' : 'read-only inspection command'};
   }
 
   return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'command did not match known safe patterns'};
