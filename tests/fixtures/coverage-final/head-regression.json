@@ -1,0 +1,24 @@
+{
+  "/project/src/a.ts": {
+    "path": "/project/src/a.ts",
+    "statementMap": {
+      "0": {"start": {}, "end": {}},
+      "1": {"start": {}, "end": {}},
+      "2": {"start": {}, "end": {}}
+    },
+    "s": {"0": 1, "1": 0, "2": 0},
+    "branchMap": {
+      "0": {"line": 1, "type": "if", "locations": [{}, {}]}
+    },
+    "b": {"0": [1, 0]}
+  },
+  "/project/src/b.ts": {
+    "path": "/project/src/b.ts",
+    "statementMap": {
+      "0": {"start": {}, "end": {}}
+    },
+    "s": {"0": 1},
+    "branchMap": {},
+    "b": {}
+  }
+}

@@ -15,6 +15,7 @@ npm run dev          # Run CLI in development mode (tsx)
 npm run typecheck    # Type-check without building
 npm run build        # Clean + compile to dist/
 npm test             # Run unit tests
+npm run coverage     # Run unit tests with coverage (writes ./coverage/)
 npm run lint         # Check code style
 ```
 
@@ -70,6 +71,14 @@ Haze is aimed at expert users. Do not add command-confirmation gates for normal 
 - One concern per PR — don't bundle unrelated changes
 - Write tests for new logic
 - Keep PRs small and focused
+
+## Test Coverage
+
+CI runs a dedicated `coverage` job on every PR that measures coverage on both the PR head and its base branch and fails if coverage decreases (statements or branches). This means a PR that drops coverage — by adding untested code or removing tests — cannot merge.
+
+- Local check: `npm run coverage` (writes `./coverage/coverage-final.json` and a text summary).
+- To see what's uncovered, inspect `coverage/coverage-final.json` or re-run with `--coverage.reporter=html`.
+- Coverage may go up but never down; there is no fixed threshold to chase.
 
 ## Reporting Issues
 
