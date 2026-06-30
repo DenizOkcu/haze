@@ -1,11 +1,12 @@
 import fs from 'fs-extra';
+import {constants as fsConstants} from 'node:fs';
 import path from 'node:path';
 import {rgPath} from '@vscode/ripgrep';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {activeModel, configuredProviders} from '../../config/providers.js';
 import {configuredLspServers, commandExists} from '../../config/lspSettings.js';
-import {configuredMcpServers} from '../../config/mcpSettings.js';
+import {configuredMcpServers, mcpServerValidationError} from '../../config/mcpSettings.js';
 import {readContextFiles} from '../../config/contextFiles.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {CheckResult} from './types.js';
@@ -25,17 +26,15 @@ function result(
 
 export async function checkSettingsValid(): Promise<CheckResult> {
   const file = path.join(HAZE_DIR, 'settings.json');
-  let raw: string | undefined;
   try {
-    await fs.ensureDir(HAZE_DIR);
-    raw = await fs.readFile(file, 'utf8');
-  } catch {
-    return result('settings.json valid', 'ok', 'No settings.json yet; Haze will create one when you run /provider.');
-  }
-  try {
+    const raw = await fs.readFile(file, 'utf8');
     JSON.parse(raw);
     return result('settings.json valid', 'ok', 'settings.json parses as JSON.');
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return result('settings.json valid', 'ok', 'No settings.json yet; Haze will create one when you run /provider.');
+    }
     const text = error instanceof Error ? error.message : String(error);
     return result(
       'settings.json valid',
@@ -79,11 +78,10 @@ export function checkRipgrepAvailable(): CheckResult {
 
 export async function checkHazeDirWritable(): Promise<CheckResult> {
   try {
-    await fs.ensureDir(HAZE_DIR);
-    const probe = path.join(HAZE_DIR, '.write-probe');
-    await fs.writeFile(probe, '');
-    await fs.remove(probe);
-    return result('.haze/ writable', 'ok', `${HAZE_DIR} is writable.`);
+    if (await fs.pathExists(HAZE_DIR)) {
+      await fs.access(HAZE_DIR, fsConstants.W_OK);
+      return result('.haze/ writable', 'ok', `${HAZE_DIR} is writable.`);
+    }
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     return result(
@@ -93,6 +91,7 @@ export async function checkHazeDirWritable(): Promise<CheckResult> {
       'Check permissions on ~/.haze or set a writable HAZE_DIR.',
     );
   }
+  return result('.haze/ writable', 'info', `${HAZE_DIR} does not exist yet; Haze will create it on first write.`);
 }
 
 export async function checkProvidersConfigured(settings: HazeSettings): Promise<CheckResult> {
@@ -131,11 +130,10 @@ export function checkActiveModel(settings: HazeSettings): CheckResult {
 export async function checkProviderReachable(settings: HazeSettings): Promise<CheckResult> {
   const resolution = activeModel(settings);
   if (!resolution) return result('provider reachable', 'info', 'Skipped: no active provider to reach.');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REACHABILITY_TIMEOUT_MS);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REACHABILITY_TIMEOUT_MS);
     const response = await fetch(resolution.provider.url, {method: 'HEAD', signal: controller.signal});
-    clearTimeout(timer);
     if (response.ok || response.status < 500) {
       return result('provider reachable', 'ok', `${resolution.provider.url} responded with HTTP ${response.status}.`);
     }
@@ -153,6 +151,8 @@ export async function checkProviderReachable(settings: HazeSettings): Promise<Ch
       `Could not reach ${resolution.provider.url}: ${text}`,
       'This is a soft check; transient failures are normal. Verify network and provider settings if chat is not working.',
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -205,16 +205,22 @@ export async function checkLspServers(settings: HazeSettings): Promise<CheckResu
 }
 
 export async function checkMcpServers(settings: HazeSettings): Promise<CheckResult> {
-  const servers = configuredMcpServers(settings).filter(s => s.enabled !== false);
-  if (servers.length === 0) return result('MCP config valid', 'ok', 'No MCP servers configured.');
-  const invalid = servers.filter(s => (s.transport === 'stdio' ? !s.command : !s.url));
+  const rawServers = settings.mcpServers ?? [];
+  const enabled = rawServers.filter(s => s.enabled !== false);
+  if (enabled.length === 0) return result('MCP config valid', 'ok', 'No MCP servers configured.');
+  const invalid: string[] = [];
+  for (const server of enabled) {
+    const error = mcpServerValidationError(server);
+    if (error) invalid.push(`${server.name ?? '(unnamed)'}: ${error}`);
+  }
   if (invalid.length > 0) {
     return result(
       'MCP config valid',
       'info',
-      `${invalid.length} MCP server(s) missing required fields.`,
+      `Invalid MCP server entries: ${invalid.join(', ')}`,
       'Use /mcp to correct transport, URL, or command.',
     );
   }
-  return result('MCP config valid', 'ok', `${servers.length} MCP server(s) configured.`);
+  const valid = configuredMcpServers(settings).filter(s => s.enabled !== false);
+  return result('MCP config valid', 'ok', `${valid.length} MCP server(s) configured.`);
 }

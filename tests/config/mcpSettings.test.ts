@@ -5,6 +5,7 @@ import {
   findMcpPreset,
   isTransport,
   MCP_PRESETS,
+  mcpServerValidationError,
   normalizeServer,
   presetIds,
   removeMcpServer,
@@ -70,6 +71,21 @@ describe('mcpSettings', () => {
     it('rejects unknown transports and missing names', () => {
       expect(normalizeServer({name: 'a', transport: 'ws', url: 'https://x'})).toBeUndefined();
       expect(normalizeServer({transport: 'http', url: 'https://x'})).toBeUndefined();
+    });
+  });
+
+  describe('mcpServerValidationError', () => {
+    it('returns undefined for valid servers', () => {
+      expect(mcpServerValidationError({name: 'a', transport: 'http', url: 'https://x'})).toBeUndefined();
+      expect(mcpServerValidationError({name: 'a', transport: 'sse', url: 'https://x'})).toBeUndefined();
+      expect(mcpServerValidationError({name: 'a', transport: 'stdio', command: 'node'})).toBeUndefined();
+    });
+
+    it('reports missing name, invalid transport, and missing fields per transport', () => {
+      expect(mcpServerValidationError({name: '', transport: 'http', url: 'https://x'})).toContain('missing server name');
+      expect(mcpServerValidationError({name: 'a', transport: 'ws', url: 'https://x'})).toContain('invalid transport');
+      expect(mcpServerValidationError({name: 'a', transport: 'http'})).toContain('missing URL');
+      expect(mcpServerValidationError({name: 'a', transport: 'stdio'})).toContain('missing command');
     });
   });
 
