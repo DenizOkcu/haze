@@ -1,5 +1,6 @@
 import type {BashClassification} from '../safety/bashClassifier.js';
 import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
+import {capRawOutput} from '../../llm/tools/outputCap.js';
 
 function uniq(values: string[]) {
   return [...new Set(values.filter(Boolean))];
@@ -24,7 +25,10 @@ export function parseValidationOutput(input: {
   stderrTruncated?: boolean;
   classification?: BashClassification;
 }): ValidationSummary {
-  const text = `${input.stdout}\n${input.stderr}`;
+  // Cap the parsing copy so a huge validation log cannot pin the event loop in
+  // the per-line regex scan below. The full raw is still stored behind the
+  // readToolOutput handle by filterBashOutput, so nothing is lost.
+  const text = `${capRawOutput(input.stdout)}\n${capRawOutput(input.stderr)}`;
   const lines = text.split(/\r?\n/);
   const diagnostics: ValidationSummary['diagnostics'] = [];
   const failedTests: string[] = [];

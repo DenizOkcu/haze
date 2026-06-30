@@ -6,7 +6,7 @@ import {parseValidationOutput} from '../../core/validation/outputParser.js';
 import {filterBashOutput} from '../../core/bashOutput/registry.js';
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {workspaceRoot} from '../../utils/path.js';
-import {compactStoredOutput, COMPACT_COMMAND_CHARS, capRawOutput} from './outputCap.js';
+import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {runDedupedTool} from './toolContext.js';
 
 const SHORT_VALIDATION_CHARS = 2_000;
@@ -43,15 +43,6 @@ export const bashTool = tool({
         settled = true;
         clearTimeout(timer);
         context.abortSignal?.removeEventListener('abort', abort);
-        // Bound raw output before any synchronous regex/reducer runs. Without
-        // this a single huge or pathological command output can pin the event
-        // loop inside the reduction pipeline (parseValidationOutput +
-        // filterBashOutput) and freeze the agent — its idle-timeout shares this
-        // same loop and so can never fire while it is blocked. The final compact
-        // step still applies for normal-sized output; this only trims the rare
-        // runaway case.
-        stdout = capRawOutput(stdout);
-        stderr = capRawOutput(stderr);
         const validationSummary = isValidationClassification(classification)
           ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: stdout.length > COMPACT_COMMAND_CHARS, stderrTruncated: stderr.length > COMPACT_COMMAND_CHARS, classification})
           : undefined;
