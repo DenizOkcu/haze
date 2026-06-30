@@ -30,7 +30,7 @@ export function classifyBashCommand(command: string): BashClassification {
   const trimmed = command.trim();
   const traits: BashTrait[] = [];
   const lower = trimmed.toLowerCase();
-  const complex = /[`$()|]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/.test(trimmed);
+  const complex = /[`$()]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/.test(trimmed);
 
   if (!trimmed) {
     return {riskLevel: 'unknown', traits: [], confidence: 'high', reason: 'empty command'};
@@ -126,13 +126,20 @@ export function classifyBashCommand(command: string): BashClassification {
       return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh subcommand'};
     }
 
+    // Pipe or complex shell syntax inside gh commands is not trusted as read-only.
+    const ghComplex = complex || trimmed.includes('|');
+
     // gh api is ambiguous unless it is explicitly GET or has no method.
     if (has(lower, /\bapi\b/)) {
+      const hasExplicitGet = /\s(-X|--method)(=|\s*)GET\b/i.test(lower);
+      if (!hasExplicitGet && /\s(-f|-F|-r|--input)\b/i.test(lower)) {
+        return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'gh api call with field/input flags defaults to POST'};
+      }
       if (/\s(-X|--method)(=|\s*)(POST|PATCH|PUT|DELETE)\b/i.test(lower)) {
         return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh api method'};
       }
       traits.push('reads_files');
-      return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like gh api call with complex shell syntax' : 'read-only gh api call'};
+      return {riskLevel: ghComplex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: ghComplex ? 'low' : 'high', reason: ghComplex ? 'read-like gh api call with complex shell syntax' : 'read-only gh api call'};
     }
 
     const readOnlySubcommands = [
@@ -153,7 +160,7 @@ export function classifyBashCommand(command: string): BashClassification {
     ];
     if (readOnlySubcommands.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
       traits.push('reads_files');
-      return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like gh subcommand with complex shell syntax' : 'read-only gh subcommand'};
+      return {riskLevel: ghComplex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: ghComplex ? 'low' : 'high', reason: ghComplex ? 'read-like gh subcommand with complex shell syntax' : 'read-only gh subcommand'};
     }
   }
 

@@ -119,8 +119,22 @@ describe('bash classifier', () => {
       'gh api --method DELETE repos/owner/repo/issues/1',
       'gh api -X POST repos/owner/repo/issues',
       'gh api -XPOST repos/owner/repo/issues',
+      'gh api repos/owner/repo/issues -f title=new',
+      'gh api repos/owner/repo/issues -F title=new',
+      'gh api repos/owner/repo/issues -r upstream',
+      'gh api repos/owner/repo/issues --input body.json',
     ])('does not classify %s as read_only', (cmd) => {
       expect(classifyBashCommand(cmd).riskLevel).not.toBe('read_only');
+    });
+
+    it.each([
+      ['gh api --method GET repos/owner/repo/issues -f title=new', 'read_only'],
+      ['gh api --method=GET repos/owner/repo/issues -F title=new', 'read_only'],
+      ['gh api -XGET repos/owner/repo/issues -r upstream', 'read_only'],
+    ])('classifies explicit GET %s as read_only despite field flags', (cmd, expected) => {
+      const result = classifyBashCommand(cmd);
+      expect(result.riskLevel).toBe(expected);
+      expect(result.traits).toContain('reads_files');
     });
 
     it('does not promise read-only for complex gh subcommands', () => {
