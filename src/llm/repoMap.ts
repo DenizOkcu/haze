@@ -132,8 +132,9 @@ export async function extractSymbolsViaLsp(
           column: value.range?.start.character ?? 1,
         });
       }
-    } catch {
-      // Fall through to document-symbol fallback per server.
+    } catch (error) {
+      console.warn(`LSP workspace-symbol query failed for ${server.name}:`, error);
+      // Fall through to the next configured server; regex remains the final fallback.
     }
 
     if (results.length >= limit) break;
@@ -148,7 +149,7 @@ const CACHE_FILE = process.env.HAZE_REPO_MAP_CACHE
 
 interface RepoMapCacheEntry {
   mtime: number;
-  head: string;
+  head: string | null;
   symbols: RepoMapSymbol[];
 }
 
@@ -164,12 +165,13 @@ export interface RepoMapResult {
   source: 'lsp' | 'regex';
 }
 
-async function gitHead(): Promise<string> {
+async function gitHead(): Promise<string | null> {
   try {
     const {stdout} = await execFile('git', ['-C', workspaceRoot(), 'rev-parse', 'HEAD']);
     return stdout.trim();
-  } catch {
-    return '';
+  } catch (error) {
+    console.error('Failed to read git HEAD for repo map cache:', error);
+    return null;
   }
 }
 
@@ -177,7 +179,8 @@ async function recentlyTouchedFiles(maxCommits = 50): Promise<Set<string>> {
   try {
     const {stdout} = await execFile('git', ['-C', workspaceRoot(), 'log', `--max-count=${maxCommits}`, '--format=', '--name-only']);
     return new Set(stdout.split('\n').map(line => line.trim()).filter(Boolean));
-  } catch {
+  } catch (error) {
+    console.warn('Failed to read recently touched files from git:', error);
     return new Set();
   }
 }
@@ -186,8 +189,12 @@ async function loadCache(): Promise<Record<string, RepoMapCacheEntry>> {
   try {
     const raw = await fs.readFile(CACHE_FILE, 'utf8');
     return JSON.parse(raw) as Record<string, RepoMapCacheEntry>;
-  } catch {
-    return {};
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {};
+    }
+    console.error('Repo map cache is corrupt or unreadable:', error);
+    throw error;
   }
 }
 
@@ -266,11 +273,15 @@ export async function buildRepoMap(options: RepoMapOptions = {}): Promise<RepoMa
         continue;
       }
 
-      const content = await fs.readFile(entry.absolutePath, 'utf8').catch(() => '');
-      const extracted = extractSymbolsFromSource(entry.path, content);
-      symbols.push(...extracted);
-      fileContents.set(entry.path, content);
-      cache[entry.path] = {mtime: stat.mtimeMs, head, symbols: extracted};
+      try {
+        const content = await fs.readFile(entry.absolutePath, 'utf8');
+        const extracted = extractSymbolsFromSource(entry.path, content);
+        symbols.push(...extracted);
+        fileContents.set(entry.path, content);
+        cache[entry.path] = {mtime: stat.mtimeMs, head, symbols: extracted};
+      } catch (error) {
+        console.error(`Failed to read ${entry.path} for repo map:`, error);
+      }
     }
 
     await saveCache(cache);
@@ -279,8 +290,12 @@ export async function buildRepoMap(options: RepoMapOptions = {}): Promise<RepoMa
   for (const symbol of symbols) {
     if (fileContents.has(symbol.path)) continue;
     const absolutePath = path.join(workspaceRoot(), symbol.path);
-    const content = await fs.readFile(absolutePath, 'utf8').catch(() => '');
-    fileContents.set(symbol.path, content);
+    try {
+      const content = await fs.readFile(absolutePath, 'utf8');
+      fileContents.set(symbol.path, content);
+    } catch (error) {
+      console.error(`Failed to read ${symbol.path} for repo map ranking:`, error);
+    }
   }
 
   const referenceCounts = await computeReferenceCounts(symbols, fileContents);
