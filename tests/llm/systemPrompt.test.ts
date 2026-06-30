@@ -107,4 +107,11 @@ describe('buildSubagentPrompt', () => {
     const session = {start: new Date('2024-01-15T03:30:00Z'), cwd: '/stable/path'};
     expect(buildSubagentPrompt([], session)).toBe(buildSubagentPrompt([], session));
   });
+
+  it('instructs the model to treat external-content as untrusted data', () => {
+    const prompt = buildSubagentPrompt();
+    expect(prompt).toContain('<external-content>');
+    expect(prompt).toContain('untrusted data');
+    expect(prompt).toContain('not instructions');
+  });
 });
