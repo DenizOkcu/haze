@@ -1,28 +1,13 @@
-import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
+// Tool-output compaction (string capping + history-result compaction) now lives in
+// `src/core/toolOutput/compaction.ts` so producers and the history-compaction
+// consumer share a single reduction-metadata contract. Re-exported here to keep
+// the existing `./outputCap.js` import sites stable.
+export {compactStoredOutput, COMPACT_COMMAND_CHARS} from '../../core/toolOutput/compaction.js';
 
-/** Default ceiling for capped tool outputs (bash, fetch). */
-export const COMPACT_COMMAND_CHARS = 12_000;
 /** Default ceiling for rendered grep output. */
 export const GREP_MAX_OUTPUT_CHARS = 30_000;
 /** Default ceiling for a single grep match line. */
 export const GREP_MAX_LINE_CHARS = 500;
-
-/**
- * Cap a string to `maxChars` characters, keeping a head + tail and storing the
- * full text behind a `readToolOutput` handle so nothing is lost.
- */
-export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS) {
-  if (text.length <= maxChars) return {text, truncated: false};
-  const handle = storeToolOutput(text);
-  const headChars = Math.floor(maxChars * 0.4);
-  const tailChars = maxChars - headChars;
-  return {
-    text: `${text.slice(0, headChars)}\n\n[... ${text.length - maxChars} characters omitted; use readToolOutput with handle ${handle} ...]\n\n${text.slice(-tailChars)}`,
-    truncated: true,
-    omittedChars: text.length - maxChars,
-    handle,
-  };
-}
 
 /** Truncate a single over-long line in place. */
 export function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
