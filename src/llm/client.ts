@@ -62,10 +62,11 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
   const name = selection.model;
   const cacheSeed = session?.cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
-  const useAnthropic = isAnthropicProvider(selection.provider.name);
+  const useAnthropic =
+    isAnthropicProvider(selection.provider.name) || /api\.anthropic\.com/i.test(baseURL);
   return {
     model: useAnthropic
-      ? createAnthropic({apiKey}).chat(name)
+      ? createAnthropic({apiKey, baseURL}).chat(name)
       : createOpenAI({apiKey, baseURL}).chat(name),
     config: {
       providerName: selection.provider.name,
@@ -89,7 +90,7 @@ export function cacheKeyFor(name: string, cwd?: string) {
 export function providerRequestSettings(config: ModelRuntimeConfig) {
   const isExtendedThinkingModel =
     config.capabilities.supportsExtendedThinking &&
-    /^claude-3-7-sonnet-/i.test(config.modelName);
+    /^claude-(3-7-sonnet|opus-4|sonnet-4|fable)/i.test(config.modelName);
   const providerOptions: {
     openai?: {promptCacheKey?: string; textVerbosity?: 'low'};
     anthropic?: {thinking: {type: 'enabled'; budgetTokens: number}};

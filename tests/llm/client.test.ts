@@ -81,12 +81,18 @@ describe('providerRequestSettings', () => {
     });
   });
 
-  it('enables Anthropic extended thinking for claude-3-7-sonnet models', () => {
+  it.each([
+    'claude-3-7-sonnet-20250219',
+    'claude-opus-4-8',
+    'claude-opus-4-8-20250514',
+    'claude-sonnet-4-6',
+    'claude-fable-5',
+  ])('enables Anthropic extended thinking for %s', (modelName) => {
     const cfg = config({
       supportsExtendedThinking: true,
       supportsPromptCacheKey: false,
       supportsTextVerbosity: false,
-      modelName: 'claude-3-7-sonnet-20250219',
+      modelName,
     });
     expect(providerRequestSettings(cfg)).toEqual({
       providerOptions: {
@@ -95,10 +101,10 @@ describe('providerRequestSettings', () => {
     });
   });
 
-  it('does not enable extended thinking for other Anthropic models', () => {
+  it('does not enable extended thinking for Anthropic models that do not support it', () => {
     const cfg = config({
       supportsExtendedThinking: true,
-      modelName: 'claude-opus-4-8',
+      modelName: 'claude-haiku-4-5',
     });
     expect(providerRequestSettings(cfg)).toEqual({});
   });
@@ -243,7 +249,7 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient(undefined, createAnthropic);
     const runtime = await modelWithConfig();
     expect(runtime).toBeDefined();
-    expect(createAnthropic).toHaveBeenCalledWith({apiKey: 'sk-ant-test'});
+    expect(createAnthropic).toHaveBeenCalledWith({apiKey: 'sk-ant-test', baseURL: 'https://api.anthropic.com/v1'});
     expect((runtime!.model as unknown as {apiKey?: string}).apiKey).toBe('sk-ant-test');
     expect(runtime!.config.capabilities.supportsExtendedThinking).toBe(true);
     expect(runtime!.config.capabilities.reportsCacheUsage).toBe(true);
