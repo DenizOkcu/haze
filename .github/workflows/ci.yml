@@ -40,6 +40,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: head/package-lock.json
       - name: Coverage on base (${{ github.event.pull_request.base.ref }})
         working-directory: base
         run: |
