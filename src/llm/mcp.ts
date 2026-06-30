@@ -1,11 +1,25 @@
 import {createMCPClient, type MCPClient} from '@ai-sdk/mcp';
-import type {ToolSet} from 'ai';
+import type {Tool, ToolSet} from 'ai';
 import type {HazeMcpServer} from '../config/settings.js';
+import {wrapExternalContent} from './externalContent.js';
 
 export interface LoadedMcpTools {
   tools: ToolSet;
   clients: MCPClient[];
   errors: string[];
+}
+
+function wrapMcpTool(tool: Tool, serverName: string): Tool {
+  const originalExecute = tool.execute;
+  if (!originalExecute) return tool;
+  return {
+    ...tool,
+    execute: async (args, options) => {
+      const result = await originalExecute(args, options);
+      const text = typeof result === 'string' ? result : (result === undefined ? '' : JSON.stringify(result, null, 2) ?? '');
+      return wrapExternalContent(text, {type: 'mcp-tool', server: serverName});
+    },
+  };
 }
 
 function headersToRecord(server: HazeMcpServer): Record<string, string> | undefined {
@@ -41,7 +55,7 @@ export async function loadMcpTools(servers: HazeMcpServer[], reserved: ReadonlyS
           continue;
         }
         taken.add(name);
-        tools[name] = toolDef;
+        tools[name] = wrapMcpTool(toolDef, server.name);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

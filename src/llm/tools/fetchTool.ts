@@ -5,6 +5,7 @@ import {fetchUrlContent, BlockedUrlError} from '../webFetch.js';
 import {structuredToolFailure} from './failures.js';
 import {compactStoredOutput} from './outputCap.js';
 import {runDedupedTool} from './toolContext.js';
+import {wrapExternalContent} from '../externalContent.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
 
@@ -20,6 +21,7 @@ export const fetchTool = tool({
       const capped = compactStoredOutput(result.content, MAX_OUTPUT_CHARS);
       const extractionMethod = format === 'text' ? 'text' as const : result.extractionMethod;
       const fetchMetrics = reductionMetrics(result.content, capped.text);
+      const fenced = wrapExternalContent(capped.text, {origin: result.url, type: 'webpage'});
       return {
         ok: true,
         url: result.url,
@@ -30,7 +32,7 @@ export const fetchTool = tool({
         redirected: result.redirected,
         extractionMethod,
         truncated: capped.truncated,
-        content: capped.text,
+        content: fenced,
         reducerName: extractionMethod === 'markdown' ? 'web-html-extract' : 'web-content-cap',
         contentKind: 'web',
         lossy: capped.truncated || extractionMethod === 'markdown',

@@ -55,6 +55,25 @@ describe('fetch tool', () => {
     expect(result.truncated).toBe(false);
   });
 
+  it('wraps successful content in an external-content envelope', async () => {
+    mockFetch.mockResolvedValue({
+      url: 'https://example.com/docs',
+      status: 200,
+      statusText: 'OK',
+      contentType: 'text/html',
+      bytes: 123,
+      redirected: false,
+      content: '# Title\n\nBody.',
+      extractionMethod: 'markdown',
+      truncated: false,
+    });
+    const result = await hazeTools.fetch.execute({url: 'https://example.com/docs', format: 'auto'}, {abortSignal: undefined});
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain('<external-content type="webpage" origin="https://example.com/docs">');
+    expect(result.content).toContain('# Title');
+    expect(result.content).toContain('</external-content>');
+  });
+
   it('forces text extraction when format=text', async () => {
     mockFetch.mockResolvedValue({
       url: 'https://example.com/x',
