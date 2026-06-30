@@ -6,7 +6,7 @@ import {assembleRequestContext} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
-import {toolCallSummary, toolResultSummary, formatSeconds} from './formatters.js';
+import {toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds} from './formatters.js';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
@@ -256,6 +256,7 @@ export async function runAgentTurn(
       resetIdleTimer();
       switch (part.type) {
         case 'text-delta': {
+          callbacks.setBusyLabel?.('Haze is thinking');
           toolDisplay.startFreshToolGroup();
           const delta = sanitizeAssistantText(part.text);
           assistantText += delta;
@@ -282,6 +283,7 @@ export async function runAgentTurn(
           const toolCall = {toolCallId: part.id, toolName: part.toolName, input: {}};
           latestToolCalls.set(part.id, toolCall);
           startedTools.set(part.id, Date.now());
+          callbacks.setBusyLabel?.(busyToolLabel(part.toolName, {}));
           toolDisplay.ensureToolItem(toolCall);
           break;
         }
@@ -294,6 +296,7 @@ export async function runAgentTurn(
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input};
           latestToolCalls.set(part.toolCallId, toolCall);
           if (!startedTools.has(part.toolCallId)) startedTools.set(part.toolCallId, Date.now());
+          callbacks.setBusyLabel?.(busyToolLabel(part.toolName, part.input));
           toolDisplay.ensureToolItem(toolCall).summary = toolCallSummary(part.toolName, part.input);
           toolDisplay.updateToolGroup(true);
           break;

@@ -20,7 +20,7 @@ import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
-import {formatContextReport} from './formatters.js';
+import {formatContextReport, formatElapsedTimeWhole} from './formatters.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
@@ -71,6 +71,13 @@ async function currentBranchName() {
   }
 }
 
+/** Elapsed-time label for the busy indicator heartbeat, or '' when no turn is active. */
+function busyElapsedLabel(startedAt: number | undefined) {
+  if (startedAt == null) return '';
+  const elapsed = Date.now() - startedAt;
+  return elapsed > 0 ? formatElapsedTimeWhole(elapsed) : '';
+}
+
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -112,6 +119,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
+  const [, setActiveGoalStatus] = useState<string | undefined>();
+  // Heartbeat for the busy indicator: ticks every second while Haze is working
+  // so the developer always sees rolling activity (elapsed turn time) even when
+  // the model is thinking with no streamed output and no tool is running.
+  const turnStartedAtRef = useRef<number | undefined>(undefined);
+  const [, setBusyTick] = useState(0);
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
@@ -128,6 +141,21 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [lspDraft, setLspDraft] = useState<Partial<HazeLspServer>>({});
   const [selectedMcpName, setSelectedMcpName] = useState<string | undefined>();
   const [mcpDraft, setMcpDraft] = useState<Partial<HazeMcpServer>>({});
+
+  // Wrap setBusy so the busy indicator knows when the turn started, and tick a
+  // heartbeat every second while busy so elapsed time keeps rolling. This keeps
+  // the UI visibly alive during long model thinking / blocked tool runs where
+  // otherwise no streamed output is produced (the "looks stuck" problem).
+  const setBusyWithHeartbeat = (nextBusy: boolean) => {
+    if (nextBusy && !busy) turnStartedAtRef.current = Date.now();
+    if (!nextBusy) turnStartedAtRef.current = undefined;
+    setBusy(nextBusy);
+  };
+  useEffect(() => {
+    if (!busy) return;
+    const heartbeat = setInterval(() => setBusyTick(tick => tick + 1), 1000);
+    return () => clearInterval(heartbeat);
+  }, [busy]);
 
   useEffect(() => {
     Promise.all([
@@ -332,7 +360,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setQueuedFollowUps([]);
       setMessages(m => [...m, {role: 'system', text: 'Cleared queued follow-ups after interrupt.'}]);
     }
-    setBusy(false);
+    setBusyWithHeartbeat(false);
   }
 
   function queueFollowUp(value: string) {
@@ -643,7 +671,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       const name = result.draftName;
       const description = result.description;
       setBusyLabel(result.busyLabel ?? 'Creating skill');
-      setBusy(true);
+      setBusyWithHeartbeat(true);
       try {
         const created = await createSkill({name, description});
         setMessages(m => [...m, {role: 'system', text: skillCreationMessage(created.name, created.file)}]);
@@ -651,7 +679,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       } catch (error) {
         setMessages(m => [...m, {role: 'system', text: skillCreationFailure(error)}]);
       } finally {
-        setBusy(false);
+        setBusyWithHeartbeat(false);
         setBusyLabel('Haze is thinking');
       }
     }
@@ -1056,7 +1084,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         conversationRef.current = msgs;
         sessionRecorder.recordConversation(msgs);
       },
-      setBusy,
+      setBusy: setBusyWithHeartbeat,
       setBusyLabel,
       debugLog,
       getConversation: () => conversationRef.current,
@@ -1140,7 +1168,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
     {busy && <Box flexShrink={0}>
-      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsedLabel(turnStartedAtRef.current) ? <Text color={theme.muted} dimColor> · {busyElapsedLabel(turnStartedAtRef.current)}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
     </Box>}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
