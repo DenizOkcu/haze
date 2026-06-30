@@ -39,6 +39,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Coverage on base (${{ github.event.pull_request.base.ref }})
         working-directory: base
         run: |

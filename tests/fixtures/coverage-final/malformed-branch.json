@@ -1,0 +1,13 @@
+{
+  "/project/src/a.ts": {
+    "path": "/project/src/a.ts",
+    "statementMap": {
+      "0": {"start": {}, "end": {}}
+    },
+    "s": {"0": 1},
+    "branchMap": {
+      "0": {"line": 1, "type": "if", "locations": [{}, {}]}
+    },
+    "b": {"0": 123}
+  }
+}

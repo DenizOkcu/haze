@@ -33,7 +33,11 @@ function aggregate(filePath) {
       if (d.s[k] > 0) sc++;
     }
     for (const k of Object.keys(d.b ?? {})) {
-      for (const v of d.b[k]) {
+      const branchHits = d.b[k];
+      if (!Array.isArray(branchHits)) {
+        throw new Error(`Expected branch data for ${file}.${k} to be an array`);
+      }
+      for (const v of branchHits) {
         bt++;
         if (v > 0) bc++;
       }
