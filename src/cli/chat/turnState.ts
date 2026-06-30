@@ -1,5 +1,5 @@
 import type {Task} from '../../core/tasks/taskStorage.js';
-import type {TokenUsage} from '../commands/streaming.js';
+import type {TokenUsage} from '../../core/usage/types.js';
 
 export const EMPTY_TOKEN_USAGE: TokenUsage = {inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: undefined};
 

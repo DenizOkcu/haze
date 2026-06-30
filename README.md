@@ -82,6 +82,19 @@ API keys are entered in a masked prompt and sent as `Authorization: Bearer <valu
 
 Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside Haze — there are no environment variables to set.
 
+Usage costs are estimated locally from bundled per-model prices and recorded as JSONL under `~/.haze/usage/<date>.jsonl`. You can override prices or set optional soft budget warnings:
+
+```json
+{
+  "budget": {"daily": 5.0, "session": 2.0, "enabled": true},
+  "priceOverrides": {
+    "gpt-4o-mini": {"input": 0.15, "output": 0.6}
+  }
+}
+```
+
+`/cost` (and `/usage`) shows estimated token usage and spend for the current session, today, or the last 7 days. Budget warnings are soft: when enabled, Haze surfaces a system message when estimated session or daily spend crosses 80 % of the configured limit.
+
 Haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/skills` (an interactive picker: generate a custom skill from a description, then enable/disable, validate, or remove it). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask Haze to create a skill and then refine the Markdown.
 
 ## Get productive immediately
@@ -190,6 +203,8 @@ This is the trick: do normal work, notice friction, create a skill, keep going. 
 /compact [instructions]
 /clear
 /exit
+/cost [session|today|week]
+/usage [session|today|week]
 
 /skills
 ```

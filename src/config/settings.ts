@@ -51,6 +51,8 @@ export interface HazeSettings {
   lspServers?: HazeLspServerSettings[];
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
+  priceOverrides?: Record<string, {input?: number; output?: number}>;
+  budget?: {daily?: number; session?: number; enabled?: boolean};
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;

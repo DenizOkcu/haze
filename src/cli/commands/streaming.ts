@@ -1,6 +1,7 @@
 import {ToolLoopAgent, stepCountIs, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
+import {appendUsageEntry} from '../../core/usage/usageLedger.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {assembleRequestContext} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
@@ -23,9 +24,10 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
-import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
+import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate} from './streaming/turnRuntime.js';
 import type {HazeToolContext} from '../../llm/tools/toolContext.js';
-export type {TokenUsage} from './streaming/turnRuntime.js';
+import type {TokenUsage} from '../../core/usage/types.js';
+export type {TokenUsage} from '../../core/usage/types.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
 
@@ -50,6 +52,13 @@ function withScopedContextSystem(messages: ModelMessage[], context: HazeToolCont
     ...messages,
     {role: 'system', content: `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`},
   ];
+}
+
+function logUsageLedgerError(label: string, error: unknown, callbacks: StreamCallbacks) {
+  const text = error instanceof Error ? error.message : String(error);
+  const message = `Usage ledger write error${label ? ` (${label})` : ''}: ${text}`;
+  console.error(message);
+  callbacks.addMessage({role: 'system', text: message});
 }
 
 export interface StreamCallbacks {
@@ -226,7 +235,7 @@ export async function runAgentTurn(
       },
       onFinish(event) {
         const providerUsage = extractUsage({usage: event.totalUsage ?? event.usage});
-        callbacks.recordTokenUsage?.({
+        const fullUsage: TokenUsage = {
           inputTokens: providerUsage.inputTokens,
           outputTokens: providerUsage.outputTokens,
           systemPrompt: inputBreakdown.systemPrompt,
@@ -239,7 +248,11 @@ export async function runAgentTurn(
           reasoningTokens: providerUsage.reasoningTokens,
           logicalInputEstimate: inputBreakdown.logicalInputEstimate,
           effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
+        };
+        void appendUsageEntry(runtime.config, fullUsage, {sessionStart: session?.start}).catch(error => {
+          logUsageLedgerError('turn', error, callbacks);
         });
+        callbacks.recordTokenUsage?.(fullUsage);
         const accumulated = [...stripSyntheticControls(requestMessages), ...event.response.messages];
         const compacted = compactToolHistory(accumulated);
         callbacks.setConversation(compacted.messages);
@@ -316,7 +329,13 @@ export async function runAgentTurn(
           activeContextFiles = rememberContextFilesFromToolOutput(activeContextFiles, part.output);
           if (toolCall.toolName === 'writeTasks') callbacks.onTasksChanged?.();
           const nestedTokens = subagentTokenEstimate(part.output);
-          if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input});
+          if (nestedTokens) {
+            const subUsage: TokenUsage = {inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input};
+            void appendUsageEntry(runtime.config, subUsage, {sessionStart: session?.start}).catch(error => {
+              logUsageLedgerError('subagent', error, callbacks);
+            });
+            callbacks.recordTokenUsage?.(subUsage);
+          }
           toolDisplay.updateToolGroup(true);
           break;
         }
