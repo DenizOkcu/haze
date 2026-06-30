@@ -83,6 +83,24 @@ export function normalizeServer(server: HazeMcpServer): HazeMcpServer | undefine
   };
 }
 
+/**
+ * Validate a raw MCP server entry and return a human-readable error reason, or
+ * undefined if the entry is valid. This checks the same rules normalizeServer
+ * uses, but surfaces why an entry would be dropped.
+ */
+export function mcpServerValidationError(server: HazeMcpServer): string | undefined {
+  const name = server.name?.trim();
+  const transport = isTransport(server.transport) ? server.transport : undefined;
+  if (!name) return 'missing server name';
+  if (!transport) return `invalid transport "${String(server.transport)}"`;
+  if (transport === 'http' || transport === 'sse') {
+    if (!server.url?.trim()) return 'missing URL';
+  } else {
+    if (!server.command?.trim()) return 'missing command';
+  }
+  return undefined;
+}
+
 export function configuredMcpServers(settings: HazeSettings): HazeMcpServer[] {
   return (settings.mcpServers ?? [])
     .map(server => normalizeServer(server))
