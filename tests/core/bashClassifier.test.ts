@@ -64,4 +64,35 @@ describe('bash classifier', () => {
     const result = classifyBashCommand('mytool -delete --force ./out');
     expect(result.traits).not.toContain('deletes_files');
   });
+
+  it('classifies Rust cargo commands as validation', () => {
+    expect(classifyBashCommand('cargo test')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('cargo check')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('cargo clippy')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('cargo build')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('cargo nextest run')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+  });
+
+  it('classifies Go commands as validation', () => {
+    expect(classifyBashCommand('go test ./...')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('go build ./...')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('go vet ./...')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+  });
+
+  it('classifies Python commands as validation', () => {
+    expect(classifyBashCommand('pytest -v')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python3 -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python3.11 -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python -m unittest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('mypy src')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('ruff check src')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('ruff format --check')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+    expect(classifyBashCommand('pylint src')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+  });
+
+  it('classifies make validation targets as validation', () => {
+    expect(classifyBashCommand('make test')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('make check')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
+  });
 });
