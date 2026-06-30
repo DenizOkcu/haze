@@ -4,7 +4,7 @@ import {runAgentTurn, type Message, type StreamCallbacks, type TokenUsage, type 
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
-import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {modelSelector, resolveModelSelector, resolveModelSlot} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 
@@ -104,7 +104,7 @@ async function resolveModelOrError(modelOverride?: string): Promise<string | und
     }
     return undefined;
   }
-  if (!activeModel(settings)) {
+  if (resolveModelSlot(settings, 'primary').status !== 'found') {
     return 'No model provider configured. Run /provider to choose or add a provider.';
   }
   return undefined;
