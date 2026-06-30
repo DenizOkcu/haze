@@ -50,4 +50,32 @@ describe('validation output parser', () => {
     const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
     expect(summary.status).toBe('passed');
   });
+
+  it('detects eslint file headers even when a filename repeats (indexOf lookahead regression)', () => {
+    // The parser used `lines[lines.indexOf(line) + 1]` to peek at the line after
+    // an eslint file header. `indexOf` returns the *first* matching index, so a
+    // repeated header peeked at the wrong neighbour and missed the real
+    // diagnostic on the later occurrence. Index-based lookahead fixes both this
+    // correctness bug and the O(n²) cost of the scan.
+    const stdout = ['src/a.ts', 'not-a-diagnostic-line', 'src/a.ts', '  1:5  error  no-undef', ''].join('\n');
+    const summary = parseValidationOutput({command: 'npm run lint', code: 1, stdout, stderr: ''});
+    expect(summary.failedFiles).toContain('src/a.ts');
+  });
+
+  it('stays linear on large eslint output (O(n²) indexOf regression)', () => {
+    // ~50k unique file headers each followed by a diagnostic. Under the old
+    // `lines.indexOf(line)` lookahead, every header scanned from the start of
+    // the array (O(n²)); index-based is O(n). The budget is generous so linear
+    // time passes comfortably while a reintroduced quadratic scan fails.
+    const lines: string[] = [];
+    for (let index = 0; index < 50_000; index++) {
+      lines.push(`src/file-${index}.ts`);
+      lines.push(`  ${index + 1}:1  error  e${index}`);
+    }
+    const start = Date.now();
+    const summary = parseValidationOutput({command: 'npm run lint', code: 1, stdout: lines.join('\n'), stderr: ''});
+    const elapsed = Date.now() - start;
+    expect(summary.failedFiles).toContain('src/file-0.ts');
+    expect(elapsed).toBeLessThan(1500);
+  });
 });

@@ -71,4 +71,15 @@ describe('bash tool safety', () => {
     expect(page.content).toContain('1234: line 1233');
     expect(page.content).toContain('1236: line 1235');
   });
+
+  it('bounds runaway command output without hanging the reduction pipeline', async () => {
+    // Emits ~2 MB of stdout. A raw-output cap is applied in the close handler
+    // before any synchronous regex/reducer runs, so a huge or pathological
+    // command output cannot pin the event loop and freeze the agent (whose
+    // idle-timeout shares the same loop). The final rendered output stays
+    // within the compact ceiling regardless of input size.
+    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(400000))\"");
+    expect(result.ok).toBe(true);
+    expect(result.stdout.text.length).toBeLessThan(20_000);
+  }, 15_000);
 });
