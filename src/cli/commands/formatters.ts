@@ -102,6 +102,42 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
   return 'completed';
 }
 
+/**
+ * A short, human label for the live busy indicator while a tool is running,
+ * e.g. "Running command", "Reading src/foo.ts", "Searching".
+ * Lets the developer see *what* is happening, not just that something is.
+ */
+export function busyToolLabel(toolName: string, input: unknown) {
+  const data = input as Record<string, unknown>;
+  switch (toolName) {
+    case 'bash':
+      return 'Running command';
+    case 'grep':
+      return 'Searching';
+    case 'listFiles':
+      return 'Listing files';
+    case 'readFile':
+      return typeof data?.path === 'string' ? `Reading ${data.path}` : 'Reading file';
+    case 'writeFile':
+      return typeof data?.path === 'string' ? `Writing ${data.path}` : 'Writing file';
+    case 'editFile':
+    case 'replaceLines':
+      return typeof data?.path === 'string' ? `Editing ${data.path}` : 'Editing file';
+    case 'fetch':
+      return 'Fetching URL';
+    case 'subagent':
+      return 'Running subagent';
+    case 'writeTasks':
+      return 'Updating tasks';
+    case 'skill':
+      return 'Loading skill';
+    default:
+      if (toolName.startsWith('lsp')) return 'Querying LSP';
+      if (toolName.startsWith('mcp')) return 'Running MCP tool';
+      return `Running ${toolName}`;
+  }
+}
+
 export function formatSeconds(milliseconds: number) {
   return `${(milliseconds / 1000).toFixed(1)}s`;
 }

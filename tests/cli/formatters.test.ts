@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {compact, toolCallSummary, toolResultSummary, formatSeconds, formatElapsedTime, formatElapsedTimeWhole, formatContextReport, type ContextReportData} from '../../src/cli/commands/formatters.js';
+import {compact, toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds, formatElapsedTime, formatElapsedTimeWhole, formatContextReport, type ContextReportData} from '../../src/cli/commands/formatters.js';
 
 describe('compact', () => {
   it('returns short strings unchanged', () => {
@@ -84,6 +84,44 @@ describe('toolCallSummary', () => {
 
   it('falls back to generic format', () => {
     expect(toolCallSummary('custom', {data: 1})).toMatch(/^custom /);
+  });
+});
+
+describe('busyToolLabel', () => {
+  it('labels bash as running a command', () => {
+    expect(busyToolLabel('bash', {command: 'npm test'})).toBe('Running command');
+  });
+
+  it('labels readFile with its path', () => {
+    expect(busyToolLabel('readFile', {path: 'src/index.ts'})).toBe('Reading src/index.ts');
+  });
+
+  it('labels readFile without input generically', () => {
+    expect(busyToolLabel('readFile', {})).toBe('Reading file');
+  });
+
+  it('labels editFile and replaceLines as editing', () => {
+    expect(busyToolLabel('editFile', {path: 'a.ts'})).toBe('Editing a.ts');
+    expect(busyToolLabel('replaceLines', {path: 'b.ts'})).toBe('Editing b.ts');
+  });
+
+  it('labels grep and listFiles', () => {
+    expect(busyToolLabel('grep', {pattern: 'x'})).toBe('Searching');
+    expect(busyToolLabel('listFiles', {path: '.'})).toBe('Listing files');
+  });
+
+  it('labels fetch and subagent', () => {
+    expect(busyToolLabel('fetch', {url: 'https://example.com'})).toBe('Fetching URL');
+    expect(busyToolLabel('subagent', {task: 'x'})).toBe('Running subagent');
+  });
+
+  it('falls back to Running <name> for unknown tools', () => {
+    expect(busyToolLabel('customTool', {data: 1})).toBe('Running customTool');
+  });
+
+  it('labels LSP- and MCP-prefixed tools generically', () => {
+    expect(busyToolLabel('lspSymbols', {path: 'a.ts'})).toBe('Querying LSP');
+    expect(busyToolLabel('mcp_search', {})).toBe('Running MCP tool');
   });
 });
 
