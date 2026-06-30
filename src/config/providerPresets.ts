@@ -9,8 +9,8 @@ export interface ProviderPreset {
   id: string;
   /** Human-readable name shown in the picker. */
   name: string;
-  /** Pre-configured OpenAI-compatible base URL. */
-  baseUrl: string;
+  /** Pre-configured OpenAI-compatible base URL. Optional for native SDK providers. */
+  baseUrl?: string;
   /** Whether an API key is typically required. Local providers default to false. */
   needsApiKey: boolean;
   /** Hint shown when prompting for the API key. */
@@ -60,7 +60,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'anthropic',
     name: 'Anthropic Claude',
-    baseUrl: 'https://api.anthropic.com/v1',
     needsApiKey: true,
     suggestedModels: [
       // SOTA

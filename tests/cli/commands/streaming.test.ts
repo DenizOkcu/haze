@@ -310,6 +310,27 @@ describe('runAgentTurn: no model', () => {
 });
 
 describe('runAgentTurn: stream handling', () => {
+  it('discards reasoning parts without adding assistant text', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
+      },
+      fullStreamParts: [
+        {type: 'reasoning-start', id: 'r1'},
+        {type: 'reasoning-delta', id: 'r1', text: 'thinking...'},
+        {type: 'reasoning-end', id: 'r1'},
+        {type: 'text-delta', id: 'a1', text: 'Hello'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+      responseMessages: [{role: 'assistant', content: 'Hello'}],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('go', undefined, [], cb);
+    const assistant = cb.messages.find((m) => m.role === 'assistant');
+    expect(assistant?.text).toBe('Hello');
+  });
+
   it('streams text-delta parts into a single assistant message', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {

@@ -407,16 +407,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    setProviderDraft({name: existingName, url: preset.baseUrl});
+    const urlLabel = preset.baseUrl ?? 'https://api.anthropic.com/v1';
+    setProviderDraft({name: existingName, url: urlLabel});
 
     if (preset.needsApiKey) {
       setMode('providerAddKey');
-      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`}]);
+      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${urlLabel})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`}]);
     } else {
       // Local/keyless: skip API key, go straight to models
       setMode('providerAddModels');
       const hint = preset.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
-      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl}) — no API key needed.\nComma-separated model names?${hint}`}]);
+      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${urlLabel}) — no API key needed.\nComma-separated model names?${hint}`}]);
     }
   }
 

@@ -349,6 +349,12 @@ export async function runAgentTurn(
           streamFinished = true;
           callbacks.debugLog(`ToolLoopAgent finished: ${part.finishReason}`);
           break;
+        case 'reasoning-start':
+        case 'reasoning-delta':
+        case 'reasoning-end':
+          // Anthropic extended thinking emits reasoning events. They are not user-facing
+          // assistant text and are intentionally discarded from the render stream.
+          break;
         default:
           break;
       }
