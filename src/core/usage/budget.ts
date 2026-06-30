@@ -1,7 +1,5 @@
 import type {HazeSettings} from '../../config/settings.js';
 import {readUsageEntries} from './usageLedger.js';
-import {costForUsage, priceForModel} from './pricing.js';
-import type {TokenUsage} from './types.js';
 
 export interface BudgetWarning {
   key: string;
@@ -10,8 +8,7 @@ export interface BudgetWarning {
 
 export interface BudgetCheckInput {
   settings: HazeSettings;
-  sessionUsage: TokenUsage;
-  runtime?: {providerName: string; modelName: string};
+  sessionCost?: number;
   baseDir?: string;
 }
 
@@ -23,15 +20,8 @@ export async function checkBudget(input: BudgetCheckInput): Promise<BudgetWarnin
   const budget = input.settings.budget;
   if (!budget || budget.enabled === false) return undefined;
 
-  if (budget.session != null && budget.session > 0 && input.runtime) {
-    const price = await priceForModel(input.runtime.providerName, input.runtime.modelName);
-    if (!price) {
-      return {
-        key: thresholdKey('session', 0),
-        message: `Budget warning: no price configured for ${input.runtime.providerName}:${input.runtime.modelName}. Session budget cannot be monitored.`,
-      };
-    }
-    const cost = costForUsage(input.sessionUsage, price);
+  if (budget.session != null && budget.session > 0 && input.sessionCost != null) {
+    const cost = input.sessionCost;
     if (cost >= budget.session * 0.8) {
       const level = Math.floor(cost / (budget.session * 0.8));
       return {

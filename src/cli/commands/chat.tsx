@@ -126,16 +126,29 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [costUnavailable, setCostUnavailable] = useState(false);
   const budgetWarningsRef = useRef<Set<string>>(new Set());
   const budgetCheckErrorRef = useRef(false);
-  const sessionUsageRef = useRef<TokenUsage>({...EMPTY_TOKEN_USAGE});
+  const sessionCostRef = useRef<number | undefined>(undefined);
   const recordTokenUsageRef = useRef<(usage: TokenUsage) => Promise<void>>(async () => undefined);
   useEffect(() => {
     recordTokenUsageRef.current = async (usage: TokenUsage) => {
       const active = activeModel(settings);
       if (!active) return;
-      const runtime = {providerName: active.provider.name, modelName: active.model};
-      sessionUsageRef.current = accumulateTokenUsage(sessionUsageRef.current, usage);
       try {
-        const warning = await checkBudget({settings, sessionUsage: sessionUsageRef.current, runtime, baseDir: HAZE_DIR});
+        const price = await priceForModel(active.provider.name, active.model);
+        if (price) {
+          setCostUnavailable(false);
+          const cost = costForUsage(usage, price);
+          setSessionCost(prev => (prev ?? 0) + cost);
+          sessionCostRef.current = (sessionCostRef.current ?? 0) + cost;
+        } else {
+          setCostUnavailable(true);
+        }
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        console.error(`Session cost update error: ${text}`);
+        setCostUnavailable(true);
+      }
+      try {
+        const warning = await checkBudget({settings, sessionCost: sessionCostRef.current, baseDir: HAZE_DIR});
         if (warning && !budgetWarningsRef.current.has(warning.key)) {
           budgetWarningsRef.current.add(warning.key);
           setMessages(m => [...m, {role: 'system', text: warning.message}]);
@@ -147,17 +160,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           budgetCheckErrorRef.current = true;
           setMessages(m => [...m, {role: 'system', text: `Budget monitoring unavailable: ${text}`}]);
         }
-      }
-      try {
-        const price = await priceForModel(active.provider.name, active.model);
-        if (price) {
-          setCostUnavailable(false);
-          setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
-        }
-      } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        console.error(`Session cost update error: ${text}`);
-        setCostUnavailable(true);
       }
     };
   }, [settings]);
@@ -251,7 +253,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     sessionStartRef.current = new Date();
     budgetWarningsRef.current.clear();
     budgetCheckErrorRef.current = false;
-    sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
+    sessionCostRef.current = undefined;
     setSessionCost(undefined);
     setCostUnavailable(false);
     if (noSession) {
@@ -280,7 +282,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         sessionStartRef.current = new Date();
         budgetWarningsRef.current.clear();
         budgetCheckErrorRef.current = false;
-        sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
+        sessionCostRef.current = undefined;
         conversationRef.current = conversation;
         setSessionLabel(session.id);
         setLiveMessagesState(() => []);
@@ -349,7 +351,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     sessionStartRef.current = new Date();
     budgetWarningsRef.current.clear();
     budgetCheckErrorRef.current = false;
-    sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
+    sessionCostRef.current = undefined;
     setTokenUsage({...EMPTY_TOKEN_USAGE});
     setSessionCost(undefined);
     setCostUnavailable(false);

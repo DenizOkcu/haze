@@ -22,10 +22,13 @@ export async function priceForModel(providerName: string, modelName: string): Pr
   const qualified = pricingKey(providerName, modelName);
   const override = overrides?.[qualified] ?? overrides?.[modelName];
   if (override) {
-    if (override.input == null || override.output == null) {
+    const defaultPrice = DEFAULT_PRICING[modelName] ?? DEFAULT_PRICING[qualified];
+    const input = override.input ?? defaultPrice?.input;
+    const output = override.output ?? defaultPrice?.output;
+    if (input == null || output == null) {
       return undefined;
     }
-    return {input: override.input, output: override.output};
+    return {input, output};
   }
   return DEFAULT_PRICING[modelName] ?? DEFAULT_PRICING[qualified] ?? undefined;
 }

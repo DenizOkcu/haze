@@ -63,10 +63,11 @@ export async function appendUsageEntry(
   usage: TokenUsage,
   options?: {sessionStart?: Date; baseDir?: string; date?: Date},
 ): Promise<void> {
+  const now = options?.date ?? new Date();
   const price = await priceForModel(config.providerName, config.modelName);
   const cost = price ? costForUsage(usage, price) : undefined;
   const entry: UsageLedgerEntry = {
-    ts: new Date().toISOString(),
+    ts: now.toISOString(),
     sessionStart: options?.sessionStart?.toISOString(),
     provider: config.providerName,
     model: config.modelName,
@@ -77,7 +78,7 @@ export async function appendUsageEntry(
     reasoningTokens: usage.reasoningTokens ?? 0,
     ...(cost != null ? {cost} : {}),
   };
-  const file = filePath(options?.date ?? new Date(), options?.baseDir);
+  const file = filePath(now, options?.baseDir);
   await queuedWrite(file, `${JSON.stringify(entry)}\n`);
 }
 

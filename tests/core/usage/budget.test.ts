@@ -16,8 +16,7 @@ describe('checkBudget', () => {
   it('warns when session spend crosses 80% of the session budget', async () => {
     const warning = await checkBudget({
       settings: {budget: {session: 1, enabled: true}},
-      sessionUsage: {inputTokens: 6000, outputTokens: 0, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 6000, reasoningTokens: 0, logicalInputEstimate: 6000, effectiveNonCachedInput: 6000},
-      runtime: {providerName: 'openai', modelName: 'gpt-4o-mini'},
+      sessionCost: 0.9,
     });
     expect(warning).toBeDefined();
     expect(warning!.message).toContain('Session spend estimate');
@@ -26,7 +25,7 @@ describe('checkBudget', () => {
   it('returns undefined when budget is disabled', async () => {
     const warning = await checkBudget({
       settings: {budget: {session: 1, enabled: false}},
-      sessionUsage: {inputTokens: 100000, outputTokens: 0, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 100000, reasoningTokens: 0, logicalInputEstimate: 100000, effectiveNonCachedInput: 100000},
+      sessionCost: 100,
     });
     expect(warning).toBeUndefined();
   });
@@ -38,19 +37,15 @@ describe('checkBudget', () => {
     ]);
     const warning = await checkBudget({
       settings: {budget: {daily: 2, enabled: true}},
-      sessionUsage: {inputTokens: 0, outputTokens: 0, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: 0},
     });
     expect(warning).toBeDefined();
     expect(warning!.message).toContain('Daily spend estimate');
   });
 
-  it('warns when a session budget is set but pricing is unavailable', async () => {
+  it('does not warn for a session budget when no session cost is tracked', async () => {
     const warning = await checkBudget({
       settings: {budget: {session: 1, enabled: true}},
-      sessionUsage: {inputTokens: 0, outputTokens: 0, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: 0},
-      runtime: {providerName: 'local', modelName: 'unknown-model'},
     });
-    expect(warning).toBeDefined();
-    expect(warning!.message).toContain('no price configured');
+    expect(warning).toBeUndefined();
   });
 });

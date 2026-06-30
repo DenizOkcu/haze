@@ -29,4 +29,22 @@ describe('pricing', () => {
     const price = await priceForModel('openai', 'gpt-4o-mini');
     expect(price).toEqual({input: 0.1, output: 0.4});
   });
+
+  it('merges partial overrides with bundled defaults', async () => {
+    const {readSettings} = await import('../../../src/config/settings.js');
+    readSettings.mockResolvedValue({
+      priceOverrides: {'gpt-4o-mini': {output: 0.4}},
+    });
+    const price = await priceForModel('openai', 'gpt-4o-mini');
+    expect(price).toEqual({input: DEFAULT_PRICING['gpt-4o-mini'].input, output: 0.4});
+  });
+
+  it('returns undefined when a partial override has no bundled default for the missing field', async () => {
+    const {readSettings} = await import('../../../src/config/settings.js');
+    readSettings.mockResolvedValue({
+      priceOverrides: {'unknown-model': {input: 1}},
+    });
+    const price = await priceForModel('local', 'unknown-model');
+    expect(price).toBeUndefined();
+  });
 });
