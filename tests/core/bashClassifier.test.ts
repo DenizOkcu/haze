@@ -133,9 +133,16 @@ describe('bash classifier', () => {
       expect(result.traits).toContain('runs_tests');
     });
 
-    it('classifies tsc as read_only with runs_build trait', () => {
+    it('classifies npm run typecheck as read_only with runs_build trait', () => {
+      const result = classifyBashCommand('npm run typecheck');
+      expect(result.riskLevel).toBe('read_only');
+      expect(result.traits).toContain('runs_build');
+    });
+
+    it('classifies npx tsc --noEmit as unknown because npx breaks the validation boundary', () => {
       const result = classifyBashCommand('npx tsc --noEmit');
-      expect(result.riskLevel).not.toBe('destructive');
+      expect(result.riskLevel).toBe('unknown');
+      expect(result.traits).toEqual([]);
     });
   });
 
