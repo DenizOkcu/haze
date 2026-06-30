@@ -76,7 +76,8 @@ Notes:
     - `client.ts` builds an OpenAI-compatible chat model from `~/.haze/settings.json`; returns `undefined` when no provider/model is configured.
     - `systemPrompt.ts` and `initPrompt.ts` define agent behavior and `/init` guidance.
     - `hazeTools.ts` defines built-in tools: `listFiles`, `readFile`, `grep`, `editFile`, `replaceLines`, `writeFile`, `bash`, `readToolOutput`, `fetch`, `writeTasks`, `memory`.
-- `core/memory/memoryStore.ts` persists workspace memory as JSONL under `~/.haze/memory/<cwd-hash>/memory.jsonl` with atomic writes and a 200-entry cap; `systemPrompt.ts` injects the last 20 entries at session start.
+  - `core/memory/` — persistent workspace memory.
+    - `memoryStore.ts` persists workspace memory as JSONL under `~/.haze/memory/<cwd-hash>/memory.jsonl` with atomic writes and a 200-entry cap; `systemPrompt.ts` injects the last 20 entries at session start.
     - `lspTools.ts`/`lsp.ts` provide optional read-only LSP navigation via installed stdio language servers.
     - `mcp.ts` loads tools from configured Model Context Protocol servers (`@ai-sdk/mcp`) into the toolset per turn.
     - `toolResultTypes.ts` contains structured tool/validation result types and guards.

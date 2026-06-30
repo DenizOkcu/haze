@@ -50,6 +50,15 @@ function normalizeTags(tags?: string[]): string[] {
     .filter(tag => tag.length > 0);
 }
 
+function isEnoent(error: unknown): error is {code: 'ENOENT'} & Error {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as {code?: unknown}).code === 'ENOENT';
+}
+
+function warnParseErrors(file: string, parseErrors: string[]): void {
+  if (parseErrors.length === 0) return;
+  console.warn(`[haze memory] ignoring ${parseErrors.length} corrupted line(s) in ${file}: ${parseErrors.join('; ')}`);
+}
+
 export async function storeMemory(input: {
   key: string;
   value: string;
@@ -68,18 +77,21 @@ export async function storeMemory(input: {
   };
 
   await fs.mkdir(path.dirname(file), {recursive: true});
-  const existing = await readMemoryEntries(cwd, input.baseDir);
-  const entries = [...existing.entries, entry];
-  if (entries.length > MAX_ENTRIES) {
-    entries.splice(0, entries.length - MAX_ENTRIES);
+  const {entries, parseErrors} = await readMemoryEntries(cwd, input.baseDir);
+  warnParseErrors(file, parseErrors);
+  const entriesToWrite = [...entries, entry];
+  if (entriesToWrite.length > MAX_ENTRIES) {
+    entriesToWrite.splice(0, entriesToWrite.length - MAX_ENTRIES);
   }
-  await atomicWriteJsonl(file, entries);
+  await atomicWriteJsonl(file, entriesToWrite);
   return entry;
 }
 
 export async function searchMemory(query: string, cwd = process.cwd(), baseDir = DEFAULT_MEMORY_DIR): Promise<MemoryEntry[]> {
   const normalizedQuery = query.toLowerCase();
-  const {entries} = await readMemoryEntries(cwd, baseDir);
+  const file = memoryFile(cwd, baseDir);
+  const {entries, parseErrors} = await readMemoryEntries(cwd, baseDir);
+  warnParseErrors(file, parseErrors);
   return entries.filter(entry =>
     entry.key.toLowerCase().includes(normalizedQuery) ||
     entry.value.toLowerCase().includes(normalizedQuery) ||
@@ -88,7 +100,9 @@ export async function searchMemory(query: string, cwd = process.cwd(), baseDir =
 }
 
 export async function listMemory(cwd = process.cwd(), baseDir = DEFAULT_MEMORY_DIR): Promise<MemoryEntry[]> {
-  const {entries} = await readMemoryEntries(cwd, baseDir);
+  const file = memoryFile(cwd, baseDir);
+  const {entries, parseErrors} = await readMemoryEntries(cwd, baseDir);
+  warnParseErrors(file, parseErrors);
   return entries;
 }
 
@@ -100,7 +114,10 @@ export async function clearMemory(cwd = process.cwd(), baseDir = DEFAULT_MEMORY_
 
 export async function readMemoryEntries(cwd = process.cwd(), baseDir = DEFAULT_MEMORY_DIR): Promise<ReadMemoryEntriesResult> {
   const file = memoryFile(cwd, baseDir);
-  const raw = await fs.readFile(file, 'utf8').catch(() => '');
+  const raw = await fs.readFile(file, 'utf8').catch((error: unknown) => {
+    if (isEnoent(error)) return '';
+    throw error;
+  });
   const entries: MemoryEntry[] = [];
   const parseErrors: string[] = [];
   const lines = raw.split('\n');
