@@ -24,9 +24,10 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
-import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
+import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate} from './streaming/turnRuntime.js';
 import type {HazeToolContext} from '../../llm/tools/toolContext.js';
-export type {TokenUsage} from './streaming/turnRuntime.js';
+import type {TokenUsage} from '../../core/usage/types.js';
+export type {TokenUsage} from '../../core/usage/types.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
 

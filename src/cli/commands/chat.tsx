@@ -19,7 +19,7 @@ import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
-import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
+import {runAgentTurn, type Message} from './streaming.js';
 import {formatContextReport} from './formatters.js';
 import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
@@ -44,6 +44,7 @@ import {createSessionRecorder} from '../chat/sessionRecorder.js';
 import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {compactHomePath, displayMessagesFromConversation, estimateConversationTokens, formatTokenCount, toolCallCount} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
+import type {TokenUsage} from '../../core/usage/types.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
@@ -125,6 +126,41 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [costUnavailable, setCostUnavailable] = useState(false);
   const budgetWarningsRef = useRef<Set<string>>(new Set());
   const budgetCheckErrorRef = useRef(false);
+  const sessionUsageRef = useRef<TokenUsage>({...EMPTY_TOKEN_USAGE});
+  const recordTokenUsageRef = useRef<(usage: TokenUsage) => Promise<void>>(async () => undefined);
+  useEffect(() => {
+    recordTokenUsageRef.current = async (usage: TokenUsage) => {
+      const active = activeModel(settings);
+      if (!active) return;
+      const runtime = {providerName: active.provider.name, modelName: active.model};
+      sessionUsageRef.current = accumulateTokenUsage(sessionUsageRef.current, usage);
+      try {
+        const warning = await checkBudget({settings, sessionUsage: sessionUsageRef.current, runtime, baseDir: HAZE_DIR});
+        if (warning && !budgetWarningsRef.current.has(warning.key)) {
+          budgetWarningsRef.current.add(warning.key);
+          setMessages(m => [...m, {role: 'system', text: warning.message}]);
+        }
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        console.error(`Budget check error: ${text}`);
+        if (!budgetCheckErrorRef.current) {
+          budgetCheckErrorRef.current = true;
+          setMessages(m => [...m, {role: 'system', text: `Budget monitoring unavailable: ${text}`}]);
+        }
+      }
+      try {
+        const price = await priceForModel(active.provider.name, active.model);
+        if (price) {
+          setCostUnavailable(false);
+          setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
+        }
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        console.error(`Session cost update error: ${text}`);
+        setCostUnavailable(true);
+      }
+    };
+  }, [settings]);
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
@@ -213,6 +249,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     contextFileSignaturesRef.current = new Map(contextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
     workStateRef.current = undefined;
     sessionStartRef.current = new Date();
+    budgetWarningsRef.current.clear();
+    budgetCheckErrorRef.current = false;
+    sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
+    setSessionCost(undefined);
+    setCostUnavailable(false);
     if (noSession) {
       sessionRef.current = undefined;
       setSessionLabel('session off');
@@ -237,11 +278,16 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         const {messages: conversation, parseErrors: conversationErrors} = await restoreConversation(session);
         sessionRef.current = session;
         sessionStartRef.current = new Date();
+        budgetWarningsRef.current.clear();
+        budgetCheckErrorRef.current = false;
+        sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
         conversationRef.current = conversation;
         setSessionLabel(session.id);
         setLiveMessagesState(() => []);
         const restoredMessages = displayMessagesFromConversation(conversation);
         setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
+        setSessionCost(undefined);
+        setCostUnavailable(false);
         const {state: workState, parseErrors: workStateErrors} = await restoreWorkState(session);
         workStateRef.current = workState;
         for (const error of [...conversationErrors, ...workStateErrors]) {
@@ -300,7 +346,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     conversationRef.current = conversation;
     workStateRef.current = workState;
     setSessionLabel(session.id);
+    sessionStartRef.current = new Date();
+    budgetWarningsRef.current.clear();
+    budgetCheckErrorRef.current = false;
+    sessionUsageRef.current = {...EMPTY_TOKEN_USAGE};
     setTokenUsage({...EMPTY_TOKEN_USAGE});
+    setSessionCost(undefined);
+    setCostUnavailable(false);
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
   }
@@ -1085,44 +1137,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       },
       compactConversation,
       recordTokenUsage: usage => {
-        setTokenUsage(current => {
-          const next = accumulateTokenUsage(current, usage);
-          void (async () => {
-            const active = activeModel(settings);
-            if (!active) return;
-            const runtime = {providerName: active.provider.name, modelName: active.model};
-            try {
-              const warning = await checkBudget({settings, sessionUsage: next, runtime, baseDir: HAZE_DIR});
-              if (warning && !budgetWarningsRef.current.has(warning.key)) {
-                budgetWarningsRef.current.add(warning.key);
-                setMessages(m => [...m, {role: 'system', text: warning.message}]);
-              }
-            } catch (error) {
-              const text = error instanceof Error ? error.message : String(error);
-              console.error(`Budget check error: ${text}`);
-              if (!budgetCheckErrorRef.current) {
-                budgetCheckErrorRef.current = true;
-                setMessages(m => [...m, {role: 'system', text: `Budget monitoring unavailable: ${text}`}]);
-              }
-            }
-          })();
-          return next;
-        });
-        void (async () => {
-          const active = activeModel(settings);
-          if (!active) return;
-          try {
-            const price = await priceForModel(active.provider.name, active.model);
-            if (price) {
-              setCostUnavailable(false);
-              setSessionCost(prev => (prev ?? 0) + costForUsage(usage, price));
-            }
-          } catch (error) {
-            const text = error instanceof Error ? error.message : String(error);
-            console.error(`Session cost update error: ${text}`);
-            setCostUnavailable(true);
-          }
-        })();
+        setTokenUsage(current => accumulateTokenUsage(current, usage));
+        void recordTokenUsageRef.current(usage);
       },
       onEvent: event => {
         sessionRecorder.recordEvent(event);

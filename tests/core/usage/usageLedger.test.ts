@@ -2,13 +2,14 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {appendUsageEntry, readUsageEntries, readUsageRange} from '../../../src/core/usage/usageLedger.js';
+import {appendUsageEntry, clearCorruptedLedgerFiles, readUsageEntries, readUsageRange} from '../../../src/core/usage/usageLedger.js';
 
 describe('usageLedger', () => {
   let tmp: string;
 
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-usage-test-'));
+    clearCorruptedLedgerFiles();
   });
 
   afterEach(async () => {

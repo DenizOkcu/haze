@@ -2,7 +2,7 @@ import path from 'node:path';
 import fs from 'fs-extra';
 import {HAZE_DIR} from '../../config/paths.js';
 import {costForUsage, priceForModel} from './pricing.js';
-import type {TokenUsage} from '../../cli/commands/streaming.js';
+import type {TokenUsage} from './types.js';
 import type {ModelRuntimeConfig} from '../../llm/client.js';
 
 export interface UsageLedgerEntry {
@@ -40,6 +40,24 @@ function filePath(date = new Date(), baseDir = HAZE_DIR) {
   return path.join(usageDir(baseDir), `${dateFileId(date)}.jsonl`);
 }
 
+const writeQueues = new Map<string, Promise<unknown>>();
+
+async function queuedWrite(file: string, line: string): Promise<void> {
+  const previous = writeQueues.get(file) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    await fs.ensureDir(path.dirname(file));
+    const tmpFile = path.join(path.dirname(file), `.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+    await fs.writeFile(tmpFile, line, 'utf8');
+    try {
+      await fs.appendFile(file, await fs.readFile(tmpFile, 'utf8'), 'utf8');
+    } finally {
+      await fs.remove(tmpFile).catch(() => undefined);
+    }
+  });
+  writeQueues.set(file, next.catch(() => undefined));
+  await next;
+}
+
 export async function appendUsageEntry(
   config: ModelRuntimeConfig,
   usage: TokenUsage,
@@ -60,8 +78,7 @@ export async function appendUsageEntry(
     ...(cost != null ? {cost} : {}),
   };
   const file = filePath(options?.date ?? new Date(), options?.baseDir);
-  await fs.ensureDir(path.dirname(file));
-  await fs.appendFile(file, `${JSON.stringify(entry)}\n`, 'utf8');
+  await queuedWrite(file, `${JSON.stringify(entry)}\n`);
 }
 
 export async function readUsageEntries(options?: {date?: Date; baseDir?: string}): Promise<UsageLedgerEntry[]> {

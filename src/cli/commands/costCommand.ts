@@ -61,10 +61,16 @@ export async function handleCostCommand(
   const scope = args.trim().toLowerCase();
   const now = new Date();
 
-  const sessionEntries = ctx.sessionStart
-    ? (await readUsageRange(1, {now, baseDir: options?.baseDir}))
-        .filter(e => e.sessionStart === ctx.sessionStart!.toISOString())
-    : [];
+  const sessionEntries: UsageLedgerEntry[] = [];
+  if (ctx.sessionStart) {
+    const sessionStart = ctx.sessionStart;
+    const startDay = new Date(Date.UTC(sessionStart.getUTCFullYear(), sessionStart.getUTCMonth(), sessionStart.getUTCDate()));
+    const todayDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    for (let day = new Date(startDay); day <= todayDay; day.setUTCDate(day.getUTCDate() + 1)) {
+      const entries = await readUsageEntries({date: new Date(day), baseDir: options?.baseDir});
+      sessionEntries.push(...entries.filter(e => e.sessionStart === sessionStart.toISOString()));
+    }
+  }
   const todayEntries = await readUsageEntries({date: now, baseDir: options?.baseDir});
   const weekEntries = await readUsageRange(7, {now, baseDir: options?.baseDir});
 

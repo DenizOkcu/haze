@@ -1,7 +1,7 @@
 import type {HazeSettings} from '../../config/settings.js';
 import {readUsageEntries} from './usageLedger.js';
 import {costForUsage, priceForModel} from './pricing.js';
-import type {TokenUsage} from '../../cli/commands/streaming.js';
+import type {TokenUsage} from './types.js';
 
 export interface BudgetWarning {
   key: string;
@@ -25,15 +25,19 @@ export async function checkBudget(input: BudgetCheckInput): Promise<BudgetWarnin
 
   if (budget.session != null && budget.session > 0 && input.runtime) {
     const price = await priceForModel(input.runtime.providerName, input.runtime.modelName);
-    if (price) {
-      const cost = costForUsage(input.sessionUsage, price);
-      if (cost >= budget.session * 0.8) {
-        const level = Math.floor(cost / (budget.session * 0.8));
-        return {
-          key: thresholdKey('session', level),
-          message: `Session spend estimate ~$${cost.toFixed(4)} (${Math.round((cost / budget.session) * 100)}% of $${budget.session} budget).`,
-        };
-      }
+    if (!price) {
+      return {
+        key: thresholdKey('session', 0),
+        message: `Budget warning: no price configured for ${input.runtime.providerName}:${input.runtime.modelName}. Session budget cannot be monitored.`,
+      };
+    }
+    const cost = costForUsage(input.sessionUsage, price);
+    if (cost >= budget.session * 0.8) {
+      const level = Math.floor(cost / (budget.session * 0.8));
+      return {
+        key: thresholdKey('session', level),
+        message: `Session spend estimate ~$${cost.toFixed(4)} (${Math.round((cost / budget.session) * 100)}% of $${budget.session} budget).`,
+      };
     }
   }
 

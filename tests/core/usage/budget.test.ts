@@ -1,10 +1,16 @@
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {checkBudget} from '../../../src/core/usage/budget.js';
+import {clearCorruptedLedgerFiles} from '../../../src/core/usage/usageLedger.js';
 
 vi.mock('../../../src/config/settings.js', () => ({readSettings: vi.fn(async () => ({}))}));
 vi.mock('../../../src/core/usage/usageLedger.js', () => ({
   readUsageEntries: vi.fn(async () => []),
+  clearCorruptedLedgerFiles: vi.fn(() => undefined),
 }));
+
+beforeEach(() => {
+  clearCorruptedLedgerFiles();
+});
 
 describe('checkBudget', () => {
   it('warns when session spend crosses 80% of the session budget', async () => {
@@ -36,5 +42,15 @@ describe('checkBudget', () => {
     });
     expect(warning).toBeDefined();
     expect(warning!.message).toContain('Daily spend estimate');
+  });
+
+  it('warns when a session budget is set but pricing is unavailable', async () => {
+    const warning = await checkBudget({
+      settings: {budget: {session: 1, enabled: true}},
+      sessionUsage: {inputTokens: 0, outputTokens: 0, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: 0},
+      runtime: {providerName: 'local', modelName: 'unknown-model'},
+    });
+    expect(warning).toBeDefined();
+    expect(warning!.message).toContain('no price configured');
   });
 });

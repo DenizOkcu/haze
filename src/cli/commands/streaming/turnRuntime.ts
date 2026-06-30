@@ -1,21 +1,7 @@
 import type {ModelMessage} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateValueTokens} from '../../../core/agent/contextBudget.js';
-
-export interface TokenUsage {
-  inputTokens: number | undefined;
-  outputTokens: number | undefined;
-  systemPrompt: number;
-  messages: number;
-  toolSchemas: number;
-  outputEstimate: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  noCacheTokens: number;
-  reasoningTokens: number;
-  logicalInputEstimate: number;
-  effectiveNonCachedInput: number | undefined;
-}
+export type {TokenUsage} from '../../../core/usage/types.js';
 
 export function retryDelayMs(attempt: number) {
   return Math.min(4000, 1000 * 2 ** attempt);
