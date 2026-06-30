@@ -83,7 +83,7 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'unknown', traits: uniq(traits), confidence: 'low', reason: 'find -exec / xargs runs an embedded command'};
   }
 
-  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b|cargo\s+(test|check|clippy|build|nextest\s+run)\b|go\s+(test|build|vet)\b|pytest\b|python\s+-m\s+(pytest|unittest)\b|mypy\b|ruff\s+(check|format\s+--check)\b|pylint\b|make\s+(test|check)\b)/)) {
+  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b|cargo\s+(test|check|clippy|build|nextest\s+run)\b|go\s+(test|build|vet)\b|pytest\b|python(?:3(?:\.\d+)?)?\s+-m\s+(pytest|unittest)\b|mypy\b|ruff\s+(check|format\s+--check)\b|pylint\b|make\s+(test|check)\b)/)) {
     if (has(lower, /test|vitest|jest|pytest|unittest|\bcargo\s+test\b|\bcargo\s+nextest\s+run\b|\bgo\s+test\b/)) traits.push('runs_tests');
     if (has(lower, /build|tsc|typecheck|lint|eslint|\bcargo\s+(check|clippy|build)\b|\bgo\s+(build|vet)\b|\bmypy\b|\bpylint\b|\bruff\s+(check|format\s+--check)\b|\bmake\s+check\b/)) traits.push('runs_build');
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};

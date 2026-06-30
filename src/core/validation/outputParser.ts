@@ -24,17 +24,20 @@ export function parseValidationOutput(input: {
   stderrTruncated?: boolean;
   classification?: BashClassification;
 }): ValidationSummary {
-  const text = `${input.stdout}\n${input.stderr}`;
-  const lines = text.split(/\r?\n/);
+  const stdoutLines = input.stdout.split(/\r?\n/);
+  const stderrLines = input.stderr.split(/\r?\n/);
+  const lines = stdoutLines.concat([''], stderrLines);
+  const stderrStart = stdoutLines.length + 1;
   const diagnostics: ValidationSummary['diagnostics'] = [];
   const failedTests: string[] = [];
   const failedFiles: string[] = [];
   const kind = inferKind(input.command, input.classification);
 
-  let cargoErrorMessage: string | undefined;
+  let cargoPending: {severity: 'error' | 'warning'; message: string} | undefined;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? '';
+    const isStderr = i >= stderrStart;
 
     const ts = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
     if (ts) {
@@ -77,22 +80,27 @@ export function parseValidationOutput(input: {
     }
 
     // Rust cargo check/clippy diagnostics
-    const cargoError = line.match(/^\s*error\[E(\d+)\]:\s*(.*)$/);
-    if (cargoError) {
-      cargoErrorMessage = cargoError[2] ?? 'rustc error';
+    const cargoHeader = line.match(/^\s*(error|warning)(?:\[E(\d+)\])?:\s*(.*)$/);
+    if (cargoHeader) {
+      const [, level, _code, message] = cargoHeader;
+      const fallback = level === 'error' && _code ? `rustc error E${_code}` : (level ?? 'rustc diagnostic');
+      cargoPending = {
+        severity: level === 'warning' ? 'warning' : 'error',
+        message: message?.trim() ? message.trim() : fallback,
+      };
       continue;
     }
-    if (cargoErrorMessage) {
+    if (cargoPending) {
       const loc = line.match(/^\s*-->\s+(.+?):(\d+):(\d+)\s*$/);
       if (loc) {
         const [, file, lineNo, column] = loc;
-        diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: 'error', message: cargoErrorMessage});
+        diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: cargoPending.severity, message: cargoPending.message});
         failedFiles.push(file ?? '');
-        cargoErrorMessage = undefined;
+        cargoPending = undefined;
         continue;
       }
-      if (!line.trim() || /^\s*error\[E\d+\]:/.test(line)) {
-        cargoErrorMessage = undefined;
+      if (!line.trim()) {
+        cargoPending = undefined;
       }
     }
 
@@ -103,7 +111,7 @@ export function parseValidationOutput(input: {
       continue;
     }
     const goDiag = line.match(/^(\S+\.go):(\d+)(?::(\d+))?:\s*(.+)$/);
-    if (goDiag) {
+    if (goDiag && isStderr) {
       const [, file, lineNo, column, message] = goDiag;
       diagnostics.push({
         file,

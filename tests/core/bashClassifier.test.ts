@@ -82,6 +82,8 @@ describe('bash classifier', () => {
   it('classifies Python commands as validation', () => {
     expect(classifyBashCommand('pytest -v')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
     expect(classifyBashCommand('python -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python3 -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
+    expect(classifyBashCommand('python3.11 -m pytest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
     expect(classifyBashCommand('python -m unittest')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_tests'])}));
     expect(classifyBashCommand('mypy src')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));
     expect(classifyBashCommand('ruff check src')).toEqual(expect.objectContaining({riskLevel: 'read_only', traits: expect.arrayContaining(['runs_build'])}));

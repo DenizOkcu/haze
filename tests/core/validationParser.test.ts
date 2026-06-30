@@ -172,4 +172,65 @@ describe('validation output parser', () => {
     expect(summary.status).toBe('failed');
     expect(summary.failedTests).toContain('test_bar (tests.test_foo.TestFoo)');
   });
+
+  it('reports passing cargo test runs', () => {
+    const stdout = [
+      'running 3 tests',
+      'test tests::one ... ok',
+      'test tests::two ... ok',
+      'test tests::three ... ok',
+      '',
+      'test result: ok. 3 passed; 0 failed; 0 ignored',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'cargo test', code: 0, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('passed');
+    expect(summary.summaryText).toBe('test passed');
+  });
+
+  it('reports passing go test runs', () => {
+    const stdout = 'ok\texample.com/foo\t0.001s\n';
+    const summary = parseValidationOutput({command: 'go test ./...', code: 0, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('passed');
+  });
+
+  it('reports passing pytest runs', () => {
+    const stdout = 'tests/test_foo.py::test_bar PASSED\ntests/test_foo.py::test_baz PASSED\n\n2 passed\n';
+    const summary = parseValidationOutput({command: 'pytest -v', code: 0, stdout, stderr: ''});
+    expect(summary.kind).toBe('test');
+    expect(summary.status).toBe('passed');
+  });
+
+  it('reports passing mypy runs', () => {
+    const stdout = 'Success: no issues found in 5 source files\n';
+    const summary = parseValidationOutput({command: 'mypy src', code: 0, stdout, stderr: ''});
+    expect(summary.kind).toBe('typecheck');
+    expect(summary.status).toBe('passed');
+  });
+
+  it('extracts cargo clippy warnings', () => {
+    const stdout = [
+      'warning: unused variable: `x`',
+      ' --> src/lib.rs:10:5',
+      '  |',
+      '10 |     let x = 1;',
+      '   |     ^^^^^^^^^',
+      '',
+      'error: aborting due to 1 previous error',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'cargo clippy', code: 101, stdout, stderr: ''});
+    expect(summary.kind).toBe('lint');
+    expect(summary.status).toBe('failed');
+    expect(summary.diagnostics).toHaveLength(1);
+    expect(summary.diagnostics[0]).toMatchObject({file: 'src/lib.rs', line: 10, column: 5, severity: 'warning'});
+    expect(summary.failedFiles).toContain('src/lib.rs');
+  });
+
+  it('does not treat go-like stdout as diagnostics', () => {
+    const stdout = 'debug: main.go:42: value\nPASS\n';
+    const summary = parseValidationOutput({command: 'go test ./...', code: 0, stdout, stderr: ''});
+    expect(summary.status).toBe('passed');
+    expect(summary.diagnostics).toHaveLength(0);
+  });
 });
