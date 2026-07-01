@@ -2,14 +2,14 @@ import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/
 import type {ContextFile} from '../../config/contextFiles.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
-import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey} from '../../config/providers.js';
+import {configuredProviders, formatModelSlot, providerHasKey, resolveModelSlot} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 
 export async function formatSettingsSummary(settings: HazeSettings, contextFiles: ContextFile[]): Promise<string> {
   const providers = configuredProviders(settings);
-  const activeProvider = resolveActiveProvider(settings);
+  const primary = resolveModelSlot(settings, 'primary');
   const contextDiagnostics = contextFileDiagnostics(contextFiles);
   const contextTokens = contextDiagnostics.reduce((sum, file) => sum + file.estimatedTokens, 0);
   const summary = summarizeContextDiagnostics(contextFiles);
@@ -27,10 +27,12 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
   const installedSkills = [...(await loadSkillRegistry()).skills.values()];
   const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(settings, skill.name) ? '' : ' (disabled)'}`).join(', ');
   const lines = [
-    `Provider: ${activeProvider?.name ?? 'not configured'}`,
-    `Model: ${settings.model ?? 'not set'}`,
-    `Base URL: ${activeProvider?.url ?? settings.baseURL ?? 'not configured'}`,
-    `API key: ${activeProvider && providerHasKey(settings, activeProvider) ? 'saved' : 'missing'}`,
+    `Provider: ${primary.status === 'found' ? primary.provider.name : 'not configured'}`,
+    `Model: ${primary.status === 'found' ? primary.model : 'not set'}`,
+    formatModelSlot(settings, 'Lightweight slot', 'lightweight'),
+    formatModelSlot(settings, 'Fallback slot', 'fallback'),
+    `Base URL: ${primary.status === 'found' ? primary.provider.url : settings.baseURL ?? 'not configured'}`,
+    `API key: ${primary.status === 'found' && providerHasKey(settings, primary.provider) ? 'saved' : 'missing'}`,
     `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
     `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `MCP servers: ${configuredMcpServers(settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,

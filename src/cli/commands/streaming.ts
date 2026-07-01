@@ -2,8 +2,10 @@ import {ToolLoopAgent, stepCountIs, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
+import {resolveModelSlot, sameModelResolution} from '../../config/providers.js';
 import {assembleRequestContext} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
+import {readSettings} from '../../config/settings.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {toolCallSummary, toolResultSummary, formatSeconds} from './formatters.js';
@@ -83,6 +85,7 @@ export async function runAgentTurn(
   contextOverflowRecovered = false,
   session?: PromptSession,
   modelOverride?: string,
+  fallbackUsed = false,
 ): Promise<TurnResult> {
   const displayVal = displayValue ?? value;
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
@@ -105,7 +108,7 @@ export async function runAgentTurn(
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
 
   try {
-    const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride});
+    const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride, slot: fallbackUsed ? 'fallback' : 'primary'});
     if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
       turnStatus = 'complete';
@@ -392,12 +395,29 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-          return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session, modelOverride);
+          return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session, modelOverride, fallbackUsed);
         }
         callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
       }
       const maxRetries = 2;
       if (retryAttempt < maxRetries && isRetryableModelError(error)) {
+        const settings = await readSettings();
+        const primaryResolution = resolveModelSlot(settings, 'primary');
+        const fallbackResolution = resolveModelSlot(settings, 'fallback');
+        const hasDistinctFallback =
+          !fallbackUsed &&
+          !modelOverride &&
+          primaryResolution.status === 'found' &&
+          fallbackResolution.status === 'found' &&
+          !sameModelResolution(primaryResolution, fallbackResolution);
+        if (hasDistinctFallback) {
+          callbacks.onEvent?.(agentEvent({type: 'fallback', provider: fallbackResolution.provider.name, model: fallbackResolution.model}));
+          callbacks.addMessage({
+            role: 'system',
+            text: `Primary model unavailable; falling back to ${fallbackResolution.provider.name}:${fallbackResolution.model}.`,
+          });
+          return await runAgentTurn(value, displayValue, contextFiles, callbacks, 0, true, contextOverflowRecovered, session, modelOverride, true);
+        }
         const delay = retryDelayMs(retryAttempt);
         callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
         callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
@@ -406,7 +426,7 @@ export async function runAgentTurn(
           turnStatus = 'aborted';
           return {status: turnStatus};
         }
-        return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session, modelOverride);
+        return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session, modelOverride, fallbackUsed);
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
     }

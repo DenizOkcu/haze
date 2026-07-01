@@ -48,19 +48,45 @@ describe('formatSettingsSummary', () => {
     const out = await formatSettingsSummary(baseSettings, []);
     expect(out).toContain('Provider: openrouter');
     expect(out).toContain('Model: gpt-4o');
+    expect(out).toContain('Lightweight slot: not set (inherits primary)');
+    expect(out).toContain('Fallback slot: not set (inherits primary)');
     expect(out).toContain('Base URL: https://openrouter.ai/api/v1');
     expect(out).toContain('API key: saved');
     expect(out).toContain('Configured providers: openrouter, local');
+  });
+
+  it('shows configured slots as provider:model and inherits primary when unset', async () => {
+    mocks.loadSkillRegistry.mockResolvedValue(skills());
+    const settings: HazeSettings = {
+      ...baseSettings,
+      models: {lightweight: 'local:llama3.1', fallback: 'openrouter:gpt-4o'},
+    };
+    const out = await formatSettingsSummary(settings, []);
+    expect(out).toContain('Lightweight slot: local:llama3.1');
+    expect(out).toContain('Fallback slot: openrouter:gpt-4o');
   });
 
   it('falls back to not configured when no provider is set', async () => {
     mocks.loadSkillRegistry.mockResolvedValue(skills());
     const out = await formatSettingsSummary({model: 'm'}, []);
     expect(out).toContain('Provider: not configured');
-    expect(out).toContain('Model: m');
+    expect(out).toContain('Model: not set');
     expect(out).toContain('Base URL: not configured');
     expect(out).toContain('API key: missing');
     expect(out).toContain('Configured providers: none');
+  });
+
+  it('uses models.primary when set for provider and model lines', async () => {
+    mocks.loadSkillRegistry.mockResolvedValue(skills());
+    const settings: HazeSettings = {
+      ...baseSettings,
+      provider: 'openai',
+      model: 'gpt-4o',
+      models: {primary: 'local:llama3.1'},
+    };
+    const out = await formatSettingsSummary(settings, []);
+    expect(out).toContain('Provider: local');
+    expect(out).toContain('Model: llama3.1');
   });
 
   it('marks disabled skills and servers', async () => {

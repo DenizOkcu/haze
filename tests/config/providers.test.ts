@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {activeModel, activeProvider, configuredProviders, resolveModelSelector} from '../../src/config/providers.js';
+import {activeModel, activeProvider, configuredProviders, resolveModelSelector, resolveModelSlot, type ModelSlotName} from '../../src/config/providers.js';
 
 describe('providers', () => {
   it('turns legacy OpenRouter settings into a provider', () => {
@@ -74,5 +74,64 @@ describe('providers', () => {
   it('returns no active model when a provider has no models', () => {
     const settings = {providers: [{name: 'remote', url: 'https://example.com/v1', models: []}]};
     expect(activeModel(settings)).toBeUndefined();
+  });
+});
+
+const baseSettings = {
+  provider: 'openai',
+  model: 'gpt-4o',
+  providers: [
+    {name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']},
+    {name: 'local', url: 'http://localhost:1234/v1', models: ['llama3.1']},
+  ],
+};
+
+describe('resolveModelSlot', () => {
+  it('resolves primary to the flat provider/model when no models.primary is set', () => {
+    const resolved = resolveModelSlot(baseSettings, 'primary');
+    expect(resolved).toMatchObject({status: 'found', provider: {name: 'openai'}, model: 'gpt-4o'});
+  });
+
+  it('lets models.primary override the flat provider/model', () => {
+    const settings = {...baseSettings, models: {primary: 'local:llama3.1'}};
+    const resolved = resolveModelSlot(settings, 'primary');
+    expect(resolved).toMatchObject({status: 'found', provider: {name: 'local'}, model: 'llama3.1'});
+  });
+
+  it('falls back lightweight to primary when unset', () => {
+    const resolved = resolveModelSlot(baseSettings, 'lightweight');
+    expect(resolved).toMatchObject({status: 'found', provider: {name: 'openai'}, model: 'gpt-4o'});
+  });
+
+  it('resolves lightweight to its configured selector', () => {
+    const settings = {...baseSettings, models: {lightweight: 'openai:gpt-4o-mini'}};
+    const resolved = resolveModelSlot(settings, 'lightweight');
+    expect(resolved).toMatchObject({status: 'found', provider: {name: 'openai'}, model: 'gpt-4o-mini'});
+  });
+
+  it('falls back fallback to primary when unset', () => {
+    const resolved = resolveModelSlot(baseSettings, 'fallback');
+    expect(resolved).toMatchObject({status: 'found', provider: {name: 'openai'}, model: 'gpt-4o'});
+  });
+
+  it('returns missing when primary itself is missing', () => {
+    expect(resolveModelSlot({providers: []}, 'primary')).toMatchObject({status: 'missing'});
+  });
+
+  it('returns missing for an invalid slot selector', () => {
+    const settings = {...baseSettings, models: {lightweight: 'no-such-model'}};
+    expect(resolveModelSlot(settings, 'lightweight')).toMatchObject({status: 'missing'});
+  });
+
+  it('returns ambiguous for a slot selector that matches multiple providers', () => {
+    const settings = {
+      ...baseSettings,
+      providers: [
+        ...baseSettings.providers,
+        {name: 'proxy', url: 'https://proxy.example.com/v1', key: 'k', models: ['gpt-4o-mini']},
+      ],
+      models: {lightweight: 'gpt-4o-mini'},
+    };
+    expect(resolveModelSlot(settings, 'lightweight')).toMatchObject({status: 'ambiguous', model: 'gpt-4o-mini'});
   });
 });

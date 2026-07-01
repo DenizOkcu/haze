@@ -11,7 +11,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, findProvider, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {findProvider, modelSelector, resolveModelSelector, resolveModelSlot} from '../../config/providers.js';
 import {removeLspServer, type HazeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
@@ -1093,9 +1093,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const orderedVisibleMessages = orderedDisplayMessages([...visible, ...activeLiveMessages]);
   const transcriptItems = orderedVisibleMessages.filter(message => !message.streaming).map((message, index) => ({key: messageKey(message, index), message}));
   const streamingItems = orderedVisibleMessages.filter(message => message.streaming);
-  const activeSelection = activeModel(settings);
+  const primary = resolveModelSlot(settings, 'primary');
   const placeholder = placeholderForMode(mode, busy);
-  const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
+  const activeModelName = primary.status === 'found' ? `${primary.provider.name}:${primary.model}` : 'unconfigured';
   const headerSubtitle = [
     'A minimal LLM harness for growing your own workflows while you work.',
     '',

@@ -6,6 +6,7 @@ import {readSettings} from '../config/settings.js';
 import {installedLspServers} from '../config/lspSettings.js';
 import {configuredMcpServers} from '../config/mcpSettings.js';
 import {loadMcpTools, type LoadedMcpTools} from './mcp.js';
+import {modelWithConfig} from './client.js';
 import {loadSkillRegistry} from '../skills/SkillRegistry.js';
 import {buildSkillTools} from '../skills/skillTools.js';
 import {isSkillEnabled} from '../config/skillSettings.js';
@@ -49,7 +50,9 @@ export async function assembleRequestContext(input: {
 
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'builtin', tools: hazeTools}});
   if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: lspTools}});
-  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session})}}});
+  const subagentRuntime = await modelWithConfig({cwd: input.session?.cwd, slot: 'lightweight'});
+  const subagentModel = subagentRuntime?.model ?? input.model;
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({model: subagentModel, contextFiles: input.contextFiles, session: input.session})}}});
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills})}});
 
   const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
