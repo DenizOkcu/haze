@@ -76,6 +76,18 @@ describe('runHeadless: output', () => {
     expect(writes.join('')).toBe('Visible.\n');
   });
 
+  it('emits fallback events in stream-json output', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => {
+        cb.onEvent?.({type: 'fallback', provider: 'openai', model: 'gpt-4o-mini', at: new Date().toISOString()});
+      },
+    });
+    await runHeadless({prompt: 'do it', output: 'stream-json'});
+    const events = writes.map(line => JSON.parse(line));
+    expect(events.some(e => e.type === 'fallback' && e.provider === 'openai' && e.model === 'gpt-4o-mini')).toBe(true);
+  });
+
   it('emits a JSON envelope with status, result, and a pinned usage shape', async () => {
     const writes = captureStdout();
     const {runHeadless} = await loadRunCommand({

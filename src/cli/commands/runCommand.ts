@@ -35,6 +35,7 @@ type HeadlessStreamEvent =
   | {type: 'tool_start'; id: string; name: string; at: string}
   | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'fallback'; provider: string; model: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
 function debug(line: string) {
@@ -77,6 +78,8 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'tool_end', id: event.id, name: event.name, success: event.success, durationMs: event.durationMs, ...(event.error === undefined ? {} : {error: errorText(event.error)}), at: event.at};
     case 'retry':
       return {type: 'retry', attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, error: event.error, at: event.at};
+    case 'fallback':
+      return {type: 'fallback', provider: event.provider, model: event.model, at: event.at};
     case 'context_overflow':
       return {type: 'context_overflow', recovered: event.recovered, error: event.error, at: event.at};
   }

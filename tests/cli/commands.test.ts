@@ -86,7 +86,7 @@ describe('handleSlashCommand', () => {
   it('sets model directly with /model <name>', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model gpt-4', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4'}));
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4', models: {primary: 'openrouter:gpt-4'}}));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
   });
 
@@ -144,6 +144,7 @@ describe('handleSlashCommand', () => {
     expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       provider: 'openai',
       model: 'gpt-4o-mini',
+      models: {primary: 'openai:gpt-4o-mini'},
     }));
   });
 
@@ -164,7 +165,7 @@ describe('handleSlashCommand', () => {
       settings: {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['llama3.1']}]},
     });
     expect(await handleSlashCommand('/model local:llama3.1', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith({provider: 'local', model: 'llama3.1'});
+    expect(ctx.updateSettings).toHaveBeenCalledWith({provider: 'local', model: 'llama3.1', models: {primary: 'local:llama3.1'}});
   });
 
   it('calls runAgentTurn for /init', async () => {

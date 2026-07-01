@@ -49,13 +49,13 @@ export async function handleModelCommand(value: string, ctx: CommandContext): Pr
       return 'handled';
     }
     const nextProvider = provider.models.includes(selector) ? provider : {...provider, models: [...provider.models, selector]};
-    await ctx.updateSettings({provider: provider.name, model: selector, providers: upsertProvider(ctx.settings, nextProvider)});
+    await ctx.updateSettings({provider: provider.name, model: selector, providers: upsertProvider(ctx.settings, nextProvider), models: {...ctx.settings.models, primary: modelSelector(provider, selector)}});
     ctx.addSystemMessage(`Model set to ${selector} on ${provider.name}. Saved to ~/.haze/settings.json.`);
     return 'handled';
   }
   const selectorString = modelSelector(resolved.provider, resolved.model);
   if (slot === 'primary') {
-    await ctx.updateSettings({provider: resolved.provider.name, model: resolved.model});
+    await ctx.updateSettings({provider: resolved.provider.name, model: resolved.model, models: {...ctx.settings.models, primary: selectorString}});
   } else {
     await ctx.updateSettings({models: {...ctx.settings.models, [slot]: selectorString}});
   }
