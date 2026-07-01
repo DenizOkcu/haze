@@ -25,6 +25,8 @@ export type CommandContext = {
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
   getContextReport?: () => Promise<string>;
+  isPlanMode: () => boolean;
+  togglePlanMode?: () => boolean;
 };
 
 export type CommandResult = 'handled' | 'unhandled' | 'exit';
@@ -73,6 +75,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: value => value === '/settings open' || value === '/settings edit' ? {args: ''} : false, run: async (_args, ctx) => { const file = await ensureSettingsFile(ctx.settings); openPath(file); ctx.addSystemMessage(`Opened settings file: ${file}`); return HANDLED; }},
   {match: exact('/settings'), run: async (_args, ctx) => { ctx.addSystemMessage(await formatSettingsSummary(ctx.settings, ctx.contextFiles)); return HANDLED; }},
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
+  {match: exact('/plan'), run: (_args, ctx) => { const on = ctx.togglePlanMode?.() ?? !ctx.isPlanMode(); ctx.addSystemMessage(on ? 'Plan mode on. Haze will plan and stop before implementing. Shift+Tab or /plan to exit.' : 'Plan mode off. Smart routing restored.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},
   {match: exact('/skills'), run: (_args, ctx) => { ctx.setMode('skills'); ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.'); return HANDLED; }},
 ];
