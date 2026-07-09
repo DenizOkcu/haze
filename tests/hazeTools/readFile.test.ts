@@ -15,11 +15,11 @@ describe('readFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function readFile(params: {path: string; offset?: number; limit?: number; mode?: 'exact' | 'outline'}, experimental_context?: unknown) {
+  async function readFile(params: {path: string; offset?: number; limit?: number; mode?: 'exact' | 'outline'}, context?: unknown) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.readFile.execute(params, {abortSignal: undefined, experimental_context});
+      return await hazeTools.readFile.execute(params, {abortSignal: undefined, context});
     } finally {
       process.chdir(originalCwd);
     }
@@ -147,11 +147,11 @@ describe('writeFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean}, experimental_context?: unknown) {
+  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean}, context?: unknown) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.writeFile.execute(params, {abortSignal: undefined, experimental_context});
+      return await hazeTools.writeFile.execute(params, {abortSignal: undefined, context});
     } finally {
       process.chdir(originalCwd);
     }

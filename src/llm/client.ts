@@ -20,9 +20,24 @@ export interface ModelRuntimeConfig {
   capabilities: ProviderCapabilities;
 }
 
+const HAZE_SITE_URL = 'https://denizokcu.github.io/haze/';
+const HAZE_TITLE = 'Haze';
+
+function isOpenRouter(providerName: string, baseURL: string): boolean {
+  return providerName === 'openrouter' || /openrouter\.ai/i.test(baseURL);
+}
+
+function openRouterHeaders(providerName: string, baseURL: string): Record<string, string> | undefined {
+  if (!isOpenRouter(providerName, baseURL)) return undefined;
+  return {
+    'HTTP-Referer': HAZE_SITE_URL,
+    'X-Title': HAZE_TITLE,
+  };
+}
+
 function capabilities(providerName: string, baseURL: string): ProviderCapabilities {
   const directOpenAI = providerName === 'openai' || /api\.openai\.com/i.test(baseURL);
-  const openRouter = providerName === 'openrouter' || /openrouter\.ai/i.test(baseURL);
+  const openRouter = isOpenRouter(providerName, baseURL);
   return {
     reportsCacheUsage: directOpenAI || openRouter,
     supportsPromptCacheKey: directOpenAI,
@@ -50,7 +65,7 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
   const cacheSeed = session?.cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
   return {
-    model: createOpenAI({apiKey, baseURL}).chat(name),
+    model: createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)}).chat(name),
     config: {
       providerName: selection.provider.name,
       baseURL,

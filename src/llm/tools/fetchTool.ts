@@ -4,12 +4,13 @@ import {reductionMetrics} from '../../core/toolOutput/reduction.js';
 import {fetchUrlContent, BlockedUrlError} from '../webFetch.js';
 import {structuredToolFailure} from './failures.js';
 import {compactStoredOutput} from './outputCap.js';
-import {runDedupedTool} from './toolContext.js';
+import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 
 const MAX_OUTPUT_CHARS = 50_000;
 
 export const fetchTool = tool({
   description: 'Fetch a public http(s) URL and return readable content. Use for current docs, API references, error lookups, or CI logs. Private/loopback/metadata hosts are blocked.',
+  contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     url: z.string().url().describe('Absolute http(s) URL to fetch'),
     format: z.enum(['auto', 'text']).default('auto').describe('auto = markdown for HTML, pretty for JSON, passthrough for text; text = raw text only'),

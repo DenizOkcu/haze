@@ -73,9 +73,9 @@ describe('subagent internals.toolOnlyStepCount', () => {
 let lastStepSeen = 0;
 
 describe('runSubagent status mapping', () => {
-  function streamTextMock(stream: AsyncIterable<string>, callbacks: {onStepFinish?: (event: {stepNumber: number}) => void; onFinish?: (event: {usage?: {inputTokens?: number; outputTokens?: number}}) => void} = {}) {
-    if (callbacks.onStepFinish) callbacks.onStepFinish({stepNumber: 0});
-    if (callbacks.onFinish) callbacks.onFinish({usage: {inputTokens: 0, outputTokens: 0}});
+  function streamTextMock(stream: AsyncIterable<string>, callbacks: {onStepEnd?: (event: {stepNumber: number}) => void; onEnd?: (event: {usage?: {inputTokens?: number; outputTokens?: number}}) => void} = {}) {
+    if (callbacks.onStepEnd) callbacks.onStepEnd({stepNumber: 0});
+    if (callbacks.onEnd) callbacks.onEnd({usage: {inputTokens: 0, outputTokens: 0}});
     return {
       textStream: stream,
       response: Promise.resolve({messages: []}),
@@ -87,7 +87,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: () => streamTextMock((async function*() { yield 'done'; })(), {onStepFinish: () => undefined, onFinish: () => undefined}),
+        streamText: () => streamTextMock((async function*() { yield 'done'; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
       };
     });
     vi.resetModules();
@@ -105,8 +105,8 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: ({onStepFinish}: {onStepFinish?: (e: {stepNumber: number}) => void}) => {
-          onStepFinish?.({stepNumber: 25});
+        streamText: ({onStepEnd}: {onStepEnd?: (e: {stepNumber: number}) => void}) => {
+          onStepEnd?.({stepNumber: 25});
           return streamTextMock((async function*() { /* empty */ })());
         },
       };
@@ -122,7 +122,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: () => streamTextMock((async function*() { yield 'partial'; })(), {onStepFinish: () => undefined, onFinish: () => undefined}),
+        streamText: () => streamTextMock((async function*() { yield 'partial'; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
       };
     });
     vi.resetModules();
@@ -151,8 +151,8 @@ describe('runSubagent status mapping', () => {
   });
 
   it('caps maxSteps at the configured STEP_LIMIT (25) even when caller asks for more', async () => {
-    // The cap is a private constant (STEP_LIMIT = 25) passed to stepCountIs.
-    // Verify behaviorally: a stream whose onStepFinish reports 100 steps
+    // The cap is a private constant (STEP_LIMIT = 25) passed to isStepCount.
+    // Verify behaviorally: a stream whose onStepEnd reports 100 steps
     // cannot make runSubagent think the limit was 100; we can only verify
     // by direct source inspection. Here we just confirm runSubagent accepts
     // a large maxSteps without crashing and returns a defined status.
@@ -160,8 +160,8 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: ({onStepFinish}: {onStepFinish?: (e: {stepNumber: number}) => void}) => {
-          onStepFinish?.({stepNumber: 25});
+        streamText: ({onStepEnd}: {onStepEnd?: (e: {stepNumber: number}) => void}) => {
+          onStepEnd?.({stepNumber: 25});
           return streamTextMock((async function*() { /* nothing */ })());
         },
       };
@@ -177,7 +177,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: () => streamTextMock((async function*() { /* empty */ })(), {onStepFinish: () => undefined, onFinish: () => undefined}),
+        streamText: () => streamTextMock((async function*() { /* empty */ })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
       };
     });
     vi.resetModules();
@@ -192,7 +192,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: () => streamTextMock((async function*() { yield huge; })(), {onStepFinish: () => undefined, onFinish: () => undefined}),
+        streamText: () => streamTextMock((async function*() { yield huge; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
       };
     });
     vi.resetModules();

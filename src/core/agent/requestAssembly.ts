@@ -14,6 +14,19 @@ export function stripSyntheticControls(messages: ModelMessage[]) {
   return messages.filter(message => !isSyntheticControlMessage(message));
 }
 
+export function withoutSystemMessages(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map(message => message.role === 'system'
+    ? {...message, role: 'user', content: `<haze_system_context>\n${modelMessageTextForContext(message)}\n</haze_system_context>`} as ModelMessage
+    : message);
+}
+
+function modelMessageTextForContext(message: ModelMessage) {
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return JSON.stringify(content);
+  return content.map(part => typeof part === 'object' && part != null && 'text' in part && typeof part.text === 'string' ? part.text : JSON.stringify(part)).join('\n');
+}
+
 export function withSyntheticControl(messages: ModelMessage[], control: string): ModelMessage[] {
   return [
     ...stripSyntheticControls(messages),

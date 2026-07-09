@@ -1,3 +1,4 @@
+import {z} from 'zod';
 import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import {readScopedContextFilesForPath, type ContextFile} from '../../config/contextFiles.js';
 import {workspaceRoot} from '../../utils/path.js';
@@ -10,13 +11,13 @@ import {HazeToolError} from './failures.js';
  * caches after writes, edit-recovery gating, and lazy discovery of scoped
  * project instructions (CLAUDE.md / AGENTS.md below the cwd).
  *
- * All state lives on `experimental_context`, which the agent turn owns and
+ * All state lives on per-tool `context` values, which the agent turn owns and
  * passes to the AI SDK. Nothing here is persisted.
  */
 
 export type ToolExecutionContext = {
   abortSignal?: AbortSignal;
-  experimental_context?: unknown;
+  context?: unknown;
 };
 
 export type HazeToolContext = {
@@ -49,10 +50,17 @@ function toolCallKey(toolName: string, input: unknown) {
   return `${toolName}:${stableJsonStringify(input)}`;
 }
 
+export const hazeToolContextSchema = z.custom<HazeToolContext>(value => typeof value === 'object' && value !== null);
+
 export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
-  return typeof context.experimental_context === 'object' && context.experimental_context != null
-    ? context.experimental_context as HazeToolContext
+  return typeof context.context === 'object' && context.context != null
+    ? context.context as HazeToolContext
     : undefined;
+}
+
+export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'bash', 'fetch']);
+  return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 
 /**

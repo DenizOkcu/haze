@@ -1,7 +1,8 @@
-import {streamText, stepCountIs, tool, type ToolSet} from 'ai';
+import {streamText, isStepCount, tool, type ToolSet} from 'ai';
 import {z} from 'zod';
 import {buildSubagentPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
+import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
 const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'fetch'] as const;
@@ -62,6 +63,7 @@ export async function runSubagent(
   }
 
   const toolCallLog: Array<{name: string; summary: string; durationMs: number}> = [];
+  const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map()};
   let tokensIn = 0;
   let tokensOut = 0;
   let lastStep = 0;
@@ -71,12 +73,13 @@ export async function runSubagent(
     const result = streamText({
       model: options.model,
       maxOutputTokens: 4096,
-      system: buildSubagentPrompt(options.contextFiles, options.session),
+      instructions: buildSubagentPrompt(options.contextFiles, options.session),
       messages: [{role: 'user' as const, content: task}],
       tools: scopedTools,
-      stopWhen: stepCountIs(maxSteps),
+      stopWhen: isStepCount(maxSteps),
       abortSignal: options.abortSignal,
-      experimental_context: {inFlightToolCalls: new Map()},
+      runtimeContext: toolExecutionContext,
+      toolsContext: toolsContextFor(scopedTools, toolExecutionContext) as never,
       prepareStep({steps}) {
         const calls = steps.flatMap(step => step.toolCalls);
         const consecutiveToolOnly = toolOnlyStepCount(steps);
@@ -90,22 +93,22 @@ export async function runSubagent(
         }
         return undefined;
       },
-      onStepFinish({stepNumber}) {
+      onStepEnd({stepNumber}) {
         lastStep = stepNumber;
       },
-      onFinish(event) {
+      onEnd(event) {
         if (event.usage) {
           tokensIn = event.usage.inputTokens ?? 0;
           tokensOut = event.usage.outputTokens ?? 0;
         }
       },
-      experimental_onToolCallFinish(event) {
+      onToolExecutionEnd(event) {
         if (!event.toolCall) return;
         totalToolCalls += 1;
         toolCallLog.push({
           name: event.toolCall.toolName,
-          summary: toolSummary(event.output),
-          durationMs: event.durationMs,
+          summary: toolSummary(event.toolOutput.type === 'tool-result' ? event.toolOutput.output : event.toolOutput.error),
+          durationMs: event.toolExecutionMs,
         });
       },
     });

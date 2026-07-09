@@ -39,14 +39,15 @@ async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = 
       }
       stream() {
         return {
-          fullStream: (async function* () {
+          stream: (async function* () {
             for (const part of parts) yield part;
           })(),
-          response: responseError ? Promise.reject(responseError) : Promise.resolve({messages: responseMessages}),
+          response: Promise.resolve({messages: responseMessages}),
+          responseMessages: responseError ? Promise.reject(responseError) : Promise.resolve(responseMessages),
         };
       }
     }
-    return {...actual, ToolLoopAgent: FakeToolLoopAgent, stepCountIs: (n: number) => ({steps: n})};
+    return {...actual, ToolLoopAgent: FakeToolLoopAgent, isStepCount: (n: number) => ({steps: n})};
   });
   vi.resetModules();
   return import('../../../src/cli/commands/runCommand.js');

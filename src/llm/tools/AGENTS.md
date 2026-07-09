@@ -11,7 +11,7 @@ Implementation helpers for Haze built-in tools.
 
 ## Turn-scoped tool context
 
-`toolContext.ts` owns per-turn execution state on AI SDK `experimental_context`:
+`toolContext.ts` owns per-turn execution state on AI SDK tool `context` values:
 
 - Deduplicates identical read-only tool calls until a mutation epoch changes.
 - Deduplicates identical in-flight calls.

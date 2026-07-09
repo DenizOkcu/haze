@@ -16,7 +16,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "bin": {
     "haze": "bin/haze.js"
@@ -44,18 +44,18 @@
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^1.0.52",
-    "@ai-sdk/openai": "3.0.73",
+    "@ai-sdk/mcp": "^2.0.10",
+    "@ai-sdk/openai": "4.0.10",
     "@vscode/ripgrep": "1.18.0",
-    "ai": "6.0.208",
+    "ai": "7.0.19",
     "cli-highlight": "2.1.11",
     "commander": "15.0.0",
-    "defuddle": "^0.19.0",
-    "fs-extra": "11.3.5",
+    "defuddle": "^0.19.1",
+    "fs-extra": "11.3.6",
     "ink": "7.1.0",
     "ink-spinner": "5.0.0",
-    "linkedom": "^0.18.12",
-    "marked": "18.0.5",
+    "linkedom": "^0.18.13",
+    "marked": "18.0.6",
     "react": "19.2.7",
     "strip-ansi": "7.2.0",
     "turndown": "^7.2.4",
@@ -65,13 +65,13 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/fs-extra": "11.0.4",
-    "@types/node": "26.0.0",
+    "@types/node": "26.1.1",
     "@types/react": "19.2.17",
-    "eslint": "^10.5.0",
-    "tsx": "4.22.4",
+    "eslint": "^10.6.0",
+    "tsx": "4.23.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.61.1",
-    "vitest": "^4.1.9"
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

@@ -19,11 +19,11 @@ describe('toolContext', () => {
     const context = {};
     let executions = 0;
 
-    const first = await runDedupedTool('readFile', {path: 'a.ts', offset: 1}, {experimental_context: context}, async () => {
+    const first = await runDedupedTool('readFile', {path: 'a.ts', offset: 1}, {context: context}, async () => {
       executions += 1;
       return {ok: true};
     });
-    const second = await runDedupedTool('readFile', {offset: 1, path: 'a.ts'}, {experimental_context: context}, async () => {
+    const second = await runDedupedTool('readFile', {offset: 1, path: 'a.ts'}, {context: context}, async () => {
       executions += 1;
       return {ok: true};
     });
@@ -48,8 +48,8 @@ describe('toolContext', () => {
     };
 
     const [first, second] = await Promise.all([
-      discoverScopedContext('src/a.ts', {experimental_context: context}),
-      discoverScopedContext('src/b.ts', {experimental_context: context}),
+      discoverScopedContext('src/a.ts', {context: context}),
+      discoverScopedContext('src/b.ts', {context: context}),
     ]);
 
     expect([...first, ...second].map(file => file.path)).toEqual(['src/AGENTS.md']);

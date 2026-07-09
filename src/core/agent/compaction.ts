@@ -59,7 +59,7 @@ export function compactModelMessages(
 
   return {
     compacted: true,
-    messages: [{role: 'system', content: summary}, ...recent],
+    messages: [{role: 'user', content: `<haze_compaction>\n${summary}\n</haze_compaction>`}, ...recent],
     olderCount: older.length,
     keptCount: recent.length,
     summary,

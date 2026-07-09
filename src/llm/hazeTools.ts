@@ -17,7 +17,7 @@ import {HazeToolError, structuredToolFailure} from './tools/failures.js';
 import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
 import {parseRipgrepJsonStream} from './tools/grepParse.js';
 import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
-import {runDedupedTool, discoverScopedContext, withScopedContext} from './tools/toolContext.js';
+import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './tools/toolContext.js';
 import {prepareWorkspaceExisting, prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
@@ -28,6 +28,7 @@ const execFile = promisify(execFileCallback);
 export const hazeTools = {
   listFiles: tool({
     description: 'List workspace files/directories with pagination. Prefer this to bash for discovery.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().default('.').describe('Directory path relative to the current workspace'),
       recursive: z.boolean().default(false).describe('Whether to list files recursively'),
@@ -72,6 +73,7 @@ export const hazeTools = {
 
   readFile: tool({
     description: 'Read numbered lines from a UTF-8 workspace file. Defaults to exact mode; outline mode is for discovery only and must be followed by exact reads before editing.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       offset: z.number().int().positive().optional().describe('1-based line number to start reading from'),
@@ -139,6 +141,7 @@ export const hazeTools = {
 
   grep: tool({
     description: 'Regex search workspace files with structured, globally capped results. Prefer this to reading files one by one.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       pattern: z.string().min(1).describe('Regex pattern'),
       path: z.string().default('.').describe('Workspace-relative file or directory'),
@@ -217,6 +220,7 @@ export const hazeTools = {
 
   replaceLines: tool({
     description: 'Replace a 1-based inclusive line range. Use after readFile when exact editFile text is ambiguous or stale.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       startLine: z.number().int().positive().describe('First 1-based line number to replace'),
@@ -260,6 +264,7 @@ export const hazeTools = {
 
   writeFile: tool({
     description: 'Create a UTF-8 file. Existing files require explicit full-rewrite approval.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       content: z.string().describe('Complete file contents to write'),
@@ -292,6 +297,7 @@ export const hazeTools = {
 
   editFile: tool({
     description: 'Apply unique text replacements. Batch same-file edits; reread and use replaceLines if matching fails.',
+    contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
       edits: z.array(z.object({

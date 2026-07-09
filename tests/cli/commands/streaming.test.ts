@@ -7,12 +7,13 @@ interface FakeFullStreamPart {
 
 interface FakeAgent {
   streamArgs: Array<{messages: unknown[]; abortSignal: AbortSignal}>;
-  fullStream: AsyncIterable<FakeFullStreamPart>;
+  stream: AsyncIterable<FakeFullStreamPart>;
   response: Promise<{messages: unknown[]}>;
+  responseMessages: Promise<unknown[]>;
   options: Record<string, unknown>;
   prepareStep: ((args: unknown) => unknown) | undefined;
-  onStepFinish: ((args: unknown) => void) | undefined;
-  onFinish: ((event: {totalUsage?: unknown; usage?: unknown; response: {messages: unknown[]}}) => void) | undefined;
+  onStepEnd: ((args: unknown) => void) | undefined;
+  onEnd: ((event: {usage?: unknown; responseMessages: unknown[]; response: {messages: unknown[]}}) => void) | undefined;
 }
 
 interface FakeModelHandle {
@@ -24,7 +25,7 @@ interface MocksConfig {
   modelHandle: FakeModelHandle | undefined;
   contextOverflow?: boolean;
   retryable?: boolean;
-  fullStreamParts?: FakeFullStreamPart[];
+  streamParts?: FakeFullStreamPart[];
   responseMessages?: unknown[];
   failFirstNAgents?: number;
   idle?: boolean;
@@ -47,20 +48,21 @@ const mocks = vi.hoisted(() => {
 function makeAgent(parts: FakeFullStreamPart[], responseMessages: unknown[]): FakeAgent {
   const agent: FakeAgent = {
     streamArgs: [],
-    fullStream: (async function* () {
+    stream: (async function* () {
       for (const part of parts) yield part;
     })(),
     response: Promise.resolve({messages: responseMessages}),
+    responseMessages: Promise.resolve(responseMessages),
     options: {},
     prepareStep: undefined,
-    onStepFinish: undefined,
-    onFinish: undefined,
+    onStepEnd: undefined,
+    onEnd: undefined,
   };
   return agent;
 }
 
 async function loadStreaming(config: MocksConfig) {
-  const parts = config.fullStreamParts ?? [];
+  const parts = config.streamParts ?? [];
   const responseMessages = config.responseMessages ?? [];
   let agentCallCount = 0;
 
@@ -91,14 +93,14 @@ async function loadStreaming(config: MocksConfig) {
     class FakeToolLoopAgent {
       options: Record<string, unknown>;
       prepareStep: ((args: unknown) => unknown) | undefined;
-      onStepFinish: ((args: unknown) => void) | undefined;
-      onFinish: ((event: unknown) => void) | undefined;
+      onStepEnd: ((args: unknown) => void) | undefined;
+      onEnd: ((event: unknown) => void) | undefined;
       _fake: FakeAgent;
       constructor(options: Record<string, unknown>) {
         this.options = options;
         this.prepareStep = options.prepareStep as never;
-        this.onStepFinish = options.onStepFinish as never;
-        this.onFinish = options.onFinish as never;
+        this.onStepEnd = options.onStepEnd as never;
+        this.onEnd = options.onEnd as never;
         this._fake = makeAgent(parts, responseMessages);
       }
       stream({messages, abortSignal}: {messages: unknown[]; abortSignal: AbortSignal}) {
@@ -107,8 +109,8 @@ async function loadStreaming(config: MocksConfig) {
         this._fake.streamArgs.push({messages, abortSignal});
         this._fake.options = this.options;
         this._fake.prepareStep = this.prepareStep;
-        this._fake.onStepFinish = this.onStepFinish;
-        this._fake.onFinish = this.onFinish;
+        this._fake.onStepEnd = this.onStepEnd;
+        this._fake.onEnd = this.onEnd;
         if (config.hangUntilAbort) {
           let onAbort: (() => void) | undefined;
           const aborted = new Error('aborted');
@@ -127,39 +129,42 @@ async function loadStreaming(config: MocksConfig) {
             throw aborted;
           };
           return {
-            fullStream: streamAbort(),
+            stream: streamAbort(),
             response: waitForAbort.then(() => {
               cleanup();
               return {messages: []};
             }),
+            responseMessages: waitForAbort.then(() => []),
           };
         }
         if (isFirstCall && config.contextOverflow) {
           const error = new Error('Request exceeds maximum context length');
           (error as Error & {cause?: unknown}).cause = 'context';
           return {
-            fullStream: (async function* () {
+            stream: (async function* () {
               yield {type: 'error', error};
             })(),
-            response: Promise.reject(error),
+            response: Promise.resolve({messages: []}),
+            responseMessages: Promise.reject(error),
           };
         }
         if (isFirstCall && config.retryable) {
           const error = new Error('Service overloaded (503)');
           return {
-            fullStream: (async function* () {
+            stream: (async function* () {
               yield {type: 'error', error};
             })(),
-            response: Promise.reject(error),
+            response: Promise.resolve({messages: []}),
+            responseMessages: Promise.reject(error),
           };
         }
-        return {...this._fake, fullStream: this._fake.fullStream, response: this._fake.response};
+        return {...this._fake, stream: this._fake.stream, response: this._fake.response, responseMessages: this._fake.responseMessages};
       }
     }
     return {
       ...actual,
       ToolLoopAgent: FakeToolLoopAgent,
-      stepCountIs: (n: number) => ({steps: n}),
+      isStepCount: (n: number) => ({steps: n}),
     };
   });
 
@@ -227,7 +232,7 @@ describe('runAgentTurn: setup', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
       responseMessages: [{role: 'assistant', content: 'done'}],
     });
     const cb = makeCallbacks();
@@ -244,7 +249,7 @@ describe('runAgentTurn: setup', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     await runAgentTurn('raw', 'display', [], cb);
@@ -271,10 +276,10 @@ describe('runAgentTurn: setup', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       class NoopAgent {
         stream() {
-          return {fullStream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []})};
+          return {stream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []}), responseMessages: Promise.resolve([])};
         }
       }
-      return {...actual, ToolLoopAgent: NoopAgent, stepCountIs: (n: number) => ({steps: n})};
+      return {...actual, ToolLoopAgent: NoopAgent, isStepCount: (n: number) => ({steps: n})};
     });
     vi.resetModules();
     const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
@@ -316,7 +321,7 @@ describe('runAgentTurn: stream handling', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [
+      streamParts: [
         {type: 'text-delta', id: 'a1', text: 'Hello'},
         {type: 'text-delta', id: 'a1', text: ' world'},
         {type: 'finish', finishReason: 'stop'},
@@ -335,7 +340,7 @@ describe('runAgentTurn: stream handling', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [
+      streamParts: [
         {type: 'tool-input-start', id: 't1', toolName: 'bash'},
         {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
         {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
@@ -359,7 +364,7 @@ describe('runAgentTurn: error paths', () => {
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
       contextOverflow: true,
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     cb.compactConversation = () => {
@@ -379,7 +384,7 @@ describe('runAgentTurn: error paths', () => {
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
       retryable: true,
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     const promise = runAgentTurn('flaky', undefined, [], cb);
@@ -398,7 +403,7 @@ describe('runAgentTurn: error paths', () => {
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
       retryable: true,
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     const promise = runAgentTurn('exhaust', undefined, [], cb, 2, true);
@@ -447,7 +452,7 @@ describe('runAgentTurn: MCP cleanup', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     await runAgentTurn('hi', undefined, [], cb);
@@ -466,7 +471,7 @@ describe('runAgentTurn: MCP cleanup', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      fullStreamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     const cb = makeCallbacks();
     await runAgentTurn('hi', undefined, [], cb);

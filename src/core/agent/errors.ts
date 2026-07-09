@@ -10,5 +10,5 @@ export function isContextOverflowError(error: unknown) {
 export function isRetryableModelError(error: unknown) {
   const text = errorText(error);
   if (isContextOverflowError(error) || /quota|billing|balance|auth|api key|invalid request|permission|forbidden|401|403|400/.test(text)) return false;
-  return /overload|rate limit|429|500|502|503|504|network|connection|stream|timeout|timed? out|econnreset|etimedout|fetch failed/.test(text);
+  return /overload|rate limit|429|500|502|503|504|network|connection|stream|timeout|timed? out|terminated|econnreset|etimedout|fetch failed/.test(text);
 }

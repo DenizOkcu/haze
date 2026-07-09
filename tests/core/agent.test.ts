@@ -17,7 +17,7 @@ describe('agent compaction', () => {
     expect(result.keptCount).toBe(2);
   });
 
-  it('adds a summary system message and keeps the recent tail', () => {
+  it('adds a summary user context message and keeps the recent tail', () => {
     const messages = [
       msg('user', 'old request'),
       msg('assistant', 'old answer'),
@@ -29,7 +29,8 @@ describe('agent compaction', () => {
     expect(result.olderCount).toBe(2);
     expect(result.keptCount).toBe(2);
     expect(result.messages).toHaveLength(3);
-    expect(result.messages[0]).toMatchObject({role: 'system'});
+    expect(result.messages[0]).toMatchObject({role: 'user'});
+    expect(modelMessageText(result.messages[0])).toContain('<haze_compaction>');
     expect(modelMessageText(result.messages[0])).toContain('old request');
     expect(result.messages.slice(1)).toEqual(messages.slice(-2));
   });
@@ -99,6 +100,7 @@ describe('agent provider error classification', () => {
   it('separates retryable transient errors from account/request errors', () => {
     expect(isRetryableModelError(new Error('503 provider overloaded'))).toBe(true);
     expect(isRetryableModelError(new Error('network connection lost'))).toBe(true);
+    expect(isRetryableModelError(new TypeError('terminated'))).toBe(true);
     expect(isRetryableModelError(new Error('insufficient quota'))).toBe(false);
     expect(isRetryableModelError(new Error('invalid api key'))).toBe(false);
     expect(isRetryableModelError(new Error('maximum context length exceeded'))).toBe(false);

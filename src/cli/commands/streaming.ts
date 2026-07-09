@@ -1,4 +1,4 @@
-import {ToolLoopAgent, stepCountIs, type ModelMessage} from 'ai';
+import {ToolLoopAgent, isStepCount, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
@@ -12,7 +12,7 @@ import {isContextOverflowError, isRetryableModelError} from '../../core/agent/er
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
-import {compactToolHistory, stripSyntheticControls, withSyntheticControl} from '../../core/agent/requestAssembly.js';
+import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
 import {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
@@ -24,7 +24,7 @@ import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, sho
 import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
-import type {HazeToolContext} from '../../llm/tools/toolContext.js';
+import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -42,14 +42,14 @@ function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
   if (log) void logAppend(log, entry).catch(() => undefined);
 }
 
-function withScopedContextSystem(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
+function withScopedContextControl(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
   const files = context.pendingContextFiles ?? [];
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];
-  return [
-    ...messages,
-    {role: 'system', content: `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`},
-  ];
+  return withSyntheticControl(
+    messages,
+    `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`,
+  );
 }
 
 export interface StreamCallbacks {
@@ -134,6 +134,7 @@ export async function runAgentTurn(
     if (estimateValueTokens(requestMessages) > ACTIVE_CONTEXT_TOKEN_BUDGET) {
       requestMessages = compactModelMessages(requestMessages, {tokenBudget: ACTIVE_CONTEXT_TOKEN_BUDGET, workState: goal}).messages;
     }
+    requestMessages = withoutSystemMessages(requestMessages);
     callbacks.setConversation(stripSyntheticControls(requestMessages));
 
     const systemPrompt = assembled.systemPrompt;
@@ -196,12 +197,13 @@ export async function runAgentTurn(
       tools: availableTools,
       maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
       ...providerSettings,
-      stopWhen: stepCountIs(MAIN_STEP_LIMIT),
-      experimental_context: toolExecutionContext,
+      stopWhen: isStepCount(MAIN_STEP_LIMIT),
+      runtimeContext: toolExecutionContext,
+      toolsContext: toolsContextFor(availableTools, toolExecutionContext) as never,
       prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
         const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
-        const scopedMessages = withScopedContextSystem(messages, toolExecutionContext);
+        const scopedMessages = withScopedContextControl(messages, toolExecutionContext);
         const messagesChanged = scopedMessages !== messages;
         if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
         if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof availableTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof availableTools>};
@@ -218,21 +220,21 @@ export async function runAgentTurn(
         }
         return messagesChanged ? {messages: scopedMessages} : undefined;
       },
-      onStepFinish({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
+      onStepEnd({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         const stepUsage = stepCacheMetrics(usage);
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
       },
-      onFinish(event) {
-        const providerUsage = extractUsage({usage: event.totalUsage ?? event.usage});
+      onEnd(event) {
+        const providerUsage = extractUsage({usage: event.usage});
         callbacks.recordTokenUsage?.({
           inputTokens: providerUsage.inputTokens,
           outputTokens: providerUsage.outputTokens,
           systemPrompt: inputBreakdown.systemPrompt,
           messages: inputBreakdown.messages,
           toolSchemas: inputBreakdown.toolSchemas,
-          outputEstimate: estimateValueTokens(event.response.messages),
+          outputEstimate: estimateValueTokens(event.responseMessages),
           cacheReadTokens: providerUsage.cacheReadTokens,
           cacheWriteTokens: providerUsage.cacheWriteTokens,
           noCacheTokens: providerUsage.noCacheTokens,
@@ -240,7 +242,7 @@ export async function runAgentTurn(
           logicalInputEstimate: inputBreakdown.logicalInputEstimate,
           effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
         });
-        const accumulated = [...stripSyntheticControls(requestMessages), ...event.response.messages];
+        const accumulated = [...stripSyntheticControls(requestMessages), ...event.responseMessages];
         const compacted = compactToolHistory(accumulated);
         callbacks.setConversation(compacted.messages);
         callbacks.debugLog(`conversation updated to ${compacted.messages.length} messages by ToolLoopAgent`);
@@ -250,7 +252,7 @@ export async function runAgentTurn(
     resetIdleTimer();
     const result = await agent.stream({messages: requestMessages, abortSignal: abortController.signal});
 
-    for await (const part of result.fullStream) {
+    for await (const part of result.stream) {
       resetIdleTimer();
       switch (part.type) {
         case 'text-delta': {
@@ -354,9 +356,14 @@ export async function runAgentTurn(
       }
     }
 
+    if (streamError && !streamFinished) {
+      void Promise.resolve(result.responseMessages).catch(() => undefined);
+      throw streamError;
+    }
+
     try {
-      const response = await result.response;
-      const completedConversation = [...stripSyntheticControls(requestMessages), ...response.messages];
+      const responseMessages = await result.responseMessages;
+      const completedConversation = [...stripSyntheticControls(requestMessages), ...responseMessages];
       callbacks.setConversation(compactToolHistory(completedConversation).messages);
     } catch (error) {
       if (latestAccumulatedResponseMessages.length > 0) {

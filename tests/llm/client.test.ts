@@ -131,6 +131,21 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.modelName).toBe('gpt-4o');
   });
 
+  it('sends OpenRouter attribution headers for app statistics', async () => {
+    await writeSettings({
+      providers: [{name: 'openrouter', url: 'https://openrouter.ai/api/v1', key: 'k', models: ['any']}],
+      provider: 'openrouter',
+      model: 'any',
+    });
+    const {modelWithConfig} = await loadClient((options: {headers?: Record<string, string>} | undefined) => ({chat: () => options}));
+    const runtime = await modelWithConfig();
+    const modelArg = runtime!.model as unknown as {headers?: Record<string, string>};
+    expect(modelArg.headers).toEqual({
+      'HTTP-Referer': 'https://denizokcu.github.io/haze/',
+      'X-Title': 'Haze',
+    });
+  });
+
   it('falls back to settings.apiKey when the provider has no key', async () => {
     await writeSettings({
       providers: [{name: 'openai', url: 'https://api.openai.com/v1', models: ['gpt-4o']}],

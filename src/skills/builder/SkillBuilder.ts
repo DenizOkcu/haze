@@ -195,7 +195,7 @@ async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
   const role = input.role?.trim() || DEFAULT_SKILL_ROLE;
   const result = await generateObject({
     model: activeModel,
-    system: SKILL_CREATOR_SKILL,
+    instructions: SKILL_CREATOR_SKILL,
     schema: generatedSkillSchema,
     schemaName: 'GeneratedHazeSkill',
     schemaDescription: 'A generated Haze Markdown skill and optional referenced files.',

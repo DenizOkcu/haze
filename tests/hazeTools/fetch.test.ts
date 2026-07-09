@@ -125,7 +125,7 @@ describe('fetch tool', () => {
       truncated: false,
     });
     const ctx = {inFlightToolCalls: new Map(), completedToolCalls: new Map(), mutationEpoch: 0};
-    const context = {abortSignal: undefined, experimental_context: ctx};
+    const context = {abortSignal: undefined, context: ctx};
     const first = await hazeTools.fetch.execute({url: 'https://example.com/docs', format: 'auto'}, context);
     const second = await hazeTools.fetch.execute({url: 'https://example.com/docs', format: 'auto'}, context);
     expect(first.ok).toBe(true);

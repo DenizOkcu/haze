@@ -154,7 +154,7 @@ describe('editFile tool', () => {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      const context = {experimental_context: {}};
+      const context = {context: {}};
       const first = hazeTools.editFile.execute({path: 'test.txt', edits: [{oldText: 'a', newText: 'A'}]}, context);
       const second = await hazeTools.editFile.execute({path: 'test.txt', edits: [{oldText: 'b', newText: 'B'}]}, context);
       await first;

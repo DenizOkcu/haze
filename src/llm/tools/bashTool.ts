@@ -7,12 +7,13 @@ import {filterBashOutput} from '../../core/bashOutput/registry.js';
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
-import {runDedupedTool} from './toolContext.js';
+import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 
 const SHORT_VALIDATION_CHARS = 2_000;
 
 export const bashTool = tool({
   description: 'Run workspace tests, builds, validation, or inspection. Use file tools for edits.',
+  contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     command: z.string().min(1).describe('Command to execute with bash -lc'),
     timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
