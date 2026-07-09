@@ -1,6 +1,7 @@
 import type {ModelMessage} from 'ai';
 import {estimateValueTokens} from './contextBudget.js';
 import {isFailedToolOutput} from './toolResults.js';
+import {compactResultOutput} from '../toolOutput/compaction.js';
 
 export const SYNTHETIC_CONTROL_OPEN = '<haze_control>';
 
@@ -46,51 +47,6 @@ function isFailedResult(output: unknown) {
   if (type === 'error-text' || type === 'error-json' || type === 'execution-denied') return true;
   const value = resultValue(output);
   return isFailedToolOutput(value);
-}
-
-function compactJsonValue(value: unknown, toolName: string) {
-  if (typeof value !== 'object' || value == null || Array.isArray(value)) {
-    return {compacted: true, toolName, summary: 'Older successful tool result omitted.'};
-  }
-  const source = value as Record<string, unknown>;
-  const keys = [
-    'ok', 'path', 'command', 'code', 'signal', 'timedOut', 'durationMs', 'reasonCode',
-    'bytes', 'created', 'replacements', 'totalMatches', 'returnedMatches',
-    'omittedMatches', 'truncated', 'nextOffset', 'totalLines', 'startLine', 'endLine',
-    'validationSummary', 'classification', 'summary', 'counts', 'filterName', 'reducerName',
-    'contentKind', 'lossy', 'rawHandle', 'handle', 'rawChars', 'returnedChars',
-    'rawTokensEstimate', 'returnedTokensEstimate', 'estimatedSavedTokens', 'savingsPct',
-  ];
-  const compacted: Record<string, unknown> = {compacted: true, toolName};
-  for (const key of keys) if (key in source) compacted[key] = source[key];
-  for (const stream of ['stdout', 'stderr']) {
-    const candidate = source[stream];
-    if (typeof candidate !== 'object' || candidate == null) continue;
-    const details = candidate as Record<string, unknown>;
-    compacted[stream] = {
-      ...(typeof details.handle === 'string' ? {handle: details.handle} : {}),
-      ...(typeof details.rawHandle === 'string' ? {rawHandle: details.rawHandle} : {}),
-      ...(typeof details.filterName === 'string' ? {filterName: details.filterName} : {}),
-      ...(typeof details.reducerName === 'string' ? {reducerName: details.reducerName} : {}),
-      ...(typeof details.contentKind === 'string' ? {contentKind: details.contentKind} : {}),
-      ...(typeof details.lossy === 'boolean' ? {lossy: details.lossy} : {}),
-      ...(typeof details.truncated === 'boolean' ? {truncated: details.truncated} : {}),
-      ...(typeof details.omittedChars === 'number' ? {omittedChars: details.omittedChars} : {}),
-      ...(typeof details.rawTokensEstimate === 'number' ? {rawTokensEstimate: details.rawTokensEstimate} : {}),
-      ...(typeof details.returnedTokensEstimate === 'number' ? {returnedTokensEstimate: details.returnedTokensEstimate} : {}),
-      ...(typeof details.estimatedSavedTokens === 'number' ? {estimatedSavedTokens: details.estimatedSavedTokens} : {}),
-      ...(typeof details.savingsPct === 'number' ? {savingsPct: details.savingsPct} : {}),
-    };
-  }
-  return compacted;
-}
-
-function compactResultOutput(output: unknown, toolName: string) {
-  if (typeof output !== 'object' || output == null || !('type' in output)) return output;
-  const typed = output as {type?: unknown; value?: unknown};
-  if (typed.type === 'json') return {...typed, value: compactJsonValue(typed.value, toolName)};
-  if (typed.type === 'text') return {...typed, value: `[Older successful ${toolName} result omitted from active context.]`};
-  return output;
 }
 
 const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'editFile', 'replaceLines', 'bash']);
