@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-09 for the 0.8.0 release.
 
 Vitest test suite instructions.
 

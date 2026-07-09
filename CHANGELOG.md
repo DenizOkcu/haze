@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-07-09
+
+### Changed
+
+- **Migrated the agent runtime to AI SDK v7.** The main `ToolLoopAgent` turn and subagent runner now use AI SDK v7 APIs while preserving haze's compact terminal rendering, turn-scoped tool state, loop guardrails, and scoped-context injection behavior.
+- **Improved live busy feedback.** The interactive busy line now shows the active model name, a one-second elapsed-time heartbeat, and current tool activity labels such as reading, editing, searching, running commands, loading skills, querying LSP, or running MCP tools. Long model/tool gaps now visibly progress instead of looking frozen.
+- **Bounded bash output processing.** Bash reducer paths now bound large output processing more aggressively before output enters the transcript/model context, keeping validation/search/log-heavy commands safer for long-running agent work.
+- **Hardened core agent maintenance paths.** Tool context wiring, maintenance prompts, and related agent guidance were tightened for AI SDK v7 and current haze runtime behavior.
+- **Standardized lowercase `haze` naming.** README, docs, prompts, skills, command help, tests, and agent guidance now consistently use lowercase `haze` for the product name.
+
+### Fixed
+
+- Fixed multiline input shortcut handling in the chat input.
+- Kept model thinking labels concise without hiding useful slash-model suffixes such as reasoning variants.
+- Compacted long file paths in live tool labels so the busy line stays readable.
+
 ## 0.7.0 - 2026-06-29
 
 ### Added

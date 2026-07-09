@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-09 for the 0.8.0 release.
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 

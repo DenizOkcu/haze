@@ -1,6 +1,6 @@
 # src/core/agent/AGENTS.md
 
-Last updated: 2026-07-09.
+Last updated: 2026-07-09 for the 0.8.0 release.
 
 Agent request assembly, compaction, budgets, events, work state, and tool-result helpers.
 

@@ -2,18 +2,18 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.7.0
+## What's new in 0.8.0
 
-haze 0.7.0 focuses on headless observability, safer web fetches, more reliable scoped project instructions, and durable sessions that stay small enough to keep.
+haze 0.8.0 focuses on runtime reliability and clearer terminal feedback while staying compact and low-friction.
 
-- **Live print-mode JSON streams.** `haze -p "…" --output stream-json` emits newline-delimited progress events (`turn_start`, message events, tool events, retries, context overflow, `turn_end`) as they happen, then finishes with the same result envelope as `--output json`. Tool event payloads omit raw inputs/outputs so CI logs stay safe and compact.
-- **Pinned-connection `fetch` safety.** Public URL fetching now pins each request and redirect hop to the IP address that passed validation, preserving the original `Host`/TLS server name and closing a DNS-rebinding race between URL validation and connection.
-- **Scoped instructions refresh during a turn.** When file tools discover nested `CLAUDE.md`/`AGENTS.md`, haze injects those instructions into the next model step, tracks file signatures, and rereads changed scoped guidance instead of assuming the first version stays valid forever.
-- **Smaller durable sessions.** Session JSONL no longer persists every streaming `message_update`, and large tool outputs in persisted events/snapshots are replaced with previews plus size metadata. Resume remains useful while `~/.haze/sessions` avoids runaway growth.
-- **Startup context visibility.** The opening system message now lists which context files were sent with the system prompt, making global/project instruction loading easier to verify.
+- **AI SDK v7 runtime.** The main agent and subagent runners now use AI SDK v7 APIs with explicit per-tool context wiring, keeping built-in tool state turn-scoped and compatible with the newer runtime.
+- **Live busy status.** The active-turn indicator now shows the current model, elapsed time, and the tool activity underway — reading, editing, searching, running commands, loading skills, or calling MCP/LSP tools — so long turns look alive instead of stuck.
+- **Bounded bash output processing.** Bash output reduction paths are tightened so large command output remains controlled before it reaches transcript/model context.
+- **Input and maintenance polish.** Multiline input shortcuts are fixed, core agent maintenance paths are hardened, model/status labels are shorter and safer, and user-facing naming is consistently lowercase `haze`.
 
 Previous releases:
 
+- **0.7.0** — Headless `-p`/`--output json`/`--output stream-json`, pinned-connection `fetch` safety, scoped instruction refresh during turns, smaller durable sessions, and startup context visibility.
 - **0.6.0** — AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, MCP server support, unified config pickers, cleaner transcripts, `/context`, and startup update checks.
 - **0.5.0** — `fetch` tool for public URLs (Markdown/JSON/text, SSRF-protected), removed all provider env vars (config via `/provider`/`/model`/`/settings`), debug-only LLM logs, command-aware output reduction, Markdown rendering in the CLI, scoped nested context files, and auto-clearing completed tasks.
 - **0.4.0** — 3-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, leaner command surface, docs site additions.

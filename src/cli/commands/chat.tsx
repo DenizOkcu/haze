@@ -124,7 +124,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
-  const [, setActiveGoalStatus] = useState<string | undefined>();
   // Heartbeat for the busy indicator: ticks every second while haze is working
   // so the developer always sees rolling activity (elapsed turn time) even when
   // the model is thinking with no streamed output and no tool is running.
