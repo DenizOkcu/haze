@@ -130,7 +130,7 @@ describe('lsp pure helpers', () => {
   });
 
   it('normalizes LSP ranges to 1-indexed positions', () => {
-    // Inputs are LSP-native (0-indexed); expected outputs are 1-indexed for Haze's display.
+    // Inputs are LSP-native (0-indexed); expected outputs are 1-indexed for haze's display.
     expect(asRange({start: {line: 0, character: 2}, end: {line: 3, character: 5}})).toEqual({
       start: {line: 1, character: 3},
       end: {line: 4, character: 6},

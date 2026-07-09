@@ -22,8 +22,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/logs <id>', description: 'Show summary of a specific log: entry counts by type, total tokens, tool calls.'},
   {usage: '/compact [instructions]', description: 'Summarize older model context and keep recent messages.'},
   {usage: '/clear', description: 'Clear the current chat conversation history.'},
-  {usage: '/exit', description: 'Exit Haze.'},
-  {usage: '/quit', description: 'Exit Haze.'},
+  {usage: '/exit', description: 'Exit haze.'},
+  {usage: '/quit', description: 'Exit haze.'},
 ];
 
 export function formatCommandHelp(entries: CommandHelpEntry[] = COMMAND_HELP_ENTRIES): string {

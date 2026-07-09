@@ -5,7 +5,7 @@ import type {ContextFile} from '../../src/config/contextFiles.js';
 describe('buildSystemPrompt', () => {
   it('includes basic structure without context files', () => {
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain('You are Haze');
+    expect(prompt).toContain('You are haze');
     expect(prompt).toContain('Tool use');
     expect(prompt).toContain('listFiles');
     expect(prompt).toContain('editFile');

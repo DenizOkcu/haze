@@ -1,4 +1,4 @@
-# Contributing to Haze
+# Contributing to haze
 
 ## Setup
 
@@ -51,12 +51,12 @@ Skill management commands also live here under `/skills ...`; do not add new top
 ## Input and Cancellation
 
 - `Esc` clears the input field while typing.
-- While Haze is thinking, `Esc` aborts the active turn through the AI SDK `abortSignal` path and re-enables input.
+- While haze is thinking, `Esc` aborts the active turn through the AI SDK `abortSignal` path and re-enables input.
 - Long prompts wrap across multiple visible input lines. Preserve cursor behavior when changing `TextInput`, including vertical movement through wrapped lines and compacted paste-block cursor mapping.
 
 ## Adding a Tool
 
-Haze is aimed at expert users. Do not add command-confirmation gates for normal bash execution; prefer transparent classification, structured output, and clear transcript rendering. Ask the user only when the requested product or implementation decision is ambiguous.
+haze is aimed at expert users. Do not add command-confirmation gates for normal bash execution; prefer transparent classification, structured output, and clear transcript rendering. Ask the user only when the requested product or implementation decision is ambiguous.
 
 1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function.
 2. Add or update the tool description in `src/llm/systemPrompt.ts`.
@@ -74,6 +74,6 @@ Haze is aimed at expert users. Do not add command-confirmation gates for normal 
 ## Reporting Issues
 
 - Include Node.js version (`node --version`)
-- Include Haze version (`haze --version`)
+- Include haze version (`haze --version`)
 - Include steps to reproduce
 - Include relevant output or error messages

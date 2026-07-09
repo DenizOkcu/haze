@@ -75,7 +75,7 @@ async function loadStreaming(config: MocksConfig) {
     assembleRequestContext: async () => {
       mocks.assembledCalls.push(Date.now());
       return mocks.assembleContextResult ?? {
-        systemPrompt: 'You are Haze.',
+        systemPrompt: 'You are haze.',
         availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
         toolCategories: new Map([['bash', 'builtin']]),
       };

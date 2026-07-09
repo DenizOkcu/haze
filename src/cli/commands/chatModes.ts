@@ -46,5 +46,5 @@ const PLACEHOLDERS: Partial<Record<Mode, string>> = {
 };
 
 export function placeholderForMode(mode: Mode, busy: boolean): string {
-  return PLACEHOLDERS[mode] ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask Haze to help build your app');
+  return PLACEHOLDERS[mode] ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask haze to help build your app');
 }

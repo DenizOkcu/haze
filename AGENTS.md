@@ -2,13 +2,13 @@
 
 Last updated: 2026-07-09.
 
-Project instructions for Haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
+Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
 Last analysis: 2026-06-29.
 
 ## Project overview
 
-Haze is a Node >=22 TypeScript ESM CLI package (`@denizokcu/haze`) for terminal-based agentic app building.
+haze is a Node >=22 TypeScript ESM CLI package (`@denizokcu/haze`) for terminal-based agentic app building.
 
 Core shape:
 

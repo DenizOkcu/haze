@@ -11,7 +11,7 @@ describe('chatModes', () => {
 
   it('returns mode-specific and fallback placeholders', () => {
     expect(placeholderForMode('providerAddUrl', false)).toBe('https://example.com/v1');
-    expect(placeholderForMode('chat', false)).toBe('Ask Haze to help build your app');
+    expect(placeholderForMode('chat', false)).toBe('Ask haze to help build your app');
     expect(placeholderForMode('chat', true)).toBe('Queue a follow-up, or Esc to interrupt');
   });
 });

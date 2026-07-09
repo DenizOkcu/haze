@@ -22,7 +22,7 @@ async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = 
   }));
   vi.doMock('../../../src/llm/requestContext.js', () => ({
     assembleRequestContext: async () => ({
-      systemPrompt: 'You are Haze.',
+      systemPrompt: 'You are haze.',
       availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
       toolCategories: new Map([['bash', 'builtin']]),
     }),

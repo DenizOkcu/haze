@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-09.
 
-Instructions for Haze source code.
+Instructions for haze source code.
 
 ## Architecture boundaries
 

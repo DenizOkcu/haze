@@ -1,4 +1,4 @@
-# Haze simplification code review — 2026-06-26
+# haze simplification code review — 2026-06-26
 
 Reviewer stance: senior software architect optimizing for **DRY, KISS, and YAGNI** while preserving current behavior.
 

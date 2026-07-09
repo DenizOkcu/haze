@@ -3,7 +3,7 @@ name: files
 description: Use when the user asks for a careful file-inspection or file-editing workflow.
 ---
 
-Use Haze's built-in file tools rather than shell commands for file discovery and edits.
+Use haze's built-in file tools rather than shell commands for file discovery and edits.
 
 Workflow:
 1. Use `listFiles` for project discovery.

@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-09.
 
-Implementation helpers for Haze built-in tools.
+Implementation helpers for haze built-in tools.
 
 ## Shared filesystem/path rules
 

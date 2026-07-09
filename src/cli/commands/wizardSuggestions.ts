@@ -133,7 +133,7 @@ export function mcpTransportSuggestions(): TextInputSuggestion[] {
 }
 
 export function skillsSuggestions(settings: HazeSettings, skills: LoadedSkill[]): TextInputSuggestion[] {
-  return [{value: SKILL_CHOICES.addSkill, description: 'describe a new skill for Haze to generate', kind: 'skill' as const},
+  return [{value: SKILL_CHOICES.addSkill, description: 'describe a new skill for haze to generate', kind: 'skill' as const},
     ...skills.map(skill => ({
       value: skill.name,
       description: `${skill.description}${isSkillEnabled(settings, skill.name) ? '' : ' · disabled'}`,

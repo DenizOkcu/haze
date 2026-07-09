@@ -23,12 +23,12 @@ const STANDARD_SKILL_REQUIREMENTS = `
 
 const SKILL_CREATOR_SKILL = `---
 name: skill-creator
-description: Use when the user asks Haze to create a new skill from a natural-language description.
+description: Use when the user asks haze to create a new skill from a natural-language description.
 ---
 
-You create predictable, high-quality Haze skills.
+You create predictable, high-quality haze skills.
 
-A Haze skill is a directory in ~/.haze/skills containing SKILL.md and optional referenced files.
+A haze skill is a directory in ~/.haze/skills containing SKILL.md and optional referenced files.
 SKILL.md must be Markdown with YAML frontmatter, followed by a role and focused prompt:
 
 ---
@@ -47,7 +47,7 @@ The body must be a deterministic operating procedure, not generic advice.
 Keep skills simple, short, and practical: prefer the fewest commands and sections that reliably complete the workflow for a professional user.
 Avoid exhaustive checklists, rigid citation requirements, or heavyweight output formats unless the user's request truly requires them.
 Additional files are allowed only when SKILL.md explicitly references them with relative paths.
-Skills do not execute code. They teach Haze how to behave for a workflow.
+Skills do not execute code. They teach haze how to behave for a workflow.
 
 Every skill you create must include, in this order:
 - YAML frontmatter.
@@ -198,9 +198,9 @@ async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
     instructions: SKILL_CREATOR_SKILL,
     schema: generatedSkillSchema,
     schemaName: 'GeneratedHazeSkill',
-    schemaDescription: 'A generated Haze Markdown skill and optional referenced files.',
+    schemaDescription: 'A generated haze Markdown skill and optional referenced files.',
     prompt: [
-      'A user is creating a Haze skill via a 3-step wizard. They have already chosen the NAME and the ROLE; you do NOT choose those.',
+      'A user is creating a haze skill via a 3-step wizard. They have already chosen the NAME and the ROLE; you do NOT choose those.',
       '',
       `User-chosen skill name (use VERBATIM in frontmatter, do not rename): ${input.name}`,
       `User-chosen Role text (paste VERBATIM into the # Role section): ${role}`,

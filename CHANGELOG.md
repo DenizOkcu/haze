@@ -6,7 +6,7 @@
 
 ### Added
 
-- **`--output stream-json` for print mode.** `haze -p "…" --output stream-json` streams the run as newline-delimited JSON: public progress events (`turn_start`, `message_start`/`message_update`/`message_end`, `tool_start`/`tool_end`, `retry`, `context_overflow`, `turn_end`, each with an ISO-8601 `at` timestamp) are written to stdout as they happen, and the final line is the same `{type,status,result,usage}` envelope as `--output json`. Tool events omit raw inputs/outputs so captured stdout stays suitable for harness and CI logs. Previously print mode stayed silent until the end and emitted only that single envelope, so harnesses driving Haze headlessly had no live progress and could not run stdout-based stagnation/loop detection on a silent-but-alive run. Every line is standalone valid JSON (pipeable through `jq -c .`). `text` and `json` outputs are unchanged.
+- **`--output stream-json` for print mode.** `haze -p "…" --output stream-json` streams the run as newline-delimited JSON: public progress events (`turn_start`, `message_start`/`message_update`/`message_end`, `tool_start`/`tool_end`, `retry`, `context_overflow`, `turn_end`, each with an ISO-8601 `at` timestamp) are written to stdout as they happen, and the final line is the same `{type,status,result,usage}` envelope as `--output json`. Tool events omit raw inputs/outputs so captured stdout stays suitable for harness and CI logs. Previously print mode stayed silent until the end and emitted only that single envelope, so harnesses driving haze headlessly had no live progress and could not run stdout-based stagnation/loop detection on a silent-but-alive run. Every line is standalone valid JSON (pipeable through `jq -c .`). `text` and `json` outputs are unchanged.
 - **Startup context visibility.** The interactive startup message now lists the context files sent with the system prompt, making it easier to verify whether global `CLAUDE.md`/`AGENTS.md` and workspace instructions were loaded.
 
 ### Changed
@@ -23,7 +23,7 @@
 
 ### Added
 
-- **MCP server support.** Haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
+- **MCP server support.** haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
 - Added optional configurable stdio LSP support through `/lsp`, with TypeScript, Rust, Python, Go, and PHP presets.
 - Added read-only semantic navigation tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) that are exposed to the model only when an enabled LSP command is installed on `PATH`.
 - Added `/context`, a token breakdown of the current request (system prompt, project context, tools including MCP, and chat messages).
@@ -34,7 +34,7 @@
 
 - Switched the main agent turn to the AI SDK v6 `ToolLoopAgent` abstraction while preserving compact terminal tool/text rendering and key loop guardrails.
 - Improved transcript segmentation so assistant text and tool blocks alternate cleanly during multi-step turns.
-- Added LSP-aware prompt guidance only when LSP tools are actually available; otherwise Haze naturally falls back to `grep`, `listFiles`, and `readFile`.
+- Added LSP-aware prompt guidance only when LSP tools are actually available; otherwise haze naturally falls back to `grep`, `listFiles`, and `readFile`.
 - Made `/lsp` and `/mcp` interactive pickers matching the `/provider` flow (autocomplete lists, preset pickers, masked API-key entry), replacing the previous `/lsp`/`/mcp` subcommand syntax.
 - Unified skill management into a single `/skills` interactive picker that mirrors `/provider`, `/lsp`, and `/mcp`; removed the legacy `/create-skill`, `/skill-info`, `/validate-skill`, and `/remove-skill` commands.
 - Updated README, docs site, and project agent guidance for LSP setup and the 0.6.0 release.
@@ -44,16 +44,16 @@
 ### Changed
 
 - Removed all user-facing environment variables. `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read; configure providers, models, API keys, and base URLs through `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands instead. This also removes the `OPENAI_*` env overrides from the startup provider info and the header.
-- File LLM logging is now **off by default**. Previously Haze wrote a detailed JSONL log (full prompts, model messages, tool inputs/outputs, token usage) to `~/.haze/logs/<timestamp>.jsonl` on every session. Logging is now enabled solely with the `--debug` flag (`haze --debug`), which also turns on the on-screen debug panel. The `/logs` command still reviews historical log files.
+- File LLM logging is now **off by default**. Previously haze wrote a detailed JSONL log (full prompts, model messages, tool inputs/outputs, token usage) to `~/.haze/logs/<timestamp>.jsonl` on every session. Logging is now enabled solely with the `--debug` flag (`haze --debug`), which also turns on the on-screen debug panel. The `/logs` command still reviews historical log files.
 - Bash results now pass through command-aware reducers before they enter the transcript/model context. Validation failures render focused diagnostics, successful validation stays short, git/diff/search/JSON/log-like output is compacted, noisy command families get line filters, and reduced raw output remains retrievable by `readToolOutput` when stored.
 - `grep` now returns compact structured search output for long match sets/lines, with reduction metadata, omitted-result counts, and a raw-output handle when the rendered result was truncated.
 - Tool activity rendering is quieter: live tool groups show elapsed timers, subagent child calls, capped group detail, and compact success/failure summaries instead of dumping large result objects.
 - Assistant Markdown rendering in the CLI now supports styled headings, inline code/strong/emphasis/links, blockquotes, syntax-highlighted code fences, horizontal rules, and width-aware tables.
 - Consecutive assistant messages in one turn now share a single visible `haze` header for a less noisy transcript.
 - Completed task lists now clear automatically at the start of a new user turn so old successful todos do not linger in the task bar.
-- Context loading now includes global `~/.claude/CLAUDE.md` while keeping `~/.haze/AGENTS.md` higher priority for Haze-specific global guidance.
+- Context loading now includes global `~/.claude/CLAUDE.md` while keeping `~/.haze/AGENTS.md` higher priority for haze-specific global guidance.
 - Nested `CLAUDE.md`/`AGENTS.md` files below the workspace are now scoped and loaded lazily when file tools operate inside their directory tree; mutating file tools stop before the first edit when newly scoped instructions are discovered.
-- Repeated identical tool calls are now steered back to the model with an explicit correction instead of aborting the turn immediately, so Haze can reuse existing results or finish cleanly.
+- Repeated identical tool calls are now steered back to the model with an explicit correction instead of aborting the turn immediately, so haze can reuse existing results or finish cleanly.
 - `/init` now explicitly keeps `AGENTS.md` compact, reminds the model that context files are injected into every request, and references the current context-file truncation budget.
 
 ### Added
@@ -95,7 +95,7 @@
 - Added request-level context accounting, cache/no-cache usage metrics, a debug token breakdown, and an offline `context:report` command.
 - Bounded `readFile`, structured and globally capped `grep`, and compacted large bash output behind paginated `readToolOutput` handles.
 - Added structured `WorkState` snapshots, token-aware compaction, conservative old-tool-result pruning, bounded continuation slices, and no-progress termination for long agent workflows.
-- Made Haze control nudges ephemeral, omitted tool schemas from text-only follow-ups, and replaced duplicated subagent prompting with a concise dedicated prompt.
+- Made haze control nudges ephemeral, omitted tool schemas from text-only follow-ups, and replaced duplicated subagent prompting with a concise dedicated prompt.
 - Consolidated installed workflows into one progressive `skill` catalog tool and added provider capability-gated cache keys, sticky session hints, and low-verbosity options.
 - Shortened the model operating contract and final-response guidance while preserving edit recovery, validation evidence, and blocked/partial reporting.
 
@@ -114,7 +114,7 @@
 - Added shared structured tool result types and more specific file-edit failure reason codes so edit recovery can reread the affected file and retry with better guidance.
 - Reworked the system prompt, subagent prompt, compaction prompt, and generated-skill guidance around autonomous expert developer workflows with concise final status reporting.
 - Removed hard-coded `temperature: 0` from model calls so providers/models that reject temperature options can run without warning workarounds.
-- Removed bash confirmation gates, including for destructive classifications; Haze now assumes expert users know what they asked for and relies on transparent tool output rather than permission prompts.
+- Removed bash confirmation gates, including for destructive classifications; haze now assumes expert users know what they asked for and relies on transparent tool output rather than permission prompts.
 - Improved chat input editing with wrapped multi-line display, vertical cursor movement across wrapped lines, and better cursor mapping for compacted paste blocks.
 - Added and updated tests for bash classification, bash execution behavior, validation parsing, edit recovery, system-prompt guidance, and skill generation.
 

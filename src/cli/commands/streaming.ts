@@ -25,6 +25,7 @@ import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGrou
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
+import {modelThinkingLabel} from '../../utils/modelName.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -87,7 +88,8 @@ export async function runAgentTurn(
   const displayVal = displayValue ?? value;
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
   callbacks.setBusy(true);
-  callbacks.setBusyLabel?.('Haze is thinking');
+  let thinkingLabel = modelThinkingLabel(undefined);
+  callbacks.setBusyLabel?.(thinkingLabel);
   if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayVal});
   const abortController = new AbortController();
   callbacks.setAbortController?.(abortController);
@@ -98,7 +100,7 @@ export async function runAgentTurn(
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      abortController.abort('Haze turn timed out after no model/tool activity.');
+      abortController.abort('haze turn timed out after no model/tool activity.');
     }, IDLE_TIMEOUT_MS);
   };
 
@@ -107,10 +109,13 @@ export async function runAgentTurn(
   try {
     const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride});
     if (!runtime?.model) {
-      callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. Haze cannot hallucinate without a model. Progress.'});
+      callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
       turnStatus = 'complete';
       return {status: turnStatus};
     }
+
+    thinkingLabel = modelThinkingLabel(runtime.config.modelName);
+    callbacks.setBusyLabel?.(thinkingLabel);
 
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
@@ -256,7 +261,7 @@ export async function runAgentTurn(
       resetIdleTimer();
       switch (part.type) {
         case 'text-delta': {
-          callbacks.setBusyLabel?.('Haze is thinking');
+          callbacks.setBusyLabel?.(thinkingLabel);
           toolDisplay.startFreshToolGroup();
           const delta = sanitizeAssistantText(part.text);
           assistantText += delta;
@@ -427,7 +432,7 @@ export async function runAgentTurn(
     toolDisplay.finalizeToolGroup();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status: turnStatus}));
     callbacks.setAbortController?.(null);
-    callbacks.setBusyLabel?.('Haze is thinking');
+    callbacks.setBusyLabel?.(thinkingLabel);
     callbacks.setBusy(false);
   }
   return {status: turnStatus};

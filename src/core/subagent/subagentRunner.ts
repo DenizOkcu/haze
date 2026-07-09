@@ -99,7 +99,7 @@ export async function runSubagent(
         totalToolCalls += 1;
         toolCallLog.push({
           name: event.toolCall.toolName,
-          summary: toolSummary(event.toolOutput.type === 'tool-result' ? event.toolOutput.output : event.toolOutput.error),
+          summary: event.toolOutput.type === 'tool-result' ? toolSummary(event.toolOutput.output) : `failed: ${String(event.toolOutput.error).slice(0, 120)}`,
           durationMs: event.toolExecutionMs,
         });
       },

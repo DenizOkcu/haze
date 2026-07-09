@@ -20,8 +20,8 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/new', description: 'Start a new session', kind: 'command'},
   {value: '/compact ', description: 'Summarize older context and keep recent messages', kind: 'command'},
   {value: '/clear', description: 'Clear conversation history', kind: 'command'},
-  {value: '/exit', description: 'Exit Haze', kind: 'command'},
-  {value: '/quit', description: 'Exit Haze', kind: 'command'},
+  {value: '/exit', description: 'Exit haze', kind: 'command'},
+  {value: '/quit', description: 'Exit haze', kind: 'command'},
 ];
 
 interface InputSuggestionState {

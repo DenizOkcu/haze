@@ -1,7 +1,7 @@
 import {MAX_CONTEXT_FILE_CHARS} from '../config/contextFiles.js';
 
 export function buildInitPrompt() {
-  return `Initialize this repository for Haze by creating a best-practice AGENTS.md file.
+  return `Initialize this repository for haze by creating a best-practice AGENTS.md file.
 
 Explore the codebase first, respecting .gitignore, but keep this quick and minimal:
 1. Start with exactly one listFiles call from the workspace root. Do not announce that you are starting before the tool call.

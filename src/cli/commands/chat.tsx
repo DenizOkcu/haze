@@ -43,6 +43,7 @@ import {compactHomePath, displayMessagesFromConversation, estimateConversationTo
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
+import {modelThinkingLabel} from '../../utils/modelName.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
 import {captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from './wizardPrompts.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from './lspWizard.js';
@@ -78,6 +79,10 @@ function busyElapsedLabel(startedAt: number | undefined) {
   return elapsed > 0 ? formatElapsedTimeWhole(elapsed) : '';
 }
 
+function thinkingLabelForSettings(settings: HazeSettings) {
+  return modelThinkingLabel(activeModel(settings)?.model);
+}
+
 function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
@@ -89,7 +94,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   };
   const withDisplayOrders = (next: Message[]) => next.map(withDisplayOrder);
   const [messages, setMessagesRaw] = useState<Message[]>([
-    {role: 'system', text: 'Welcome to Haze. Use /help for commands.', displayOrder: 0}
+    {role: 'system', text: 'Welcome to haze. Use /help for commands.', displayOrder: 0}
   ]);
   const setMessages = (updater: React.SetStateAction<Message[]>) => {
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
@@ -118,9 +123,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
-  const [busyLabel, setBusyLabel] = useState('Haze is thinking');
+  const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
   const [, setActiveGoalStatus] = useState<string | undefined>();
-  // Heartbeat for the busy indicator: ticks every second while Haze is working
+  // Heartbeat for the busy indicator: ticks every second while haze is working
   // so the developer always sees rolling activity (elapsed turn time) even when
   // the model is thinking with no streamed output and no tool is running.
   const turnStartedAtRef = useRef<number | undefined>(undefined);
@@ -180,7 +185,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'})
         .then(result => {
           if (result?.isOutdated) {
-            setMessages(m => [...m, {role: 'system', text: `A new version of Haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
+            setMessages(m => [...m, {role: 'system', text: `A new version of haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
           }
         })
         .catch(() => undefined);
@@ -680,7 +685,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMessages(m => [...m, {role: 'system', text: skillCreationFailure(error)}]);
       } finally {
         setBusyWithHeartbeat(false);
-        setBusyLabel('Haze is thinking');
+        setBusyLabel(thinkingLabelForSettings(settings));
       }
     }
   }
@@ -1119,12 +1124,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const headerSubtitle = [
     'A minimal LLM harness for growing your own workflows while you work.',
     '',
-    'Start with simple chat, then teach Haze your habits with skills:',
+    'Start with simple chat, then teach haze your habits with skills:',
     '/skills  — add, enable/disable, validate, or remove Markdown skills.',
     '',
     'The most adaptive workflow is the one you shape as you go.',
     '',
-    'Guardrails are light: Haze lets the LLM work from the terminal almost like you,',
+    'Guardrails are light: haze lets the LLM work from the terminal almost like you,',
     'while trying to stay scoped to this project.',
   ].join('\n');
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;

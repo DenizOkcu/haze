@@ -6,7 +6,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 
 ## Responsibilities
 
-- `paths.ts` defines Haze's user-data roots such as `~/.haze` and global skills paths.
+- `paths.ts` defines haze's user-data roots such as `~/.haze` and global skills paths.
 - `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types.
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
 - `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly.
@@ -21,7 +21,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - Do not introduce user-facing environment variables for provider/model config.
 - Provider key order is saved provider key, then legacy OpenRouter `apiKey`, then local-provider placeholder behavior where the client layer expects it.
 - Custom/local OpenAI-compatible providers may intentionally use placeholder keys.
-- Model selectors use `provider:model` in Haze settings/UI, not slash-separated provider IDs.
+- Model selectors use `provider:model` in haze settings/UI, not slash-separated provider IDs.
 
 ## Context file contract
 

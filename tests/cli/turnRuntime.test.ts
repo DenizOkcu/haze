@@ -57,7 +57,7 @@ describe('turnRuntime', () => {
 
   it('estimateInputBreakdown reduces messages, tools, and system to token counts', () => {
     const breakdown = estimateInputBreakdown({
-      system: 'You are Haze.',
+      system: 'You are haze.',
       contextFiles: [{path: 'AGENTS.md', content: 'rules'}],
       messages: [{role: 'user', content: 'hi'}, {role: 'assistant', content: 'hello'}],
       tools: {readFile: {description: 'r'}, bash: {description: 'b'}},

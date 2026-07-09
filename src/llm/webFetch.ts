@@ -59,7 +59,7 @@ export type {UrlValidation};
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
 const DEFAULT_MAX_REDIRECTS = 5;
-const USER_AGENT = 'Haze/0.5 (+https://github.com/DenizOkcu/haze)';
+const USER_AGENT = 'haze/0.5 (+https://github.com/DenizOkcu/haze)';
 
 /** Error thrown when a URL is rejected by the SSRF guard. */
 export class BlockedUrlError extends Error {

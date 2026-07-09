@@ -12,12 +12,14 @@ import {HazeToolError} from './failures.js';
  * project instructions (CLAUDE.md / AGENTS.md below the cwd).
  *
  * All state lives on per-tool `context` values, which the agent turn owns and
- * passes to the AI SDK. Nothing here is persisted.
+ * passes to the AI SDK. Tests and older callers may still provide the legacy
+ * `experimental_context` shape. Nothing here is persisted.
  */
 
 export type ToolExecutionContext = {
   abortSignal?: AbortSignal;
   context?: unknown;
+  experimental_context?: unknown;
 };
 
 export type HazeToolContext = {
@@ -53,8 +55,11 @@ function toolCallKey(toolName: string, input: unknown) {
 export const hazeToolContextSchema = z.custom<HazeToolContext>(value => typeof value === 'object' && value !== null);
 
 export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
-  return typeof context.context === 'object' && context.context != null
-    ? context.context as HazeToolContext
+  const value = typeof context.context === 'object' && context.context != null
+    ? context.context
+    : context.experimental_context;
+  return typeof value === 'object' && value != null
+    ? value as HazeToolContext
     : undefined;
 }
 
