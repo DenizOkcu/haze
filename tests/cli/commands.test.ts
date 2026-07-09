@@ -1,8 +1,13 @@
-import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterAll, beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {handleSlashCommand, type CommandContext} from '../../src/cli/commands/commands.js';
+
+const doctorMock = vi.hoisted(() => ({handleDoctorCommand: vi.fn()}));
+vi.mock('../../src/cli/commands/doctorCommand.js', () => ({
+  handleDoctorCommand: doctorMock.handleDoctorCommand,
+}));
 
 function mockContext(overrides?: Partial<CommandContext>): CommandContext {
   return {
@@ -329,5 +334,33 @@ describe('handleSlashCommand /logs', () => {
     await handleSlashCommand('/help', ctx);
     const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(msg).toContain('/logs');
+  });
+});
+
+describe('handleSlashCommand /doctor', () => {
+  beforeEach(() => {
+    doctorMock.handleDoctorCommand.mockImplementation(async (_args, ctx) => {
+      ctx.addSystemMessage('Doctor report');
+      return 'handled';
+    });
+  });
+
+  it('handles /doctor', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/doctor', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Doctor report'));
+  });
+
+  it('handles /doctor --full', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/doctor --full', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Doctor report'));
+  });
+
+  it('lists /doctor in /help', async () => {
+    const ctx = mockContext();
+    await handleSlashCommand('/help', ctx);
+    const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+    expect(msg).toContain('/doctor');
   });
 });
