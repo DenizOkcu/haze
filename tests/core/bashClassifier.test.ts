@@ -64,4 +64,81 @@ describe('bash classifier', () => {
     const result = classifyBashCommand('mytool -delete --force ./out');
     expect(result.traits).not.toContain('deletes_files');
   });
+
+  describe('gh subcommands', () => {
+    it.each([
+      ['gh pr view 123', 'read_only'],
+      ['gh issue list --json assignees,title', 'read_only'],
+      ['gh run view 1234 --log-failed', 'read_only'],
+      ['gh repo view owner/repo', 'read_only'],
+      ['gh gist list', 'read_only'],
+      ['gh api repos/owner/repo/pulls', 'read_only'],
+      ['gh pr diff', 'read_only'],
+      ['gh pr status', 'read_only'],
+      ['gh pr checks', 'read_only'],
+      ['gh run list', 'read_only'],
+      ['gh run watch 1234', 'read_only'],
+      ['gh repo list', 'read_only'],
+      ['gh api --method GET repos/owner/repo/issues', 'read_only'],
+      ['gh api --method=GET repos/owner/repo/issues', 'read_only'],
+      ['gh api -XGET repos/owner/repo/issues', 'read_only'],
+    ])('classifies %s as read_only', (cmd, expected) => {
+      const result = classifyBashCommand(cmd);
+      expect(result.riskLevel).toBe(expected);
+      expect(result.traits).toContain('reads_files');
+    });
+
+    it.each([
+      'gh pr merge 123',
+      'gh pr create --fill',
+      'gh pr edit 123 --title new',
+      'gh pr close 123',
+      'gh pr reopen 123',
+      'gh pr review --approve',
+      'gh pr comment 123',
+      'gh issue create --title new',
+      'gh issue edit 123 --title new',
+      'gh issue close 123',
+      'gh issue reopen 123',
+      'gh issue comment 123',
+      'gh run rerun 1234',
+      'gh run cancel 1234',
+      'gh release create v1.0.0',
+      'gh release edit v1.0.0',
+      'gh release delete v1.0.0',
+      'gh repo create owner/repo',
+      'gh repo fork owner/repo',
+      'gh repo delete owner/repo --yes',
+      'gh gist create file.txt',
+      'gh gist edit abc123',
+      'gh gist delete abc123',
+      'gh api --method PATCH repos/owner/repo/issues/1',
+      'gh api --method POST repos/owner/repo/issues',
+      'gh api --method=POST repos/owner/repo/issues',
+      'gh api --method PUT repos/owner/repo/pulls/1',
+      'gh api --method DELETE repos/owner/repo/issues/1',
+      'gh api -X POST repos/owner/repo/issues',
+      'gh api -XPOST repos/owner/repo/issues',
+      'gh api repos/owner/repo/issues -f title=new',
+      'gh api repos/owner/repo/issues -F title=new',
+      'gh api repos/owner/repo/issues -r upstream',
+      'gh api repos/owner/repo/issues --input body.json',
+    ])('does not classify %s as read_only', (cmd) => {
+      expect(classifyBashCommand(cmd).riskLevel).not.toBe('read_only');
+    });
+
+    it.each([
+      ['gh api --method GET repos/owner/repo/issues -f title=new', 'read_only'],
+      ['gh api --method=GET repos/owner/repo/issues -F title=new', 'read_only'],
+      ['gh api -XGET repos/owner/repo/issues -r upstream', 'read_only'],
+    ])('classifies explicit GET %s as read_only despite field flags', (cmd, expected) => {
+      const result = classifyBashCommand(cmd);
+      expect(result.riskLevel).toBe(expected);
+      expect(result.traits).toContain('reads_files');
+    });
+
+    it('does not promise read-only for complex gh subcommands', () => {
+      expect(classifyBashCommand('gh pr view 123 | cat').riskLevel).not.toBe('read_only');
+    });
+  });
 });

@@ -89,6 +89,76 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};
   }
 
+  // GitHub CLI read-only subcommands
+  if (has(lower, /\bgh\b/)) {
+    // Explicitly reject known mutating subcommands before trusting anything else.
+    const mutating = [
+      ['pr', 'merge'],
+      ['pr', 'create'],
+      ['pr', 'edit'],
+      ['pr', 'close'],
+      ['pr', 'reopen'],
+      ['pr', 'review'],
+      ['pr', 'comment'],
+      ['issue', 'create'],
+      ['issue', 'edit'],
+      ['issue', 'close'],
+      ['issue', 'reopen'],
+      ['issue', 'comment'],
+      ['run', 'rerun'],
+      ['run', 'cancel'],
+      ['release', 'create'],
+      ['release', 'edit'],
+      ['release', 'delete'],
+      ['repo', 'create'],
+      ['repo', 'fork'],
+      ['repo', 'delete'],
+      ['gist', 'create'],
+      ['gist', 'edit'],
+      ['gist', 'delete'],
+    ];
+    if (mutating.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
+      return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh subcommand'};
+    }
+
+    // Pipe or complex shell syntax inside gh commands is not trusted as read-only.
+    const ghComplex = complex || trimmed.includes('|');
+
+    // gh api is ambiguous unless it is explicitly GET or has no method.
+    if (has(lower, /\bapi\b/)) {
+      const hasExplicitGet = /\s(-X|--method)(=|\s*)GET\b/i.test(lower);
+      if (!hasExplicitGet && /\s(-f|-F|-r|--input)\b/i.test(lower)) {
+        return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'gh api call with field/input flags defaults to POST'};
+      }
+      if (/\s(-X|--method)(=|\s*)(POST|PATCH|PUT|DELETE)\b/i.test(lower)) {
+        return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'mutating gh api method'};
+      }
+      traits.push('reads_files');
+      return {riskLevel: ghComplex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: ghComplex ? 'low' : 'high', reason: ghComplex ? 'read-like gh api call with complex shell syntax' : 'read-only gh api call'};
+    }
+
+    const readOnlySubcommands = [
+      ['pr', 'list'],
+      ['pr', 'view'],
+      ['pr', 'diff'],
+      ['pr', 'status'],
+      ['pr', 'checks'],
+      ['issue', 'list'],
+      ['issue', 'view'],
+      ['run', 'list'],
+      ['run', 'view'],
+      ['run', 'watch'],
+      ['repo', 'view'],
+      ['repo', 'list'],
+      ['gist', 'list'],
+      ['gist', 'view'],
+    ];
+    if (readOnlySubcommands.some(([tool, verb]) => has(lower, new RegExp(`\\b${tool}\\s+${verb}\\b`)))) {
+      traits.push('reads_files');
+      return {riskLevel: ghComplex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: ghComplex ? 'low' : 'high', reason: ghComplex ? 'read-like gh subcommand with complex shell syntax' : 'read-only gh subcommand'};
+    }
+  }
+
   if (has(lower, /(^|[;&|]\s*)(git\s+(status|diff|log|show|branch)\b|rg\b|grep\b|find\b|ls\b|pwd\b|cat\b|head\b|tail\b|node\s+--version|npm\s+--version|which\b)/)) {
     traits.push('reads_files');
     return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like command with complex shell syntax' : 'read-only inspection command'};
