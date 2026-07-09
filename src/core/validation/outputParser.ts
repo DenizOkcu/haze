@@ -1,5 +1,6 @@
 import type {BashClassification} from '../safety/bashClassifier.js';
 import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
+import {capOutputForProcessing} from '../toolOutput/reduction.js';
 
 function uniq(values: string[]) {
   return [...new Set(values.filter(Boolean))];
@@ -24,14 +25,15 @@ export function parseValidationOutput(input: {
   stderrTruncated?: boolean;
   classification?: BashClassification;
 }): ValidationSummary {
-  const text = `${input.stdout}\n${input.stderr}`;
+  const text = `${capOutputForProcessing(input.stdout)}\n${capOutputForProcessing(input.stderr)}`;
   const lines = text.split(/\r?\n/);
   const diagnostics: ValidationSummary['diagnostics'] = [];
   const failedTests: string[] = [];
   const failedFiles: string[] = [];
   const kind = inferKind(input.command, input.classification);
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     const ts = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\((\d+),(\d+)\):\s+(error|warning)\s+TS\d+:\s+(.+)$/);
     if (ts) {
       const [, file, lineNo, column, severity, message] = ts;
@@ -42,7 +44,7 @@ export function parseValidationOutput(input: {
     const eslint = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\s*$/);
     if (eslint) {
       const currentFile = eslint[1] ?? '';
-      const next = lines[lines.indexOf(line) + 1];
+      const next = lines[index + 1];
       if (next && /^\s*\d+:\d+\s+/.test(next)) failedFiles.push(currentFile);
     }
     const eslintDiag = line.match(/^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}\S+)?$/);

@@ -50,4 +50,10 @@ describe('validation output parser', () => {
     const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
     expect(summary.status).toBe('passed');
   });
+
+  it('detects repeated eslint file headers', () => {
+    const stdout = ['src/a.ts', 'not-a-diagnostic-line', 'src/a.ts', '  1:5  error  no-undef'].join('\n');
+    const summary = parseValidationOutput({command: 'npm run lint', code: 1, stdout, stderr: ''});
+    expect(summary.failedFiles).toContain('src/a.ts');
+  });
 });

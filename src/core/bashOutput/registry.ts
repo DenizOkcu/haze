@@ -6,7 +6,7 @@ import {reduceGitOutput} from './reducers/git.js';
 import {reduceGhOutput} from './reducers/gh.js';
 import {reduceSearchOutput} from './reducers/search.js';
 import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from './reducers/content.js';
-import {isInflating, reductionMetrics, retrievalHint, type ReductionContentKind} from '../toolOutput/reduction.js';
+import {capOutputForProcessing, isInflating, reductionMetrics, retrievalHint, type ReductionContentKind} from '../toolOutput/reduction.js';
 
 export const builtInLineFilters: LineFilterDefinition[] = [
   {name: 'markdownlint', matchCommand: /(^|[;&|]\s*)markdownlint\b/, stripAnsi: true, truncateLinesAt: 200, maxLines: 80, onEmpty: 'markdownlint: ok'},
@@ -78,8 +78,10 @@ export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilter
       stdout = makeReduction(input.stdout, renderValidationReduction(input.validationSummary, rawHandle), true, filterName, input, undefined, 'validation');
       stderr = makeReduction(input.stderr, '', input.stderr.length > 0, filterName, input, undefined, 'validation');
     } else {
-      const git = reduceGitOutput(input.command, input.stdout, input.stderr);
-      const gh = git == null ? reduceGhOutput(input.command, input.stdout, input.stderr) : undefined;
+      const stdoutIn = capOutputForProcessing(input.stdout);
+      const stderrIn = capOutputForProcessing(input.stderr);
+      const git = reduceGitOutput(input.command, stdoutIn, stderrIn);
+      const gh = git == null ? reduceGhOutput(input.command, stdoutIn, stderrIn) : undefined;
       if (git != null) {
         filterName = 'git';
         const kind: ReductionContentKind = /^git (?:diff|show):/.test(git) ? 'diff' : 'generic';
@@ -91,15 +93,15 @@ export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilter
         stdout = makeReduction(input.stdout, input.stdout ? gh : '', true, filterName, input, undefined, kind);
         stderr = makeReduction(input.stderr, input.stdout ? '' : gh, true, filterName, input, undefined, kind);
       } else {
-        const search = reduceSearchOutput(input.command, input.stdout, input.stderr);
+        const search = reduceSearchOutput(input.command, stdoutIn, stderrIn);
         if (search != null) {
           filterName = 'search';
           stdout = makeReduction(input.stdout, input.stdout ? search : '', true, filterName, input, undefined, 'search');
           stderr = makeReduction(input.stderr, input.stdout ? '' : search, true, filterName, input, undefined, 'search');
         } else {
-          const diff = reduceUnifiedDiffOutput(input.stdout, input.stderr);
-          const json = diff == null ? reduceJsonOutput(input.stdout, input.stderr) : undefined;
-          const log = diff == null && json == null ? reduceGenericLogOutput(input.stdout, input.stderr) : undefined;
+          const diff = reduceUnifiedDiffOutput(stdoutIn, stderrIn);
+          const json = diff == null ? reduceJsonOutput(stdoutIn, stderrIn) : undefined;
+          const log = diff == null && json == null ? reduceGenericLogOutput(stdoutIn, stderrIn) : undefined;
           const content = diff ?? json ?? log;
           if (content != null) {
             filterName = diff != null ? 'diff' : json != null ? 'json' : 'log';
@@ -110,8 +112,8 @@ export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilter
             const lineFilter = findLineFilter(builtInLineFilters, input.command);
             if (lineFilter) {
               filterName = lineFilter.name;
-              const out = input.stdout ? applyLineFilter(lineFilter, input.command, input.stdout) : undefined;
-              const err = input.stderr ? applyLineFilter(lineFilter, input.command, input.stderr) : undefined;
+              const out = input.stdout ? applyLineFilter(lineFilter, input.command, stdoutIn) : undefined;
+              const err = input.stderr ? applyLineFilter(lineFilter, input.command, stderrIn) : undefined;
               stdout = makeReduction(input.stdout, out?.text ?? input.stdout, out?.filtered ?? false, lineFilter.name, input, out?.warning, 'log');
               stderr = makeReduction(input.stderr, err?.text ?? input.stderr, err?.filtered ?? false, lineFilter.name, input, err?.warning, 'log');
             }

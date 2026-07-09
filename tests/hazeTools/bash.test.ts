@@ -71,4 +71,18 @@ describe('bash tool safety', () => {
     expect(page.content).toContain('1234: line 1233');
     expect(page.content).toContain('1236: line 1235');
   });
+
+  it('bounds runaway command output without hanging reducers', async () => {
+    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(400000))\"");
+    expect(result.ok).toBe(true);
+    expect(result.stdout.text.length).toBeLessThan(20_000);
+  }, 15_000);
+
+  it('keeps full raw output retrievable when reducer input is capped', async () => {
+    const script = "let s='a'.repeat(250000); s += 'NEEDLE_END'; process.stdout.write(s)";
+    const result = await bash(`node -e "${script}"`);
+    expect(result.stdout.handle).toMatch(/^output-/);
+    const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 250000, limit: 20}, {abortSignal: undefined});
+    expect(page.content).toContain('NEEDLE_END');
+  }, 15_000);
 });

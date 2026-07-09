@@ -1,4 +1,7 @@
 export type ReductionPressure = 'conservative' | 'normal' | 'aggressive';
+
+export const PROCESSING_OUTPUT_CHAR_LIMIT = 200_000;
+const PROCESSING_TRUNCATION_MARKER = '\n[... output truncated for processing ...]\n';
 export type ReductionContentKind = 'validation' | 'log' | 'search' | 'diff' | 'json' | 'table' | 'web' | 'source-outline' | 'generic';
 export type ReductionParseTier = 'full' | 'degraded' | 'passthrough';
 
@@ -24,6 +27,15 @@ export interface ToolOutputReductionMetadata extends ReductionMetrics {
 
 export function estimateReductionTokens(text: string) {
   return Math.ceil(text.length / 4);
+}
+
+export function capOutputForProcessing(text: string, maxChars = PROCESSING_OUTPUT_CHAR_LIMIT) {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= PROCESSING_TRUNCATION_MARKER.length) return text.slice(0, maxChars);
+  const keepChars = maxChars - PROCESSING_TRUNCATION_MARKER.length;
+  const headChars = Math.floor(keepChars / 2);
+  const tailChars = keepChars - headChars;
+  return `${text.slice(0, headChars)}${PROCESSING_TRUNCATION_MARKER}${text.slice(-tailChars)}`;
 }
 
 export function reductionMetrics(raw: string, returned: string): ReductionMetrics {
