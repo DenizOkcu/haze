@@ -1,8 +1,14 @@
 # src/core/agent/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Agent request assembly, compaction, budgets, events, work state, and tool-result helpers.
 
 ## Module contracts
+
+Maintainability focus:
+
+- `turnPolicy.ts` is the shared home for tool-loop/repeated-tool decision helpers used outside the UI. Do not reimplement these in subagents or CLI helpers.
 
 - `budgets.ts` centralizes main agent/subagent step, tool-call, output-token, idle-timeout, and active-context limits. Changing values changes product behavior; update tests and docs if user-visible.
 - `contextBudget.ts` contains approximate token estimation and breakdown helpers. Keep deterministic and cheap.

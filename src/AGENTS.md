@@ -1,5 +1,7 @@
 # src/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Instructions for Haze source code.
 
 ## Architecture boundaries
@@ -17,6 +19,11 @@ Instructions for Haze source code.
 - Prefer deterministic functions for core logic. Isolate filesystem, network, child-process, and terminal effects.
 
 ## Public behavior
+
+Maintainability focus:
+
+- Prefer DRY/KISS/YAGNI refactors that reduce future agent context load without changing UX.
+- Split growing orchestration files behind small pure helpers before adding new branches or modes.
 
 - Treat anything surfaced through slash commands, tool result shapes, session files, settings files, skill format, or README as public contract.
 - When changing public result objects, update formatters and tests that snapshot/inspect those fields.

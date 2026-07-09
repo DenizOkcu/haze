@@ -1,5 +1,7 @@
 # src/config/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Runtime configuration, paths, context files, and provider/server settings.
 
 ## Responsibilities
@@ -30,6 +32,11 @@ Runtime configuration, paths, context files, and provider/server settings.
 - Display paths should be stable and user-friendly (`~`, relative cwd paths) because they appear in UI and model context.
 
 ## Settings safety
+
+Current settings behavior:
+
+- Missing `settings.json` reads as `{}`; malformed JSON or invalid known-field shape should throw an actionable error with the settings path.
+- Settings writes should validate the public shape, preserve unknown fields, and use temp-file-plus-rename style writes.
 
 - Settings may contain API keys. Never log full settings or print secret fields unless the user explicitly asks and understands the risk.
 - Write JSON/YAML atomically enough for normal CLI use and preserve unrelated existing fields where possible.

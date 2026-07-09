@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Last updated: 2026-07-09.
+
 Project instructions for Haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
 Last analysis: 2026-06-29.
@@ -67,6 +69,12 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 - Do not commit, tag, publish, reset, delete, force-push, or run destructive cleanups unless explicitly requested.
 
 ## Runtime contracts to preserve
+
+Recent decisions to preserve:
+
+- Runtime support floor is Node >=22. Keep docs, package metadata, and generated docs aligned.
+- Provider/model selection is explicit: do not silently fall back to the first configured provider/model.
+- Settings parsing should fail loudly for malformed files and preserve unrelated/unknown fields when patching.
 
 - No default provider/model. Users configure providers via `/provider`; no user-facing env vars for provider/model settings.
 - File tools are confined to `process.cwd()`, respect `.gitignore` by default, and skip `.git`/`node_modules` walking.

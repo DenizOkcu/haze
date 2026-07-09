@@ -1,5 +1,7 @@
 # src/llm/tools/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Implementation helpers for Haze built-in tools.
 
 ## Shared filesystem/path rules
@@ -30,6 +32,11 @@ Do not persist this state; it is valid only for one agent turn. If scoped contex
 - Diff output should be compact and line-limited by `INLINE_DIFF_LINE_LIMIT`.
 
 ## Bash/fetch/output helpers
+
+Current behavior:
+
+- `bashTool.ts` always executes commands and returns informational risk classification; `allowMutation` is compatibility-only and should not affect behavior.
+- Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
 - `bashTool.ts` runs `bash -lc`, classifies commands, parses validation output, reduces stdout/stderr, stores raw handles where needed, and returns structured metadata.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.

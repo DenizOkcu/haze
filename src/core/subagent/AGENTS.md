@@ -1,5 +1,7 @@
 # src/core/subagent/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Subagent runner and model-facing subagent tool.
 
 ## Purpose
@@ -7,6 +9,10 @@ Subagent runner and model-facing subagent tool.
 Subagents are for independent parallel investigations/actions with no conversation history. They summarize back to the main agent.
 
 ## Contracts
+
+Maintainability focus:
+
+- Reuse shared agent policy helpers such as `toolOnlyStepCount` from `core/agent/turnPolicy.ts`; subagents should differ by caps/prompt, not duplicated logic.
 
 - Do not use subagents for simple sequential tasks or tasks that need active conversation context.
 - Allowed subagent tools are a fixed allowlist from built-ins; never pass arbitrary tool names through unchecked.

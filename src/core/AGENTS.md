@@ -1,5 +1,7 @@
 # src/core/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 
 ## Boundaries
@@ -21,6 +23,11 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `toolOutput/` — shared token/char reduction metrics.
 
 ## Contracts
+
+Maintainability focus:
+
+- Keep loop and safety policy in shared core helpers when both main-agent and subagent flows need it.
+- Prefer metadata/reporting for safety classifiers unless a caller explicitly documents enforcement.
 
 - Core should not require configured provider settings except where explicitly passed in.
 - Keep serialized shapes backward-tolerant: sessions and tasks may be read after upgrades.

@@ -1,8 +1,14 @@
 # src/core/safety/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Safety classifiers and guards.
 
 ## Bash classifier
+
+Current contract:
+
+- Bash classification is metadata for display, logging, validation parsing, and output reduction. It does not block execution by itself.
 
 - `bashClassifier.ts` classifies commands for display/metadata. It is not a permission gate.
 - Keep classification conservative but non-blocking.

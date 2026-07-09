@@ -1,5 +1,7 @@
 # src/llm/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
 ## Responsibilities
@@ -34,6 +36,11 @@ When adding/removing/changing a tool or result shape:
 - Update tests under `tests/hazeTools/**` and `tests/llm/**`.
 
 ## Provider/MCP/LSP rules
+
+Current reliability contracts:
+
+- LSP stdio protocol errors must reject pending requests and isolate the failed server; malformed server output must not crash the CLI.
+- Fetch byte limits are byte limits, including for UTF-8/multibyte content and both streaming and non-streaming bodies.
 
 - Do not invent default providers/models; honor `config/providers.ts` resolution.
 - MCP tools are optional per turn. Failures should be isolated and surfaced as system/UI messages, not crash unrelated turns.

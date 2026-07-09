@@ -1,5 +1,7 @@
 # src/skills/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Markdown skill loading, registry, model-facing skill tool, and skill builder.
 
 ## Skill format contract
@@ -19,6 +21,10 @@ Markdown skill loading, registry, model-facing skill tool, and skill builder.
 - `types.ts` defines loaded skill and registry shapes. Treat these as public within the codebase and tests.
 
 ## Builder behavior
+
+Maintainability focus:
+
+- Keep generated fallback skills deterministic and small so skill creation remains usable without configured providers/models.
 
 - `builder/SkillBuilder.ts` creates a skill from name + natural-language description in one model pass when a model is configured.
 - If no model is configured, builder must provide deterministic fallback content.

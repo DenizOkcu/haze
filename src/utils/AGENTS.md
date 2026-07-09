@@ -1,8 +1,14 @@
 # src/utils/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Small shared utilities.
 
 ## Rules
+
+Maintainability focus:
+
+- Prefer small single-purpose helpers reused from domain modules over generic utility abstractions that hide product policy.
 
 - Keep utilities dependency-light and side-effect-light.
 - Do not put product policy here if it belongs in `config/`, `core/`, or `llm/`.
