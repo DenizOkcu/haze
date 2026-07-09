@@ -127,6 +127,23 @@ function classifyContentType(contentType: string): 'json' | 'html' | 'text' {
   return 'text';
 }
 
+function decodeValidUtf8Prefix(buffer: Buffer): string {
+  for (let end = buffer.byteLength; end >= 0; end--) {
+    try {
+      return new TextDecoder('utf-8', {fatal: true}).decode(buffer.subarray(0, end));
+    } catch {
+      // Back up until we land on a UTF-8 character boundary.
+    }
+  }
+  return '';
+}
+
+function truncateUtf8Bytes(text: string, maxBytes: number) {
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.byteLength <= maxBytes) return {text, bytes: buffer.byteLength, truncated: false};
+  return {text: decodeValidUtf8Prefix(buffer.subarray(0, maxBytes)), bytes: maxBytes, truncated: true};
+}
+
 async function readBodyCapped(
   response: Response,
   maxBytes: number,
@@ -135,46 +152,41 @@ async function readBodyCapped(
   const body = response.body;
   if (body == null || typeof (body as {getReader?: unknown}).getReader !== 'function') {
     // No streamable body; read as text once and cap.
-    const text = await response.text();
-    const bytes = Buffer.byteLength(text, 'utf8');
-    if (bytes > maxBytes) {
-      return {text: text.slice(0, maxBytes), bytes: maxBytes, truncated: true};
-    }
-    return {text, bytes, truncated: false};
+    return truncateUtf8Bytes(await response.text(), maxBytes);
   }
 
   const reader = body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let text = '';
+  const chunks: Buffer[] = [];
   let received = 0;
+  let kept = 0;
   let truncated = false;
 
   try {
-    // Stream with a byte counter; stop and mark truncated once the ceiling is hit.
+    // Stream with a byte counter; keep only bytes up to the ceiling and stop once hit.
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
-      const chunkBytes = value.byteLength;
-      received += chunkBytes;
+      const chunk = Buffer.from(value);
+      received += chunk.byteLength;
+      const remaining = Math.max(0, maxBytes - kept);
+      if (remaining > 0) {
+        const slice = chunk.subarray(0, Math.min(remaining, chunk.byteLength));
+        chunks.push(slice);
+        kept += slice.byteLength;
+      }
       if (received > maxBytes) {
-        const already = received - chunkBytes;
-        const remaining = Math.max(0, maxBytes - already);
-        if (remaining > 0) text += decoder.decode(value.slice(0, remaining), {stream: true});
-        text += decoder.decode();
         truncated = true;
         try { reader.cancel(); } catch { /* ignore */ }
         break;
       }
-      text += decoder.decode(value, {stream: true});
     }
-    if (!truncated) text += decoder.decode();
   } finally {
     try { reader.releaseLock(); } catch { /* ignore */ }
     // If we hit the cap, abort the fetch to free the underlying connection.
     if (truncated && !abortController.signal.aborted) abortController.abort();
   }
 
-  return {text, bytes: Math.min(received, maxBytes), truncated};
+  return {text: decodeValidUtf8Prefix(Buffer.concat(chunks)), bytes: Math.min(received, maxBytes), truncated};
 }
 
 /**

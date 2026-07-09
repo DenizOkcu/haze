@@ -5,7 +5,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 // headless dropped the finalized assistant text emitted via updateMessage and only kept the
 // initial streamed partial from addMessage.
 
-const PROVIDER_SETTINGS = {providers: [{name: 'openai', url: 'https://x/v1', key: 'k', models: ['gpt-4o-mini']}], provider: 'openai'};
+const PROVIDER_SETTINGS = {providers: [{name: 'openai', url: 'https://x/v1', key: 'k', models: ['gpt-4o-mini']}], provider: 'openai', model: 'gpt-4o-mini'};
 
 interface FakePart {
   type: string;

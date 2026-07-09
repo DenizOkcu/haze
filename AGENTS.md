@@ -6,7 +6,7 @@ Last analysis: 2026-06-29.
 
 ## Project overview
 
-Haze is a Node >=20 TypeScript ESM CLI package (`@denizokcu/haze`) for terminal-based agentic app building.
+Haze is a Node >=22 TypeScript ESM CLI package (`@denizokcu/haze`) for terminal-based agentic app building.
 
 Core shape:
 

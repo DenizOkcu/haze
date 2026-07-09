@@ -3,6 +3,7 @@ import {z} from 'zod';
 import {buildSubagentPrompt, type PromptSession} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
+import {toolOnlyStepCount} from '../agent/turnPolicy.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 
 const ALL_TOOLS = ['listFiles', 'readFile', 'grep', 'bash', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'fetch'] as const;
@@ -28,15 +29,6 @@ function toolSummary(output: unknown): string {
   if (o.ok === true) return 'completed';
   if (o.ok === false && typeof o.error === 'string') return `failed: ${o.error.slice(0, 120)}`;
   return 'completed';
-}
-
-function toolOnlyStepCount(steps: Array<{toolCalls: unknown[]; text: string}>) {
-  let count = 0;
-  for (const step of [...steps].reverse()) {
-    if (step.toolCalls.length === 0 || step.text.trim().length > 0) break;
-    count += 1;
-  }
-  return count;
 }
 
 export const internals = {toolSummary, toolOnlyStepCount};

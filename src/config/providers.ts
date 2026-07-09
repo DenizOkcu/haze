@@ -59,18 +59,14 @@ export function findProvider(settings: HazeSettings, name: string): HazeProvider
 }
 
 export function activeProvider(settings: HazeSettings): HazeProviderSettings | undefined {
-  const providers = configuredProviders(settings);
-  return providers.find(provider => provider.name === settings.provider) ?? providers[0];
+  if (!settings.provider) return undefined;
+  return configuredProviders(settings).find(provider => provider.name === settings.provider);
 }
 
 export function activeModel(settings: HazeSettings): {provider: HazeProviderSettings; model: string} | undefined {
   const provider = activeProvider(settings);
-  if (!provider) return undefined;
-  const model = settings.model && provider.models.includes(settings.model)
-    ? settings.model
-    : provider.models[0];
-  if (!model) return undefined;
-  return {provider, model};
+  if (!provider || !settings.model || !provider.models.includes(settings.model)) return undefined;
+  return {provider, model: settings.model};
 }
 
 export function resolveModelSelector(settings: HazeSettings, selector: string): ModelResolution {

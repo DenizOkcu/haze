@@ -91,7 +91,15 @@ export class StdioLspClient {
   private pending = new Map<number, Pending>();
 
   constructor(private server: HazeLspServer, private child: ChildProcessWithoutNullStreams) {
-    child.stdout.on('data', chunk => this.onData(chunk));
+    child.stdout.on('data', chunk => {
+      try {
+        this.onData(chunk);
+      } catch (error) {
+        const lspError = error instanceof Error ? error : new LspError(String(error));
+        this.rejectAll(lspError);
+        this.child.kill('SIGTERM');
+      }
+    });
     child.stderr.on('data', () => undefined);
     child.on('error', error => this.rejectAll(error instanceof Error ? error : new Error(String(error))));
     child.on('exit', code => this.rejectAll(new LspError(`LSP server exited${code == null ? '' : ` with code ${code}`}`)));

@@ -96,6 +96,14 @@ describe('webFetch fetchUrlContent', () => {
     expect(result.bytes).toBeLessThanOrEqual(5000);
   }, 10_000);
 
+  it('caps non-streaming bodies by bytes, not UTF-16 characters', async () => {
+    globalThis.fetch = vi.fn(async () => textResponse('é'.repeat(10))) as typeof globalThis.fetch;
+    const result = await fetchUrlContent('https://93.184.216.34/unicode', {maxBytes: 5});
+    expect(result.truncated).toBe(true);
+    expect(result.bytes).toBe(5);
+    expect(Buffer.byteLength(result.content, 'utf8')).toBeLessThanOrEqual(5);
+  });
+
   it('follows redirects and re-validates the target', async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async (input: URL | RequestInfo) => {

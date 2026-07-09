@@ -45,11 +45,17 @@ describe('settings', () => {
     expect(await readSettings()).toEqual({model: 'gpt', apiKey: 'k'});
   });
 
-  it('readSettings returns {} for a malformed JSON file rather than throwing', async () => {
+  it('readSettings throws an actionable error for a malformed JSON file', async () => {
     await fs.ensureDir(path.dirname(settingsFile));
     await fs.writeFile(settingsFile, '{not valid', 'utf8');
     const {readSettings} = await loadSettings();
-    expect(await readSettings()).toEqual({});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
+  it('readSettings throws an actionable error for invalid settings shape', async () => {
+    await fs.writeJson(settingsFile, {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: 'llama'}]});
+    const {readSettings} = await loadSettings();
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
   it('writeSettings creates the directory and writes pretty-printed JSON', async () => {

@@ -253,6 +253,28 @@ describe('StdioLspClient', () => {
     await client.close();
   });
 
+  it('rejects pending requests instead of throwing from malformed response headers', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const pending = client.request('workspace/symbol', undefined, 1000);
+    const assertion = expect(pending).rejects.toThrow('Malformed LSP response');
+    child.stdout.emit('data', Buffer.from('Nope: 1\r\n\r\n{}'));
+    await assertion;
+    expect(child.killedBy).toBe('SIGTERM');
+  });
+
+  it('rejects pending requests instead of throwing from malformed JSON bodies', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const pending = client.request('workspace/symbol', undefined, 1000);
+    const assertion = expect(pending).rejects.toThrow();
+    child.stdout.emit('data', Buffer.from('Content-Length: 1\r\n\r\n{'));
+    await assertion;
+    expect(child.killedBy).toBe('SIGTERM');
+  });
+
   it('sends shutdown + exit and kills the child on close', async () => {
     const child = fakeChild();
     const client = new StdioLspClient(ts, child);

@@ -15,7 +15,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 
 ## Provider/model contract
 
-- There is no default provider or model. `activeModel(settings)` returns `undefined` when no configured provider has a model.
+- There is no default provider or model. `activeProvider(settings)` requires an explicit saved provider, and `activeModel(settings)` requires an explicit saved provider/model pair that still resolves.
 - Do not introduce user-facing environment variables for provider/model config.
 - Provider key order is saved provider key, then legacy OpenRouter `apiKey`, then local-provider placeholder behavior where the client layer expects it.
 - Custom/local OpenAI-compatible providers may intentionally use placeholder keys.

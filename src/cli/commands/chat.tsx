@@ -112,11 +112,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [mode, setMode] = useState<Mode>('chat');
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState('Haze is thinking');
-  const [, setActiveGoalStatus] = useState<string | undefined>();
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
-  const [, setSessionLabel] = useState<string | undefined>();
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
@@ -208,20 +206,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     sessionStartRef.current = new Date();
     if (noSession) {
       sessionRef.current = undefined;
-      setSessionLabel('session off');
       return;
     }
     const session = await createSession({hazeVersion: version});
     sessionRef.current = session;
     setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
-    setSessionLabel(session.id);
     setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
   }
 
   async function initializeSession() {
     if (noSession) {
-      setSessionLabel('session off');
       return;
     }
     if (continueSession) {
@@ -231,7 +226,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         sessionRef.current = session;
         sessionStartRef.current = new Date();
         conversationRef.current = conversation;
-        setSessionLabel(session.id);
         setLiveMessagesState(() => []);
         const restoredMessages = displayMessagesFromConversation(conversation);
         setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
@@ -292,7 +286,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     sessionRef.current = session;
     conversationRef.current = conversation;
     workStateRef.current = workState;
-    setSessionLabel(session.id);
     setTokenUsage({...EMPTY_TOKEN_USAGE});
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
@@ -1070,7 +1063,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       getLastAssistantText: () => lastAssistantTextRef.current,
       setLastAssistantText: text => { lastAssistantTextRef.current = text; },
       setAbortController: controller => { abortControllerRef.current = controller; },
-      setGoalStatus: setActiveGoalStatus,
       setWorkState: state => {
         workStateRef.current = state;
         sessionRecorder.recordWorkState(state);
