@@ -109,6 +109,7 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
  */
 export function busyToolLabel(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
+  const pathLabel = typeof data?.path === 'string' ? compact(data.path, 80) : undefined;
   switch (toolName) {
     case 'bash':
       return 'Running command';
@@ -117,12 +118,12 @@ export function busyToolLabel(toolName: string, input: unknown) {
     case 'listFiles':
       return 'Listing files';
     case 'readFile':
-      return typeof data?.path === 'string' ? `Reading ${data.path}` : 'Reading file';
+      return pathLabel ? `Reading ${pathLabel}` : 'Reading file';
     case 'writeFile':
-      return typeof data?.path === 'string' ? `Writing ${data.path}` : 'Writing file';
+      return pathLabel ? `Writing ${pathLabel}` : 'Writing file';
     case 'editFile':
     case 'replaceLines':
-      return typeof data?.path === 'string' ? `Editing ${data.path}` : 'Editing file';
+      return pathLabel ? `Editing ${pathLabel}` : 'Editing file';
     case 'fetch':
       return 'Fetching URL';
     case 'subagent':

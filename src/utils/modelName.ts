@@ -1,9 +1,13 @@
 export function shortModelName(modelName: string | undefined) {
   const trimmed = modelName?.trim();
   if (!trimmed) return 'model';
-  const slashShort = trimmed.split('/').filter(Boolean).at(-1) ?? trimmed;
-  const colonShort = slashShort.split(':').filter(Boolean).at(-1) ?? slashShort;
-  return colonShort.length > 32 ? `${colonShort.slice(0, 29)}…` : colonShort;
+  const slashIndex = trimmed.indexOf('/');
+  const colonIndex = trimmed.indexOf(':');
+  const selectorShort = colonIndex >= 0 && (slashIndex < 0 || colonIndex < slashIndex)
+    ? trimmed.slice(colonIndex + 1)
+    : trimmed;
+  const slashShort = selectorShort.split('/').filter(Boolean).at(-1) ?? selectorShort;
+  return slashShort.length > 32 ? `${slashShort.slice(0, 29)}…` : slashShort;
 }
 
 export function modelThinkingLabel(modelName: string | undefined) {

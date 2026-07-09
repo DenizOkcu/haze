@@ -1151,6 +1151,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
   ];
+  const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
 
   return <Box flexDirection="column">
     <Static items={staticItems}>
@@ -1173,7 +1174,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
     {busy && <Box flexShrink={0}>
-      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsedLabel(turnStartedAtRef.current) ? <Text color={theme.muted} dimColor> · {busyElapsedLabel(turnStartedAtRef.current)}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted} dimColor> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
     </Box>}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>

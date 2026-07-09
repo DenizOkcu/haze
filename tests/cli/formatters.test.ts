@@ -100,6 +100,12 @@ describe('busyToolLabel', () => {
     expect(busyToolLabel('readFile', {})).toBe('Reading file');
   });
 
+  it('compacts long file paths', () => {
+    const label = busyToolLabel('readFile', {path: `src/${'very-long/'.repeat(12)}file.ts`});
+    expect(label.length).toBeLessThanOrEqual('Reading '.length + 81);
+    expect(label.endsWith('…')).toBe(true);
+  });
+
   it('labels editFile and replaceLines as editing', () => {
     expect(busyToolLabel('editFile', {path: 'a.ts'})).toBe('Editing a.ts');
     expect(busyToolLabel('replaceLines', {path: 'b.ts'})).toBe('Editing b.ts');
