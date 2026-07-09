@@ -1,8 +1,14 @@
 # src/core/tasks/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Workspace-local task storage.
 
 ## Contract
+
+Maintainability focus:
+
+- Keep task storage deliberately simple and workspace-local; do not add cross-session/global task state without a clear product need.
 
 - Tasks persist to `.haze/tasks.json` under the current workspace using `resolveWorkspacePath`.
 - `.haze/` is runtime state and should remain ignored by git.

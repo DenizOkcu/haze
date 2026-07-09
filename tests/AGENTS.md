@@ -1,8 +1,14 @@
 # tests/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Vitest test suite instructions.
 
 ## General rules
+
+Current regression priorities:
+
+- Cover explicit provider/model selection, malformed settings errors, LSP protocol isolation, bash classification-as-metadata, and byte-accurate fetch truncation.
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.

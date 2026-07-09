@@ -1,8 +1,14 @@
 # src/core/bashOutput/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Command-aware reduction of bash stdout/stderr.
 
 ## Goals
+
+Maintainability focus:
+
+- Bash risk classification is informational for tool results and reducers; do not rely on output reducers to enforce command permission.
 
 - Preserve actionable failure information while keeping model context compact.
 - Prefer structured/semantic reducers over blind truncation.

@@ -1,5 +1,7 @@
 # src/core/session/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Durable session storage.
 
 ## Storage contract
@@ -29,6 +31,10 @@ Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt 
 - Large persisted tool outputs/errors should be replaced with previews, byte counts, and omission metadata. Active in-memory model context can stay richer than the persisted JSONL audit trail.
 
 ## Restore behavior
+
+Maintainability focus:
+
+- Session parse errors should stay explicit and actionable; do not silently replace corrupted durable state with empty defaults.
 
 - `restoreConversation` and `restoreWorkState` return the latest snapshot of their type.
 - Malformed JSONL lines are reported in `parseErrors` with 1-based line numbers; do not silently discard corruption.

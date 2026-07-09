@@ -1,5 +1,7 @@
 # src/cli/commands/streaming/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Helpers for `src/cli/commands/streaming.ts`.
 
 ## Purpose
@@ -12,6 +14,11 @@ This subtree keeps the main agent loop readable by isolating display, accounting
 - `turnRuntime.ts` contains token/usage extraction, retry delays, context-file memory, abortable delay, and response metrics helpers.
 
 ## Contracts
+
+Maintainability focus:
+
+- Share loop-policy helpers with `core/agent/turnPolicy.ts` instead of duplicating tool-budget or repeated-tool logic.
+- Keep provider/model fallback behavior aligned with headless preflight checks.
 
 - Keep helpers deterministic where possible. UI callbacks and logs should be injected, not imported from chat state.
 - Assistant text filtering must avoid hiding substantive final answers while suppressing duplicated/empty/lead-in fragments around tool calls.

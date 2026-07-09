@@ -1,5 +1,7 @@
 # src/cli/AGENTS.md
 
+Last updated: 2026-07-09.
+
 CLI and terminal UI orchestration instructions.
 
 ## Responsibilities
@@ -12,6 +14,11 @@ CLI and terminal UI orchestration instructions.
 - `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`.
 
 ## UI state rules
+
+Maintainability focus:
+
+- Treat `commands/chat.tsx` as orchestration glue; prefer extracting session, wizard, and turn controllers over adding more inline branches.
+- Avoid dead React state. If a value is not rendered or passed to durable logic, remove it rather than keeping setter-only state.
 
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.
 - Keep refs for mutable turn/session machinery (`conversationRef`, abort controllers, logs, work state) when React rerenders must not reset them.

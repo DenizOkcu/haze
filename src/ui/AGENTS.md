@@ -1,5 +1,7 @@
 # src/ui/AGENTS.md
 
+Last updated: 2026-07-09.
+
 Reusable Ink components, theme, and input-buffer logic.
 
 ## Scope
@@ -10,6 +12,10 @@ Reusable Ink components, theme, and input-buffer logic.
 - `inputBuffer.ts` contains terminal text editing primitives independent of React where possible.
 
 ## Component contracts
+
+Maintainability focus:
+
+- UI components should render explicit props only; avoid hidden/session state that is set but never displayed.
 
 - `Header.tsx` renders current app/session/model/status summary. Do not expose secrets.
 - `TextInput.tsx` handles terminal input/editing interactions; preserve keyboard behavior covered by tests.

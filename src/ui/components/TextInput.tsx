@@ -15,6 +15,16 @@ import {
 
 const COMPACT_PASTE_MIN_LINES = 4;
 
+const CTRL_ENTER_ESCAPE_INPUTS = new Set(['\u001B[13;5u', '\u001B[13;5~']);
+
+type TextInputKey = {return?: boolean; shift?: boolean; ctrl?: boolean};
+
+export function shouldInsertNewline(input: string, key: TextInputKey) {
+  return (key.return === true && (key.shift === true || key.ctrl === true))
+    || input === '\n'
+    || CTRL_ENTER_ESCAPE_INPUTS.has(input);
+}
+
 export type TextInputSuggestion = {
   value: string;
   description?: string;
@@ -163,12 +173,12 @@ export function TextInput({
       return;
     }
 
-    if (key.return) {
-      if (key.shift || key.ctrl) {
-        replaceInput(cursor, cursor, '\n');
-        return;
-      }
+    if (shouldInsertNewline(input, key)) {
+      replaceInput(cursor, cursor, '\n');
+      return;
+    }
 
+    if (key.return) {
       const shouldUseSuggestion = activeSuggestion && activeSuggestion.value !== value.trim() && (suggestionMode === 'always' || value.startsWith('/'));
       const submitted = shouldUseSuggestion ? activeSuggestion.value : value.trim();
       const submittedSuggestion = activeSuggestion?.value === submitted ? activeSuggestion : undefined;
