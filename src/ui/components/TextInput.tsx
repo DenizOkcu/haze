@@ -164,6 +164,11 @@ export function TextInput({
     }
 
     if (key.return) {
+      if (key.shift || key.ctrl) {
+        replaceInput(cursor, cursor, '\n');
+        return;
+      }
+
       const shouldUseSuggestion = activeSuggestion && activeSuggestion.value !== value.trim() && (suggestionMode === 'always' || value.startsWith('/'));
       const submitted = shouldUseSuggestion ? activeSuggestion.value : value.trim();
       const submittedSuggestion = activeSuggestion?.value === submitted ? activeSuggestion : undefined;
