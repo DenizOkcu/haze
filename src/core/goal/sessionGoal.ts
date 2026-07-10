@@ -1,4 +1,4 @@
-import {classifyRequestIntent} from './requestClassifier.js';
+import {classifyRequestIntent, type RequestIntent} from './requestClassifier.js';
 import {createWorkState, observeWorkToolEvent, type WorkState, type WorkStatus, type WorkValidationStatus} from '../agent/workState.js';
 
 export type SessionGoalStatus = WorkStatus;
@@ -10,8 +10,8 @@ function shortRequest(value: string) {
   return value.replace(/\s+/g, ' ').trim().slice(0, 160) || 'current request';
 }
 
-export function createSessionGoal(request: string, now = Date.now()): SessionGoal {
-  const intent = classifyRequestIntent(request);
+export function createSessionGoal(request: string, now = Date.now(), forceIntent?: RequestIntent): SessionGoal {
+  const intent = forceIntent ?? classifyRequestIntent(request);
   const successCriteria = intent === 'plan'
     ? ['Create or update the requested plan artifact/answer', 'Do not implement source changes unless asked']
     : intent === 'test'

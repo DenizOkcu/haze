@@ -84,6 +84,7 @@ export async function runAgentTurn(
   contextOverflowRecovered = false,
   session?: PromptSession,
   modelOverride?: string,
+  forcePlanOnly = false,
 ): Promise<TurnResult> {
   const displayVal = displayValue ?? value;
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
@@ -125,10 +126,10 @@ export async function runAgentTurn(
     loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
 
-    const goal = createSessionGoal(value);
+    const goal = createSessionGoal(value, Date.now(), forcePlanOnly ? 'plan' : undefined);
     callbacks.setWorkState?.(goal);
     callbacks.setGoalStatus?.(formatGoalStatus(goal));
-    const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
+    const likelyPlanOnlyRequest = forcePlanOnly || isPlanOnlyRequest(value);
 
     const durableRequestMessages = compactToolHistory(
       retryingExistingRequest

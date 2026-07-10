@@ -122,6 +122,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
+  const [planMode, setPlanMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
   // Heartbeat for the busy indicator: ticks every second while haze is working
@@ -1011,6 +1012,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         return next;
       },
       getContextReport: async () => buildContextReport(),
+      isPlanMode: () => planMode,
+      togglePlanMode: () => { const next = !planMode; setPlanMode(next); return next; },
     };
     let result;
     try {
@@ -1028,10 +1031,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    await doAgentTurn(value);
+    await doAgentTurn(value, undefined, planMode);
   }
 
-  async function doAgentTurn(value: string, displayValue?: string) {
+  async function doAgentTurn(value: string, displayValue?: string, forcePlanOnly?: boolean) {
     setDebugLogs([]);
     // When every task is already completed, start the new turn with a clean
     // slate: the task bar clears (nothing shown for simple questions) and the
@@ -1042,17 +1045,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setTaskBarPadding(0);
       await clearTasksFromStore().catch(() => undefined);
     }
-    await runSingleAgentTurn(value, displayValue);
+    await runSingleAgentTurn(value, displayValue, forcePlanOnly);
     while (followUpQueueRef.current.length > 0) {
       const next = followUpQueueRef.current[0];
       followUpQueueRef.current = followUpQueueRef.current.slice(1);
       setQueuedFollowUps(followUpQueueRef.current);
       setMessages(m => [...m, {role: 'system', text: `Running queued follow-up: ${next}`}]);
-      await runSingleAgentTurn(next);
+      await runSingleAgentTurn(next, undefined, forcePlanOnly);
     }
   }
 
-  async function runSingleAgentTurn(value: string, displayValue?: string) {
+  async function runSingleAgentTurn(value: string, displayValue?: string, forcePlanOnly?: boolean) {
     const sessionRecorder = createSessionRecorder(() => sessionRef.current);
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
@@ -1109,7 +1112,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()});
+    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, forcePlanOnly);
   }
 
   const visible = messages.filter(message => !message.hidden);
@@ -1175,7 +1178,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {busy && <Box flexShrink={0}>
       <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted} dimColor> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
     </Box>}
-    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
+    <Box borderStyle="round" borderColor={planMode && mode === 'chat' ? theme.deepCyan : theme.deepPurple} paddingX={1} flexShrink={0}>
+      {planMode && mode === 'chat' && <Text color={theme.cyan} bold>PLAN MODE </Text>}
       <Box flexGrow={1} minWidth={0}>
         <TextInput
           placeholder={placeholder}
@@ -1186,7 +1190,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           suggestions={inputSuggestions}
           suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
           submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
-          width={Math.max(20, width - 4)}
+          width={Math.max(20, width - 4 - (planMode && mode === 'chat' ? 11 : 0))}
+          accentColor={planMode && mode === 'chat' ? theme.cyan : undefined}
           onHistoryAdd={persistInputHistory}
           onToggleTasks={() => {
             if (!tasksExpanded) {
@@ -1204,6 +1209,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
             if (busy) cancelThinking();
             else closeInputList();
           }}
+          onTogglePlanMode={() => { if (mode === 'chat' && !busy) setPlanMode(current => !current); }}
           onSubmit={submit}
         />
       </Box>

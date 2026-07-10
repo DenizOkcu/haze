@@ -40,6 +40,19 @@ describe('SessionGoal', () => {
     expect(goal.phase).toBe('starting');
     expect(goal.touchedFiles).toEqual([]);
   });
+
+  it('forces plan intent via forceIntent even for action requests', () => {
+    const goal = createSessionGoal('add a feature', 1, 'plan');
+    expect(goal.intent).toBe('plan');
+    expect(goal.successCriteria).toContain('Do not implement source changes unless asked');
+  });
+
+  it('preserves smart routing when forceIntent is omitted', () => {
+    const goal = createSessionGoal('create a plan for auth', 1);
+    expect(goal.intent).toBe('plan');
+    const actionGoal = createSessionGoal('fix the login bug', 1);
+    expect(actionGoal.intent).toBe('fix');
+  });
 });
 
 describe('completionDecision', () => {

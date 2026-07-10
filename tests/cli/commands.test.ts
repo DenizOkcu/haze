@@ -14,6 +14,8 @@ function mockContext(overrides?: Partial<CommandContext>): CommandContext {
     runAgentTurn: vi.fn(),
     refreshContextFiles: vi.fn(() => Promise.resolve([])),
     updateSettings: vi.fn(() => Promise.resolve({model: 'new-model'})),
+    isPlanMode: vi.fn(() => false),
+    togglePlanMode: vi.fn(),
     ...overrides,
   };
 }
@@ -35,6 +37,7 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/logs'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/lsp'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/plan'));
   });
 
   it('opens the skills picker from /skills', async () => {
@@ -94,6 +97,20 @@ describe('handleSlashCommand', () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/provider', ctx)).toBe('handled');
     expect(ctx.setMode).toHaveBeenCalledWith('provider');
+  });
+
+  it('toggles plan mode on with /plan when off', async () => {
+    const ctx = mockContext({isPlanMode: () => false});
+    expect(await handleSlashCommand('/plan', ctx)).toBe('handled');
+    expect(ctx.togglePlanMode).toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Plan mode on'));
+  });
+
+  it('toggles plan mode off with /plan when on', async () => {
+    const ctx = mockContext({isPlanMode: () => true});
+    expect(await handleSlashCommand('/plan', ctx)).toBe('handled');
+    expect(ctx.togglePlanMode).toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Plan mode off'));
   });
 
   it('treats /create-skill as an unknown command now that skills use the picker', async () => {
