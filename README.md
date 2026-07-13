@@ -67,6 +67,24 @@ On first run, create or choose a provider, then choose your first model:
 /model local:llama3.1
 ```
 
+### Model slots
+
+Haze supports three named model slots in `~/.haze/settings.json`:
+
+- `primary` — main model for edits, planning, and chat. `/model` sets this by default.
+- `lightweight` — used by subagents and other parallel read-only work. Set a cheaper/faster model here to reduce spend.
+- `fallback` — used automatically when `primary` returns a retriable error (429, overload, timeout).
+
+Configure slots from chat:
+
+```txt
+/model gpt-4o-mini                      # sets primary slot (existing behavior)
+/model lightweight openai:gpt-4o-mini   # sets lightweight slot
+/model fallback local:llama3.1          # sets fallback slot
+```
+
+An unset slot resolves to `primary`, so existing single-model setups keep working unchanged. When `fallback` is configured and different from `primary`, a transient primary failure prints a compact note and retries against the fallback model once.
+
 ### MCP servers
 
 Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) servers and give the agent extra tools. It opens an interactive picker (like `/provider`): choose a server to enable, disable, remove, or set an API key for it, or choose **add server** to add one from a preset (Context7 ships built-in for up-to-date library docs) or enter custom details.

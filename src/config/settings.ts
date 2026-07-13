@@ -48,6 +48,12 @@ export interface HazeSkillSetting {
 export interface HazeSettings {
   provider?: string;
   model?: string;
+  /** Named model slots. `primary` falls back to the flat provider/model for backward compatibility. */
+  models?: {
+    primary?: string;
+    lightweight?: string;
+    fallback?: string;
+  };
   providers?: HazeProviderSettings[];
   lspServers?: HazeLspServerSettings[];
   mcpServers?: HazeMcpServer[];

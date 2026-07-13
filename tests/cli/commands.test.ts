@@ -86,8 +86,66 @@ describe('handleSlashCommand', () => {
   it('sets model directly with /model <name>', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model gpt-4', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4'}));
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4', models: {primary: 'openrouter:gpt-4'}}));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
+  });
+
+  it('rejects /model lightweight without a selector', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model lightweight', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Provide a model selector'));
+  });
+
+  it('sets the lightweight slot with /model lightweight <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model lightweight gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      models: {lightweight: 'openai:gpt-4o-mini'},
+    }));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('lightweight slot'));
+  });
+
+  it('sets the fallback slot with /model fallback <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model fallback openai:gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      models: {fallback: 'openai:gpt-4o-mini'},
+    }));
+  });
+
+  it('still sets primary via flat provider/model for bare /model <selector>', async () => {
+    const ctx = mockContext({
+      settings: {
+        providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+        provider: 'openai',
+        model: 'gpt-4o',
+      },
+    });
+    expect(await handleSlashCommand('/model gpt-4o-mini', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      models: {primary: 'openai:gpt-4o-mini'},
+    }));
   });
 
   it('enters provider mode for /provider', async () => {
@@ -107,7 +165,7 @@ describe('handleSlashCommand', () => {
       settings: {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['llama3.1']}]},
     });
     expect(await handleSlashCommand('/model local:llama3.1', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith({provider: 'local', model: 'llama3.1'});
+    expect(ctx.updateSettings).toHaveBeenCalledWith({provider: 'local', model: 'llama3.1', models: {primary: 'local:llama3.1'}});
   });
 
   it('calls runAgentTurn for /init', async () => {

@@ -1,4 +1,4 @@
-import {activeModel, configuredProviders, providerHasKey} from '../../config/providers.js';
+import {configuredProviders, formatModelSlot, providerHasKey, resolveModelSlot} from '../../config/providers.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
@@ -13,7 +13,7 @@ export function startupContextInfo(contextFiles: ContextFile[]) {
 }
 
 export function startupProviderInfo(settings: HazeSettings) {
-  const selection = activeModel(settings);
+  const primary = resolveModelSlot(settings, 'primary');
   const configuredCount = configuredProviders(settings).length;
   const lspServers = configuredLspServers(settings);
   const enabledLsp = lspServers.filter(server => server.enabled !== false);
@@ -25,11 +25,13 @@ export function startupProviderInfo(settings: HazeSettings) {
   const mcpLine = enabledMcp.length > 0
     ? `- MCP: ${enabledMcp.length} configured (${enabledMcp.map(server => server.name).join(', ')}; tools load each turn)`
     : '- MCP: none configured (optional: /mcp add context7 for up-to-date library docs)';
-  if (!selection) {
+  if (primary.status !== 'found') {
     return [
       'Provider configuration',
       '- Provider: not configured',
       '- Model: not set',
+      `- ${formatModelSlot(settings, 'Lightweight slot', 'lightweight')}`,
+      `- ${formatModelSlot(settings, 'Fallback slot', 'fallback')}`,
       '- Base URL: not configured',
       '- API key: missing',
       `- Configured providers: ${configuredCount}`,
@@ -39,16 +41,17 @@ export function startupProviderInfo(settings: HazeSettings) {
       'Run /provider to choose or add a provider, then select a model.',
     ].join('\n');
   }
-  const model = selection.model;
-  const modelSource = settings.model ? 'settings' : 'provider default';
-  const baseURL = selection.provider.url;
-  const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
-  const provider = selection.provider.name;
-
+  const provider = primary.provider.name;
+  const model = primary.model;
+  const modelSource = settings.models?.primary ? 'slot' : (settings.model ? 'settings' : 'provider default');
+  const baseURL = primary.provider.url;
+  const apiKeySource = providerHasKey(settings, primary.provider) ? `provider ${primary.provider.name}` : 'missing';
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
+    `- ${formatModelSlot(settings, 'Lightweight slot', 'lightweight')}`,
+    `- ${formatModelSlot(settings, 'Fallback slot', 'fallback')}`,
     `- Base URL: ${baseURL} (settings)`,
     `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
     `- Configured providers: ${configuredCount}`,

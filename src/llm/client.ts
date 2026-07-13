@@ -1,7 +1,7 @@
 import {createOpenAI} from '@ai-sdk/openai';
 import crypto from 'node:crypto';
-import {readSettings, type HazeProviderSettings} from '../config/settings.js';
-import {activeModel, resolveModelSelector} from '../config/providers.js';
+import {readSettings} from '../config/settings.js';
+import {resolveModelSelector, resolveModelSlot, type ModelResolution, type ModelSlotName} from '../config/providers.js';
 
 export interface ProviderCapabilities {
   reportsCacheUsage: boolean;
@@ -48,17 +48,17 @@ function capabilities(providerName: string, baseURL: string): ProviderCapabiliti
   };
 }
 
-export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string}) {
+export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string; slot?: ModelSlotName}) {
   const settings = await readSettings();
   const override = session?.modelSelector?.trim();
-  let selection: {provider: HazeProviderSettings; model: string} | undefined;
+  let resolution: ModelResolution;
   if (override) {
-    const resolved = resolveModelSelector(settings, override);
-    if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
+    resolution = resolveModelSelector(settings, override);
   } else {
-    selection = activeModel(settings);
+    resolution = resolveModelSlot(settings, session?.slot ?? 'primary');
   }
-  if (!selection) return undefined;
+  if (resolution.status !== 'found') return undefined;
+  const selection = {provider: resolution.provider, model: resolution.model};
   const baseURL = selection.provider.url;
   const apiKey = selection.provider.key ?? settings.apiKey ?? 'not-needed';
   const name = selection.model;

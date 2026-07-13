@@ -4,7 +4,7 @@ import {runAgentTurn, type Message, type StreamCallbacks, type TokenUsage, type 
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
-import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {modelSelector, resolveModelSelector, resolveModelSlot} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 
@@ -35,6 +35,7 @@ type HeadlessStreamEvent =
   | {type: 'tool_start'; id: string; name: string; at: string}
   | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'fallback'; provider: string; model: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
 function debug(line: string) {
@@ -77,6 +78,8 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'tool_end', id: event.id, name: event.name, success: event.success, durationMs: event.durationMs, ...(event.error === undefined ? {} : {error: errorText(event.error)}), at: event.at};
     case 'retry':
       return {type: 'retry', attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, error: event.error, at: event.at};
+    case 'fallback':
+      return {type: 'fallback', provider: event.provider, model: event.model, at: event.at};
     case 'context_overflow':
       return {type: 'context_overflow', recovered: event.recovered, error: event.error, at: event.at};
   }
@@ -104,7 +107,7 @@ async function resolveModelOrError(modelOverride?: string): Promise<string | und
     }
     return undefined;
   }
-  if (!activeModel(settings)) {
+  if (resolveModelSlot(settings, 'primary').status !== 'found') {
     return 'No model provider configured. Run /provider to choose or add a provider.';
   }
   return undefined;

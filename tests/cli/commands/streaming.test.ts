@@ -286,10 +286,10 @@ describe('runAgentTurn: setup', () => {
     // No session: cwd must still be forwarded (undefined) alongside the selector so the
     // cache-seed behavior matches the no-override path.
     await runAgentTurn('hi', undefined, [], makeCallbacks(), 0, false, false, undefined, 'openai:gpt-4o-mini');
-    expect(modelWithConfigCalls[0]).toEqual({cwd: undefined, modelSelector: 'openai:gpt-4o-mini'});
+    expect(modelWithConfigCalls[0]).toEqual({cwd: undefined, modelSelector: 'openai:gpt-4o-mini', slot: 'primary'});
     // Session present: its cwd is forwarded.
     await runAgentTurn('hi', undefined, [], makeCallbacks(), 0, false, false, {start: new Date(), cwd: '/work'}, 'openai:gpt-4o-mini');
-    expect(modelWithConfigCalls[1]).toEqual({cwd: '/work', modelSelector: 'openai:gpt-4o-mini'});
+    expect(modelWithConfigCalls[1]).toEqual({cwd: '/work', modelSelector: 'openai:gpt-4o-mini', slot: 'primary'});
   });
 });
 
@@ -392,6 +392,162 @@ describe('runAgentTurn: error paths', () => {
     await promise;
     expect(cb.messages.some((m) => /Transient model error/.test(m.text))).toBe(true);
     expect(cb.messages.some((m) => /retrying attempt 1\/2/.test(m.text))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('switches to the fallback slot on the first retriable error', async () => {
+    vi.useFakeTimers();
+    const modelWithConfigCalls: Array<{slot?: string; modelSelector?: string}> = [];
+    vi.doMock('../../../src/llm/client.js', () => ({
+      modelWithConfig: vi.fn(async (opts?: {slot?: string; modelSelector?: string}) => {
+        modelWithConfigCalls.push(opts ?? {});
+        return {
+          model: {id: 'mock'},
+          config: {providerName: opts?.slot === 'fallback' ? 'openai' : 'primary', baseURL: 'https://x/v1', modelName: opts?.slot === 'fallback' ? 'fallback-model' : 'primary-model', cacheKey: 'k', capabilities: {}},
+        };
+      }),
+      providerRequestSettings: () => ({}),
+    }));
+    vi.doMock('../../../src/llm/requestContext.js', () => ({
+      assembleRequestContext: vi.fn(async () => ({systemPrompt: '', availableTools: {}, toolCategories: new Map()})),
+    }));
+    vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: vi.fn(async () => undefined)}));
+    vi.doMock('../../../src/config/settings.js', () => ({
+      readSettings: vi.fn(async () => ({
+        providers: [
+          {name: 'primary', url: 'https://p/v1', models: ['primary-model']},
+          {name: 'openai', url: 'https://x/v1', models: ['fallback-model']},
+        ],
+        provider: 'primary',
+        model: 'primary-model',
+        models: {fallback: 'openai:fallback-model'},
+      })),
+    }));
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      let call = 0;
+      class ToggleAgent {
+        stream() {
+          call += 1;
+          if (call === 1) {
+            const error = new Error('Service overloaded (503)');
+            return {fullStream: (async function* () { yield {type: 'error', error}; })(), response: Promise.reject(error)};
+          }
+          return {fullStream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []})};
+        }
+      }
+      return {...actual, ToolLoopAgent: ToggleAgent, stepCountIs: (n: number) => ({steps: n})};
+    });
+    vi.resetModules();
+    const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('flaky', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    await promise;
+    expect(cb.messages.some(m => /falling back to openai:fallback-model/.test(m.text))).toBe(true);
+    expect(cb.events.some(e => e.type === 'turn_end')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('does not fallback when fallback resolves to the same model as primary', async () => {
+    vi.useFakeTimers();
+    vi.doMock('../../../src/llm/client.js', () => ({
+      modelWithConfig: vi.fn(async () => ({
+        model: {id: 'mock'},
+        config: {providerName: 'openai', baseURL: 'https://x/v1', modelName: 'same-model', cacheKey: 'k', capabilities: {}},
+      })),
+      providerRequestSettings: () => ({}),
+    }));
+    vi.doMock('../../../src/llm/requestContext.js', () => ({
+      assembleRequestContext: vi.fn(async () => ({systemPrompt: '', availableTools: {}, toolCategories: new Map()})),
+    }));
+    vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: vi.fn(async () => undefined)}));
+    vi.doMock('../../../src/config/settings.js', () => ({
+      readSettings: vi.fn(async () => ({
+        providers: [{name: 'openai', url: 'https://x/v1', models: ['same-model']}],
+        provider: 'openai',
+        model: 'same-model',
+        models: {fallback: 'openai:same-model'},
+      })),
+    }));
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      let call = 0;
+      class ToggleAgent {
+        stream() {
+          call += 1;
+          if (call === 1) {
+            const error = new Error('Service overloaded (503)');
+            return {fullStream: (async function* () { yield {type: 'error', error}; })(), response: Promise.reject(error)};
+          }
+          return {fullStream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []})};
+        }
+      }
+      return {...actual, ToolLoopAgent: ToggleAgent, stepCountIs: (n: number) => ({steps: n})};
+    });
+    vi.resetModules();
+    const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('flaky', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    await promise;
+    expect(cb.messages.some(m => /falling back/.test(m.text))).toBe(false);
+    expect(cb.messages.some(m => /Transient model error/.test(m.text))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('does not fallback when an explicit model override is active', async () => {
+    vi.useFakeTimers();
+    const modelWithConfigCalls: Array<{slot?: string; modelSelector?: string}> = [];
+    vi.doMock('../../../src/llm/client.js', () => ({
+      modelWithConfig: vi.fn(async (opts?: {slot?: string; modelSelector?: string}) => {
+        modelWithConfigCalls.push(opts ?? {});
+        return {
+          model: {id: 'mock'},
+          config: {providerName: 'primary', baseURL: 'https://x/v1', modelName: opts?.modelSelector ?? 'primary-model', cacheKey: 'k', capabilities: {}},
+        };
+      }),
+      providerRequestSettings: () => ({}),
+    }));
+    vi.doMock('../../../src/llm/requestContext.js', () => ({
+      assembleRequestContext: vi.fn(async () => ({systemPrompt: '', availableTools: {}, toolCategories: new Map()})),
+    }));
+    vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: vi.fn(async () => undefined)}));
+    vi.doMock('../../../src/config/settings.js', () => ({
+      readSettings: vi.fn(async () => ({
+        providers: [
+          {name: 'primary', url: 'https://p/v1', models: ['primary-model']},
+          {name: 'openai', url: 'https://x/v1', models: ['fallback-model']},
+        ],
+        provider: 'primary',
+        model: 'primary-model',
+        models: {fallback: 'openai:fallback-model'},
+      })),
+    }));
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      let call = 0;
+      class ToggleAgent {
+        stream() {
+          call += 1;
+          if (call === 1) {
+            const error = new Error('Service overloaded (503)');
+            return {fullStream: (async function* () { yield {type: 'error', error}; })(), response: Promise.reject(error)};
+          }
+          return {fullStream: (async function* () { yield {type: 'finish', finishReason: 'stop'}; })(), response: Promise.resolve({messages: []})};
+        }
+      }
+      return {...actual, ToolLoopAgent: ToggleAgent, stepCountIs: (n: number) => ({steps: n})};
+    });
+    vi.resetModules();
+    const {runAgentTurn} = await import('../../../src/cli/commands/streaming.js');
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('flaky', undefined, [], cb, 0, false, false, undefined, 'primary:primary-model');
+    await vi.runAllTimersAsync();
+    await promise;
+    expect(cb.messages.some(m => /falling back/.test(m.text))).toBe(false);
+    expect(cb.messages.some(m => /Transient model error/.test(m.text))).toBe(true);
+    expect(modelWithConfigCalls.every(c => c.modelSelector === 'primary:primary-model')).toBe(true);
     vi.useRealTimers();
   });
 
