@@ -108,6 +108,10 @@ A `/fleet` run may contain a mix of independent and dependent work, or one subta
 - **FR-012**: The system MUST guard concurrent file modifications: when two or more subagents attempt to edit the same file during a `/fleet` run, those edits MUST be serialized and any conflict MUST be surfaced to the user rather than silently overwriting earlier edits.
 - **FR-013**: During a `/fleet` run, the system MUST show per-subtask status (running / done / failed), updated as each subtask finishes; it MUST NOT stream each subagent's tokens live in parallel. Full results are presented in the aggregated view on completion.
 
+> **Implementation note (FR-006 & FR-012):** `/fleet` is a native slash command whose behavior is delivered as **model-guided discipline** injected into the turn (the `FLEET_GUIDANCE` text), so FR-006 (the ≤5 concurrency cap) and FR-012 (same-file edit serialization) are model-guided, not hard-enforced code guarantees. The hard backstop is the existing per-subagent bounds (steps, tool-only loops, summary length, output tokens) and the within-subagent same-path mutation guard; a core primitive to hard-enforce FR-012 *across* subagents is intentionally deferred. See `plan.md` (Constitution Check note) and `research.md` (D4, D5) for the full trade-off.
+>
+> **Delivery vehicle note:** `/fleet` ships as a built-in command (an explicit, owner-approved exception to constitution Principle II, which would otherwise require it to be a skill), chosen so it appears in the native command surface (`/help`, autocomplete) with no install step. It adds no new tools — it reuses the existing `subagent` tool. See `plan.md` Constitution Check and Complexity Tracking.
+
 ### Key Entities *(include if feature involves data)*
 
 - **Fleet Prompt**: The natural-language instruction the user passes to `/fleet`. The single input to the feature.

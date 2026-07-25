@@ -230,3 +230,112 @@ describe('createSubagentTool', () => {
     expect(result.data?.maxSteps).toBe(10);
   });
 });
+
+describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
+  // The /fleet command relies on an existing core guarantee: the turn's AbortSignal
+  // is forwarded from the tool execution context through runSubagent into the
+  // streamText call, so one user abort cancels every in-flight subagent.
+  it('forwards the turn AbortSignal from the tool context and cancels the in-flight subagent', async () => {
+    const captured: {abortSignal?: AbortSignal} = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        streamText: ({abortSignal, onStepEnd, onEnd}: {abortSignal?: AbortSignal; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
+          captured.abortSignal = abortSignal;
+          onStepEnd?.({stepNumber: 0});
+          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
+          return {
+            textStream: (async function* () { yield 'partial'; })(),
+            response: Promise.resolve({messages: []}),
+          };
+        },
+      };
+    });
+    vi.resetModules();
+    const {createSubagentTool} = await import('../../../src/core/subagent/subagentRunner.js');
+    const controller = new AbortController();
+    controller.abort();
+    const subagentTool = createSubagentTool({model: noopModel, contextFiles: []});
+    const result = await subagentTool.execute({task: 'abort me'}, {abortSignal: controller.signal} as never);
+    // The tool forwarded the turn's abort signal into the subagent run...
+    expect(captured.abortSignal).toBe(controller.signal);
+    // ...and the aborted run reports cancelled, restoring user control.
+    expect(result.status).toBe('cancelled');
+  });
+});
+
+describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
+  // A /fleet run fans out several subagents; one failing or timing out must not
+  // collapse the others. Each parallel subagent is an independent streamText run
+  // with its own try/catch, so failures are returned per subtask, never thrown.
+  it('a failing subagent does not collapse parallel subagents; each result is returned independently', async () => {
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        streamText: ({messages, onStepEnd, onEnd}: {messages?: Array<{role: string; content: string}>; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
+          const task = messages?.[0]?.content ?? '';
+          if (task === 'fail') throw new Error('boom');
+          onStepEnd?.({stepNumber: 0});
+          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
+          return {
+            textStream: (async function* () { yield `ok: ${task}`; })(),
+            response: Promise.resolve({messages: []}),
+          };
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const results = await Promise.all([
+      runSubagent('audit', {model: noopModel, contextFiles: []}),
+      runSubagent('fail', {model: noopModel, contextFiles: []}),
+      runSubagent('research', {model: noopModel, contextFiles: []}),
+    ]);
+    expect(results).toHaveLength(3);
+    // None of the three collapsed the parallel group; statuses are per subtask.
+    expect(results.map(r => r.status)).toEqual(['ok', 'error', 'ok']);
+    // The healthy subtasks still produced their own summaries.
+    expect(results[0]?.summary).toBe('ok: audit');
+    expect(results[2]?.summary).toBe('ok: research');
+    // The failing subtask is reported, not swallowed.
+    expect(results[1]?.status).toBe('error');
+    expect(results[1]?.error).toBe('boom');
+    // Timeout-status mapping for a single subagent is covered by the suite above.
+  });
+});
+
+describe('runSubagent independent context (FR-010, /fleet)', () => {
+  // Every subagent spawned by /fleet must operate with no shared conversation
+  // history. runSubagent builds its own messages — a single user turn carrying
+  // only the task — so sibling subagents never see each other's context.
+  it('each subagent receives only its own task with no shared conversation history', async () => {
+    const captured: Array<Array<{role: string; content: string}>> = [];
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        streamText: ({messages, onStepEnd, onEnd}: {messages?: Array<{role: string; content: string}>; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
+          captured.push(messages ?? []);
+          onStepEnd?.({stepNumber: 0});
+          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
+          return {
+            textStream: (async function* () { yield 'ok'; })(),
+            response: Promise.resolve({messages: []}),
+          };
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    await Promise.all([
+      runSubagent('task-a', {model: noopModel, contextFiles: []}),
+      runSubagent('task-b', {model: noopModel, contextFiles: []}),
+    ]);
+    expect(captured).toHaveLength(2);
+    // Each call sees exactly one user message — its own task — never its sibling's history.
+    expect(captured[0]).toEqual([{role: 'user', content: 'task-a'}]);
+    expect(captured[1]).toEqual([{role: 'user', content: 'task-b'}]);
+  });
+});

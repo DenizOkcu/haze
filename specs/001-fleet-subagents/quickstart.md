@@ -2,7 +2,7 @@
 
 **Branch**: `001-fleet-subagents` | **Date**: 2026-07-09
 
-`/fleet` analyzes a prompt and, when it splits into independent tasks, runs them in parallel as subagents.
+`/fleet` is a **built-in command**. It analyzes a prompt and, when it splits into independent tasks, runs them in parallel as subagents, then aggregates the results.
 
 ## Prerequisites
 
@@ -10,25 +10,15 @@
 - A provider and model configured (`/provider`, `/model`). `/fleet` uses your current model; there is no default.
 - The `subagent` tool is available (it is built-in).
 
-## Install the skill
+## Use it
 
-The skill ships as an example. Copy it into your skills directory:
-
-```bash
-# from a clone of this repo
-mkdir -p ~/.haze/skills
-cp -R examples/skills/fleet ~/.haze/skills/fleet
-```
-
-Or generate/install via the picker: type `/skills`, choose "add skill", and point it at the example (or describe "parallelize a prompt into concurrent subagents").
-
-Verify it loaded:
+`/fleet` is always available — no install step. Confirm it is listed:
 
 ```text
-/skills        # "fleet" should appear and be enabled
+/help        # "/fleet <prompt>" appears in the command list
 ```
 
-## Use it
+Then run it:
 
 ```text
 /fleet research how library X handles retries, audit error handling in src/auth, and draft v2 migration notes
@@ -61,6 +51,6 @@ Expected: `/fleet` reports this is sequential/dependent and does not fan out.
 
 ## Development
 
-- Edit the skill: `examples/skills/fleet/SKILL.md` (Markdown only — no code).
-- Validate: `npm test` (includes the example-skill smoke test under `tests/skills/`).
+- Implementation: `src/cli/commands/fleetCommand.ts` (`buildFleetPrompt` holds the behavioral guidance), registered in `src/cli/commands/commands.ts`, listed in `src/cli/commands/commandHelp.ts`.
+- Validate: `npm test` (includes `tests/cli/commands/fleetCommand.test.ts` plus core regression tests for abort propagation, partial failure, independent context, and parallel rendering).
 - Full gates: `npm run typecheck && npm test && npm run lint && npm run build`.

@@ -1797,6 +1797,10 @@
               <td class="cmd-c"><code>/context</code></td>
               <td class="cmd-d">Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.</td>
             </tr>
+            <tr>
+              <td class="cmd-c"><code>/fleet &lt;prompt&gt;</code></td>
+              <td class="cmd-d">Analyze a prompt; if it splits into independent tasks, fan out one subagent per task (at most 5) in parallel and aggregate the results. Declines (no auto-run) when not parallelizable.</td>
+            </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
             <tr>

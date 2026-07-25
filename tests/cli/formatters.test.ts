@@ -336,3 +336,53 @@ describe('formatContextReport bars', () => {
     expect(out2).toMatch(/System prompt\s+█{20}/);
   });
 });
+
+describe('parallel subagent activity rendering (FR-013, /fleet US3)', () => {
+  // During a /fleet run, N parallel `subagent` tool calls must render as N
+  // distinguishable activity rows whose status (running/done/failed) updates as
+  // each finishes — with NO live per-subagent token streaming. These formatter
+  // snapshots are the rendering primitive the skill relies on (research.md D9).
+  it('renders each parallel subagent call with a distinct, identifiable task preview', () => {
+    const tasks = ['audit error handling in src/auth', 'research how lib X does retries', 'draft v2 migration notes'];
+    const summaries = tasks.map(task => toolCallSummary('subagent', {task}));
+    expect(summaries).toEqual([
+      'subagent "audit error handling in src/auth"',
+      'subagent "research how lib X does retries"',
+      'subagent "draft v2 migration notes"',
+    ]);
+    // Distinct previews => N parallel calls are distinguishable in grouped activity.
+    expect(new Set(summaries).size).toBe(tasks.length);
+  });
+
+  it('compacts long subagent task previews', () => {
+    const long = 'x'.repeat(80);
+    const summary = toolCallSummary('subagent', {task: long});
+    expect(summary).toContain('…');
+    expect(summary.length).toBeLessThan(long.length);
+  });
+
+  it('labels every in-flight subagent as "Running subagent" with no per-subagent token streaming', () => {
+    // The busy indicator is a static label per call, not a live token counter.
+    // Parallel subagents are told apart by their toolCallSummary preview, not by
+    // streamed token deltas (there is no per-subagent token-stream primitive).
+    expect(busyToolLabel('subagent', {task: 'a'})).toBe('Running subagent');
+    expect(busyToolLabel('subagent', {task: 'b'})).toBe('Running subagent');
+  });
+
+  it('reports per-subtask status (done / failed / timed out) from each subagent result', () => {
+    const done = toolResultSummary({success: true, output: {status: 'ok', summary: 'auth is solid', toolCallCount: 3, durationMs: 1200}});
+    const failed = toolResultSummary({success: true, output: {status: 'error', summary: 'file not found', toolCallCount: 1, durationMs: 200}});
+    const timedOut = toolResultSummary({success: true, output: {status: 'timeout', summary: 'still going', toolCallCount: 25, durationMs: 30_000}});
+    expect(done.startsWith('ok')).toBe(true);
+    expect(done).toContain('auth is solid');
+    expect(failed.startsWith('error')).toBe(true);
+    expect(timedOut.startsWith('timeout')).toBe(true);
+    // The three statuses are distinguishable in the aggregated view.
+    expect(new Set([done, failed, timedOut]).size).toBe(3);
+  });
+
+  it('marks no-output subtasks explicitly rather than as a silent success', () => {
+    const noOutput = toolResultSummary({success: true, output: {status: 'ok', summary: 'Subagent completed without text output.', toolCallCount: 0}});
+    expect(noOutput).toContain('completed without text output');
+  });
+});
