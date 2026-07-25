@@ -3,7 +3,36 @@ import {createSubagentTool, internals, runSubagent, type SubagentResult} from '.
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 
-const capture = vi.hoisted(() => ({maxSteps: 0, lastStep: 0}));
+// Subagents use generateText (non-streaming). Mocks return a fully-resolved
+// result whose `text` is the final step's text and `steps`/`usage` are read
+// directly — mirroring the real AI SDK contract.
+type GenConfig = {
+  messages?: Array<{role: string; content: string}>;
+  abortSignal?: AbortSignal;
+  prepareStep?: (args: {steps: Array<{toolCalls: unknown[]; text: string}>; messages: Array<{role: string; content: string}>}) => unknown;
+};
+type GenStep = {stepNumber: number; text: string};
+type GenResult = {
+  text: string;
+  steps: GenStep[];
+  finalStep: GenStep;
+  usage: {inputTokens: number; outputTokens: number};
+  response: {messages: unknown[]};
+};
+function genResult(opts: {text?: string; steps?: GenStep[]; usage?: {inputTokens?: number; outputTokens?: number}} = {}): GenResult {
+  const text = opts.text ?? '';
+  const steps = opts.steps ?? [{stepNumber: 0, text}];
+  return {
+    text,
+    steps,
+    finalStep: steps[steps.length - 1] ?? {stepNumber: 0, text},
+    usage: opts.usage ?? {inputTokens: 0, outputTokens: 0},
+    response: {messages: []},
+  };
+}
+function steps(n: number, text = ''): GenStep[] {
+  return Array.from({length: n}, (_, i) => ({stepNumber: i, text}));
+}
 
 describe('subagent internals.toolSummary', () => {
   it('returns "no matches" when totalMatches is zero', () => {
@@ -43,13 +72,13 @@ describe('subagent internals.toolOnlyStepCount', () => {
   });
 
   it('counts only consecutive trailing steps that have tool calls and no text', () => {
-    const steps = [
+    const stepList = [
       {toolCalls: [{}], text: 'thinking aloud'},
       {toolCalls: [{}], text: ''},
       {toolCalls: [{}], text: '   '},
       {toolCalls: [{}, {}], text: ''},
     ];
-    expect(internals.toolOnlyStepCount(steps)).toBe(3);
+    expect(internals.toolOnlyStepCount(stepList)).toBe(3);
   });
 
   it('stops at the first step that emitted non-empty text', () => {
@@ -71,25 +100,46 @@ describe('subagent internals.toolOnlyStepCount', () => {
   });
 });
 
-let lastStepSeen = 0;
+describe('internals.shouldForceSynthesis (subagent budget guard)', () => {
+  // Regression for the fleet review failure: a chatty model that narrates on
+  // every step defeated the old toolOnly guard (it only counts trailing steps
+  // with tool calls AND no text). Total tool-call volume must still force a
+  // synthesis turn.
+  it('forces synthesis on tool-call volume even when every step has narration text (P2)', () => {
+    const narrating = Array.from({length: 20}, () => ({toolCalls: [{toolName: 'readFile', input: {}}], text: 'Let me read the next file.'}));
+    expect(internals.shouldForceSynthesis(narrating, 25)).toBe(true);
+  });
+
+  it('does NOT force synthesis below the tool-call budget when steps narrate (no premature cutoff)', () => {
+    const narrating = Array.from({length: 19}, () => ({toolCalls: [{}], text: 'reading…'}));
+    expect(internals.shouldForceSynthesis(narrating, 25)).toBe(false);
+  });
+
+  // Reserve the tail of the step budget for synthesis so a subagent never ends
+  // on read-narration just because it ran out of steps.
+  it('forces synthesis within the reserved tail of the step budget (P1)', () => {
+    const nearBudget = Array.from({length: 23}, () => ({toolCalls: [], text: ''})); // 25 - 2 = 23
+    expect(internals.shouldForceSynthesis(nearBudget, 25)).toBe(true);
+    const beforeTail = Array.from({length: 22}, () => ({toolCalls: [], text: ''}));
+    expect(internals.shouldForceSynthesis(beforeTail, 25)).toBe(false);
+  });
+
+  it('still forces synthesis on a long tool-only run (original guard preserved)', () => {
+    const toolOnly = Array.from({length: 12}, () => ({toolCalls: [{}], text: ''}));
+    expect(internals.shouldForceSynthesis(toolOnly, 25)).toBe(true);
+  });
+
+  it('leaves quick tasks untouched (no synthesis forcing)', () => {
+    expect(internals.shouldForceSynthesis([{toolCalls: [{toolName: 'readFile', input: {}}], text: ''}], 25)).toBe(false);
+    expect(internals.shouldForceSynthesis([], 25)).toBe(false);
+  });
+});
 
 describe('runSubagent status mapping', () => {
-  function streamTextMock(stream: AsyncIterable<string>, callbacks: {onStepEnd?: (event: {stepNumber: number}) => void; onEnd?: (event: {usage?: {inputTokens?: number; outputTokens?: number}}) => void} = {}) {
-    if (callbacks.onStepEnd) callbacks.onStepEnd({stepNumber: 0});
-    if (callbacks.onEnd) callbacks.onEnd({usage: {inputTokens: 0, outputTokens: 0}});
-    return {
-      textStream: stream,
-      response: Promise.resolve({messages: []}),
-    };
-  }
-
   it('returns ok status when the model finishes within the step budget', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: () => streamTextMock((async function*() { yield 'done'; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
-      };
+      return {...actual, generateText: async () => genResult({text: 'done'})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -101,16 +151,10 @@ describe('runSubagent status mapping', () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('returns timeout status when the model hits the step limit (lastStep >= maxSteps)', async () => {
+  it('returns timeout status when the model hits the step limit (steps.length >= maxSteps)', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: ({onStepEnd}: {onStepEnd?: (e: {stepNumber: number}) => void}) => {
-          onStepEnd?.({stepNumber: 25});
-          return streamTextMock((async function*() { /* empty */ })());
-        },
-      };
+      return {...actual, generateText: async () => genResult({text: '', steps: steps(25)})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -121,10 +165,7 @@ describe('runSubagent status mapping', () => {
   it('returns cancelled status when the abort signal is already aborted', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: () => streamTextMock((async function*() { yield 'partial'; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
-      };
+      return {...actual, generateText: async () => genResult({text: 'partial'})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -139,7 +180,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: () => {
+        generateText: async () => {
           throw new Error('boom');
         },
       };
@@ -152,20 +193,12 @@ describe('runSubagent status mapping', () => {
   });
 
   it('caps maxSteps at the configured STEP_LIMIT (25) even when caller asks for more', async () => {
-    // The cap is a private constant (STEP_LIMIT = 25) passed to isStepCount.
-    // Verify behaviorally: a stream whose onStepEnd reports 100 steps
-    // cannot make runSubagent think the limit was 100; we can only verify
-    // by direct source inspection. Here we just confirm runSubagent accepts
-    // a large maxSteps without crashing and returns a defined status.
+    // STEP_LIMIT caps maxSteps to 25, and isStepCount stops when steps.length
+    // === maxSteps. A result with 25 steps therefore reads as a timeout even
+    // though the caller requested 999.
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: ({onStepEnd}: {onStepEnd?: (e: {stepNumber: number}) => void}) => {
-          onStepEnd?.({stepNumber: 25});
-          return streamTextMock((async function*() { /* nothing */ })());
-        },
-      };
+      return {...actual, generateText: async () => genResult({text: '', steps: steps(25)})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -173,13 +206,10 @@ describe('runSubagent status mapping', () => {
     expect(result.status).toBe('timeout');
   });
 
-  it('uses a no-text fallback summary when the stream produces nothing', async () => {
+  it('uses a no-text fallback summary when the model produces no text', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: () => streamTextMock((async function*() { /* empty */ })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
-      };
+      return {...actual, generateText: async () => genResult({text: ''})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -191,40 +221,130 @@ describe('runSubagent status mapping', () => {
     const huge = 'x'.repeat(5000);
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {
-        ...actual,
-        streamText: () => streamTextMock((async function*() { yield huge; })(), {onStepEnd: () => undefined, onEnd: () => undefined}),
-      };
+      return {...actual, generateText: async () => genResult({text: huge})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
     const result = await runSubagent('huge summary', {model: noopModel, contextFiles: []});
     expect(result.summary.length).toBe(4000);
   });
+
+  it('reports token usage from the resolved result', async () => {
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, generateText: async () => genResult({text: 'done', usage: {inputTokens: 42, outputTokens: 7}})};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const result = await runSubagent('metered', {model: noopModel, contextFiles: []});
+    expect(result.tokens).toEqual({in: 42, out: 7});
+  });
+});
+
+describe('runSubagent synthesis capture & prepareStep history preservation', () => {
+  // Regression for the /fleet review failure: the forced-synthesis turn sent
+  // ONLY the directive to the model because prepareStep returned a bare
+  // messages array, which the AI SDK uses verbatim (replacing the accumulated
+  // conversation). The model then truthfully reported "no task / no tools
+  // executed" and discarded every finding it had gathered. prepareStep must
+  // preserve the full history and append the directive.
+  it('prepareStep preserves the conversation and appends the synthesis directive (does not clobber history)', async () => {
+    const captured: {prepareStep?: GenConfig['prepareStep']} = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        generateText: async (config: GenConfig) => {
+          captured.prepareStep = config.prepareStep;
+          return genResult({text: ''});
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent, internals} = await import('../../../src/core/subagent/subagentRunner.js');
+    await runSubagent('the assigned task', {model: noopModel, contextFiles: []});
+
+    // Force synthesis via tool-call volume (TOOL_CALL_BUDGET = 20).
+    const forceSteps = Array.from({length: 20}, () => ({toolCalls: [{}], text: ''}));
+    const history = [{role: 'user', content: 'the assigned task'}, {role: 'assistant', content: '[tool-call readFile]'}];
+    const res = captured.prepareStep!({steps: forceSteps, messages: history}) as {toolChoice?: string; messages?: Array<{role: string; content: string}>};
+
+    expect(res.toolChoice).toBe('none');
+    expect(res.messages).toBeDefined();
+    // The original task message must survive (history was not replaced).
+    expect(res.messages?.[0]).toEqual({role: 'user', content: 'the assigned task'});
+    // The directive is appended as a final user control message.
+    const appended = res.messages?.at(-1);
+    expect(appended?.role).toBe('user');
+    expect(appended?.content).toContain(internals.SYNTHESIS_DIRECTIVE);
+    // History preserved + exactly one appended directive.
+    expect(res.messages?.length).toBe(history.length + 1);
+  });
+
+  it('prepareStep returns undefined when synthesis is not forced (normal steps untouched)', async () => {
+    const captured: {prepareStep?: GenConfig['prepareStep']} = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        generateText: async (config: GenConfig) => {
+          captured.prepareStep = config.prepareStep;
+          return genResult({text: ''});
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    await runSubagent('quick task', {model: noopModel, contextFiles: []});
+    expect(captured.prepareStep!({steps: [{toolCalls: [{}], text: ''}], messages: [{role: 'user', content: 'quick task'}]})).toBeUndefined();
+  });
+
+  // Guard: the summary is the FINAL step's text (the deliverable), never the
+  // first step's narration and never a concatenation of all steps.
+  it('uses the final step text as the summary, not earlier narration or a concatenation', async () => {
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        generateText: async () => genResult({
+          text: '# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts',
+          steps: [
+            {stepNumber: 0, text: 'Now let me look at the MCP/LSP settings.'},
+            {stepNumber: 1, text: '# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts'},
+          ],
+        }),
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const result: SubagentResult = await runSubagent('security review', {model: noopModel, contextFiles: []});
+    expect(result.summary).toBe('# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts');
+    expect(result.summary.startsWith('Now let me')).toBe(false);
+  });
 });
 
 describe('createSubagentTool', () => {
   it('exposes a stable description that encourages parallel-only use', () => {
-    const tool = createSubagentTool({model: noopModel, contextFiles: []});
-    expect(tool.description).toContain('parallel');
-    expect(tool.description).toContain('no conversation history');
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    expect(toolObj.description).toContain('parallel');
+    expect(toolObj.description).toContain('no conversation history');
   });
 
   it('rejects an empty task via the input schema', () => {
-    const tool = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = tool.inputSchema.safeParse({task: ''});
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const result = toolObj.inputSchema.safeParse({task: ''});
     expect(result.success).toBe(false);
   });
 
   it('rejects a negative maxSteps via the input schema', () => {
-    const tool = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = tool.inputSchema.safeParse({task: 'x', maxSteps: -1});
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const result = toolObj.inputSchema.safeParse({task: 'x', maxSteps: -1});
     expect(result.success).toBe(false);
   });
 
   it('accepts a valid task', () => {
-    const tool = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = tool.inputSchema.safeParse({task: 'do something', tools: ['bash', 'grep'], maxSteps: 10});
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const result = toolObj.inputSchema.safeParse({task: 'do something', tools: ['bash', 'grep'], maxSteps: 10});
     expect(result.success).toBe(true);
     expect(result.data?.tools).toEqual(['bash', 'grep']);
     expect(result.data?.maxSteps).toBe(10);
@@ -234,21 +354,16 @@ describe('createSubagentTool', () => {
 describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
   // The /fleet command relies on an existing core guarantee: the turn's AbortSignal
   // is forwarded from the tool execution context through runSubagent into the
-  // streamText call, so one user abort cancels every in-flight subagent.
+  // generateText call, so one user abort cancels every in-flight subagent.
   it('forwards the turn AbortSignal from the tool context and cancels the in-flight subagent', async () => {
     const captured: {abortSignal?: AbortSignal} = {};
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: ({abortSignal, onStepEnd, onEnd}: {abortSignal?: AbortSignal; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
-          captured.abortSignal = abortSignal;
-          onStepEnd?.({stepNumber: 0});
-          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
-          return {
-            textStream: (async function* () { yield 'partial'; })(),
-            response: Promise.resolve({messages: []}),
-          };
+        generateText: async (config: GenConfig) => {
+          captured.abortSignal = config.abortSignal;
+          return genResult({text: 'partial'});
         },
       };
     });
@@ -267,22 +382,17 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
 
 describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
   // A /fleet run fans out several subagents; one failing or timing out must not
-  // collapse the others. Each parallel subagent is an independent streamText run
-  // with its own try/catch, so failures are returned per subtask, never thrown.
+  // collapse the others. Each parallel subagent is an independent generateText
+  // run with its own try/catch, so failures are returned per subtask, never thrown.
   it('a failing subagent does not collapse parallel subagents; each result is returned independently', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: ({messages, onStepEnd, onEnd}: {messages?: Array<{role: string; content: string}>; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
-          const task = messages?.[0]?.content ?? '';
+        generateText: async (config: GenConfig) => {
+          const task = config.messages?.[0]?.content ?? '';
           if (task === 'fail') throw new Error('boom');
-          onStepEnd?.({stepNumber: 0});
-          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
-          return {
-            textStream: (async function* () { yield `ok: ${task}`; })(),
-            response: Promise.resolve({messages: []}),
-          };
+          return genResult({text: `ok: ${task}`});
         },
       };
     });
@@ -316,14 +426,9 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        streamText: ({messages, onStepEnd, onEnd}: {messages?: Array<{role: string; content: string}>; onStepEnd?: (e: {stepNumber: number}) => void; onEnd?: (e: {usage?: {inputTokens?: number; outputTokens?: number}}) => void}) => {
-          captured.push(messages ?? []);
-          onStepEnd?.({stepNumber: 0});
-          onEnd?.({usage: {inputTokens: 0, outputTokens: 0}});
-          return {
-            textStream: (async function* () { yield 'ok'; })(),
-            response: Promise.resolve({messages: []}),
-          };
+        generateText: async (config: GenConfig) => {
+          captured.push(config.messages ?? []);
+          return genResult({text: 'ok'});
         },
       };
     });

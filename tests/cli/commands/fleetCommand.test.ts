@@ -64,6 +64,31 @@ describe('buildFleetPrompt', () => {
     expect(lower).toContain('empty prompt guard'); // B7
     expect(prompt).toContain('do x, y, and z'); // payload
   });
+
+  it('frames subagent tasks so the final message is the deliverable (P0 budget/synthesis contract)', () => {
+    const lower = buildFleetPrompt('do x').toLowerCase();
+    expect(lower).toContain('final message'); // subagent's final message IS the result
+    expect(lower).toMatch(/budget/); // bounded budget awareness
+    expect(lower).toMatch(/narrat/); // do not end on process narration
+    expect(lower).toContain('no conversation history'); // still self-contained
+  });
+
+  it('uses bounded concurrency (waves), not a hard total cap, and scopes disjointness to writes', () => {
+    const lower = buildFleetPrompt('do x').toLowerCase();
+    // 5 is a concurrency cap, not a total-task cap; extras are queued in waves
+    expect(lower).toMatch(/in flight/);
+    expect(lower).toMatch(/wave/);
+    expect(lower).toMatch(/never drop/);
+    // a single-wave run (N <= 5) must not narrate redundant wave math — the plan already states the count
+    expect(lower).toMatch(/keep wave narration minimal/);
+    expect(lower).toMatch(/noise/);
+    // reads may overlap; only writes must be disjoint
+    expect(lower).toMatch(/reads? may overlap/);
+    expect(lower).toMatch(/disjoint writes/);
+    // context isolation is the stated rationale; worthwhile even for two tasks
+    expect(lower).toMatch(/context isolation/);
+    expect(lower).toMatch(/even for two tasks|two is fine/);
+  });
 });
 
 // Routing through the real slash-command dispatcher. Mock the paths module so the

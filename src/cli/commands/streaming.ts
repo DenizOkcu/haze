@@ -27,6 +27,7 @@ import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFil
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {terminalTurnStatus} from './streaming/turnOutcome.js';
+import {createIdleTimer} from './streaming/idleTimer.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -93,14 +94,16 @@ async function runAgentAttempt(
   let thinkingLabel = modelThinkingLabel(undefined);
   callbacks.setBusyLabel?.(thinkingLabel);
   let turnStatus: TurnStatus = 'failed';
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let loadedMcp: LoadedMcpTools | undefined;
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      abortController.abort('haze turn timed out after no model/tool activity.');
-    }, IDLE_TIMEOUT_MS);
-  };
+  // Tool calls currently executing. A concurrent subagent wave can run for many
+  // minutes with no stream parts; that is activity, not a dead stream, so the
+  // idle timer defers while any tool is in flight (see streaming/idleTimer.ts).
+  const inFlightTools = new Set<string>();
+  const idleTimer = createIdleTimer({
+    timeoutMs: IDLE_TIMEOUT_MS,
+    isBusy: () => inFlightTools.size > 0,
+    onTimeout: () => abortController.abort('haze turn timed out after no model/tool activity.'),
+  });
 
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
 
@@ -260,11 +263,11 @@ async function runAgentAttempt(
       },
     });
 
-    resetIdleTimer();
+    idleTimer.reset();
     const result = await agent.stream({messages: requestMessages, abortSignal: abortController.signal});
 
     for await (const part of result.stream) {
-      resetIdleTimer();
+      idleTimer.reset();
       switch (part.type) {
         case 'text-delta': {
           callbacks.setBusyLabel?.(thinkingLabel);
@@ -294,6 +297,7 @@ async function runAgentAttempt(
           const toolCall = {toolCallId: part.id, toolName: part.toolName, input: {}};
           latestToolCalls.set(part.id, toolCall);
           startedTools.set(part.id, Date.now());
+          inFlightTools.add(part.id);
           callbacks.setBusyLabel?.(busyToolLabel(part.toolName, {}));
           toolDisplay.ensureToolItem(toolCall);
           break;
@@ -315,6 +319,7 @@ async function runAgentAttempt(
         case 'tool-result': {
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input};
           latestToolCalls.set(part.toolCallId, toolCall);
+          inFlightTools.delete(part.toolCallId);
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
           const ok = toolOutputOk(part.output, true);
           lastToolOk = ok;
@@ -338,6 +343,7 @@ async function runAgentAttempt(
           break;
         }
         case 'tool-error': {
+          inFlightTools.delete(part.toolCallId);
           const existing = latestToolCalls.get(part.toolCallId);
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input ?? existing?.input};
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
@@ -435,7 +441,7 @@ async function runAgentAttempt(
     }
   } finally {
     if (loadedMcp?.clients.length) await closeMcpClients(loadedMcp.clients);
-    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer.clear();
     toolDisplay.stopToolTimer();
     toolDisplay.finalizeToolGroup();
   }

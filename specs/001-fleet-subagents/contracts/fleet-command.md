@@ -28,12 +28,15 @@
 | ID | Behavior | Spec ref |
 |----|----------|----------|
 | B1 | Analyze the prompt to decide if it decomposes into 2+ genuinely independent tasks, and state that decision. | FR-002, FR-005 |
-| B2 | If parallelizable: enumerate subtasks and spawn **one `subagent` tool call per subtask in a single step**, ≤ 5 concurrent. | FR-003, FR-006 |
-| B3 | Assign each subtask a **disjoint set of files**; if two tasks must touch the same file, merge them or run sequentially. | FR-012 |
+| B2 | If parallelizable: enumerate the natural number of independent subtasks (2..N) and spawn one `subagent` tool call per subtask, **at most 5 IN FLIGHT at a time**; if there are more than 5, run the rest in successive waves (next batch when the current one returns) until all are done — never drop tasks. | FR-003, FR-006 |
+| B3 | **Reads may overlap** across subagents; only **writes** must be disjoint — give each subtask a disjoint set of files to *mutate*; if two tasks must edit the same file, merge them or run sequentially. | FR-012 |
 | B4 | If not parallelizable: inform the user with the reason and **stop** (do not auto-run as a normal turn). | FR-004 |
 | B5 | After subagents return, aggregate their summaries into one consolidated answer (per-subtask status + summary). | FR-007, FR-009 |
 | B6 | Surface the decomposition plan (the subtask list) in the answer. | FR-005 |
 | B7 | On empty/whitespace-only prompt: ask the user for a prompt; do not fan out. (Also hard-guarded in the handler.) | Edge case |
+| B8 | Decompose along the prompt's natural independent axes (distinct deliverables/features/bugs), not geographic file-slices. The value is **context isolation**: each subagent works in its own context and returns only a concise summary, keeping the main conversation lean — worthwhile even for two tasks. | FR-007 |
+
+Subagents are not context-starved: they inherit the main turn's loaded context files (global + ancestor `AGENTS.md`/`CLAUDE.md`) in their system prompt, and the file tools' lazy `discoverScopedContext` surfaces subtree-specific instructions for the paths each subagent touches (pausing same-subtree writes to review them).
 
 Non-behavioral guarantees (abort, per-worker bounds, within-subagent same-path guard, status computation) are provided by existing core and are NOT part of the guidance — they hold for every turn.
 
