@@ -1,6 +1,6 @@
 # src/core/goal/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Request intent classification and lightweight goal/completion policy.
 
@@ -8,7 +8,8 @@ Request intent classification and lightweight goal/completion policy.
 
 - `requestClassifier.ts` classifies the user's request intent (`plan`, `test`, `review`, `answer`, implementation-style work). Keep heuristics deterministic and transparent.
 - `sessionGoal.ts` creates/updates `WorkState` success criteria from the initial user request and observed tool events.
-- `completionPolicy.ts` provides model-facing control prompts for repeated tools, tool-loop budgets, and completion/continuation decisions.
+- `completionPolicy.ts` provides the model-facing control prompts for repeated tools and tool-loop budgets.
+- `cli/commands/streaming/turnOutcome.ts` is the authoritative terminal turn-status function (`complete`/`aborted`/`failed`) from runtime facts.
 
 ## Contracts
 

@@ -1,6 +1,6 @@
 # src/utils/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Small shared utilities.
 
@@ -18,7 +18,7 @@ Maintainability focus:
 
 ## Important files
 
-- `path.ts` — workspace root/path resolution and confinement helpers.
+- `path.ts` — workspace root/path resolution and confinement helpers. `assertRealPathInsideRoot(root, candidate)` and `assertPathInsideRoot` are the shared real-path confinement primitives reused by file tools, skills, LSP, and the skills registry; keep them generic and add domain wrappers in callers rather than duplicating prefix logic.
 - `fs.ts` — directory walking and filesystem helpers used by tools.
 - `collections.ts` — small collection operations such as name-based upsert/find.
 - `version.ts` — version loading/parsing helpers.

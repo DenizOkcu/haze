@@ -26,6 +26,7 @@ import {applyToolResultState, initialToolResultState, isMutatingToolName} from '
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
+import {terminalTurnStatus} from './streaming/turnOutcome.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -74,27 +75,24 @@ export interface StreamCallbacks {
   contextFileSignatures?: Map<string, string>;
 }
 
-export async function runAgentTurn(
+type AgentAttemptResult = TurnResult & {
+  retry?: {attempt: number; contextOverflowRecovered: boolean; delayMs: number};
+};
+
+async function runAgentAttempt(
   value: string,
-  displayValue: string | undefined,
   contextFiles: ContextFile[],
   callbacks: StreamCallbacks,
-  retryAttempt = 0,
-  retryingExistingRequest = false,
-  contextOverflowRecovered = false,
-  session?: PromptSession,
-  modelOverride?: string,
-): Promise<TurnResult> {
-  const displayVal = displayValue ?? value;
-  callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
-  callbacks.setBusy(true);
+  retryAttempt: number,
+  retryingExistingRequest: boolean,
+  contextOverflowRecovered: boolean,
+  session: PromptSession | undefined,
+  modelOverride: string | undefined,
+  abortController: AbortController,
+): Promise<AgentAttemptResult> {
   let thinkingLabel = modelThinkingLabel(undefined);
   callbacks.setBusyLabel?.(thinkingLabel);
-  if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayVal});
-  const abortController = new AbortController();
-  callbacks.setAbortController?.(abortController);
-
-  let turnStatus: 'complete' | 'aborted' | 'failed' = 'failed';
+  let turnStatus: TurnStatus = 'failed';
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let loadedMcp: LoadedMcpTools | undefined;
   const resetIdleTimer = () => {
@@ -110,7 +108,7 @@ export async function runAgentTurn(
     const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride});
     if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
-      turnStatus = 'complete';
+      turnStatus = 'failed';
       return {status: turnStatus};
     }
 
@@ -120,7 +118,7 @@ export async function runAgentTurn(
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
     const providerSettings = providerRequestSettings(runtime.config);
-    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel});
+    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, abortSignal: abortController.signal});
     const availableTools = assembled.availableTools;
     loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
@@ -167,6 +165,11 @@ export async function runAgentTurn(
     let currentAssistantText = '';
     let streamError: unknown;
     let streamFinished = false;
+    let finishReason: string | undefined;
+    let lastToolOk: boolean | undefined;
+    let completedSteps = 0;
+    let completedToolCalls = 0;
+    let completedToolOnlySteps = 0;
     let toolResultState = initialToolResultState();
     const resetAssistantSegment = () => {
       currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -226,6 +229,9 @@ export async function runAgentTurn(
         return messagesChanged ? {messages: scopedMessages} : undefined;
       },
       onStepEnd({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
+        completedSteps++;
+        completedToolCalls += toolCalls.length;
+        if (toolCalls.length > 0 && text.trim().length === 0) completedToolOnlySteps++;
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         const stepUsage = stepCacheMetrics(usage);
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
@@ -310,15 +316,16 @@ export async function runAgentTurn(
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input};
           latestToolCalls.set(part.toolCallId, toolCall);
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
-          const finish: NativeToolFinish = {toolCall, success: true, output: part.output, durationMs: Date.now() - startedAt};
+          const ok = toolOutputOk(part.output, true);
+          lastToolOk = ok;
+          const finish: NativeToolFinish = {toolCall, success: ok, output: part.output, durationMs: Date.now() - startedAt};
           const item = toolDisplay.ensureToolItem(toolCall);
-          item.status = toolOutputOk(part.output, true) ? 'success' : 'error';
+          item.status = ok ? 'success' : 'error';
           item.result = toolResultSummary(finish);
           item.durationMs = finish.durationMs;
           item.finishedAt = startedAt + finish.durationMs;
-          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: true, output: part.output, durationMs: finish.durationMs}));
-          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: true, output: part.output, durationMs: finish.durationMs}});
-          const ok = toolOutputOk(part.output, true);
+          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}));
+          logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}});
           toolResultState = applyToolResultState(toolResultState, {toolName: toolCall.toolName, input: toolCall.input, output: part.output, ok});
           observeGoalToolEvent(goal, {...toolCall, success: ok, output: part.output, duplicateSkipped: isDuplicateSkippedOutput(part.output)});
           callbacks.setWorkState?.(goal);
@@ -334,6 +341,7 @@ export async function runAgentTurn(
           const existing = latestToolCalls.get(part.toolCallId);
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input ?? existing?.input};
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
+          lastToolOk = false;
           const finish: NativeToolFinish = {toolCall, success: false, error: part.error, durationMs: Date.now() - startedAt};
           const item = toolDisplay.ensureToolItem(toolCall);
           item.status = 'error';
@@ -357,6 +365,7 @@ export async function runAgentTurn(
           break;
         case 'finish':
           streamFinished = true;
+          finishReason = part.finishReason;
           callbacks.debugLog(`ToolLoopAgent finished: ${part.finishReason}`);
           break;
         default:
@@ -386,14 +395,18 @@ export async function runAgentTurn(
     if (currentAssistantText.trim().length > 0 || assistantStarted) {
       finalizeAssistantSegment();
     } else if (latestToolCalls.size > 0) {
-      const fallback = 'Finished tool work.';
-      callbacks.addMessage({id: currentAssistantId, role: 'assistant', text: fallback, streaming: false, startedAt: assistantStartedAt, ...responseCompletionMetrics(fallback, assistantStartedAt)});
+      callbacks.addMessage({role: 'system', text: 'Tool work ended without a substantive final answer.'});
     }
 
+    const budgetReached = finishReason === 'length'
+      || completedSteps >= MAIN_STEP_LIMIT
+      || completedToolCalls >= MAIN_TOOL_CALL_LIMIT
+      || completedToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT;
+    turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached});
     goal.phase = 'done';
-    goal.status = 'complete';
+    goal.status = turnStatus === 'complete' ? 'complete' : 'blocked';
+    callbacks.setWorkState?.(goal);
     callbacks.setGoalStatus?.(undefined);
-    turnStatus = 'complete';
   } catch (error) {
     if (abortController.signal.aborted) {
       turnStatus = 'aborted';
@@ -407,7 +420,7 @@ export async function runAgentTurn(
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-          return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt, true, true, session, modelOverride);
+          return {status: 'failed', retry: {attempt: retryAttempt, contextOverflowRecovered: true, delayMs: 0}};
         }
         callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
       }
@@ -416,12 +429,7 @@ export async function runAgentTurn(
         const delay = retryDelayMs(retryAttempt);
         callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
         callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
-        await abortableDelay(delay, abortController.signal);
-        if (abortController.signal.aborted) {
-          turnStatus = 'aborted';
-          return {status: turnStatus};
-        }
-        return await runAgentTurn(value, displayValue, contextFiles, callbacks, retryAttempt + 1, true, contextOverflowRecovered, session, modelOverride);
+        return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay}};
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
     }
@@ -430,10 +438,46 @@ export async function runAgentTurn(
     if (idleTimer) clearTimeout(idleTimer);
     toolDisplay.stopToolTimer();
     toolDisplay.finalizeToolGroup();
-    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status: turnStatus}));
-    callbacks.setAbortController?.(null);
-    callbacks.setBusyLabel?.(thinkingLabel);
-    callbacks.setBusy(false);
   }
   return {status: turnStatus};
+}
+
+export async function runAgentTurn(
+  value: string,
+  displayValue: string | undefined,
+  contextFiles: ContextFile[],
+  callbacks: StreamCallbacks,
+  retryAttempt = 0,
+  retryingExistingRequest = false,
+  contextOverflowRecovered = false,
+  session?: PromptSession,
+  modelOverride?: string,
+): Promise<TurnResult> {
+  const abortController = new AbortController();
+  let status: TurnStatus = 'failed';
+  callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
+  callbacks.setBusy(true);
+  callbacks.setAbortController?.(abortController);
+  if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayValue ?? value});
+  try {
+    let attempt = retryAttempt;
+    let overflowRecovered = contextOverflowRecovered;
+    let retrying = retryingExistingRequest;
+    while (true) {
+      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController);
+      status = result.status;
+      if (!result.retry) break;
+      attempt = result.retry.attempt;
+      overflowRecovered = result.retry.contextOverflowRecovered;
+      retrying = true;
+      if (result.retry.delayMs > 0) await abortableDelay(result.retry.delayMs, abortController.signal);
+      if (abortController.signal.aborted) { status = 'aborted'; break; }
+    }
+    return {status};
+  } finally {
+    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status}));
+    callbacks.setAbortController?.(null);
+    callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
+    callbacks.setBusy(false);
+  }
 }

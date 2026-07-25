@@ -1,5 +1,7 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {EventEmitter} from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   LspError,
@@ -9,9 +11,11 @@ import {
   fromUri,
   languageId,
   locationToResult,
+  locationToWorkspaceResult,
   pickLspServer,
   toUri,
 } from '../../src/llm/lsp.js';
+import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../src/core/limits/byteBudgets.js';
 import type {HazeLspServer} from '../../src/config/lspSettings.js';
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 
@@ -174,6 +178,21 @@ describe('lsp pure helpers', () => {
     expect(loc).toBeDefined();
     expect(loc?.range.start.line).toBe(3);
   });
+
+  it.runIf(process.platform !== 'win32')('labels a returned symlink escape as external', async () => {
+    const workspace = await fs.mkdtemp(path.join(process.cwd(), '.haze-lsp-location-'));
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-lsp-outside-'));
+    const outside = path.join(outsideDir, 'outside.ts');
+    await fs.writeFile(outside, 'secret');
+    await fs.symlink(outside, path.join(workspace, 'linked.ts'));
+    try {
+      const result = await locationToWorkspaceResult({uri: toUri(path.join(workspace, 'linked.ts')), range: {start: {line: 0, character: 0}, end: {line: 0, character: 1}}});
+      expect(result).toMatchObject({external: true, path: expect.stringMatching(/^file:/)});
+    } finally {
+      await fs.rm(workspace, {recursive: true, force: true});
+      await fs.rm(outsideDir, {recursive: true, force: true});
+    }
+  });
 });
 
 describe('StdioLspClient', () => {
@@ -271,6 +290,26 @@ describe('StdioLspClient', () => {
     const pending = client.request('workspace/symbol', undefined, 1000);
     const assertion = expect(pending).rejects.toThrow();
     child.stdout.emit('data', Buffer.from('Content-Length: 1\r\n\r\n{'));
+    await assertion;
+    expect(child.killedBy).toBe('SIGTERM');
+  });
+
+  it('terminates the client when an unterminated header exceeds the cap', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const pending = client.request('workspace/symbol', undefined, 1000);
+    const assertion = expect(pending).rejects.toThrow(/header exceeds/);
+    child.stdout.emit('data', Buffer.alloc(LSP_HEADER_BYTES + 1, 65));
+    await assertion;
+    expect(child.killedBy).toBe('SIGTERM');
+  });
+
+  it('terminates the client before buffering an oversized declared frame', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const pending = client.request('workspace/symbol', undefined, 1000);
+    const assertion = expect(pending).rejects.toThrow(/frame exceeds/);
+    child.stdout.emit('data', Buffer.from(`Content-Length: ${LSP_FRAME_BYTES + 1}\r\n\r\n`));
     await assertion;
     expect(child.killedBy).toBe('SIGTERM');
   });

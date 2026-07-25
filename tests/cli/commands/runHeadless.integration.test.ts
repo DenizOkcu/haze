@@ -101,12 +101,12 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     );
   });
 
-  it('returns status complete with an empty result when the model streams no text', async () => {
+  it('returns failed with an empty result when the model streams no authoritative answer', async () => {
     const writes = captureStdout();
     const {runHeadless} = await loadRunHeadless([{type: 'finish', finishReason: 'stop'}]);
     const code = await runHeadless({prompt: 'go', output: 'json'});
-    expect(JSON.parse(writes.join(''))).toMatchObject({status: 'complete', result: ''});
-    expect(code).toBe(0);
+    expect(JSON.parse(writes.join(''))).toMatchObject({status: 'failed', result: ''});
+    expect(code).toBe(1);
   });
 
   it('--output json emits exactly one line (no event stream) — koan parser stays compatible', async () => {

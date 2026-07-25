@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {classifyRequestIntent, isActionRequest, isPlanOnlyRequest, isValidationRequest} from '../../src/core/goal/requestClassifier.js';
-import {completionDecision, looksBlocked, looksIncomplete, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
+import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
 
 describe('requestClassifier', () => {
@@ -42,97 +42,7 @@ describe('SessionGoal', () => {
   });
 });
 
-describe('completionDecision', () => {
-  it('continues action requests after read-only inspection without mutation', () => {
-    const goal = createSessionGoal('add a feature', 1);
-    const decision = completionDecision({
-      request: 'add a feature',
-      goal,
-      assistantText: 'I inspected the files.',
-      sawReadOnlyTool: true,
-      sawToolCall: true,
-      mutatingToolSucceeded: false,
-      validationToolSucceeded: false,
-      validationToolFailed: false,
-      editFileFailed: false,
-    });
-    expect(decision.needsActionContinuation).toBe(true);
-    expect(decision.continuationPrompt).toContain('have not made the requested change');
-  });
-
-  it('continues validation requests until validation runs', () => {
-    const goal = createSessionGoal('run tests', 1);
-    const decision = completionDecision({
-      request: 'run tests',
-      goal,
-      assistantText: 'I will run tests next.',
-      sawReadOnlyTool: false,
-      sawToolCall: false,
-      mutatingToolSucceeded: false,
-      validationToolSucceeded: false,
-      validationToolFailed: false,
-      editFileFailed: false,
-    });
-    expect(decision.needsValidationContinuation).toBe(true);
-  });
-
-  it('continues after validation fails in a changed task', () => {
-    const goal = createSessionGoal('add a feature', 1);
-    const decision = completionDecision({
-      request: 'add a feature',
-      goal,
-      assistantText: 'Tests failed.',
-      sawReadOnlyTool: true,
-      sawToolCall: true,
-      mutatingToolSucceeded: true,
-      validationToolSucceeded: false,
-      validationToolFailed: true,
-      editFileFailed: false,
-    });
-    expect(decision.needsActionContinuation).toBe(true);
-    expect(decision.continuationPrompt).toContain('Validation failed');
-  });
-
-  it('continues changed action requests until validation runs', () => {
-    const goal = createSessionGoal('add a feature', 1);
-    const decision = completionDecision({
-      request: 'add a feature',
-      goal,
-      assistantText: 'Changed src/a.ts.',
-      sawReadOnlyTool: true,
-      sawToolCall: true,
-      mutatingToolSucceeded: true,
-      validationToolSucceeded: false,
-      validationToolFailed: false,
-      editFileFailed: false,
-    });
-    expect(decision.needsValidationContinuation).toBe(true);
-    expect(decision.continuationPrompt).toContain('no validation has run');
-  });
-
-  it('stops validation continuation when the assistant reports a concrete blocker', () => {
-    const goal = createSessionGoal('add a feature', 1);
-    const decision = completionDecision({
-      request: 'add a feature',
-      goal,
-      assistantText: 'Blocked: no practical validation exists for this documentation-only change.',
-      sawReadOnlyTool: true,
-      sawToolCall: true,
-      mutatingToolSucceeded: true,
-      validationToolSucceeded: false,
-      validationToolFailed: false,
-      editFileFailed: false,
-    });
-    expect(decision.needsValidationContinuation).toBe(false);
-    expect(decision.assistantReportsBlocker).toBe(true);
-  });
-
-  it('detects incomplete assistant summaries and blockers', () => {
-    expect(looksIncomplete('Remaining: run validation.')).toBe(true);
-    expect(looksIncomplete('Tool slice reached; next action is writing App.vue.')).toBe(true);
-    expect(looksBlocked('Blocked: missing dependency.')).toBe(true);
-  });
-
+describe('completionPrompts', () => {
   it('uses autonomous-friendly tool slice wording', () => {
     const prompt = toolLoopBudgetPrompt();
     expect(prompt).toMatch(/haze can continue/i);

@@ -12,6 +12,7 @@ describe('subagent internals.toolSummary', () => {
 
   it('returns "<n> matches" when totalMatches is positive', () => {
     expect(internals.toolSummary({totalMatches: 12})).toBe('12 matches');
+    expect(internals.toolSummary({totalMatches: 12, matchCountIsLowerBound: true})).toBe('at least 12 matches');
   });
 
   it('returns "exit <code>" for bash-style outputs', () => {

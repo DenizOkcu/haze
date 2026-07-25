@@ -27,7 +27,7 @@ function skills(...names: Array<string | [string, boolean]>) {
       source: 'global',
     });
   }
-  return {skills: map};
+  return {skills: map, errors: []};
 }
 
 const baseSettings: HazeSettings = {

@@ -108,7 +108,7 @@ export function mcpActionSuggestions(settings: HazeSettings, selectedMcpName: st
   const result: TextInputSuggestion[] = [];
   if (server) {
     result.push({value: server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable, description: `${server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable} this server`, kind: 'mcp' as const});
-    result.push({value: MCP_ACTIONS.setApiKey, description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
+    if (server.transport !== 'stdio') result.push({value: MCP_ACTIONS.setApiKey, description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
   }
   result.push({value: MCP_ACTIONS.removeServer, description: 'remove this server', kind: 'mcp' as const});
   return result;

@@ -1,6 +1,7 @@
 import {findMcpPreset, findMcpServer, toggleMcpServer, upsertMcpServer} from '../../config/mcpSettings.js';
 import type {HazeMcpServer, HazeSettings} from '../../config/settings.js';
 import {COMMON_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, SERVER_CHOICES} from './wizardActions.js';
+import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
 
 export type McpWizardResult = {
   message?: string;
@@ -39,7 +40,10 @@ export function selectMcpActionResult(settings: HazeSettings, selectedName: stri
     const enabled = action === COMMON_ACTIONS.enable;
     return {mode: 'chat', selectedName: undefined, settingsPatch: {mcpServers: toggleMcpServer(settings, selectedName, enabled) ?? []}, message: `MCP server ${selectedName} ${enabled ? 'enabled' : 'disabled'}.`};
   }
-  if (action === MCP_ACTIONS.setApiKey) return {mode: 'mcpSetKey', message: `New API key for ${selectedName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`};
+  if (action === MCP_ACTIONS.setApiKey) {
+    if (server.transport === 'stdio') return {mode: 'chat', selectedName: undefined, message: 'Stdio MCP authentication must be handled by its command or wrapper; HTTP headers do not apply.'};
+    return {mode: 'mcpSetKey', message: `New API key for ${selectedName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`};
+  }
   if (action === MCP_ACTIONS.removeServer) return {mode: 'mcpConfirmRemove', message: `Remove MCP server ${selectedName}? Type "yes" to confirm. Esc to cancel.`};
   return {message: `Unknown MCP action: ${action}`};
 }
@@ -50,10 +54,15 @@ export function finishMcpCustomResult(settings: HazeSettings, draft: Partial<Haz
   if (!name || !transport) return {mode: 'chat', clearDraft: true, message: 'MCP server name and transport are required.'};
   const headers = keyValue?.trim() ? [{name: 'Authorization', value: `Bearer ${keyValue.trim()}`}] : undefined;
   const server: HazeMcpServer = transport === MCP_TRANSPORTS.stdio
-    ? {name, transport, command: draft.command, args: draft.args, ...(headers ? {headers} : {}), enabled: true}
+    ? {name, transport, command: draft.command, args: draft.args, enabled: true}
     : {name, transport, url: draft.url, ...(headers ? {headers} : {}), enabled: true};
   if (transport === MCP_TRANSPORTS.stdio && !server.command) return {mode: 'chat', clearDraft: true, message: 'Command is required for stdio transport.'};
   if (transport !== MCP_TRANSPORTS.stdio && !server.url) return {mode: 'chat', clearDraft: true, message: `URL is required for ${transport} transport.`};
+  if (server.url) {
+    try { assertCredentialedEndpointSecure(server.url, server.headers); } catch (error) {
+      return {mode: 'chat', clearDraft: true, message: error instanceof Error ? error.message : String(error)};
+    }
+  }
   const location = transport === MCP_TRANSPORTS.stdio ? `${server.command}${(server.args ?? []).length ? ` ${(server.args ?? []).join(' ')}` : ''}` : server.url;
   return {mode: 'chat', clearDraft: true, server, settingsPatch: {mcpServers: upsertMcpServer(settings, server)}, message: `Added MCP server ${name} (${transport}, ${location}). Tools load on the next turn.`};
 }
@@ -62,9 +71,15 @@ export function setMcpServerKeyResult(settings: HazeSettings, selectedName: stri
   if (!selectedName) return {mode: 'mcp'};
   const server = findMcpServer(settings, selectedName);
   if (!server) return {mode: 'chat', selectedName: undefined, message: `MCP server ${selectedName} not found.`};
+  if (server.transport === 'stdio') return {mode: 'chat', selectedName: undefined, message: 'Stdio MCP authentication must be handled by its command or wrapper.'};
   const key = keyValue.trim();
   if (!key) return {message: 'API key cannot be empty. Esc to cancel.'};
   const headers = (server.headers ?? []).filter(header => header.name !== 'Authorization');
   headers.push({name: 'Authorization', value: `Bearer ${key}`});
+  if (server.url) {
+    try { assertCredentialedEndpointSecure(server.url, headers); } catch (error) {
+      return {mode: 'chat', selectedName: undefined, message: error instanceof Error ? error.message : String(error)};
+    }
+  }
   return {mode: 'chat', selectedName: undefined, settingsPatch: {mcpServers: upsertMcpServer(settings, {...server, headers})}, message: `API key updated for ${server.name}.`};
 }

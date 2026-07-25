@@ -128,17 +128,8 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   let usage: TokenUsage = {...EMPTY_TOKEN_USAGE};
   let log: LlmLog | undefined;
   if (options.debug) log = await createLog();
-  let emittedTurnStart = false;
   const emitStreamEvent = options.output === 'stream-json'
     ? (event: AgentEvent) => {
-        // runAgentTurn emits nested turn_start/turn_end pairs for retries; expose one clean
-        // headless turn and emit the authoritative turn_end after the run settles.
-        if (event.type === 'turn_start') {
-          if (emittedTurnStart) return;
-          emittedTurnStart = true;
-        } else if (event.type === 'turn_end') {
-          return;
-        }
         const headlessEvent = toHeadlessStreamEvent(event);
         if (headlessEvent) writeNdjson(headlessEvent);
       }
@@ -174,6 +165,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
 
   let status: TurnStatus;
   let result: string;
+  let persistenceError: string | undefined;
   try {
     ({status} = await runAgentTurn(options.prompt, options.prompt, contextFiles, callbacks, 0, false, false, session, options.modelOverride));
     result = segments.filter((s) => !s.hidden && s.text).map((s) => s.text).join('\n');
@@ -181,12 +173,14 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     status = 'failed';
     result = error instanceof Error ? error.message : String(error);
   } finally {
-    if (log) await endLog(log).catch(() => undefined);
+    if (log) await endLog(log).catch(error => {
+      persistenceError = error instanceof Error ? error.message : String(error);
+    });
   }
+  if (persistenceError) process.stderr.write(`haze persistence warning: ${persistenceError}\n`);
 
   if (options.output === 'json' || options.output === 'stream-json') {
-    if (options.output === 'stream-json') writeNdjson({type: 'turn_end', request: options.prompt, status, at: new Date().toISOString()});
-    // For stream-json the agent events have already streamed above; this is the terminal line.
+    // For stream-json the authoritative agent events have already streamed above; this is the terminal line.
     // It is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
     writeNdjson({type: 'result', status, result, usage: pinnedUsage(usage)});
   } else if (status === 'complete') {

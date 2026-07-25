@@ -1,6 +1,6 @@
 # src/cli/commands/streaming/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Helpers for `src/cli/commands/streaming.ts`.
 
@@ -12,6 +12,7 @@ This subtree keeps the main agent loop readable by isolating display, accounting
 - `toolGroupRenderer.ts` groups native tool calls/results into compact UI messages and emits events/log entries.
 - `toolResultState.ts` tracks mutating tool success/failure and edit-recovery state.
 - `turnRuntime.ts` contains token/usage extraction, retry delays, context-file memory, abortable delay, and response metrics helpers.
+- `turnOutcome.ts` is the authoritative terminal turn-status function (`complete`/`aborted`/`failed`) derived from runtime facts (abort, error, last tool `ok`, finish reason, step/tool budgets, substantive final text). `runAgentTurn` calls it once per turn; do not duplicate status inference elsewhere.
 
 ## Contracts
 
@@ -35,3 +36,4 @@ Use/update:
 - `tests/cli/toolGroupCaption.test.ts`
 - `tests/cli/toolResultState.test.ts`
 - `tests/cli/turnRuntime.test.ts`
+- `tests/cli/turnOutcome.test.ts`

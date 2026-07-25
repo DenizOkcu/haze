@@ -59,5 +59,5 @@ export function captureMcpTransport(value: string): FieldCaptureResult {
 export function captureMcpCommand(value: string): FieldCaptureResult {
   const parts = commandParts(value);
   if (parts.length === 0) return {message: 'Command is required.'};
-  return {draft: {command: parts[0], args: parts.slice(1)}, nextMode: 'mcpAddKey', systemMessage: 'Optional API key or auth header value? (Leave blank to skip — Enter works.) Sent as Authorization: Bearer <value>.'};
+  return {draft: {command: parts[0], args: parts.slice(1)}, nextMode: 'chat', systemMessage: 'Stdio MCP authentication must be handled by the command or wrapper; HTTP headers do not apply.'};
 }

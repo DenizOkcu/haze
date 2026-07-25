@@ -1,27 +1,44 @@
 import crypto from 'node:crypto';
+import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../limits/byteBudgets.js';
 
 export interface StoredToolOutputPage {
   handle: string;
   offset: number;
   nextOffset?: number;
   totalChars: number;
+  totalBytes: number;
+  retainedBytes: number;
+  omittedBytes: number;
   content: string;
   truncated: boolean;
   query?: string;
   matches?: number;
 }
 
-const outputs = new Map<string, string>();
+const outputs = new Map<string, {content: string; bytes: number; originalBytes: number}>();
 const MAX_STORED_OUTPUTS = 100;
+let storedBytes = 0;
+
+function utf8Prefix(content: string, maxBytes: number) {
+  const bytes = Buffer.from(content, 'utf8');
+  if (bytes.length <= maxBytes) return content;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.subarray(0, end).toString('utf8');
+}
 
 export function storeToolOutput(content: string) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
-  outputs.set(handle, content);
-  // Synchronous, so the check+delete is atomic across async callers — no race.
-  // Each call inserts exactly one entry, so a single eviction restores the cap.
-  if (outputs.size > MAX_STORED_OUTPUTS) {
+  const originalBytes = Buffer.byteLength(content, 'utf8');
+  const retained = utf8Prefix(content, TOOL_OUTPUT_ENTRY_BYTES);
+  const bytes = Buffer.byteLength(retained, 'utf8');
+  outputs.set(handle, {content: retained, bytes, originalBytes});
+  storedBytes += bytes;
+  while (outputs.size > MAX_STORED_OUTPUTS || storedBytes > TOOL_OUTPUT_TOTAL_BYTES) {
     const oldest = outputs.keys().next().value;
-    if (oldest) outputs.delete(oldest);
+    if (!oldest) break;
+    storedBytes -= outputs.get(oldest)?.bytes ?? 0;
+    outputs.delete(oldest);
   }
   return handle;
 }
@@ -30,7 +47,7 @@ function escapeRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function searchOutput(output: string, query: string, limit: number, contextLines = 2): StoredToolOutputPage {
+function searchOutput(output: string, query: string, limit: number, contextLines = 2): Omit<StoredToolOutputPage, 'handle' | 'totalBytes' | 'retainedBytes' | 'omittedBytes'> {
   const pattern = new RegExp(escapeRegex(query), 'i');
   const lines = output.split(/\r?\n/);
   const ranges: Array<{start: number; end: number}> = [];
@@ -48,15 +65,17 @@ function searchOutput(output: string, query: string, limit: number, contextLines
     for (let index = range.start; index <= range.end; index++) chunks.push(`${index + 1}: ${lines[index] ?? ''}`);
   }
   const content = chunks.join('\n');
-  return {handle: '', offset: 0, totalChars: output.length, content: content.slice(0, limit), truncated: content.length > limit, query, matches: ranges.length};
+  return {offset: 0, totalChars: output.length, content: content.slice(0, limit), truncated: content.length > limit, query, matches: ranges.length};
 }
 
 export function readToolOutput(handle: string, offset = 0, limit = 12_000, options?: {query?: string; contextLines?: number}): StoredToolOutputPage | undefined {
-  const output = outputs.get(handle);
-  if (output == null) return undefined;
+  const stored = outputs.get(handle);
+  if (stored == null) return undefined;
+  const output = stored.content;
   if (options?.query?.trim()) {
     const result = searchOutput(output, options.query.trim(), limit, options.contextLines);
-    return {...result, handle};
+    const omittedBytes = stored.originalBytes - stored.bytes;
+    return {...result, handle, truncated: result.truncated || omittedBytes > 0, totalBytes: stored.originalBytes, retainedBytes: stored.bytes, omittedBytes};
   }
   const safeOffset = Math.min(Math.max(0, offset), output.length);
   const content = output.slice(safeOffset, safeOffset + limit);
@@ -66,11 +85,15 @@ export function readToolOutput(handle: string, offset = 0, limit = 12_000, optio
     offset: safeOffset,
     ...(nextOffset == null ? {} : {nextOffset}),
     totalChars: output.length,
+    totalBytes: stored.originalBytes,
+    retainedBytes: stored.bytes,
+    omittedBytes: stored.originalBytes - stored.bytes,
     content,
-    truncated: nextOffset != null,
+    truncated: nextOffset != null || stored.originalBytes > stored.bytes,
   };
 }
 
 export function clearToolOutputs() {
   outputs.clear();
+  storedBytes = 0;
 }

@@ -3,6 +3,10 @@ import fs from 'fs-extra';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {ModelMessage} from 'ai';
 import type {ContextBreakdown} from '../agent/contextBudget.js';
+import {appendPrivateFile, ensurePrivateFile, ensurePrivateDir, tightenPrivateFile} from '../../config/privateStorage.js';
+import {OrderedFileWriter} from '../persistence/orderedFileWriter.js';
+import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
+import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export interface LlmLogEntry {
   /** ISO timestamp. */
@@ -70,20 +74,26 @@ function logFilePath(id: string) {
 export interface LlmLog {
   id: string;
   file: string;
+  writer?: OrderedFileWriter<LlmLogEntry>;
 }
 
 
 export async function createLog(): Promise<LlmLog> {
-  await fs.ensureDir(LOGS_DIR);
+  await ensurePrivateDir(LOGS_DIR);
   const id = logFileId();
   const file = logFilePath(id);
-  await fs.writeFile(file, '');
-  return {id, file};
+  await ensurePrivateFile(file);
+  const log: LlmLog = {id, file};
+  log.writer = new OrderedFileWriter(entry => appendPrivateFile(file, `${JSON.stringify(entry)}\n`));
+  return log;
 }
 
 export async function appendLogEntry(log: LlmLog, entry: LlmLogEntry): Promise<void> {
-  const line = JSON.stringify(entry) + '\n';
-  await fs.appendFile(log.file, line);
+  if (log.writer) {
+    await log.writer.append(entry);
+    return;
+  }
+  await appendPrivateFile(log.file, `${JSON.stringify(entry)}\n`);
 }
 
 export async function endLog(log: LlmLog): Promise<void> {
@@ -94,10 +104,11 @@ export async function endLog(log: LlmLog): Promise<void> {
     finishReason: 'log-ended',
   };
   await appendLogEntry(log, entry);
+  await log.writer?.close();
 }
 
 export async function listLogs(): Promise<Array<{id: string; file: string; size: number; modified: string}>> {
-  await fs.ensureDir(LOGS_DIR);
+  await ensurePrivateDir(LOGS_DIR);
   const files = await fs.readdir(LOGS_DIR);
   const logs: Array<{id: string; file: string; size: number; modified: string}> = [];
   for (const name of files) {
@@ -111,12 +122,42 @@ export async function listLogs(): Promise<Array<{id: string; file: string; size:
 
 export async function readLogEntries(id: string): Promise<LlmLogEntry[]> {
   const file = logFilePath(id);
-  const raw = await fs.readFile(file, 'utf8').catch(() => '');
-  return raw.split('\n').filter(Boolean).flatMap(line => {
-    try {
-      return [JSON.parse(line) as LlmLogEntry];
-    } catch {
-      return [];
+  const entries: LlmLogEntry[] = [];
+  try {
+    await tightenPrivateFile(file);
+    for await (const {line, oversized} of iterateBoundedUtf8Lines(file, JSONL_LINE_BYTES)) {
+      if (!line || oversized) continue;
+      try { entries.push(JSON.parse(line) as LlmLogEntry); } catch { /* isolate malformed lines */ }
     }
-  });
+  } catch { return []; }
+  return entries;
+}
+
+export interface LlmLogSummary {
+  entries: number;
+  typeCounts: Record<string, number>;
+  totalInput: number;
+  totalOutput: number;
+  toolCallCounts: Record<string, number>;
+}
+
+export async function summarizeLog(id: string): Promise<LlmLogSummary | undefined> {
+  const file = logFilePath(id);
+  const summary: LlmLogSummary = {entries: 0, typeCounts: {}, totalInput: 0, totalOutput: 0, toolCallCounts: {}};
+  try {
+    await tightenPrivateFile(file);
+    for await (const {line, oversized} of iterateBoundedUtf8Lines(file, JSONL_LINE_BYTES)) {
+      if (!line || oversized) continue;
+      let entry: LlmLogEntry;
+      try { entry = JSON.parse(line) as LlmLogEntry; } catch { continue; }
+      summary.entries++;
+      summary.typeCounts[entry.type] = (summary.typeCounts[entry.type] ?? 0) + 1;
+      summary.totalInput += entry.usage?.inputTokens ?? 0;
+      summary.totalOutput += entry.usage?.outputTokens ?? 0;
+      if (entry.type === 'tool_call' && entry.toolCall) {
+        summary.toolCallCounts[entry.toolCall.name] = (summary.toolCallCounts[entry.toolCall.name] ?? 0) + 1;
+      }
+    }
+  } catch { return undefined; }
+  return summary.entries > 0 ? summary : undefined;
 }

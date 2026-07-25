@@ -19,6 +19,12 @@ export interface LoadedSkill {
   source: 'global';
 }
 
+export interface SkillRegistryError {
+  directory: string;
+  message: string;
+}
+
 export interface SkillRegistry {
   skills: Map<string, LoadedSkill>;
+  errors: SkillRegistryError[];
 }

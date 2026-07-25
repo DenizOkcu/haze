@@ -1,12 +1,13 @@
 # src/core/session/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Durable session storage.
 
 ## Storage contract
 
 - Sessions are JSONL files under `~/.haze/sessions/<cwd-hash>/<session-id>.jsonl` unless tests/CLI options pass another directory.
+- Session files and their parent directories use private POSIX permissions (`0600`/`0700`) via `config/privateStorage.ts`. Writes are ordered and flushable: callers preserve append invocation order and `flush()` at turn end, session switch, and shutdown, surfacing one concise persistence warning on failure rather than swallowing it.
 - Each non-empty line is one `SessionEntry` JSON object.
 - Session IDs are timestamp-derived and filenames end with `.jsonl`.
 - Workspace separation uses a hash of resolved cwd.

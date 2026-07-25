@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 
@@ -21,6 +21,10 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.
 - `toolOutput/` — shared token/char reduction metrics.
+- `process/` — bounded subprocess primitive (byte-bounded stdout/stderr, timeout, abort, process-tree termination) used by `bash` and `grep`.
+- `io/` — bounded UTF-8 stream readers (line iteration, paged reads, byte-prefix reads) that cap work performed, not just returned text.
+- `limits/` — centralized byte budgets referenced by every collector/reader/storage module.
+- `persistence/` — ordered, flushable append writers backing sessions and debug logs.
 
 ## Contracts
 

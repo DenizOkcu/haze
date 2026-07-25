@@ -1583,14 +1583,14 @@
                 <span class="comp-name">grep</span>
                 <span class="comp-part">HAZE-R-003</span>
               </div>
-              <p class="comp-desc">Bundled ripgrep search with a true global result cap.</p>
+              <p class="comp-desc">Bundled ripgrep search with a true global result cap and explicit ignored-path override.</p>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
                 <span class="comp-name">readToolOutput</span>
                 <span class="comp-part">HAZE-R-004</span>
               </div>
-              <p class="comp-desc">Retrieve paged output omitted from oversized bash, grep, and fetch results.</p>
+              <p class="comp-desc">Retrieve paged retained output omitted from oversized results, within bounded memory budgets.</p>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
@@ -1702,7 +1702,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Bring your<br>own model.</h2>
-          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys via <code class="cmd">/provider</code> and <code class="cmd">/model</code> inside haze — not environment variables. Your key, your bill.</p>
+          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys via <code class="cmd">/provider</code> and <code class="cmd">/model</code> inside haze — not environment variables. Credentialed remote endpoints require HTTPS; loopback HTTP remains supported. Your key, your bill.</p>
         </div>
         <table class="compat-table reveal" aria-label="Supported providers">
           <thead>
@@ -1733,7 +1733,7 @@
       <div class="container reveal">
         <div class="eyebrow-stamp">§06 · INSTALL</div>
         <h2 class="install-mark">Install <span class="em">haze</span>.</h2>
-        <p class="install-sub">MIT-licensed. Open source. No contact-sales button. Detailed LLM logs are off by default and only written with <code class="cmd">haze --debug</code>. Provider settings live in <code class="cmd">~/.haze/settings.json</code>, not environment variables.</p>
+        <p class="install-sub">MIT-licensed. Open source. No contact-sales button. Detailed LLM logs are off by default and only written with <code class="cmd">haze --debug</code>. Provider settings live in <code class="cmd">~/.haze/settings.json</code>, not environment variables, with private POSIX permissions.</p>
         <div class="install-cmd">
           <code><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
           <button id="copy-btn-cta" type="button" aria-label="Copy install command">Copy</button>

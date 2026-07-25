@@ -1,6 +1,6 @@
 # src/core/agent/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Agent request assembly, compaction, budgets, events, work state, and tool-result helpers.
 
@@ -15,7 +15,7 @@ Maintainability focus:
 - `requestAssembly.ts` handles synthetic controls and active-conversation tool-history compaction. Synthetic `<haze_control>` messages are one-request nudges and must not be persisted as durable user conversation.
 - `compaction.ts` compacts model messages with token budgets and embeds structured work state. It must preserve recent messages and enough task/tool context to continue safely.
 - `toolResults.ts` contains guards and field helpers used by CLI, tool context, and request assembly. Keep guards tolerant of unknown provider/tool output shapes.
-- `toolOutputStore.ts` stores process-scoped raw/reduced output handles. Handles are not durable session references and should be cleared for new sessions.
+- `toolOutputStore.ts` stores process-scoped raw/reduced output handles with per-entry (`TOOL_OUTPUT_ENTRY_BYTES`) and aggregate (`TOOL_OUTPUT_TOTAL_BYTES`) byte budgets and LRU eviction. Handles are not durable session references, should be cleared for new sessions, and report omitted bytes truthfully when collection overflow is dropped.
 - `events.ts` defines structured agent events for sessions/headless/UI. Additive changes are preferred.
 - `workState.ts` defines structured work state included in compaction/session snapshots.
 

@@ -19,11 +19,17 @@ export function workspaceRelativePath(absolutePath: string) {
   return path.relative(workspaceRoot(), absolutePath) || '.';
 }
 
-function assertPathInsideRoot(root: string, candidate: string, inputPath: string) {
+export function assertPathInsideRoot(root: string, candidate: string, inputPath: string, label = 'workspace') {
   const relative = path.relative(root, candidate);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Path is outside the workspace: ${inputPath}`);
+    throw new Error(`Path is outside the ${label}: ${inputPath}`);
   }
+}
+
+export async function assertRealPathInsideRoot(root: string, candidate: string, inputPath = candidate, label = 'root'): Promise<string> {
+  const [realRoot, realCandidate] = await Promise.all([fs.realpath(root), fs.realpath(candidate)]);
+  assertPathInsideRoot(realRoot, realCandidate, inputPath, label);
+  return realCandidate;
 }
 
 export async function assertRealPathInsideWorkspace(absolutePath: string, inputPath = absolutePath): Promise<void> {
@@ -31,7 +37,7 @@ export async function assertRealPathInsideWorkspace(absolutePath: string, inputP
     fs.realpath(workspaceRoot()),
     fs.realpath(absolutePath),
   ]);
-  assertPathInsideRoot(realRoot, realPath, inputPath);
+  assertPathInsideRoot(realRoot, realPath, inputPath, 'workspace');
 }
 
 async function nearestExistingPath(absolutePath: string): Promise<string> {
@@ -56,5 +62,5 @@ export async function assertWritablePathInsideWorkspace(absolutePath: string, in
     nearestExistingPath(absolutePath),
   ]);
   const realExisting = await fs.realpath(existing);
-  assertPathInsideRoot(realRoot, realExisting, inputPath);
+  assertPathInsideRoot(realRoot, realExisting, inputPath, 'workspace');
 }

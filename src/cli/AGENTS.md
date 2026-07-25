@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 CLI and terminal UI orchestration instructions.
 
@@ -10,8 +10,8 @@ CLI and terminal UI orchestration instructions.
 - `commands/chat.tsx` owns the interactive Ink screen, session lifecycle, slash command wiring, mode/picker state, input history, context refresh/signature tracking, tasks display, token display, abort handling, and debug logging.
 - `commands/runCommand.ts` is the non-interactive/headless path; keep behavior aligned with interactive turns where practical.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
-- `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, and `wizardSuggestions.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests.
-- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`.
+- `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, `wizardSuggestions.ts`, and `wizardTransition.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests. `wizardTransition.ts` holds the pure typed field-transition/effect functions for provider and MCP flows; prefer extending it over adding more inline branching in `chat.tsx`.
+- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`. Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
 
 ## UI state rules
 

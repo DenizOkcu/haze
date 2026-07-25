@@ -24,4 +24,11 @@ describe('mcp wizard helpers', () => {
     expect(finishMcpCustomResult({}, {name: 'local', transport: 'stdio', command: 'node', args: ['x.js']}).server).toMatchObject({name: 'local', command: 'node'});
     expect(finishMcpCustomResult({}, {name: 'bad', transport: 'stdio'})).toMatchObject({mode: 'chat', message: 'Command is required for stdio transport.'});
   });
+
+  it('rejects adding a key to a remote plaintext server', () => {
+    const insecure = {mcpServers: [{name: 'remote', transport: 'http' as const, url: 'http://example.com/mcp'}]};
+    const result = setMcpServerKeyResult(insecure, 'remote', 'secret');
+    expect(result.settingsPatch).toBeUndefined();
+    expect(result.message).toContain('plaintext HTTP');
+  });
 });

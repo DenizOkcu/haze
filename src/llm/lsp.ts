@@ -1,9 +1,11 @@
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import type {HazeLspServer} from '../config/lspSettings.js';
-import {resolveWorkspacePath, workspaceRelativePath, workspaceRoot} from '../utils/path.js';
+import {assertRealPathInsideWorkspace, workspaceRelativePath, workspaceRoot} from '../utils/path.js';
+import {prepareWorkspaceRead} from './tools/workspaceFile.js';
+import {LSP_BUFFER_BYTES, LSP_DOCUMENT_BYTES, LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../core/limits/byteBudgets.js';
+import {readUtf8Prefix} from '../core/io/boundedRead.js';
 
 type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
 type JsonObject = {[key: string]: Json | undefined};
@@ -32,9 +34,9 @@ export function toUri(absolutePath: string) {
   return pathToFileURL(absolutePath).toString();
 }
 
-export function fromUri(uri: string) {
+export function fromUri(uri: string): string {
   if (!uri.startsWith('file://')) return uri;
-  return workspaceRelativePath(new URL(uri).pathname);
+  try { return workspaceRelativePath(fileURLToPath(uri)); } catch { return uri; }
 }
 
 export function isObject(value: unknown): value is Record<string, unknown> {
@@ -56,7 +58,24 @@ export function locationToResult(value: unknown) {
   const uri = typeof value.uri === 'string' ? value.uri : (typeof value.targetUri === 'string' ? value.targetUri : undefined);
   const range = asRange(value.range ?? value.targetSelectionRange ?? value.targetRange);
   if (!uri || !range) return undefined;
-  return {path: fromUri(uri), range};
+  const resultPath = fromUri(uri);
+  const external = !uri.startsWith('file://') || resultPath.startsWith('..') || path.isAbsolute(resultPath);
+  return {path: resultPath, range, ...(external ? {external: true} : {})};
+}
+
+export async function locationToWorkspaceResult(value: unknown) {
+  const result = locationToResult(value);
+  if (!result || result.external) return result;
+  if (!isObject(value)) return undefined;
+  const uri = typeof value.uri === 'string' ? value.uri : (typeof value.targetUri === 'string' ? value.targetUri : undefined);
+  if (!uri?.startsWith('file://')) return result;
+  try {
+    const absolutePath = fileURLToPath(uri);
+    await assertRealPathInsideWorkspace(absolutePath, uri);
+    return result;
+  } catch {
+    return {...result, path: uri, external: true as const};
+  }
 }
 
 export function flattenSymbols(symbols: unknown[], filePath: string, limit: number) {
@@ -120,14 +139,20 @@ export class StdioLspClient {
   }
 
   private onData(chunk: Buffer) {
+    if (this.buffer.length + chunk.length > LSP_BUFFER_BYTES) throw new LspError(`LSP receive buffer exceeds ${LSP_BUFFER_BYTES} bytes.`);
     this.buffer = Buffer.concat([this.buffer, chunk]);
     while (true) {
       const headerEnd = this.buffer.indexOf('\r\n\r\n');
-      if (headerEnd === -1) return;
+      if (headerEnd === -1) {
+        if (this.buffer.length > LSP_HEADER_BYTES) throw new LspError(`LSP header exceeds ${LSP_HEADER_BYTES} bytes.`);
+        return;
+      }
+      if (headerEnd > LSP_HEADER_BYTES) throw new LspError(`LSP header exceeds ${LSP_HEADER_BYTES} bytes.`);
       const header = this.buffer.slice(0, headerEnd).toString('utf8');
       const match = /Content-Length: (\d+)/i.exec(header);
       if (!match) throw new LspError('Malformed LSP response: missing Content-Length.');
       const length = Number(match[1]);
+      if (!Number.isSafeInteger(length) || length < 0 || length > LSP_FRAME_BYTES) throw new LspError(`LSP frame exceeds ${LSP_FRAME_BYTES} bytes.`);
       const bodyStart = headerEnd + 4;
       if (this.buffer.length < bodyStart + length) return;
       const raw = this.buffer.slice(bodyStart, bodyStart + length).toString('utf8');
@@ -181,7 +206,9 @@ export class StdioLspClient {
   }
 
   async openDocument(absolutePath: string) {
-    const text = await fs.readFile(absolutePath, 'utf8');
+    const document = await readUtf8Prefix(absolutePath, LSP_DOCUMENT_BYTES);
+    if (document.truncated) throw new LspError(`LSP document exceeds ${LSP_DOCUMENT_BYTES} byte limit.`);
+    const text = document.content;
     this.notify('textDocument/didOpen', {
       textDocument: {uri: toUri(absolutePath), languageId: languageId(absolutePath), version: 1, text},
     });
@@ -198,7 +225,7 @@ export class StdioLspClient {
 }
 
 async function withLsp<T>(server: HazeLspServer, filePath: string, fn: (client: StdioLspClient, absolutePath: string) => Promise<T>) {
-  const absolutePath = resolveWorkspacePath(filePath);
+  const absolutePath = await prepareWorkspaceRead(filePath, false);
   const client = StdioLspClient.start(server);
   try {
     await client.initialize();
@@ -221,7 +248,7 @@ export async function lspDefinition(server: HazeLspServer, filePath: string, lin
   return await withLsp(server, filePath, async (client, absolutePath) => {
     const result = await client.request('textDocument/definition', {textDocument: {uri: toUri(absolutePath)}, position: {line: line - 1, character: character - 1}});
     const values = Array.isArray(result) ? result : result ? [result] : [];
-    return values.map(locationToResult).filter(result => result != null).slice(0, limit);
+    return (await Promise.all(values.map(locationToWorkspaceResult))).filter(result => result != null).slice(0, limit);
   });
 }
 
@@ -229,7 +256,7 @@ export async function lspReferences(server: HazeLspServer, filePath: string, lin
   return await withLsp(server, filePath, async (client, absolutePath) => {
     const result = await client.request('textDocument/references', {textDocument: {uri: toUri(absolutePath)}, position: {line: line - 1, character: character - 1}, context: {includeDeclaration: true}});
     const values = Array.isArray(result) ? result : [];
-    return values.map(locationToResult).filter(result => result != null).slice(0, limit);
+    return (await Promise.all(values.map(locationToWorkspaceResult))).filter(result => result != null).slice(0, limit);
   });
 }
 
@@ -239,11 +266,13 @@ export async function lspWorkspaceSymbols(server: HazeLspServer, query: string, 
     await client.initialize();
     const result = await client.request('workspace/symbol', {query});
     const values = Array.isArray(result) ? result : [];
-    return values.flatMap(value => {
+    const locations = await Promise.all(values.map(async value => {
       if (!isObject(value) || typeof value.name !== 'string') return [];
-      const location = locationToResult(value.location);
+      const location = await locationToWorkspaceResult(value.location);
+      if (!location) return [];
       return [{name: value.name, kind: typeof value.kind === 'number' ? value.kind : undefined, ...location}];
-    }).slice(0, limit);
+    }));
+    return locations.flat().slice(0, limit);
   } finally {
     await client.close();
   }

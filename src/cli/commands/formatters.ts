@@ -49,12 +49,12 @@ export function toolCallSummary(toolName: string, input: unknown) {
 }
 
 export function toolResultSummary(event: {success: boolean; output?: unknown; error?: unknown}) {
-  if (!event.success) return `failed: ${compact(event.error)}`;
   const output = event.output as Record<string, unknown> | undefined;
+  if (!event.success) return `failed: ${compact(event.error ?? output?.error ?? event.output)}`;
   if (output?.duplicateSkipped === true) return 'skipped duplicate';
   if (typeof output?.totalMatches === 'number') {
     const count = output.totalMatches as number;
-    return count === 0 ? 'no matches' : `${count} match${count === 1 ? '' : 'es'}`;
+    return count === 0 ? 'no matches' : `${output.matchCountIsLowerBound === true ? 'at least ' : ''}${count} match${count === 1 ? '' : 'es'}`;
   }
   if (typeof output?.validationSummary === 'object' && output.validationSummary != null && 'summaryText' in output.validationSummary) {
     const summary = output.validationSummary as {summaryText?: unknown; suggestedNextStep?: unknown};

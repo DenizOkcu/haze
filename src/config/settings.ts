@@ -2,6 +2,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
+import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 export interface HazeProviderSettings {
   name: string;
@@ -110,6 +111,7 @@ function settingsReadError(error: unknown): Error {
 
 export async function readSettings(): Promise<HazeSettings> {
   try {
+    if (await fs.pathExists(SETTINGS_FILE)) await tightenPrivateFile(SETTINGS_FILE);
     const raw = await fs.readJson(SETTINGS_FILE);
     return settingsSchema.parse(raw) as HazeSettings;
   } catch (error) {
@@ -120,11 +122,8 @@ export async function readSettings(): Promise<HazeSettings> {
 }
 
 export async function writeSettings(settings: HazeSettings): Promise<void> {
-  await fs.ensureDir(HAZE_DIR);
   const parsed = settingsSchema.parse(settings) as HazeSettings;
-  const tempFile = `${SETTINGS_FILE}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeJson(tempFile, parsed, {spaces: 2});
-  await fs.move(tempFile, SETTINGS_FILE, {overwrite: true});
+  await writePrivateJsonAtomic(SETTINGS_FILE, parsed);
 }
 
 export async function updateSettings(patch: HazeSettings): Promise<HazeSettings> {

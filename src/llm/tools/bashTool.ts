@@ -1,4 +1,3 @@
-import {spawn} from 'node:child_process';
 import {tool} from 'ai';
 import {z} from 'zod';
 import {classifyBashCommand, isValidationClassification} from '../../core/safety/bashClassifier.js';
@@ -8,6 +7,8 @@ import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
+import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
+import {BASH_STREAM_BYTES} from '../../core/limits/byteBudgets.js';
 
 const SHORT_VALIDATION_CHARS = 2_000;
 
@@ -24,61 +25,22 @@ export const bashTool = tool({
     const classification = classifyBashCommand(command);
     const timeoutMs = (timeoutSeconds ?? 60) * 1000;
     const startedAt = Date.now();
-    return await new Promise(resolve => {
-      const child = spawn('bash', ['-lc', command], {cwd, stdio: ['ignore', 'pipe', 'pipe']});
-      let stdout = '';
-      let stderr = '';
-      let settled = false;
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          timedOut = true;
-          child.kill('SIGTERM');
-        }
-      }, timeoutMs);
-      const abort = () => child.kill('SIGTERM');
-      context.abortSignal?.addEventListener('abort', abort, {once: true});
-      child.stdout.on('data', data => stdout += data.toString());
-      child.stderr.on('data', data => stderr += data.toString());
-      child.on('close', code => {
-        settled = true;
-        clearTimeout(timer);
-        context.abortSignal?.removeEventListener('abort', abort);
-        const validationSummary = isValidationClassification(classification)
-          ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: stdout.length > COMPACT_COMMAND_CHARS, stderrTruncated: stderr.length > COMPACT_COMMAND_CHARS, classification})
-          : undefined;
-        const validationPassed = validationSummary?.status === 'passed';
-        const output = filterBashOutput({
-          command,
-          code,
-          stdout,
-          stderr,
-          timedOut,
-          classification,
-          validationSummary,
-          storeRawOutput: storeToolOutput,
-          fallbackCompact: compactStoredOutput,
-          compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS,
-        });
-        resolve({
-          ok: code === 0 && !timedOut,
-          code,
-          command,
-          cwd,
-          classification,
-          durationMs: Date.now() - startedAt,
-          timedOut,
-          stdout: output.stdout,
-          stderr: output.stderr,
-          validationSummary,
-        });
-      });
-      child.on('error', error => {
-        settled = true;
-        clearTimeout(timer);
-        context.abortSignal?.removeEventListener('abort', abort);
-        resolve({ok: false, command, cwd, classification, durationMs: Date.now() - startedAt, error: error.message});
-      });
-    });
+    const processResult = await runBoundedProcess({command: 'bash', args: ['-lc', command], cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: BASH_STREAM_BYTES, maxStderrBytes: BASH_STREAM_BYTES});
+    const {code, timedOut} = processResult;
+    const stdout = processResult.stdout.text;
+    const stderr = processResult.stderr.text;
+    const validationSummary = isValidationClassification(classification)
+      ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: processResult.stdout.omittedBytes > 0, stderrTruncated: processResult.stderr.omittedBytes > 0, classification})
+      : undefined;
+    const validationPassed = validationSummary?.status === 'passed';
+    const output = filterBashOutput({command, code, stdout, stderr, timedOut, classification, validationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
+    return {
+      ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
+      code, command, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
+      aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
+      stdout: output.stdout, stderr: output.stderr, validationSummary,
+      stdoutBytes: processResult.stdout, stderrBytes: processResult.stderr,
+      ...(processResult.error ? {error: processResult.error} : {}),
+    };
   }),
 });

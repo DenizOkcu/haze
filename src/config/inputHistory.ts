@@ -1,6 +1,7 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 import {HAZE_DIR} from './paths.js';
+import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 const HISTORY_DIR = path.join(HAZE_DIR, 'history');
 export const INPUT_HISTORY_FILE = path.join(HISTORY_DIR, 'input-history.json');
@@ -15,6 +16,7 @@ function normalizeHistory(value: unknown): string[] {
 
 export async function readInputHistory(): Promise<string[]> {
   if (DISABLE_PERSISTENT_HISTORY) return testHistory.slice(-MAX_HISTORY_ITEMS);
+  if (await fs.pathExists(INPUT_HISTORY_FILE)) await tightenPrivateFile(INPUT_HISTORY_FILE);
   const data = await fs.readJson(INPUT_HISTORY_FILE).catch(() => []);
   return normalizeHistory(data).slice(-MAX_HISTORY_ITEMS);
 }
@@ -25,8 +27,7 @@ export async function writeInputHistory(history: string[]): Promise<void> {
     testHistory = normalized;
     return;
   }
-  await fs.ensureDir(HISTORY_DIR);
-  await fs.writeJson(INPUT_HISTORY_FILE, normalized, {spaces: 2});
+  await writePrivateJsonAtomic(INPUT_HISTORY_FILE, normalized);
 }
 
 export async function addInputHistoryItem(item: string): Promise<string[]> {

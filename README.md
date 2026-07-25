@@ -78,9 +78,9 @@ Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) 
 # add server -> custom -> name -> stdio -> cmd (custom local)
 ```
 
-API keys are entered in a masked prompt and sent as `Authorization: Bearer <value>`. Servers persist in `~/.haze/settings.json` under `mcpServers` and support `http`, `sse`, and `stdio` transports. Their tools load at the start of each agent turn and the connections close when the turn ends. An unreachable server is isolated and never blocks the agent, and MCP tools never shadow built-in tools.
+API keys for HTTP/SSE servers are entered in a masked prompt and sent as `Authorization: Bearer <value>`. Stdio authentication belongs in the command or wrapper; haze does not attach HTTP headers to stdio. Servers persist in `~/.haze/settings.json` under `mcpServers`. Discovery and cleanup have bounded deadlines, failures are isolated, and MCP tools never shadow built-ins.
 
-Saved settings live in `~/.haze/settings.json`. Providers can include API keys, base URLs, and model lists; local OpenAI-compatible providers can be configured without a key. Use `/provider`, `/model`, and `/settings` to configure everything from inside haze — there are no environment variables to set.
+Saved settings live in `~/.haze/settings.json`. Provider keys and MCP headers require HTTPS unless the endpoint is loopback HTTP (`localhost`, `*.localhost`, `127/8`, or `::1`); keyless HTTP remains available. Local OpenAI-compatible providers can be configured without a key. Malformed settings are shown as an actionable startup error rather than treated as empty. Use `/provider`, `/model`, and `/settings` to configure everything from inside haze — there are no environment variables to set.
 
 haze is intentionally minimal: chat, local tools, context files, sessions, and Markdown skills. Any workflow beyond the core is meant to be grown with the LLM through `/skills` (an interactive picker: generate a custom skill from a description, then enable/disable, validate, or remove it). If you want reviews, release prep, deploy checks, debugging rituals, or your team's strange checklist, ask haze to create a skill and then refine the Markdown.
 
@@ -92,7 +92,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-haze will inspect, search, write files, fetch public URLs, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Bash output is reduced by command-aware filters for validation, git, search, JSON, diffs, and noisy logs; failures point at the relevant files, tests, or diagnostics, and raw output remains available by handle when it was omitted. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
+haze will inspect, search, write files, fetch public URLs, run commands, and show compact tool activity inline. Small file edits include a colorized line diff with one context line before and after the change; large diffs stay summarized so the transcript does not become a wall of noise. Bash output is bounded while the process runs, then reduced by command-aware filters for validation, git, search, JSON, diffs, and noisy logs; failures point at relevant diagnostics. Handles retain raw output only within explicit per-entry and aggregate memory budgets, and report omitted bytes when collection overflow is dropped. Sessions are saved by default so you can resume the latest workspace conversation with `haze --continue` or `/resume`.
 
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
@@ -233,7 +233,7 @@ echo "what does this project do?" | haze
 }
 ```
 
-The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A `complete` run with an empty `result` means the model produced no visible text — distinct from a `failed` run.
+The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A turn that ends without a substantive final answer, after an unresolved final tool failure, or at a hard step/tool budget is `failed` even if the provider returned normally.
 
 `--output stream-json` streams the run as it happens instead of staying silent until the end. Each public progress event is written to stdout as one newline-delimited JSON object (NDJSON), and the **last** line is the exact same `{ type: "result", status, result, usage }` envelope as `--output json` — so a consumer can render live progress and still parse the final line identically:
 
@@ -258,12 +258,12 @@ haze exposes a deliberately small toolset:
 
 - `listFiles` — structured discovery, recursive with cursor pagination when needed.
 - `readFile` — read numbered UTF-8 lines in bounded pages, with `nextOffset` when more remain.
-- `grep` — structured ripgrep search with a true global result cap and compacted long lines/results.
+- `grep` — structured ripgrep search with a true global result cap and compacted long lines/results; directly named ignored roots are rejected unless `includeIgnored` is explicitly set.
 - `editFile` — unique text replacements, with line-number-prefix tolerance for common model mistakes.
 - `replaceLines` — line-range edits when exact replacements are awkward; slightly-too-large EOF ranges are clamped.
 - `writeFile` — create files and parent directories.
 - `bash` — run tests, builds, git/gh commands, inspections, scripts, installs, and other shell workflows with command-aware output reduction (git, gh, search, JSON, diffs, logs) and compact validation output.
-- `readToolOutput` — page through full/raw output omitted from an oversized or reduced tool result.
+- `readToolOutput` — page through retained raw output omitted from an oversized or reduced tool result (subject to bounded in-memory budgets).
 - `fetch` — read a public `http(s)` URL and return readable content (Markdown for docs, pretty JSON, or text). Private/loopback/metadata hosts and non-`http(s)` schemes are blocked; output is bounded and retrievable via `readToolOutput`.
 - `writeTasks` — replace the task list at meaningful phase changes; completed lists auto-clear on the next user turn.
 - `skill` — load one installed Markdown workflow or one of its references.
@@ -294,7 +294,7 @@ Use them for parallel investigation across separate areas of a codebase. Do not 
 
 ## Context files
 
-haze saves durable workspace sessions in `~/.haze/sessions`. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+haze saves durable workspace sessions in `~/.haze/sessions`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
 
 Session files are optimized for resume and audit, not token-by-token playback: completed user/assistant messages, tool lifecycle events, conversation snapshots, and work-state snapshots are persisted, but streaming `message_update` events are skipped. Large persisted tool outputs are replaced with previews and byte counts so a resumed model can reread current files instead of carrying stale megabytes forward.
 

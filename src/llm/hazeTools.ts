@@ -1,5 +1,3 @@
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {tool} from 'ai';
@@ -18,12 +16,13 @@ import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
 import {parseRipgrepJsonStream} from './tools/grepParse.js';
 import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
 import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './tools/toolContext.js';
-import {prepareWorkspaceExisting, prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
+import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
-
-const execFile = promisify(execFileCallback);
+import {runRipgrepBounded} from './tools/grepRunner.js';
+import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
+import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
 
 export const hazeTools = {
   listFiles: tool({
@@ -84,11 +83,13 @@ export const hazeTools = {
     execute: async ({path: filePath, offset, limit, mode, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, mode, allowIgnored}, context, async () => {
       try {
         const absolutePath = await prepareWorkspaceRead(filePath, allowIgnored);
-        const content = await fs.readFile(absolutePath, 'utf8');
-        const lines = content.split(/\r?\n/);
         const start = offset == null ? 0 : offset - 1;
-        const requestedEnd = Math.min(lines.length, start + (limit ?? DEFAULT_READ_LINES));
-        const selectedLines = lines.slice(start, requestedEnd);
+        const pageLimit = limit ?? DEFAULT_READ_LINES;
+        const page = await readUtf8LinesPage(absolutePath, start + 1, pageLimit);
+        const lines = page.lines;
+        const totalLines = page.totalLines;
+        const requestedEnd = Math.min(totalLines, start + pageLimit);
+        const selectedLines = lines;
         const outlineEntries = mode === 'outline' ? sourceOutlineEntries(selectedLines, start + 1) : undefined;
         const displayLines = outlineEntries?.map(entry => ({lineNumber: entry.lineNumber, text: entry.text}))
           ?? selectedLines.map((line, index) => ({lineNumber: start + index + 1, text: line}));
@@ -118,15 +119,15 @@ export const hazeTools = {
           ? displayLines[Math.max(0, includedLines - 1)]?.lineNumber ?? start + 1
           : start + includedLines;
         const hasMore = mode === 'outline'
-          ? requestedEnd < lines.length
-          : endLine < lines.length;
+          ? requestedEnd < totalLines
+          : endLine < totalLines;
         const scopedContext = await discoverScopedContext(filePath, context);
         return withScopedContext({
           path: filePath,
           mode,
           startLine: start + 1,
           endLine,
-          totalLines: lines.length,
+          totalLines,
           content: numberedLines.join('\n'),
           nextOffset: hasMore ? requestedEnd + 1 : undefined,
           truncated: hasMore || lineTruncated,
@@ -149,10 +150,11 @@ export const hazeTools = {
       contextLines: z.number().int().nonnegative().max(5).default(2).describe('Context lines before/after each match'),
       maxMatches: z.number().int().positive().max(200).default(50).describe('Global match limit'),
       caseInsensitive: z.boolean().default(false).describe('Ignore case'),
+      includeIgnored: z.boolean().default(false).describe('Search ignored paths only when explicitly needed'),
     }),
-    execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive}, context, async () => {
+    execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive, includeIgnored}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive, includeIgnored}, context, async () => {
       try {
-        const absolutePath = await prepareWorkspaceExisting(searchPath);
+        const absolutePath = await prepareWorkspaceRead(searchPath, includeIgnored);
         const args = [
           '--json', '--color=never',
           '--max-count', String(maxMatches),
@@ -162,18 +164,11 @@ export const hazeTools = {
         if (glob) args.push('--glob', glob);
         args.push('--', pattern, absolutePath);
 
-        let stdout = '';
-        try {
-          const result = await execFile(rgPath, args, {cwd: workspaceRoot(), timeout: 30_000});
-          stdout = result.stdout;
-        } catch (error) {
-          const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
-          if (code === 1) {
-            stdout = '';
-          } else {
-            throw error;
-          }
-        }
+        const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});
+        const stdout = result.stdout;
+        if (result.aborted) throw new Error('ripgrep aborted');
+        if (result.timedOut) throw new Error('ripgrep timed out');
+        if (result.code !== 0 && result.code !== 1 && !result.capped) throw new Error(result.stderr || `ripgrep exited with code ${result.code}`);
 
         const scopedContext = await discoverScopedContext(searchPath, context);
         if (!stdout) {
@@ -203,14 +198,15 @@ export const hazeTools = {
           omittedMatches,
           omittedResultLines: compacted.omittedResultLines,
           lineTruncated: compacted.lineTruncated,
-          truncated: omittedMatches > 0 || outputTruncated,
+          truncated: result.capped || omittedMatches > 0 || outputTruncated,
+          matchCountIsLowerBound: result.capped,
           reducerName: 'grep-structured',
           contentKind: 'search',
-          lossy: omittedMatches > 0 || outputTruncated,
+          lossy: result.capped || omittedMatches > 0 || outputTruncated,
           parseTier: 'full',
           ...grepMetrics,
           ...(fullOutputHandle ? {handle: fullOutputHandle, rawHandle: fullOutputHandle, omittedChars: Math.max(0, rawRenderedMatches.length - returnedRenderedMatches.length)} : {omittedChars: 0}),
-          suggestion: omittedMatches > 0 || outputTruncated ? 'Narrow the path, glob, or pattern to inspect omitted results, or use readToolOutput with the handle when present.' : undefined,
+          suggestion: result.capped || omittedMatches > 0 || outputTruncated ? 'Narrow the path, glob, or pattern to inspect omitted results, or use readToolOutput with the handle when present.' : undefined,
         }, scopedContext);
       } catch (error) {
         return structuredToolFailure('grep', error, 'Check that the search path exists and the pattern is valid regex. Try a narrower path or simpler pattern.', searchPath);
@@ -232,7 +228,9 @@ export const hazeTools = {
       try {
         const {absolutePath, scopedStop} = await prepareWorkspaceMutation('replaceLines', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
-        const original = await fs.readFile(absolutePath, 'utf8');
+        const file = await readUtf8Prefix(absolutePath, EXACT_MUTATION_BYTES);
+        if (file.truncated) throw new HazeToolError(`File exceeds ${EXACT_MUTATION_BYTES} byte exact-mutation limit`, 'file_too_large');
+        const original = file.content;
         const hasTrailingNewline = original.endsWith('\n');
         const lines = original.split(/\r?\n/);
         if (hasTrailingNewline) lines.pop();
@@ -310,7 +308,9 @@ export const hazeTools = {
       try {
         const {absolutePath, scopedStop} = await prepareWorkspaceMutation('editFile', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
-        const original = await fs.readFile(absolutePath, 'utf8');
+        const file = await readUtf8Prefix(absolutePath, EXACT_MUTATION_BYTES);
+        if (file.truncated) throw new HazeToolError(`File exceeds ${EXACT_MUTATION_BYTES} byte exact-mutation limit`, 'file_too_large');
+        const original = file.content;
         const ranges = edits.map((edit, index) => {
           const match = findEditRange(original, edit.oldText);
           if (match.kind === 'missing') throw new HazeToolError(`edit ${index}: oldText was not found. Read the file again and use the exact current text, or use replaceLines with the latest line numbers.`, 'old_text_missing', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});

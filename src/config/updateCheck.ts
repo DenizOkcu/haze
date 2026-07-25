@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import {HAZE_DIR} from './paths.js';
 import {isNewer} from '../utils/version.js';
+import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 const execFile = promisify(execFileCallback);
 
@@ -35,12 +36,12 @@ async function defaultExecVersion(packageName: string, options: {timeout: number
 }
 
 async function defaultReadStore(file: string): Promise<UpdateCheckStore> {
+  if (await fs.pathExists(file)) await tightenPrivateFile(file);
   return fs.readJson(file).catch(() => ({}));
 }
 
 async function defaultWriteStore(file: string, store: UpdateCheckStore): Promise<void> {
-  await fs.ensureDir(path.dirname(file));
-  await fs.writeJson(file, store, {spaces: 2});
+  await writePrivateJsonAtomic(file, store);
 }
 
 /**

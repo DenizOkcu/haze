@@ -5,6 +5,9 @@ import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
 import {prepareSessionEntryForWrite} from './sessionSlimming.js';
+import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile} from '../../config/privateStorage.js';
+import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
+import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export type SessionEntry =
   | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string}
@@ -41,13 +44,14 @@ export async function createSession(options: {cwd?: string; hazeVersion?: string
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const id = newSessionId();
   const file = sessionFile(id, cwd, options.sessionsDir);
-  await fs.ensureDir(path.dirname(file));
+  await ensurePrivateDir(path.dirname(file));
   await appendSessionEntry({id, file, cwd}, {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion});
   return {id, file, cwd};
 }
 
 export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
   const dir = sessionDir(cwd, sessionsDir);
+  await ensurePrivateDir(dir);
   const files = (await fs.readdir(dir).catch(() => []))
     .filter(file => file.endsWith('.jsonl'))
     .sort();
@@ -60,14 +64,39 @@ export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_S
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
   const prepared = prepareSessionEntryForWrite(entry);
   if (!prepared) return;
-  await fs.ensureDir(path.dirname(session.file));
-  await fs.appendFile(session.file, `${JSON.stringify(prepared)}\n`, 'utf8');
+  await appendPrivateFile(session.file, `${JSON.stringify(prepared)}\n`);
 }
 
 export interface ReadSessionEntriesResult {
   entries: SessionEntry[];
   /** Per-line parse failures, e.g. `Line 3: Unexpected token...`. Empty when every line parsed. */
   parseErrors: string[];
+}
+
+const MAX_PARSE_ERRORS = 100;
+
+async function scanSessionEntries(session: HazeSession, onEntry: (entry: SessionEntry) => void): Promise<string[]> {
+  await tightenPrivateFile(session.file);
+  const parseErrors: string[] = [];
+  let omittedErrors = 0;
+  const report = (message: string) => {
+    if (parseErrors.length < MAX_PARSE_ERRORS) parseErrors.push(message);
+    else omittedErrors++;
+  };
+  for await (const {line, lineNumber, oversized} of iterateBoundedUtf8Lines(session.file, JSONL_LINE_BYTES)) {
+    if (!line && !oversized) continue;
+    if (oversized) {
+      report(`Line ${lineNumber}: exceeds ${JSONL_LINE_BYTES} byte limit`);
+      continue;
+    }
+    try {
+      onEntry(JSON.parse(line) as SessionEntry);
+    } catch (error) {
+      report(`Line ${lineNumber}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (omittedErrors > 0) parseErrors.push(`${omittedErrors} additional parse errors omitted.`);
+  return parseErrors;
 }
 
 /**
@@ -78,21 +107,8 @@ export interface ReadSessionEntriesResult {
  * loss in debug mode instead of silently dropping messages.
  */
 export async function readSessionEntries(session: HazeSession): Promise<ReadSessionEntriesResult> {
-  const raw = await fs.readFile(session.file, 'utf8');
   const entries: SessionEntry[] = [];
-  const parseErrors: string[] = [];
-  // Number by true file position: a stray blank line (e.g. from corruption) must not shift
-  // the reported line number away from where the malformed line actually sits.
-  const lines = raw.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue; // skip blank lines (e.g. the trailing newline)
-    try {
-      entries.push(JSON.parse(line) as SessionEntry);
-    } catch (error) {
-      parseErrors.push(`Line ${i + 1}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const parseErrors = await scanSessionEntries(session, entry => entries.push(entry));
   return {entries, parseErrors};
 }
 
@@ -102,9 +118,11 @@ export interface RestoreConversationResult {
 }
 
 export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
-  const {entries, parseErrors} = await readSessionEntries(session);
-  const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'conversation_snapshot'}> => entry.type === 'conversation_snapshot');
-  return {messages: snapshots.at(-1)?.messages ?? [], parseErrors};
+  let messages: ModelMessage[] = [];
+  const parseErrors = await scanSessionEntries(session, entry => {
+    if (entry.type === 'conversation_snapshot') messages = entry.messages;
+  });
+  return {messages, parseErrors};
 }
 
 export interface RestoreWorkStateResult {
@@ -113,9 +131,11 @@ export interface RestoreWorkStateResult {
 }
 
 export async function restoreWorkState(session: HazeSession): Promise<RestoreWorkStateResult> {
-  const {entries, parseErrors} = await readSessionEntries(session);
-  const snapshots = entries.filter((entry): entry is Extract<SessionEntry, {type: 'work_state_snapshot'}> => entry.type === 'work_state_snapshot');
-  return {state: snapshots.at(-1)?.state, parseErrors};
+  let state: WorkState | undefined;
+  const parseErrors = await scanSessionEntries(session, entry => {
+    if (entry.type === 'work_state_snapshot') state = entry.state;
+  });
+  return {state, parseErrors};
 }
 
 export function formatSession(session: HazeSession) {

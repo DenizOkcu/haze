@@ -1,6 +1,6 @@
 # src/skills/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Markdown skill loading, registry, model-facing skill tool, and skill builder.
 
@@ -11,12 +11,12 @@ Markdown skill loading, registry, model-facing skill tool, and skill builder.
 - Required frontmatter: `name` (letters/numbers/hyphens/underscores only) and non-empty `description`.
 - The Markdown body is instructions only; skills do not execute code.
 - Referenced files may be Markdown links or plain file-looking relative paths in the body.
-- References must stay inside the skill directory and be <= 50k bytes.
+- `SKILL.md` is capped at `SKILL_MARKDOWN_BYTES` (256 KB); references must stay inside the skill directory and be <= 50k bytes. Both `SKILL.md` and references are real-path-confined to the skill root so symlink escapes are rejected.
 
 ## Loader/registry behavior
 
 - `SkillLoader.ts` parses frontmatter, validates names/descriptions, discovers references, and loads referenced content.
-- `SkillRegistry.ts` loads global skills from `~/.haze/skills`; preserve deterministic handling of duplicate/invalid skills if changed.
+- `SkillRegistry.ts` loads global skills from `~/.haze/skills` and returns `{skills, errors}`: directories are iterated in sorted order, each skill directory is real-path-confined to the skills root, and invalid/duplicate skills are isolated (first valid wins) so unrelated skills and built-ins stay usable.
 - `skillTools.ts` exposes a single model-facing `skill` catalog tool. It returns instructions and available reference paths first, then one referenced file only when requested.
 - `types.ts` defines loaded skill and registry shapes. Treat these as public within the codebase and tests.
 

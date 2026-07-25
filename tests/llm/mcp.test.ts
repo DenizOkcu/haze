@@ -1,4 +1,4 @@
-import {describe, expect, it, beforeEach, vi} from 'vitest';
+import {afterEach, describe, expect, it, beforeEach, vi} from 'vitest';
 import type {ToolSet} from 'ai';
 import type {HazeMcpServer} from '../../src/config/settings.js';
 
@@ -35,6 +35,10 @@ function httpServer(name: string): HazeMcpServer {
 
 beforeEach(() => {
   mocks.createMCPClient.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('loadMcpTools', () => {
@@ -86,7 +90,7 @@ describe('loadMcpTools', () => {
     expect(result.clients).toHaveLength(1);
   });
 
-  it('isolates a server whose tools() rejects but keeps its client for closing', async () => {
+  it('isolates a server whose tools() rejects and closes its partial client immediately', async () => {
     const failing: FakeClient = {tools: async () => Promise.reject(new Error('tools unavailable')), close: vi.fn()};
     mocks.createMCPClient
       .mockReturnValueOnce(failing)
@@ -94,8 +98,36 @@ describe('loadMcpTools', () => {
     const result = await loadMcpTools([httpServer('broken'), httpServer('alive')]);
     expect(Object.keys(result.tools)).toEqual(['ok']);
     expect(result.errors.some(message => message.includes('tools unavailable'))).toBe(true);
-    // The failing client is pushed before tools() resolves, so it stays closable.
-    expect(result.clients).toHaveLength(2);
+    expect(result.clients).toHaveLength(1);
+    expect(failing.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds hanging discovery while another server remains available', async () => {
+    vi.useFakeTimers();
+    const hanging = fakeClient(toolset([]));
+    hanging.tools = () => new Promise<ToolSet>(() => undefined);
+    mocks.createMCPClient
+      .mockReturnValueOnce(hanging)
+      .mockReturnValueOnce(fakeClient(toolset([['ok', 'ok']])));
+    const pending = loadMcpTools([httpServer('hanging'), httpServer('alive')]);
+    await vi.advanceTimersByTimeAsync(10_001);
+    const result = await pending;
+    expect(Object.keys(result.tools)).toEqual(['ok']);
+    expect(result.errors.some(message => message.includes('timed out'))).toBe(true);
+    expect(hanging.close).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('stops discovery promptly when the turn is aborted', async () => {
+    const controller = new AbortController();
+    const hanging = fakeClient(toolset([]));
+    hanging.tools = () => new Promise<ToolSet>(() => undefined);
+    mocks.createMCPClient.mockReturnValueOnce(hanging);
+    const pending = loadMcpTools([httpServer('hanging')], new Set(), controller.signal);
+    controller.abort();
+    const result = await pending;
+    expect(result.errors.some(message => message.includes('aborted'))).toBe(true);
+    expect(hanging.close).toHaveBeenCalledTimes(1);
   });
 
   it('reports a missing command for stdio servers before opening any transport', async () => {

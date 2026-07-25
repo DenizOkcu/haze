@@ -38,6 +38,7 @@ export async function assembleRequestContext(input: {
   contextFiles: ContextFile[];
   session?: PromptSession;
   model: RequestModel;
+  abortSignal?: AbortSignal;
 }): Promise<AssembledRequestContext> {
   const settings = await readSettings();
   const skillRegistry = await loadSkillRegistry();
@@ -50,16 +51,19 @@ export async function assembleRequestContext(input: {
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'builtin', tools: hazeTools}});
   if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: lspTools}});
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session})}}});
-  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills})}});
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills, errors: skillRegistry.errors ?? []})}});
 
   const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
-  const loadedMcp = mcpServers.length > 0 ? await loadMcpTools(mcpServers, new Set(Object.keys(availableTools))) : undefined;
+  const loadedMcp = mcpServers.length > 0
+    ? await loadMcpTools(mcpServers, new Set(Object.keys(availableTools)), ...(input.abortSignal ? [input.abortSignal] : []))
+    : undefined;
   if (loadedMcp && Object.keys(loadedMcp.tools).length > 0) {
     addCapabilityTools({availableTools, toolCategories, loaded: {category: 'mcp', tools: loadedMcp.tools}, skipCollisions: true});
   }
 
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
-  const systemPrompt = buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable});
+  const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.directory}: ${error.message}`);
+  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {systemPrompt, availableTools, toolCategories, loadedMcp};
 }

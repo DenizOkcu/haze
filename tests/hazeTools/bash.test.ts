@@ -15,11 +15,11 @@ describe('bash tool safety', () => {
     await fs.remove(tmp);
   });
 
-  async function bash(command: string, allowMutation = false) {
+  async function bash(command: string, allowMutation = false, abortSignal?: AbortSignal) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.bash.execute({command, allowMutation}, {abortSignal: undefined});
+      return await hazeTools.bash.execute({command, allowMutation}, {abortSignal});
     } finally {
       process.chdir(originalCwd);
     }
@@ -73,10 +73,21 @@ describe('bash tool safety', () => {
   });
 
   it('bounds runaway command output without hanging reducers', async () => {
-    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(400000))\"");
+    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(600000))\"");
     expect(result.ok).toBe(true);
     expect(result.stdout.text.length).toBeLessThan(20_000);
+    expect(result.stdoutBytes.omittedBytes).toBeGreaterThan(0);
+    const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000}, {abortSignal: undefined});
+    expect(page.content).toHaveLength(1000);
   }, 15_000);
+
+  it('reports explicit abort separately from timeout', async () => {
+    const controller = new AbortController();
+    const pending = bash("node -e 'setInterval(()=>{},1000)'", false, controller.signal);
+    setTimeout(() => controller.abort(), 50);
+    const result = await pending;
+    expect(result).toMatchObject({ok: false, aborted: true, timedOut: false});
+  });
 
   it('keeps full raw output retrievable when reducer input is capped', async () => {
     const script = "let s='a'.repeat(250000); s += 'NEEDLE_END'; process.stdout.write(s)";

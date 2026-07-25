@@ -24,7 +24,8 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
     notes.push(`${summary.duplicateGroups.length} duplicate group${summary.duplicateGroups.length === 1 ? '' : 's'} (${duplicateTotal} file${duplicateTotal === 1 ? '' : 's'} with identical content)`);
   }
   const lspServers = configuredLspServers(settings);
-  const installedSkills = [...(await loadSkillRegistry()).skills.values()];
+  const skillRegistry = await loadSkillRegistry();
+  const installedSkills = [...skillRegistry.skills.values()];
   const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(settings, skill.name) ? '' : ' (disabled)'}`).join(', ');
   const lines = [
     `Provider: ${activeProvider?.name ?? 'not configured'}`,
@@ -35,6 +36,7 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
     `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `MCP servers: ${configuredMcpServers(settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `Skills: ${skillNames || 'none'}`,
+    ...(skillRegistry.errors.length ? [`Skill load errors: ${skillRegistry.errors.map(error => `${error.directory}: ${error.message}`).join('; ')}`] : []),
     `Context files: ${contextFiles.length ? `${contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
   ];
   if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);

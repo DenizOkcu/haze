@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -14,6 +14,8 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations.
 - `inputHistory.ts` persists prompt history.
 - `updateCheck.ts` checks npm/latest version; keep it non-fatal.
+- `privateStorage.ts` is the single helper for `~/.haze` home-state writes: `0700` dirs, `0600` atomic/append files, and opportunistic tightening of pre-existing overly-broad modes. All settings/session/log/history/update state must go through it.
+- `endpointSecurity.ts` validates provider/MCP endpoints: credentialed remote plaintext HTTP is rejected at configuration and runtime; loopback HTTP (`localhost`, `*.localhost`, `127/8`, `::1`) remains supported.
 
 ## Provider/model contract
 
@@ -36,7 +38,8 @@ Runtime configuration, paths, context files, and provider/server settings.
 Current settings behavior:
 
 - Missing `settings.json` reads as `{}`; malformed JSON or invalid known-field shape should throw an actionable error with the settings path.
-- Settings writes should validate the public shape, preserve unknown fields, and use temp-file-plus-rename style writes.
+- Settings writes should validate the public shape, preserve unknown fields, use temp-file-plus-rename style writes, and create/tighten files to `0600` under `0700` dirs via `privateStorage.ts`.
+- Credentialed endpoints (provider keys, MCP Authorization headers) must pass `assertCredentialedEndpointSecure` before persisting or sending; reject non-loopback `http:` with credentials.
 
 - Settings may contain API keys. Never log full settings or print secret fields unless the user explicitly asks and understands the risk.
 - Write JSON/YAML atomically enough for normal CLI use and preserve unrelated existing fields where possible.

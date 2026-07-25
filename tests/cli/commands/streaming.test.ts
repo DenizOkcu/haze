@@ -30,6 +30,7 @@ interface MocksConfig {
   failFirstNAgents?: number;
   idle?: boolean;
   hangUntilAbort?: boolean;
+  stepEnds?: Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string}>;
 }
 
 const mocks = vi.hoisted(() => {
@@ -158,7 +159,17 @@ async function loadStreaming(config: MocksConfig) {
             responseMessages: Promise.reject(error),
           };
         }
-        return {...this._fake, stream: this._fake.stream, response: this._fake.response, responseMessages: this._fake.responseMessages};
+        const onStepEnd = this.onStepEnd;
+        const stepEnds = config.stepEnds ?? [];
+        return {
+          ...this._fake,
+          stream: (async function* () {
+            for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: []}});
+            for (const part of parts) yield part;
+          })(),
+          response: this._fake.response,
+          responseMessages: this._fake.responseMessages,
+        };
       }
     }
     return {
@@ -232,7 +243,7 @@ describe('runAgentTurn: setup', () => {
         model: {modelId: 'test'},
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
-      streamParts: [{type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'text-delta', text: 'The requested answer is complete.'}, {type: 'finish', finishReason: 'stop'}],
       responseMessages: [{role: 'assistant', content: 'done'}],
     });
     const cb = makeCallbacks();
@@ -353,6 +364,38 @@ describe('runAgentTurn: stream handling', () => {
     expect(cb.events.find((e) => e.type === 'tool_start')).toBeDefined();
     expect(cb.events.filter((e) => e.type === 'tool_end')).toHaveLength(1);
   });
+
+  it('publishes structured tool failure consistently to events, logs, work state, and status', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [
+        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: false, code: 1}},
+        {type: 'text-delta', text: 'The validation failed and remains unresolved.'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+    });
+    const logEntries: Array<{toolResult?: {success: boolean}}> = [];
+    const workStates: Array<{validations: Array<{status: string}>}> = [];
+    const cb = makeCallbacks();
+    cb.log = {id: 'test', file: 'unused', writer: {append: async (entry: {toolResult?: {success: boolean}}) => { logEntries.push(entry); }}} as never;
+    cb.setWorkState = (state: {validations: Array<{status: string}>}) => { workStates.push(structuredClone(state)); };
+    const outcome = await runAgentTurn('run tests', undefined, [], cb);
+    await new Promise(resolve => queueMicrotask(resolve));
+    expect(cb.events.find(event => event.type === 'tool_end')).toMatchObject({success: false});
+    expect(logEntries.find(entry => entry.toolResult)?.toolResult?.success).toBe(false);
+    expect(workStates.some(state => state.validations.some(validation => validation.status === 'failed'))).toBe(true);
+    expect(outcome).toEqual({status: 'failed'});
+  });
+
+  it('cannot report complete after the hard step budget is reached', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      stepEnds: Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: []})),
+      streamParts: [{type: 'text-delta', text: 'A final answer arrived only after exhausting the budget.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toEqual({status: 'failed'});
+  });
 });
 
 describe('runAgentTurn: error paths', () => {
@@ -392,6 +435,8 @@ describe('runAgentTurn: error paths', () => {
     await promise;
     expect(cb.messages.some((m) => /Transient model error/.test(m.text))).toBe(true);
     expect(cb.messages.some((m) => /retrying attempt 1\/2/.test(m.text))).toBe(true);
+    expect(cb.events.filter(event => event.type === 'turn_start')).toHaveLength(1);
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
     vi.useRealTimers();
   });
 

@@ -26,7 +26,7 @@ import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import {findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
-import {appendSessionEntry, createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
+import {createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {contextBreakdown} from '../../core/agent/contextBudget.js';
 import {stripSyntheticControls} from '../../core/agent/requestAssembly.js';
@@ -37,7 +37,7 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
-import {createSessionRecorder} from '../chat/sessionRecorder.js';
+import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {compactHomePath, displayMessagesFromConversation, estimateConversationTokens, formatTokenCount, toolCallCount} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
@@ -45,7 +45,8 @@ import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
-import {captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from './wizardPrompts.js';
+import {captureLspName} from './wizardPrompts.js';
+import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from './lspWizard.js';
 import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from './mcpWizard.js';
 import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from './providerWizard.js';
@@ -109,13 +110,18 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     });
   };
   const [settings, setSettings] = useState<HazeSettings>({});
+  const [settingsError, setSettingsError] = useState<string | undefined>();
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
   const abortControllerRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<HazeSession | undefined>(undefined);
+  const sessionRecorderRef = useRef<SessionRecorder | undefined>(undefined);
+  if (!sessionRecorderRef.current) sessionRecorderRef.current = createSessionRecorder(() => sessionRef.current);
   const sessionStartRef = useRef<Date>(new Date());
   const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
+  const persistenceWarningShownRef = useRef(false);
+  const skillErrorSignatureRef = useRef('');
   const contextFileSignaturesRef = useRef<Map<string, string>>(new Map());
   const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
@@ -163,15 +169,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   useEffect(() => {
     Promise.all([
-      readSettings().catch(() => ({} as HazeSettings)),
+      readSettings().then(value => ({value, error: undefined as string | undefined})).catch(error => ({value: {} as HazeSettings, error: error instanceof Error ? error.message : String(error)})),
       currentBranchName().catch(() => undefined),
       readContextFiles().catch(() => [] as ContextFile[]),
-    ]).then(([next, branch, files]) => {
+    ]).then(([settingsResult, branch, files]) => {
+      const next = settingsResult.value;
       setSettings(next);
+      setSettingsError(settingsResult.error);
       setBranchName(branch);
       setContextFiles(files);
       contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-      setMessages(m => [...m, {role: 'system', text: `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
+      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
     }).catch(() => undefined);
     initializeSession().catch(error => {
       const text = error instanceof Error ? error.message : String(error);
@@ -203,6 +211,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     const registry = await loadSkillRegistry();
     const nextSkills = [...registry.skills.values()];
     setSkills(nextSkills);
+    const errorSignature = registry.errors.map(error => `${error.directory}: ${error.message}`).join('\n');
+    if (errorSignature && errorSignature !== skillErrorSignatureRef.current) {
+      setMessages(messages => [...messages, {role: 'system', text: `Invalid skills were isolated:\n${errorSignature}`}]);
+    }
+    skillErrorSignatureRef.current = errorSignature;
     return nextSkills;
   }
 
@@ -221,10 +234,17 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setDebugLogs(current => [...current.slice(-7), line]);
   }
 
+  function showPersistenceWarning(error: unknown) {
+    if (persistenceWarningShownRef.current) return;
+    persistenceWarningShownRef.current = true;
+    const text = error instanceof Error ? error.message : String(error);
+    setMessages(messages => [...messages, {role: 'system', text: `Persistence warning: ${text}`}]);
+  }
+
   async function startNewLog() {
     if (!debug) return undefined;
     if (llmLogRef.current) {
-      await endLlmLog(llmLogRef.current).catch(() => undefined);
+      await endLlmLog(llmLogRef.current).catch(showPersistenceWarning);
     }
     const log = await createLlmLog();
     llmLogRef.current = log;
@@ -232,6 +252,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function startNewSession(message = 'Started a new session.') {
+    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
     clearToolOutputs();
     contextFileSignaturesRef.current = new Map(contextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
     workStateRef.current = undefined;
@@ -274,7 +295,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     await startNewSession(continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.');
   }
 
-  function clearConversation() {
+  async function clearConversation() {
     clearToolOutputs();
     conversationRef.current = [];
     lastAssistantTextRef.current = '';
@@ -282,9 +303,9 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     workStateRef.current = undefined;
     setLiveMessagesState(() => []);
     setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
-    void startNewLog();
-    const session = sessionRef.current;
-    if (session) void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'clear', text: 'Conversation cleared'}).catch(() => undefined);
+    sessionRecorderRef.current?.recordNamedEvent('clear', 'Conversation cleared');
+    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
+    await startNewLog().catch(showPersistenceWarning);
   }
 
   function compactConversation(instructions?: string) {
@@ -294,16 +315,14 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return false;
     }
     conversationRef.current = result.messages;
-    const session = sessionRef.current;
-    if (session) {
-      void appendSessionEntry(session, {type: 'event', at: new Date().toISOString(), name: 'compact', text: `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`}).catch(() => undefined);
-      void appendSessionEntry(session, {type: 'conversation_snapshot', at: new Date().toISOString(), messages: result.messages}).catch(() => undefined);
-    }
+    sessionRecorderRef.current?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`);
+    sessionRecorderRef.current?.recordConversation(result.messages);
     setMessages(m => [...m, {role: 'system', text: `Compacted context: summarized ${result.olderCount} older model messages and kept the last ${result.keptCount}.`}]);
     return true;
   }
 
   async function resumeLatestSession() {
+    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
     const session = await latestSession();
     if (!session) {
       setMessages(m => [...m, {role: 'system', text: 'No previous session found for this workspace.'}]);
@@ -602,8 +621,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     showWizardMessage(result.message);
   }
 
-  async function finishMcpCustom(keyValue?: string) {
-    const result = finishMcpCustomResult(settings, mcpDraft, keyValue);
+  async function finishMcpCustom(keyValue?: string, draft = mcpDraft) {
+    const result = finishMcpCustomResult(settings, draft, keyValue);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
     if (result.clearDraft) setMcpDraft({});
     if (result.mode) setMode(result.mode);
@@ -690,8 +709,46 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function submit(value: string) {
+    if (settingsError) {
+      try {
+        const repaired = await readSettings();
+        setSettings(repaired);
+        setSettingsError(undefined);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSettingsError(message);
+        if (!/^\/(?:settings\s+(?:open|edit)|help|exit|quit)\b/i.test(value.trim())) {
+          setMessages(messages => [...messages, {role: 'system', text: `${message}\nRepair settings, then retry. /settings open, /help, and /exit remain available.`}]);
+          return;
+        }
+      }
+    }
     if (busy) {
       if (mode === 'chat') queueFollowUp(value);
+      return;
+    }
+
+    const providerEffects = transitionProviderField({mode, value, settings});
+    if (providerEffects) {
+      for (const effect of providerEffects) {
+        if (effect.type === 'message') showWizardMessage(effect.text);
+        else if (effect.type === 'mode') setMode(effect.mode);
+        else if (effect.type === 'provider-draft') {
+          if (effect.replace) setProviderDraft(effect.patch);
+          else setProviderDraft(draft => ({...draft, ...effect.patch}));
+        }
+      }
+      return;
+    }
+
+    const mcpEffects = transitionMcpField({mode, value, settings, draft: mcpDraft});
+    if (mcpEffects) {
+      for (const effect of mcpEffects) {
+        if (effect.type === 'message') showWizardMessage(effect.text);
+        else if (effect.type === 'mode') setMode(effect.mode);
+        else if (effect.type === 'mcp-draft') setMcpDraft(draft => ({...draft, ...effect.patch}));
+        else if (effect.type === 'finish-mcp-stdio') await finishMcpCustom(undefined, effect.draft);
+      }
       return;
     }
 
@@ -742,37 +799,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
     if (mode === 'model') {
       await selectModel(value);
-      return;
-    }
-
-    if (mode === 'providerAddName') {
-      const result = captureProviderName(settings, value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setProviderDraft({name: result.draft.name});
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-
-    if (mode === 'providerAddUrl') {
-      const result = captureProviderUrl(value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setProviderDraft(draft => ({...draft, ...result.draft}));
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-
-    if (mode === 'providerAddKey') {
-      setProviderDraft(draft => ({...draft, ...(value.trim() ? {key: value.trim()} : {})}));
-      setMode('providerAddModels');
-      setMessages(m => [...m, {role: 'system', text: 'Comma-separated model names? Example: llama3.1, qwen2.5-coder, gpt-4o'}]);
       return;
     }
 
@@ -903,50 +929,6 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       await selectMcpPreset(value);
       return;
     }
-    if (mode === 'mcpAddName') {
-      const result = captureMcpName(settings, value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setMcpDraft({name: result.draft.name});
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-    if (mode === 'mcpAddTransport') {
-      const result = captureMcpTransport(value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-    if (mode === 'mcpAddUrl') {
-      const result = captureMcpUrl(value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-    if (mode === 'mcpAddCommand') {
-      const result = captureMcpCommand(value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setMcpDraft(draft => ({...draft, ...result.draft}));
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
     if (mode === 'mcpAddKey') {
       await finishMcpCustom(value);
       return;
@@ -1020,7 +1002,11 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMessages(m => [...m, {role: 'system', text: `Command failed: ${text}`}]);
       return;
     }
-    if (result === 'exit') return exit();
+    if (result === 'exit') {
+      await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
+      if (llmLogRef.current) await endLlmLog(llmLogRef.current).catch(showPersistenceWarning);
+      return exit();
+    }
     if (result === 'handled') {
       if (value === '/clear') {
         loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
@@ -1053,7 +1039,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string) {
-    const sessionRecorder = createSessionRecorder(() => sessionRef.current);
+    const sessionRecorder = sessionRecorderRef.current!;
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
       const ordered = withDisplayOrder(msg);
@@ -1110,6 +1096,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
     }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()});
+    await sessionRecorder.flush().catch(showPersistenceWarning);
+    await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
   }
 
   const visible = messages.filter(message => !message.hidden);

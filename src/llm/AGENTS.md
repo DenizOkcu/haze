@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
@@ -39,8 +39,10 @@ When adding/removing/changing a tool or result shape:
 
 Current reliability contracts:
 
-- LSP stdio protocol errors must reject pending requests and isolate the failed server; malformed server output must not crash the CLI.
+- LSP stdio protocol errors must reject pending requests and isolate the failed server; malformed server output must not crash the CLI. Frame/header/aggregate-buffer sizes are capped (`core/limits`); overflow terminates the client and rejects pending requests without heap growth. Opened documents and returned locations are real-path-confined to the workspace; outside-workspace locations are omitted or labeled `external`.
 - Fetch byte limits are byte limits, including for UTF-8/multibyte content and both streaming and non-streaming bodies.
+- Bash and grep run through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, and omitted bytes are reported.
+- MCP discovery has per-server deadlines, runs with bounded concurrency, accepts the turn abort signal, closes partial/late clients, and bounds cleanup. One hanging server never blocks a turn.
 
 - Do not invent default providers/models; honor `config/providers.ts` resolution.
 - MCP tools are optional per turn. Failures should be isolated and surfaced as system/UI messages, not crash unrelated turns.

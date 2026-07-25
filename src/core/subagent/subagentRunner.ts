@@ -24,7 +24,7 @@ export interface SubagentResult {
 function toolSummary(output: unknown): string {
   if (typeof output !== 'object' || output == null) return 'completed';
   const o = output as Record<string, unknown>;
-  if (typeof o.totalMatches === 'number') return o.totalMatches === 0 ? 'no matches' : `${o.totalMatches} matches`;
+  if (typeof o.totalMatches === 'number') return o.totalMatches === 0 ? 'no matches' : `${o.matchCountIsLowerBound === true ? 'at least ' : ''}${o.totalMatches} matches`;
   if (typeof o.code === 'number') return `exit ${o.code}`;
   if (o.ok === true) return 'completed';
   if (o.ok === false && typeof o.error === 'string') return `failed: ${o.error.slice(0, 120)}`;

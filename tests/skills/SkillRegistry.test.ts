@@ -55,4 +55,25 @@ describe('loadSkillRegistry', () => {
     const registry = await loadSkillRegistry();
     expect([...registry.skills.keys()]).toEqual(['alpha']);
   });
+
+  it('isolates invalid skills while retaining valid ones', async () => {
+    await writeSkill('alpha');
+    const invalid = path.join(tmp, 'broken');
+    await fs.ensureDir(invalid);
+    await fs.writeFile(path.join(invalid, 'SKILL.md'), 'not frontmatter');
+    const registry = await loadSkillRegistry();
+    expect([...registry.skills.keys()]).toEqual(['alpha']);
+    expect(registry.errors).toEqual([expect.objectContaining({directory: 'broken'})]);
+  });
+
+  it('keeps the first sorted valid skill when names collide', async () => {
+    for (const directory of ['a', 'b']) {
+      const dir = path.join(tmp, directory);
+      await fs.ensureDir(dir);
+      await fs.writeFile(path.join(dir, 'SKILL.md'), `---\nname: duplicate\ndescription: ${directory}\n---\n\nbody\n`);
+    }
+    const registry = await loadSkillRegistry();
+    expect(registry.skills.get('duplicate')?.description).toBe('a');
+    expect(registry.errors).toEqual([expect.objectContaining({directory: 'b', message: expect.stringContaining('duplicate')})]);
+  });
 });

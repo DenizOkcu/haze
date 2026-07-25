@@ -1,6 +1,6 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
 
 Implementation helpers for haze built-in tools.
 
@@ -38,10 +38,10 @@ Current behavior:
 - `bashTool.ts` always executes commands and returns informational risk classification; `allowMutation` is compatibility-only and should not affect behavior.
 - Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
-- `bashTool.ts` runs `bash -lc`, classifies commands, parses validation output, reduces stdout/stderr, stores raw handles where needed, and returns structured metadata.
+- `bashTool.ts` runs `bash -lc` through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
-- `grepParse.ts` parses ripgrep JSON; prefer structured matches over plain text.
+- `grepRunner.ts` spawns ripgrep and parses `--json` incrementally, stopping at the true global match cap with separate stdout/stderr byte budgets and timeout/abort; do not route grep through an unbounded buffer.
 
 ## Failure results
 

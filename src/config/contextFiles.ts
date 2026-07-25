@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {HAZE_DIR} from './paths.js';
+import {readUtf8Prefix} from '../core/io/boundedRead.js';
 
 export interface ContextFile {
   path: string;
@@ -84,11 +85,13 @@ async function readContextCandidates(candidates: string[], seen = new Set<string
     const loadedSignature = options.alreadyLoadedSignatures?.get(displayedPath) ?? options.alreadyLoadedSignatures?.get(absolute);
     if (loadedSignature === signature) continue;
     options.onContextFileRead?.(displayedPath);
-    const content = await fs.readFile(absolute, 'utf8');
+    const prefix = await readUtf8Prefix(absolute, MAX_CONTEXT_FILE_CHARS * 4);
+    const content = prefix.content.slice(0, MAX_CONTEXT_FILE_CHARS);
+    const truncated = prefix.truncated || prefix.content.length > MAX_CONTEXT_FILE_CHARS;
     const file = {
       path: displayedPath,
-      content: content.length > MAX_CONTEXT_FILE_CHARS
-        ? `${content.slice(0, MAX_CONTEXT_FILE_CHARS)}\n\n[Context file truncated: ${content.length - MAX_CONTEXT_FILE_CHARS} characters omitted]`
+      content: truncated
+        ? `${content}\n\n[Context file truncated at ${MAX_CONTEXT_FILE_CHARS} characters; source is ${prefix.totalBytes} bytes]`
         : content,
       signature,
     };

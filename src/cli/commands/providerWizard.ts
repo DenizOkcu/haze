@@ -3,6 +3,7 @@ import type {HazeProviderSettings, HazeSettings} from '../../config/settings.js'
 import type {Mode} from './chatModes.js';
 import {PROVIDER_ACTIONS} from './wizardActions.js';
 import {commaList} from './wizardInput.js';
+import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
 
 type WizardPatch = {
   settingsPatch?: Partial<HazeSettings>;
@@ -31,6 +32,9 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
   if (!draft.name || !draft.url || models.length === 0) {
     return {models, message: 'Provider name, URL, and at least one model are required.'};
   }
+  try { assertCredentialedEndpointSecure(draft.url, draft.key); } catch (error) {
+    return {models, message: error instanceof Error ? error.message : String(error)};
+  }
   const provider: HazeProviderSettings = {
     name: draft.name,
     url: draft.url,
@@ -58,7 +62,7 @@ export function providerRemoveModels(settings: HazeSettings, providerName: strin
   const wasActive = Boolean(settings.model && provider.models.includes(settings.model) && !remaining.includes(settings.model));
   const parts = [`Removed ${removed.join(', ')} from ${provider.name}.`];
   if (notFound.length) parts.push(`Not found: ${notFound.join(', ')}.`);
-  if (wasActive) parts.push(`Active model updated to ${remaining[0]}.`);
+  if (wasActive) parts.push('Active model selection cleared. Choose a model explicitly.');
   return {
     provider,
     remaining,
@@ -67,7 +71,7 @@ export function providerRemoveModels(settings: HazeSettings, providerName: strin
     wasActive,
     settingsPatch: {
       providers: upsertProvider(settings, updated),
-      ...(wasActive ? {model: remaining[0]} : {}),
+      ...(wasActive ? {model: undefined} : {}),
     },
     message: parts.join(' '),
   };
@@ -77,16 +81,16 @@ export function providerRemove(settings: HazeSettings, providerName: string | un
   const provider = providerName ? findProvider(settings, providerName) : undefined;
   if (!provider) return {message: 'No provider selected.'};
   const providers = configuredProviders(settings).filter(candidate => candidate.name !== providerName);
-  const wasActiveProvider = settings.provider === providerName || (!settings.provider && configuredProviders(settings)[0]?.name === providerName);
+  const wasActiveProvider = settings.provider === providerName;
   return {
     provider,
     providers,
     wasActiveProvider,
     settingsPatch: {
       providers,
-      ...(wasActiveProvider ? {provider: providers[0]?.name, model: providers[0]?.models[0]} : {}),
+      ...(wasActiveProvider ? {provider: undefined, model: undefined} : {}),
     },
-    message: `Removed provider ${provider.name}.${wasActiveProvider ? ` Switched to ${providers[0]?.name ?? 'no provider'}.` : ''}`,
+    message: `Removed provider ${provider.name}.${wasActiveProvider ? ' Active provider and model selection cleared.' : ''}`,
   };
 }
 
@@ -95,6 +99,9 @@ export function providerSetKey(settings: HazeSettings, providerName: string | un
   if (!provider) return {message: 'No provider selected.'};
   const key = value.trim();
   if (!key) return {provider, message: 'API key cannot be empty. Esc to cancel.'};
+  try { assertCredentialedEndpointSecure(provider.url, key); } catch (error) {
+    return {provider, message: error instanceof Error ? error.message : String(error)};
+  }
   return {
     provider,
     key,

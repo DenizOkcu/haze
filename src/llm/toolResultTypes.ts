@@ -6,6 +6,7 @@ export type ToolFailureReasonCode =
   | 'existing_file_requires_overwrite'
   | 'invalid_line_range'
   | 'io_error'
+  | 'file_too_large'
   | 'blocked_url'
   | 'scoped_instructions_discovered';
 

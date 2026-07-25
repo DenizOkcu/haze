@@ -4,6 +4,7 @@ import {
   readToolOutput,
   clearToolOutputs,
 } from '../../../src/core/agent/toolOutputStore.js';
+import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../../../src/core/limits/byteBudgets.js';
 
 // The store is a module-level singleton shared across tests; reset between cases.
 beforeEach(() => {
@@ -25,6 +26,22 @@ describe('storeToolOutput', () => {
     expect(page?.content).toBe('hello world');
     expect(page?.totalChars).toBe('hello world'.length);
     expect(page?.truncated).toBe(false);
+    expect(page).toMatchObject({totalBytes: 11, retainedBytes: 11, omittedBytes: 0});
+  });
+
+  it('caps individual entries by UTF-8 bytes and reports dropped content', () => {
+    const original = `🙂${'x'.repeat(TOOL_OUTPUT_ENTRY_BYTES)}`;
+    const page = readToolOutput(storeToolOutput(original), 0, TOOL_OUTPUT_ENTRY_BYTES + 10);
+    expect(page?.retainedBytes).toBeLessThanOrEqual(TOOL_OUTPUT_ENTRY_BYTES);
+    expect(page?.omittedBytes).toBeGreaterThan(0);
+    expect(page?.truncated).toBe(true);
+    expect(page?.content).not.toContain('�');
+  });
+
+  it('evicts oldest entries when the aggregate byte budget is exceeded', () => {
+    const handles = Array.from({length: Math.ceil(TOOL_OUTPUT_TOTAL_BYTES / TOOL_OUTPUT_ENTRY_BYTES) + 1}, () => storeToolOutput('x'.repeat(TOOL_OUTPUT_ENTRY_BYTES)));
+    expect(readToolOutput(handles[0]!)).toBeUndefined();
+    expect(readToolOutput(handles.at(-1)!)).toBeDefined();
   });
 
   it('caps the number of stored outputs, evicting oldest first (FIFO)', () => {

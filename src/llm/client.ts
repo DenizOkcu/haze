@@ -2,6 +2,7 @@ import {createOpenAI} from '@ai-sdk/openai';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {activeModel, resolveModelSelector} from '../config/providers.js';
+import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 
 export interface ProviderCapabilities {
   reportsCacheUsage: boolean;
@@ -60,7 +61,9 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
   }
   if (!selection) return undefined;
   const baseURL = selection.provider.url;
-  const apiKey = selection.provider.key ?? settings.apiKey ?? 'not-needed';
+  const configuredKey = selection.provider.key ?? settings.apiKey;
+  assertCredentialedEndpointSecure(baseURL, configuredKey);
+  const apiKey = configuredKey ?? 'not-needed';
   const name = selection.model;
   const cacheSeed = session?.cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);

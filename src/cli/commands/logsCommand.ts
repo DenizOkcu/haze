@@ -1,4 +1,4 @@
-import {listLogs, readLogEntries} from '../../core/log/llmLog.js';
+import {listLogs, summarizeLog} from '../../core/log/llmLog.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
 function formatBytes(bytes: number): string {
@@ -24,44 +24,28 @@ export async function handleLogsCommand(args: string, ctx: CommandContext): Prom
     return 'handled';
   }
 
-  const entries = await readLogEntries(id);
-  if (entries.length === 0) {
+  const summary = await summarizeLog(id);
+  if (!summary) {
     ctx.addSystemMessage(`No log found with id ${id}.`);
     return 'handled';
   }
 
-  const typeCounts: Record<string, number> = {};
-  let totalInput = 0;
-  let totalOutput = 0;
-  const toolCallCounts: Record<string, number> = {};
-
-  for (const entry of entries) {
-    typeCounts[entry.type] = (typeCounts[entry.type] ?? 0) + 1;
-    if (entry.usage) {
-      totalInput += entry.usage.inputTokens ?? 0;
-      totalOutput += entry.usage.outputTokens ?? 0;
-    }
-    if (entry.type === 'tool_call' && entry.toolCall) {
-      toolCallCounts[entry.toolCall.name] = (toolCallCounts[entry.toolCall.name] ?? 0) + 1;
-    }
-  }
-
-  const typeLines = Object.entries(typeCounts)
+  const typeLines = Object.entries(summary.typeCounts)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([type, count]) => `  ${type}: ${count}`);
 
-  const toolLines = Object.entries(toolCallCounts)
+  const toolLines = Object.entries(summary.toolCallCounts)
     .sort(([, a], [, b]) => b - a)
     .map(([name, count]) => `  ${name}: ${count}`);
 
   const parts = [
     `Log: ${id}`,
-    `Entries: ${entries.length}`,
+    `Entries: ${summary.entries}`,
     '',
     'Entry counts by type:',
     ...typeLines,
     '',
-    `Total token usage: in=${totalInput} out=${totalOutput}`,
+    `Total token usage: in=${summary.totalInput} out=${summary.totalOutput}`,
   ];
 
   if (toolLines.length > 0) {

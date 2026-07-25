@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels} from '../../src/cli/commands/providerWizard.js';
+import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from '../../src/cli/commands/providerWizard.js';
 
 const settings = {
   provider: 'local',
@@ -22,14 +22,37 @@ describe('provider wizard helpers', () => {
 
   it('removes models and updates active model when necessary', () => {
     const result = providerRemoveModels(settings, 'local', 'old, missing');
-    expect(result.settingsPatch?.model).toBe('keep');
+    expect(result.settingsPatch?.model).toBeUndefined();
+    expect(result.message).toContain('selection cleared');
     expect(result.message).toContain('Not found: missing.');
   });
 
   it('removes providers and switches active provider when needed', () => {
     const result = providerRemove(settings, 'local');
     expect(result.settingsPatch).toEqual({providers: [], provider: undefined, model: undefined});
-    expect(result.message).toContain('Switched to no provider');
+    expect(result.message).toContain('selection cleared');
+  });
+
+  it('clears active selection instead of falling back to another provider', () => {
+    const result = providerRemove({provider: 'first', model: 'a', providers: [
+      {name: 'first', url: 'https://first.example/v1', models: ['a']},
+      {name: 'second', url: 'https://second.example/v1', models: ['b']},
+    ]}, 'first');
+    expect(result.settingsPatch).toEqual({providers: [{name: 'second', url: 'https://second.example/v1', models: ['b']}], provider: undefined, model: undefined});
+  });
+
+  it('preserves selection when removing an inactive provider', () => {
+    const result = providerRemove({provider: 'first', model: 'a', providers: [
+      {name: 'first', url: 'https://first.example/v1', models: ['a']},
+      {name: 'second', url: 'https://second.example/v1', models: ['b']},
+    ]}, 'second');
+    expect(result.settingsPatch).toEqual({providers: [{name: 'first', url: 'https://first.example/v1', models: ['a']}]});
+  });
+
+  it('rejects adding a key to a remote plaintext provider', () => {
+    const result = providerSetKey({providers: [{name: 'remote', url: 'http://example.com/v1', models: ['a']}]}, 'remote', 'secret');
+    expect(result.settingsPatch).toBeUndefined();
+    expect(result.message).toContain('plaintext HTTP');
   });
 
   it('maps provider actions to modes and prompts', () => {

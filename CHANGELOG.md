@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Security
+
+- Private haze state now uses `0700` directories and `0600` files on POSIX. Bash/process output, raw-output handles, file reads, edits, LSP documents/frames, grep, and JSONL readers enforce collection-time byte limits; bash timeout/abort terminates process trees.
+- Grep rejects explicitly ignored roots unless requested, skills and LSP enforce real workspace/root boundaries, MCP discovery and cleanup are bounded and abort-aware, and credentials are rejected on remote plaintext HTTP endpoints.
+
+### Fixed
+
+- Turn/tool status is authoritative across UI, events, logs, sessions, and headless output; retries expose one turn lifecycle and structured `{ok:false}` results remain failures.
+- Session/debug persistence is ordered and flushable, invalid skills are isolated, malformed settings remain visible, active provider/model removal clears selection, and stdio MCP setup no longer asks for HTTP headers.
+
 ## 0.8.0 - 2026-07-09
 
 ### Changed

@@ -1,8 +1,19 @@
-import {afterAll, beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterAll, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {handleSlashCommand, type CommandContext} from '../../src/cli/commands/commands.js';
+import type {CommandContext} from '../../src/cli/commands/commands.js';
+
+const commandHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-commands-test-'));
+vi.doMock('../../src/config/paths.js', () => ({
+  HAZE_DIR: commandHome,
+  GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills'),
+}));
+const {handleSlashCommand} = await import('../../src/cli/commands/commands.js');
+
+afterAll(async () => {
+  await fs.remove(commandHome);
+});
 
 function mockContext(overrides?: Partial<CommandContext>): CommandContext {
   return {
@@ -248,33 +259,9 @@ describe('handleSlashCommand', () => {
 });
 
 describe('handleSlashCommand /logs', () => {
-  let logsTmp: string;
-  let originalHazeDir: typeof process.env.HAZE_DIR;
-
-  beforeAll(async () => {
-    logsTmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-logs-cmd-test-'));
-    // Point the logs dir via HAZE_DIR env so llmLog uses our temp
-    // llmLog uses HAZE_DIR from paths.ts which reads os.homedir(), so we monkeypatch
-    // We'll write log files directly into the expected dir structure
-    originalHazeDir = process.env.HAZE_DIR;
-  });
-
-  afterAll(async () => {
-    await fs.remove(logsTmp);
-  });
-
   it('shows no log files message when empty', async () => {
-    // Monkey-patch HAZE_DIR temporarily
-    const origJoin = path.join;
-    // We need the llmLog module to use our temp dir.
-    // Since LOGS_DIR is computed at module level, we use dynamic import with a different approach.
-    // Instead, directly create a scenario: write a log file to ~/.haze/logs and verify.
-    // For isolated tests, we'll test the command handler directly by importing the module.
     const ctx = mockContext();
-    // The /logs command calls listLogs() which reads from ~/.haze/logs.
-    // If no logs exist, it should report that.
     expect(await handleSlashCommand('/logs', ctx)).toBe('handled');
-    // Either "No log files" or a list with existing logs
     const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(typeof msg).toBe('string');
   });
@@ -286,7 +273,6 @@ describe('handleSlashCommand /logs', () => {
   });
 
   it('shows log summary for a real log file', async () => {
-    // Create a log file in ~/.haze/logs
     const {createLog, appendLogEntry} = await import('../../src/core/log/llmLog.js');
     const log = await createLog();
     await appendLogEntry(log, {at: new Date().toISOString(), type: 'request', stream: 'main'});

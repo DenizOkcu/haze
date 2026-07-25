@@ -2,6 +2,9 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import YAML from 'yaml';
 import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter} from './types.js';
+import {assertRealPathInsideRoot} from '../utils/path.js';
+import {SKILL_MARKDOWN_BYTES} from '../core/limits/byteBudgets.js';
+import {readUtf8Prefix} from '../core/io/boundedRead.js';
 
 const MAX_REFERENCE_BYTES = 50_000;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -47,19 +50,26 @@ async function loadReference(dir: string, referencePath: string): Promise<Loaded
   const absolutePath = path.resolve(dir, referencePath);
   const relative = path.relative(dir, absolutePath);
   if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Skill reference escapes skill directory: ${referencePath}`);
-  const stat = await fs.stat(absolutePath);
+  const realPath = await assertRealPathInsideRoot(dir, absolutePath, referencePath, 'skill directory');
+  const stat = await fs.stat(realPath);
   if (!stat.isFile()) throw new Error(`Skill reference is not a file: ${referencePath}`);
-  if (stat.size > MAX_REFERENCE_BYTES) throw new Error(`Skill reference is too large: ${referencePath}`);
-  return {path: referencePath, absolutePath, content: await fs.readFile(absolutePath, 'utf8')};
+  const prefix = await readUtf8Prefix(realPath, MAX_REFERENCE_BYTES);
+  if (prefix.truncated) throw new Error(`Skill reference is too large: ${referencePath}`);
+  return {path: referencePath, absolutePath: realPath, content: prefix.content};
 }
 
 export async function loadSkill(dir: string, source: 'global' = 'global'): Promise<LoadedSkill | null> {
   const skillPath = path.join(dir, 'SKILL.md');
   if (!(await fs.pathExists(skillPath))) return null;
-  const content = await fs.readFile(skillPath, 'utf8');
+  const realSkillPath = await assertRealPathInsideRoot(dir, skillPath, 'SKILL.md', 'skill directory');
+  const stat = await fs.stat(realSkillPath);
+  if (!stat.isFile()) throw new Error('SKILL.md is not a file');
+  const prefix = await readUtf8Prefix(realSkillPath, SKILL_MARKDOWN_BYTES);
+  if (prefix.truncated) throw new Error(`SKILL.md exceeds ${SKILL_MARKDOWN_BYTES} byte limit`);
+  const content = prefix.content;
   const {frontmatter, body} = parseSkillMarkdown(content);
   const references = await Promise.all(referencedPaths(body).map(ref => loadReference(dir, ref)));
-  return {dir, path: skillPath, name: frontmatter.name, description: frontmatter.description, body, references, source};
+  return {dir, path: realSkillPath, name: frontmatter.name, description: frontmatter.description, body, references, source};
 }
 
 export const internals = {parseSkillMarkdown, referencedPaths};

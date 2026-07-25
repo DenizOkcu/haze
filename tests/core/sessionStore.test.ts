@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation, restoreWorkState} from '../../src/core/session/sessionStore.js';
+import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
 
 describe('sessionStore', () => {
   let tmp: string;
@@ -95,6 +96,15 @@ describe('sessionStore', () => {
     // The malformed line is on file line 4 (header=1, first=2, blank=3, corrupt=4), not line 3.
     expect(parseErrors).toHaveLength(1);
     expect(parseErrors[0]).toContain('Line 4');
+  });
+
+  it('rejects an oversized JSONL line and continues with later entries', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await fs.appendFile(session.file, `${'x'.repeat(JSONL_LINE_BYTES + 1)}\n`, 'utf8');
+    await appendSessionEntry(session, {type: 'ui_message', at: '2', role: 'user', text: 'after'});
+    const {entries, parseErrors} = await readSessionEntries(session);
+    expect(entries.at(-1)).toMatchObject({type: 'ui_message', text: 'after'});
+    expect(parseErrors).toContain(`Line 2: exceeds ${JSONL_LINE_BYTES} byte limit`);
   });
 
   it('returns no parse errors for a clean session file', async () => {

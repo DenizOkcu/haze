@@ -134,6 +134,11 @@ describe('busyToolLabel', () => {
 describe('toolResultSummary', () => {
   it('reports failure', () => {
     expect(toolResultSummary({success: false, error: 'bad'})).toBe('failed: bad');
+    expect(toolResultSummary({success: false, output: {ok: false, error: 'structured failure'}})).toBe('failed: structured failure');
+  });
+
+  it('labels globally capped grep counts as lower bounds', () => {
+    expect(toolResultSummary({success: true, output: {totalMatches: 3, matchCountIsLowerBound: true}})).toBe('at least 3 matches');
   });
 
   it('reports exit code', () => {
