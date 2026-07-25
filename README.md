@@ -2,17 +2,19 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.8.0
+## What's new in 0.9.0
 
-haze 0.8.0 focuses on runtime reliability and clearer terminal feedback while staying compact and low-friction.
+haze 0.9.0 closes the security and correctness findings from the 0.8.0 code review: private state, truthful status, bounded work, and robust boundaries.
 
-- **AI SDK v7 runtime.** The main agent and subagent runners now use AI SDK v7 APIs with explicit per-tool context wiring, keeping built-in tool state turn-scoped and compatible with the newer runtime.
-- **Live busy status.** The active-turn indicator now shows the current model, elapsed time, and the tool activity underway — reading, editing, searching, running commands, loading skills, or calling MCP/LSP tools — so long turns look alive instead of stuck.
-- **Bounded bash output processing.** Bash output reduction paths are tightened so large command output remains controlled before it reaches transcript/model context.
-- **Input and maintenance polish.** Multiline input shortcuts are fixed, core agent maintenance paths are hardened, model/status labels are shorter and safer, and user-facing naming is consistently lowercase `haze`.
+- **Private home-state storage.** Settings, sessions, logs, and history now use `0700` directories and `0600` files on POSIX, with opportunistic tightening of pre-existing overly-broad modes.
+- **Truthful turn and tool status.** Turn and tool status is now authoritative across the UI, events, logs, sessions, and headless exit codes — a turn that ends without a substantive answer, after an unresolved tool failure, or at a hard step/tool budget reports `failed` even when the provider returned normally.
+- **Bounded work, not just bounded output.** Bash, grep, and LSP output, file reads, edits, and stored handles enforce collection-time byte limits; bash timeout and abort terminate the whole process tree, not just the shell.
+- **Stronger filesystem and integration boundaries.** `grep` rejects directly named ignored files, skills and LSP confine to real workspace/root paths (symlink-safe), MCP discovery is bounded and abort-aware, and credentialed remote plaintext HTTP is rejected while loopback HTTP stays supported.
+- **Ordered, flushable persistence.** Sessions and debug logs preserve write order and flush at turn end and shutdown, surfacing persistence failures instead of swallowing them.
 
 Previous releases:
 
+- **0.8.0** — AI SDK v7 runtime, live busy status with model/elapsed/tool labels, bounded bash output processing, and standardized lowercase `haze` naming.
 - **0.7.0** — Headless `-p`/`--output json`/`--output stream-json`, pinned-connection `fetch` safety, scoped instruction refresh during turns, smaller durable sessions, and startup context visibility.
 - **0.6.0** — AI SDK-native ToolLoopAgent core, optional LSP semantic navigation, MCP server support, unified config pickers, cleaner transcripts, `/context`, and startup update checks.
 - **0.5.0** — `fetch` tool for public URLs (Markdown/JSON/text, SSRF-protected), removed all provider env vars (config via `/provider`/`/model`/`/settings`), debug-only LLM logs, command-aware output reduction, Markdown rendering in the CLI, scoped nested context files, and auto-clearing completed tasks.
