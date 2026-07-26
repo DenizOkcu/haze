@@ -1,0 +1,843 @@
+{
+  "": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "high",
+    "reason": "empty command"
+  },
+  "rm -rf /tmp/foo": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "rm dist": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git reset --hard origin/main": {
+    "riskLevel": "destructive",
+    "traits": [
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git clean -fdx": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git restore .": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout -- .": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout --force .": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout --staged .": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout --": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout --force": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git checkout --track origin/main": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "git push --force": {
+    "riskLevel": "destructive",
+    "traits": [
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "drop database users": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "truncate table users": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "npm install && rm -rf node_modules": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "npm install && find . -name \"*.tmp\" -delete": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "find -delete removes matched files"
+  },
+  "find . -name \"*.tmp\" -delete && npm install": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "find -delete removes matched files"
+  },
+  "echo hi > file.txt && find . -exec rm {} +": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can delete files"
+  },
+  "find . -exec rm {} + && echo hi > file.txt": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can delete files"
+  },
+  "echo $(rm -rf /)": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "eval \"rm -rf /\"": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "find . -name \"*.tmp\" -delete": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "find -delete removes matched files"
+  },
+  "find . -name foo -delete -print": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files"
+    ],
+    "confidence": "high",
+    "reason": "find -delete removes matched files"
+  },
+  "mytool -delete --force ./out": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "find . -type f -name \"*.log\" -exec rm {} +": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can delete files"
+  },
+  "find . -type d -name node_modules -exec git clean -fdx {} +": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can delete files"
+  },
+  "find . -name x -exec chmod 644 {} +": {
+    "riskLevel": "mutating",
+    "traits": [
+      "changes_permissions",
+      "writes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can modify files"
+  },
+  "find . -name \"*.ts\" | xargs eslint": {
+    "riskLevel": "unknown",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "low",
+    "reason": "find -exec / xargs runs an embedded command"
+  },
+  "find . -type f | xargs rm": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can delete files"
+  },
+  "find . -name \"*.ts\" -exec git add {} +": {
+    "riskLevel": "mutating",
+    "traits": [
+      "changes_git_state",
+      "writes_files",
+      "reads_files"
+    ],
+    "confidence": "medium",
+    "reason": "embedded command can modify files"
+  },
+  "find . -name \"*.ts\" -exec cat {} +": {
+    "riskLevel": "unknown",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "low",
+    "reason": "find -exec / xargs runs an embedded command"
+  },
+  "npm install": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "npm i": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "npm add lodash": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "pnpm install": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "pnpm add lodash": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "yarn add lodash": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "yarn install": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "pip install requests": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "brew install ripgrep": {
+    "riskLevel": "mutating",
+    "traits": [
+      "uses_network",
+      "installs_dependencies",
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "curl https://example.com": {
+    "riskLevel": "network",
+    "traits": [
+      "uses_network"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "wget https://example.com": {
+    "riskLevel": "network",
+    "traits": [
+      "uses_network"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "scp file.txt user@host:/path": {
+    "riskLevel": "network",
+    "traits": [
+      "uses_network"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "ssh user@host": {
+    "riskLevel": "network",
+    "traits": [
+      "uses_network"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "curl https://example.com | tee output.txt": {
+    "riskLevel": "network",
+    "traits": [
+      "uses_network"
+    ],
+    "confidence": "high",
+    "reason": "command uses the network or installs dependencies"
+  },
+  "echo hi > file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "echo hi >> file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "sed -i s/foo/bar/ file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "perl -pi -e s/foo/bar/ file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "tee file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "chmod 755 file.sh": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_permissions"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "mv a b": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "cp a b": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "mkdir foo": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "touch file.txt": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git add .": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git commit -m test": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git merge feature": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git rebase main": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git checkout main": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "git restore --staged .": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can modify files or repository state"
+  },
+  "node -e \"fs.writeFileSync(\\\"f\\\", \\\"x\\\")\"": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "medium",
+    "reason": "command can modify files or repository state"
+  },
+  "node -e \"fs.appendFile(\\\"f\\\", \\\"x\\\")\"": {
+    "riskLevel": "mutating",
+    "traits": [
+      "writes_files"
+    ],
+    "confidence": "medium",
+    "reason": "command can modify files or repository state"
+  },
+  "npm test": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "npm run test": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "npm run typecheck": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "npm run lint": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "npm run build": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "pnpm test": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "pnpm run test": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "yarn test": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "yarn run build": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "vitest run": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "jest": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_tests"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "tsc --noEmit": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "eslint src/": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "npx tsc --noEmit": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "npm run build && echo done": {
+    "riskLevel": "read_only",
+    "traits": [
+      "runs_build"
+    ],
+    "confidence": "high",
+    "reason": "validation command"
+  },
+  "git status": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "git diff": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "git log": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "git show": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "git branch": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "rg foo": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "grep foo f": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "find .": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "ls": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "pwd": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "cat f": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "head f": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "tail f": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "node --version": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "npm --version": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "which node": {
+    "riskLevel": "read_only",
+    "traits": [
+      "reads_files"
+    ],
+    "confidence": "high",
+    "reason": "read-only inspection command"
+  },
+  "echo hi": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "whoami": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "node -e \"console.log(1)\"": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "`rm -rf`": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "echo $(whoami)": {
+    "riskLevel": "unknown",
+    "traits": [],
+    "confidence": "low",
+    "reason": "command did not match known safe patterns"
+  },
+  "git status && rm -rf dist": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  },
+  "rm -rf dist && git status": {
+    "riskLevel": "destructive",
+    "traits": [
+      "deletes_files",
+      "changes_git_state"
+    ],
+    "confidence": "high",
+    "reason": "command can delete files or irreversibly change repository state"
+  }
+}
