@@ -323,4 +323,14 @@ describe('StdioLspClient', () => {
     expect(sent.some(s => s.includes('"exit"'))).toBe(true);
     expect(child.killedBy).toBe('SIGTERM');
   });
+
+  it('escalates LSP termination when the process tree does not exit', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    await client.close();
+    expect(child.killedBy).toBe('SIGTERM');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(child.killedBy).toBe('SIGKILL');
+  });
 });

@@ -4,29 +4,32 @@
 
 ### Added
 
-- Subagents now act as disposable context-isolation workers for one or more independently described tasks. They receive bounded task capsules and fresh scoped project instructions, use explicit mode/profile/model policy, and return compact truthful result capsules while private worker telemetry stays out of parent model context and durable sessions.
-- `/fleet` now supports ephemeral `--review`, `--profile`, `--workers`, and `--concurrency` controls. Runtime-enforced concurrency, deadlines, tool-call caps, retry-wide mutation serialization, and quarantine of abort-ignoring work replace prompt-only scheduling promises.
+- Subagents can handle one or more independent tasks in disposable, isolated contexts. Each worker receives a bounded task description and fresh project instructions for its scope. Mode, profile, and model selection are explicit. Workers return compact results, while their private telemetry stays out of the parent context and saved sessions.
+- `/fleet` accepts temporary `--review`, `--profile`, `--workers`, and `--concurrency` options. The runtime now enforces concurrency, deadlines, and tool-call limits. It serializes mutations across retries and quarantines work that ignores an abort instead of relying on scheduling instructions in the prompt.
 
 ### Security
 
-- Private haze state now uses `0700` directories and `0600` files on POSIX. Bash/process output, raw-output handles, file reads, edits, LSP documents/frames, grep, and JSONL readers enforce collection-time byte limits; bash timeout/abort terminates process trees.
-- Grep rejects explicitly ignored roots unless requested, skills and LSP enforce real workspace/root boundaries, MCP discovery and cleanup are bounded and abort-aware, and credentials are rejected on remote plaintext HTTP endpoints.
+- Private haze state uses `0700` directories and `0600` files on POSIX. Bash and process output, raw-output handles, file operations, LSP documents and frames, grep, and JSONL readers apply byte limits while collecting data. Bash timeouts and aborts terminate process trees.
+- Grep rejects ignored roots unless they are requested explicitly. Skills and LSP enforce real workspace or root boundaries. MCP discovery and cleanup have deadlines and respond to aborts. Remote plaintext HTTP endpoints cannot receive credentials.
 
 ### Fixed
 
-- Subagent tool input now uses one flat required capsule schema instead of a legacy union, preventing local OpenAI-compatible models from emitting empty `{}` calls that fail validation. The orchestration tool no longer requires a per-tool Haze context that the main AI SDK turn does not provide. Verbose objectives and pre-mapped scopes are accepted within bounded ceilings, while prompts request compact handoffs, state concrete worker budgets, and prevent repeated broad retries.
-- Turn/tool status is authoritative across UI, events, logs, sessions, and headless output; retries expose one turn lifecycle and structured `{ok:false}` results remain failures.
-- Session/debug persistence is ordered and flushable, invalid skills are isolated, malformed settings remain visible, active provider/model removal clears selection, and stdio MCP setup no longer asks for HTTP headers.
+- `readFile` exact line pages now use a bounded, signature-validated sparse byte-offset index. Later pages no longer rescan from the beginning, cached indexes are invalidated when files change, and empty or trailing-newline final lines retain their previous behavior.
+- Timed-out or aborted commands now settle even when an escaped descendant retains stdout or stderr. Forced teardown has a short close fallback, destroys owned streams, and shares process-tree signaling with LSP servers; LSP shutdown and protocol failures now terminate the whole server tree and escalate to `SIGKILL` when needed.
+- Malformed IPv6-shaped URL hosts now fail closed instead of bypassing literal-address blocking.
+- Subagent input now uses one flat, required capsule schema instead of the old union. This prevents local OpenAI-compatible models from sending empty `{}` calls that fail validation. The orchestration tool no longer expects per-tool Haze context that the main AI SDK turn does not provide. It accepts verbose objectives and pre-mapped scopes within fixed limits, while prompts ask for compact handoffs, spell out worker budgets, and discourage repeated broad retries.
+- Turn and tool status now agrees across the UI, events, logs, sessions, and headless output. Retries expose one turn lifecycle, and structured `{ok:false}` results still count as failures.
+- Session and debug writes are ordered and flushable. Invalid skills are isolated, malformed settings remain visible, removing the active provider or model clears the selection, and stdio MCP setup no longer asks for HTTP headers.
 
 ## 0.8.0 - 2026-07-09
 
 ### Changed
 
-- **Migrated the agent runtime to AI SDK v7.** The main `ToolLoopAgent` turn and subagent runner now use AI SDK v7 APIs while preserving haze's compact terminal rendering, turn-scoped tool state, loop guardrails, and scoped-context injection behavior.
-- **Improved live busy feedback.** The interactive busy line now shows the active model name, a one-second elapsed-time heartbeat, and current tool activity labels such as reading, editing, searching, running commands, loading skills, querying LSP, or running MCP tools. Long model/tool gaps now visibly progress instead of looking frozen.
-- **Bounded bash output processing.** Bash reducer paths now bound large output processing more aggressively before output enters the transcript/model context, keeping validation/search/log-heavy commands safer for long-running agent work.
-- **Hardened core agent maintenance paths.** Tool context wiring, maintenance prompts, and related agent guidance were tightened for AI SDK v7 and current haze runtime behavior.
-- **Standardized lowercase `haze` naming.** README, docs, prompts, skills, command help, tests, and agent guidance now consistently use lowercase `haze` for the product name.
+- Migrated the main `ToolLoopAgent` turn and subagent runner to AI SDK v7 while preserving compact terminal output, turn-scoped tool state, loop guardrails, and scoped context injection.
+- Added the active model, a one-second elapsed timer, and current tool activity to the busy line. Activity labels cover reading, editing, searching, commands, skills, LSP, and MCP tools. Long waits during model and tool calls now show visible progress.
+- Applied stricter bounds to large bash output before it enters the transcript or model context, especially for validation, search, and log-heavy commands.
+- Updated tool context wiring, maintenance prompts, and agent guidance for AI SDK v7 and the current runtime.
+- Standardized the lowercase `haze` name across the README, docs, prompts, skills, command help, tests, and agent guidance.
 
 ### Fixed
 
@@ -38,24 +41,24 @@
 
 ### Added
 
-- **`--output stream-json` for print mode.** `haze -p "…" --output stream-json` streams the run as newline-delimited JSON: public progress events (`turn_start`, `message_start`/`message_update`/`message_end`, `tool_start`/`tool_end`, `retry`, `context_overflow`, `turn_end`, each with an ISO-8601 `at` timestamp) are written to stdout as they happen, and the final line is the same `{type,status,result,usage}` envelope as `--output json`. Tool events omit raw inputs/outputs so captured stdout stays suitable for harness and CI logs. Previously print mode stayed silent until the end and emitted only that single envelope, so harnesses driving haze headlessly had no live progress and could not run stdout-based stagnation/loop detection on a silent-but-alive run. Every line is standalone valid JSON (pipeable through `jq -c .`). `text` and `json` outputs are unchanged.
-- **Startup context visibility.** The interactive startup message now lists the context files sent with the system prompt, making it easier to verify whether global `CLAUDE.md`/`AGENTS.md` and workspace instructions were loaded.
+- Added `--output stream-json` to print mode. `haze -p "…" --output stream-json` writes public progress events to stdout as newline-delimited JSON, followed by the same `{type,status,result,usage}` envelope as `--output json`. Each event has an ISO-8601 `at` timestamp. Tool events omit raw inputs and outputs so CI and harness logs do not capture them. Before this option, print mode stayed silent until it returned the final envelope; harnesses could not show live progress or detect stagnant and looping runs from stdout. Every line is valid JSON and can be piped through `jq -c .`. The `text` and `json` formats are unchanged.
+- The startup message now lists the context files sent with the system prompt. This makes it possible to check whether haze loaded global `CLAUDE.md` or `AGENTS.md` files and workspace instructions.
 
 ### Changed
 
-- **CLI print mode.** `haze -p "prompt"` runs a single non-interactive turn and prints the result, with optional `--model provider:name` override (per-run, no settings write) and `--output json` structured output. Reads the prompt from stdin when piped. The exit code and JSON `status` are driven by the agent's authoritative terminal state (`complete`/`aborted`/`failed`) rather than by parsing the reply, so CI gating on the exit code is reliable. A bad or ambiguous `--model` selector reports a precise error and exits non-zero, `--debug` writes a JSONL log under `~/.haze/logs/`, and the `--output json` `usage` object is pinned to a documented set of fields.
-- **Scoped context refresh during turns.** Nested `CLAUDE.md`/`AGENTS.md` files discovered by file tools are injected into the next model step, tracked by signature, and reread when they change. Concurrent scoped-context discovery is serialized so unchanged instruction files are read once while still surfacing newly changed guidance.
-- **Smaller durable session files.** Session persistence now drops streaming `message_update` events and slims large tool outputs/errors in persisted `tool_end` events and `conversation_snapshot` tool results to previews plus byte counts. Sessions remain resumable while avoiding runaway JSONL growth from repeated streamed text or large file reads.
+- `haze -p "prompt"` runs one non-interactive turn and prints the result. It supports a per-run `--model provider:name` override without changing settings, plus structured `--output json` output. It reads piped prompts from stdin. Exit codes and JSON status come from the agent's terminal state (`complete`, `aborted`, or `failed`) rather than parsed reply text. Invalid or ambiguous model selectors print a specific error and exit nonzero. `--debug` writes a JSONL log under `~/.haze/logs/`, and the JSON `usage` object has a documented, fixed set of fields.
+- Nested `CLAUDE.md` and `AGENTS.md` files discovered during a turn are added to the next model step and reread when their signature changes. haze serializes concurrent discovery so it reads unchanged files once without missing updated instructions.
+- Session persistence no longer stores streaming `message_update` events. Large outputs and errors in saved `tool_end` events and `conversation_snapshot` tool results are reduced to previews and byte counts. Sessions remain resumable without unchecked JSONL growth from repeated text streams or large file reads.
 
 ### Security
 
-- **Closed a DNS-rebinding TOCTOU in the `fetch` tool.** `urlGuard.validateUrl` resolved a hostname and confirmed every address was public, but the subsequent global `fetch` re-resolved the hostname at connect time, so an attacker-controlled DNS server could answer validation with a public IP and connect with an internal/cloud-metadata IP — fully bypassing the SSRF guard that exists precisely to stop that. `fetchUrlContent` now pins each connection (and each redirect hop) to the already-validated IP via a small stdlib transport that preserves the original `Host` header and TLS `servername`/cert verification, with no second DNS lookup between validation and connect. The post-fetch re-validation was removed as it re-resolved DNS against an already-pinned connection and only reopened the race. Literal-IP URLs keep using the global `fetch` (no rebinding surface).
+- Closed a DNS-rebinding TOCTOU issue in `fetch`. `urlGuard.validateUrl` checked that a hostname resolved only to public addresses, but the global `fetch` resolved it again when connecting. An attacker-controlled DNS server could therefore return a public IP during validation and an internal or cloud-metadata IP during connection. `fetchUrlContent` now pins each connection and redirect hop to the validated IP with a small standard-library transport. It preserves the original `Host` header, TLS `servername`, and certificate verification without another DNS lookup. The redundant post-fetch validation was removed. Literal IP URLs still use the global `fetch` because they have no DNS-rebinding surface.
 
 ## 0.6.0 - 2026-06-21
 
 ### Added
 
-- **MCP server support.** haze can now connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and expose their tools to the agent alongside the built-in toolset. `/mcp` opens an interactive picker (like `/provider`) to add a server from a preset (Context7 ships built-in for up-to-date library docs) or custom `http`/`sse`/`stdio` details, then enable/disable/remove it or set a masked API key. Servers persist in `~/.haze/settings.json` under `mcpServers`. MCP clients open per agent turn and close when it ends; a failing server is isolated and MCP tools never shadow built-ins.
+- Added [Model Context Protocol](https://modelcontextprotocol.io) server support. `/mcp` opens an interactive picker for presets or custom `http`, `sse`, and `stdio` servers. Context7 is included as a preset for current library documentation. From the picker, users can enable, disable, or remove a server and set a masked API key. Configuration is stored under `mcpServers` in `~/.haze/settings.json`. MCP clients open for each agent turn and close afterward. A failing server is isolated, and MCP tools cannot shadow built-ins.
 - Added optional configurable stdio LSP support through `/lsp`, with TypeScript, Rust, Python, Go, and PHP presets.
 - Added read-only semantic navigation tools (`lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, `lspReferences`) that are exposed to the model only when an enabled LSP command is installed on `PATH`.
 - Added `/context`, a token breakdown of the current request (system prompt, project context, tools including MCP, and chat messages).
@@ -64,7 +67,7 @@
 
 ### Changed
 
-- Switched the main agent turn to the AI SDK v6 `ToolLoopAgent` abstraction while preserving compact terminal tool/text rendering and key loop guardrails.
+- Switched the main agent turn to the AI SDK v6 `ToolLoopAgent` abstraction while preserving compact terminal tool and text rendering and the existing loop guardrails.
 - Improved transcript segmentation so assistant text and tool blocks alternate cleanly during multi-step turns.
 - Added LSP-aware prompt guidance only when LSP tools are actually available; otherwise haze naturally falls back to `grep`, `listFiles`, and `readFile`.
 - Made `/lsp` and `/mcp` interactive pickers matching the `/provider` flow (autocomplete lists, preset pickers, masked API-key entry), replacing the previous `/lsp`/`/mcp` subcommand syntax.
@@ -76,7 +79,7 @@
 ### Changed
 
 - Removed all user-facing environment variables. `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `HAZE_MODEL`, and `HAZE_CONTEXT_BUDGET_SHARE` are no longer read; configure providers, models, API keys, and base URLs through `~/.haze/settings.json` and the `/provider`, `/model`, `/settings` slash commands instead. This also removes the `OPENAI_*` env overrides from the startup provider info and the header.
-- File LLM logging is now **off by default**. Previously haze wrote a detailed JSONL log (full prompts, model messages, tool inputs/outputs, token usage) to `~/.haze/logs/<timestamp>.jsonl` on every session. Logging is now enabled solely with the `--debug` flag (`haze --debug`), which also turns on the on-screen debug panel. The `/logs` command still reviews historical log files.
+- File-based LLM logging is now off by default. Previously, every session wrote a detailed JSONL log containing full prompts, model messages, tool inputs and outputs, and token usage to `~/.haze/logs/<timestamp>.jsonl`. Run `haze --debug` to enable logging and the on-screen debug panel. `/logs` still opens historical log files.
 - Bash results now pass through command-aware reducers before they enter the transcript/model context. Validation failures render focused diagnostics, successful validation stays short, git/diff/search/JSON/log-like output is compacted, noisy command families get line filters, and reduced raw output remains retrievable by `readToolOutput` when stored.
 - `grep` now returns compact structured search output for long match sets/lines, with reduction metadata, omitted-result counts, and a raw-output handle when the rendered result was truncated.
 - Tool activity rendering is quieter: live tool groups show elapsed timers, subagent child calls, capped group detail, and compact success/failure summaries instead of dumping large result objects.
@@ -101,13 +104,13 @@
 
 ### Skills
 
-- Replaced single-shot `/create-skill <description>` with a 3-step interactive wizard: name → optional role → description. The user-supplied name and role are used verbatim — the model no longer renames them.
+- Replaced single-shot `/create-skill <description>` with a three-step interactive wizard: name → optional role → description. The wizard uses the supplied name and role verbatim; the model no longer renames them.
 - Added language-agnostic intent extraction. Skill descriptions are interpreted by the model in any language, replacing the previous English-only regex strip. `"crée une compétence qui vérifie le style du code"` now produces a skill that vérifies code style, not a skill about creating something.
 - Added `toSkillDirName` for kebab-casing user-typed skill names without stop-word stripping (so `"create a skill"` stays `create-a-skill`, not `skill`).
 
 ### Commands
 
-- Removed the `/tasks` slash command. Tasks are now managed exclusively by the model via the `writeTasks` tool — `/clear` still wipes them as a side effect of clearing the conversation.
+- Removed the `/tasks` slash command. The model now manages tasks through `writeTasks`. `/clear` still removes them when it clears the conversation.
 - Removed the `/list-skills` alias; `/skills` now shows the overview and the installed list.
 - Removed the `/skill <subcommand>` and `/skills <subcommand>` legacy routing forms. Each skill operation now has exactly one user-facing form: `/skills`, `/create-skill`, `/skill-info`, `/validate-skill`, `/remove-skill`.
 - Removed the `/tasks rm` alias for `/tasks remove`.
@@ -116,7 +119,7 @@
 ### Docs site
 
 - Added §02 "Native skill creation" segment that frames the 3-step wizard as the haze superpower, with a live transcript of the wizard prompts, superpower bullets, and copy-pasteable recipe cards for `/code-review`, `/deploy-check`, `/release-prep`, `/security-review`.
-- Added §07 "Commands index" — a categorized reference of all 16 slash commands plus the `/<skill-name>` dynamic invocations.
+- Added §07 "Commands index," a categorized reference for all 16 slash commands and dynamic `/<skill-name>` invocations.
 - Removed §04 "Serviceable procedures" (folded into §02).
 - Renumbered sections sequentially (§01 Operation → §02 Native skill creation → §03 Field behavior → §04 Components → §05 Compatibility → §06 Install → §07 Commands index).
 - Fixed §01 layout: switched from `.container-prose` (narrow, visually centered) to `.container` so it aligns with every other section.

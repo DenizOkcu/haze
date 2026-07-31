@@ -2,44 +2,48 @@
 ==============================================================================
   Sync Impact Report
 ==============================================================================
-  Version change: 1.0.0 → 1.1.0 (MINOR: new core principle added).
-  Context: Initially ratified 2026-07-25 (1.0.0) from README.md,
-           docs/index.html, package.json, the comprehensive-review remediation
-           docs, and every nested src/**/AGENTS.md + tests/AGENTS.md file.
+  Version change: 1.1.0 → 1.2.0 (MINOR: one principle added and existing
+  resource/orchestration guidance materially expanded).
+  Context: Updated after the 2026-08-03 full-codebase review of the current
+           /fleet and context-isolated subagent implementation.
 
-  Amendment 1.1.0 (2026-07-25): Added Core Principle II 'Minimal Core, Skills
-    as First-Class Tools' — haze is a minimal agent that the user extends via
-    skills created with /skills; user-created skills are first-class,
-    peer-to-native-tools objects for the model. Former principles II–VII were
-    renumbered to III–VIII.
+  Amendment 1.2.0 (2026-08-03):
+    - Principle II now records /fleet as the sole approved native workflow
+      exception. It remains a thin command over the existing subagent tool.
+    - Principle III now covers bounded memory, exact-page indexing, deadlines,
+      cancellation, process-tree teardown, and physical quarantine.
+    - Principle IV now requires fail-closed malformed IP-literal handling and
+      connection pinning to the validated address at every redirect hop.
+    - Added Principle IX, 'Controlled Delegation and Parallel Work', covering
+      fresh worker context, fixed mode toolsets, explicit profiles/models,
+      hard admission limits, mutation coordination, and capsule-only handoff.
 
-  Modified principles: n/a (initial adoption).
-  Added sections (all new):
-    - Core Principles I–VIII (II added in 1.1.0)
-    - Technology Stack & Conventions
-    - Development Workflow & Quality Gates
-    - Governance
+  Modified principles:
+    - II. Minimal Core, Skills as First-Class Tools
+    - III. Bounded Resources and Lifecycles
+    - IV. Strong Real-Path Boundaries and Network Safety
+  Added principles:
+    - IX. Controlled Delegation and Parallel Work
   Removed sections: none.
 
   Templates requiring updates (propagation checklist):
-    - .specify/templates/plan-template.md   — ✅ compatible. Its Constitution
-      Check gate defers to "constitution file" and is intentionally generic;
-      the principles below are testable, so no edit is required.
-    - .specify/templates/spec-template.md   — ✅ compatible. Uses the same
-      MUST/SHOULD vocabulary; no mandatory spec section added or removed.
-    - .specify/templates/tasks-template.md  — ✅ compatible. Test-first phases
-      and quality-gate tasks already align with the test discipline in the
-      Development Workflow section; no new task category mandated.
-    - .specify/templates/commands/*.md      — N/A. No commands/ directory
-      exists in this workspace.
-    - README.md / docs/index.html           — ✅ already aligned (these were
-      sources for the constitution, not dependents).
-    - src/skills/AGENTS.md                  — ✅ already aligned. Documents the
-      single model-facing `skill` catalog tool and `/<skillName>` commands,
-      which is exactly the first-class-peer contract now codified in Principle
-      II.
+    - .specify/templates/plan-template.md   — ✅ compatible. Constitution Check
+      remains generic and can evaluate delegation, lifecycle, and exception
+      requirements without a structural template change.
+    - .specify/templates/spec-template.md   — ✅ compatible. No mandatory spec
+      section was added or removed.
+    - .specify/templates/tasks-template.md  — ✅ compatible. Existing test and
+      quality-gate phases can carry coordinator, cancellation, and persistence
+      tasks.
+    - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
+    - README.md / docs/index.html           — ✅ already describe /fleet,
+      context-isolated workers, explicit profiles, quarantine, and mutation
+      serialization.
+    - src/core/subagent/AGENTS.md, src/llm/AGENTS.md,
+      src/cli/commands/streaming/AGENTS.md — ✅ already aligned with Principle IX.
 
-  Follow-up TODOs: none. RATIFICATION_DATE set to initial adoption date.
+  Follow-up TODOs: none for propagation. Code-review findings are reported
+  separately and do not change the governance contract.
 ==============================================================================
 -->
 
@@ -71,9 +75,14 @@ context files, sessions, and Markdown skills. The user builds the harness; the
 core does not grow to absorb every workflow.
 
 - haze MUST stay minimal. New workflow/ritual capability (reviews, release
-  prep, deploy checks, debugging rituals, team checklists) MUST be added as a
-  user-created skill, NOT as a built-in feature. Growth of the native toolset
-  MUST be justified, not incidental.
+  prep, deploy checks, debugging rituals, team checklists) MUST normally be
+  added as a user-created skill, NOT as a built-in feature. Growth of the
+  native toolset MUST be justified, not incidental.
+- `/fleet` is the sole approved native workflow exception: it is a thin,
+  ephemeral command wrapper over the existing `subagent` tool and MUST NOT
+  create a second orchestration primitive or add another model-facing tool.
+  Any further native workflow exception requires an explicit constitution or
+  feature-plan exception with the simpler skill alternative documented.
 - Users extend haze through skills created with the `/skills` picker (or
   generated from a description) and stored as Markdown under
   `~/.haze/skills/<name>/SKILL.md`. Skills are the primary, intended extension
@@ -90,27 +99,43 @@ adapts to them, not the other way around. Because the model treats a
 user-authored skill as a peer to a native tool, the harness is whatever the
 user builds with it.
 
-### III. Bounded Work, Not Just Bounded Output
+### III. Bounded Resources and Lifecycles
 
-Every collector and reader MUST cap the work it *performs*, not merely the text
-it returns.
+Collectors, readers, processes, network calls, and delegated work MUST bound
+memory growth and MUST NOT leave a turn waiting forever on an abandoned
+resource.
 
 - All collection-time and storage-time byte budgets MUST live as named
   constants in `src/core/limits`. Callers MUST cite a constant, never a magic
-  number.
+  number. UI-only display limits and scheduler counts MAY use separately named
+  constants in their owning modules.
 - Bash/grep subprocess `stdout`+`stderr`, file reads, `fetch` bodies, LSP
   frames/headers/aggregate buffers, stored tool-output handles, skill files,
   and exact-mutation inputs MUST be bounded before their full content is
   resident in memory.
+- Exact line paging MAY perform a streaming full-file scan when an exact total
+  line count is part of the public result, but it MUST keep memory bounded,
+  cache only a bounded sparse byte-offset index, validate the file signature,
+  and never silently skip unread lines between pages.
 - Byte limits are byte limits for multibyte UTF-8. Truncation MUST preserve a
   valid UTF-8 prefix (flush the decoder tail only when nothing was omitted from
   that stream).
 - Omitted bytes MUST be reported truthfully (`retainedBytes`/`omittedBytes`).
   Raw output MAY remain retrievable behind bounded in-memory handles with
   per-entry and aggregate LRU budgets — never unbounded.
+- Potentially blocking process, network, provider, integration, and worker
+  operations MUST accept cancellation and have an explicit deadline or bounded
+  cleanup path. A timeout or abort MUST terminate owned process trees, escalate
+  when graceful shutdown fails, and settle even when a descendant retains an
+  output pipe.
+- Logical cancellation MAY return control before uncooperative work physically
+  stops only when that work is quarantined and continues to hold its real
+  concurrency and mutation capacity until settlement. A busy marker MUST NOT
+  disable all hard lifecycle bounds indefinitely.
 
-Rationale: a single runaway process, file, or server response MUST NOT be able
-to exhaust memory or stall a turn.
+Rationale: a runaway process, file, server response, provider call, or worker
+MUST NOT exhaust memory, stall a turn forever, or resume unsafe work after its
+capacity has been reassigned.
 
 ### IV. Strong Real-Path Boundaries and Network Safety
 
@@ -121,12 +146,16 @@ exfiltration, traversal, and local-network reach.
   and MUST follow `.gitignore` by default. Ignored paths require an explicit
   override (`allowIgnored`/`includeIgnored`).
 - Real-path confinement (`assertRealPathInsideRoot`/`assertPathInsideRoot`)
-  MUST be reused across file tools, skills, LSP, and the skill registry so
-  symlink escapes are rejected.
+  MUST be reused across file tools, workspace-owned context files, workspace
+  runtime state, skills, LSP, and the skill registry so symlink escapes are
+  rejected. A repository-controlled `AGENTS.md`, `CLAUDE.md`, or `.haze` path
+  MUST NOT follow a symlink to read or overwrite data outside its allowed root.
 - The `fetch` tool MUST allow only public `http(s)`, blocking private,
-  loopback, link-local, multicast, unspecified, and cloud-metadata hosts, and
-  MUST re-validate the public IP after DNS resolution and at every redirect
-  hop.
+  loopback, link-local, multicast, unspecified, cloud-metadata, and malformed
+  IP-shaped hosts. Literal parsing MUST fail closed. Every hostname and
+  redirect hop MUST be resolved and validated, and the connection MUST be
+  pinned to an address from that validation so DNS cannot change the target
+  between policy check and connect.
 - Credentialed remote plaintext HTTP MUST be rejected (configuration and
   runtime); loopback HTTP remains supported. Secrets, API keys, and masked
   inputs MUST NEVER be logged at full or surfaced in UI text.
@@ -210,6 +239,43 @@ User state is private by default and crash-safe.
 Rationale: secrets and transcripts stay private by default; ordered, flushable
 writes prevent state corruption and silent data loss on crash or shutdown.
 
+### IX. Controlled Delegation and Parallel Work
+
+Subagents exist to isolate noisy work from the main context. Parallelism is an
+optional scheduling benefit, not permission to copy the parent conversation or
+run unbounded work.
+
+- A worker MUST receive one bounded, self-contained task capsule and a fresh
+  context. It MUST NOT inherit parent or sibling conversation history,
+  accumulated parent subtree instructions, fleet control prose, or private
+  worker transcripts. It MUST independently load root and applicable scoped
+  `AGENTS.md`/`CLAUDE.md` guidance with the shared precedence/signature rules.
+- Worker modes MUST map to fixed code-owned toolsets. Model-authored arbitrary
+  tool allowlists are forbidden. Read-only modes MUST omit mutation tools and
+  bash when bash cannot be enforced as read-only.
+- Worker model and profile selection MUST be explicit. Missing, unknown, or
+  ambiguous configured selectors MUST block delegation rather than fall back
+  to the first provider, model, or an inferred endpoint capability.
+- The turn-scoped coordinator MUST hard-enforce concurrency, per-execution tool
+  calls, deadlines, cancellation truth, and exactly one logical terminal result.
+  Parent cancellation, deadline, provider failure, policy block, no output, and
+  step/tool limits MUST remain distinct outcomes.
+- Mutation-capable workers and main-turn mutations MUST share one retry-wide,
+  reentrant workspace mutation policy. Quarantined mutation work retains its
+  lease until physical settlement. Coordination is conservative and MUST NOT be
+  represented as a shell sandbox or transactional filesystem isolation.
+- Only the compact result capsule enters parent model context. Bounded telemetry
+  MAY feed live UI, accounting, and debug logs, but result handles are
+  process-local and durable sessions MUST not depend on them.
+- `/fleet` MUST remain parallel-only and ephemeral: persist the original user
+  invocation and compact result capsules, not synthetic orchestration control or
+  per-run overrides. If fewer than two independent tasks exist, it MUST decline
+  rather than invent parallel work.
+
+Rationale: delegation saves context only when the worker boundary is real.
+Hard admission, truthful outcomes, and retained physical capacity prevent
+parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
+
 ## Technology Stack and Conventions
 
 - **Runtime**: Node `>=22`. Package `@denizokcu/haze`, MIT-licensed, published
@@ -290,4 +356,4 @@ writes prevent state corruption and silent data loss on crash or shutdown.
 - If version-bump type is ambiguous, the proposer MUST state reasoning before
   finalizing.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-07-25
+**Version**: 1.2.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-03

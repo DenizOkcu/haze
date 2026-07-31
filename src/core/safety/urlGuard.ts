@@ -145,7 +145,7 @@ function ipv6InBlockedRange(ip: string): boolean {
   try {
     num = ipv6ToBigInt(ip);
   } catch {
-    return false;
+    return true;
   }
   for (const range of BLOCKED_IPV6_CIDRS) {
     if ((num & range.mask) === range.start) return true;
@@ -155,7 +155,8 @@ function ipv6InBlockedRange(ip: string): boolean {
 
 /**
  * Check whether a literal IP address (v4 or v6) is in a blocked range.
- * Returns false for non-IP strings (hostnames are resolved separately).
+ * Returns false for ordinary non-IP strings. Colon-shaped malformed IPv6 is
+ * blocked fail-closed because callers treat such hosts as literal addresses.
  */
 export function isBlockedIp(ip: string): boolean {
   // Strip IPv6 bracket form for literal checks.

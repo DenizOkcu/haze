@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-07-10 for the 0.9.0 release.
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 
@@ -15,14 +15,14 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `agent/` — context accounting, model-message compaction, request assembly, tool-result helpers, turn budgets, events, and work state.
 - `bashOutput/` — command-aware reduction of bash stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
 - `goal/` — user-request classification, session-goal state, completion/continuation prompts.
-- `safety/` — bash command trait/risk classification and URL SSRF guard.
+- `safety/` — bash command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
 - `session/` — durable JSONL session store, restore helpers, and disk-size slimming for streaming events/large tool outputs.
 - `subagent/` — independent tool-loop runner used by the `subagent` tool.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.
 - `toolOutput/` — shared token/char reduction metrics.
-- `process/` — bounded subprocess primitive (byte-bounded stdout/stderr, timeout, abort, process-tree termination) used by `bash` and `grep`.
-- `io/` — bounded UTF-8 stream readers (line iteration, paged reads, byte-prefix reads) that cap work performed, not just returned text.
+- `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `bash`, `grep`, and LSP teardown.
+- `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
 - `limits/` — centralized byte budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.
 

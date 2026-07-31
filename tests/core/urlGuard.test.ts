@@ -175,4 +175,8 @@ describe('urlGuard isBlockedIp', () => {
   it('blocks an IPv6-mapped loopback', () => {
     expect(isBlockedIp('[::1]')).toBe(true);
   });
+
+  it('fails closed for a malformed IPv6-shaped address', () => {
+    expect(isBlockedIp('[gggg::1]')).toBe(true);
+  });
 });

@@ -41,4 +41,18 @@ describe('bounded UTF-8 reads', () => {
     const trailing = await tempFile('one\n');
     await expect(readUtf8LinesPage(trailing, 1, 10)).resolves.toEqual({lines: ['one', ''], totalLines: 2});
   });
+
+  it('reads later pages from indexed line checkpoints', async () => {
+    const content = Array.from({length: 600}, (_, index) => `line-${index + 1}`).join('\n');
+    const file = await tempFile(content);
+    await expect(readUtf8LinesPage(file, 300, 3)).resolves.toEqual({lines: ['line-300', 'line-301', 'line-302'], totalLines: 600});
+    await expect(readUtf8LinesPage(file, 598, 5)).resolves.toEqual({lines: ['line-598', 'line-599', 'line-600'], totalLines: 600});
+  });
+
+  it('invalidates a cached line index when the file changes', async () => {
+    const file = await tempFile('one\ntwo');
+    await expect(readUtf8LinesPage(file, 1, 10)).resolves.toMatchObject({totalLines: 2});
+    await fs.writeFile(file, 'one\ntwo\nthree');
+    await expect(readUtf8LinesPage(file, 3, 10)).resolves.toEqual({lines: ['three'], totalLines: 3});
+  });
 });

@@ -1,6 +1,6 @@
 # src/core/safety/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the 0.9.0 release.
 
 Safety classifiers and guards.
 
@@ -20,6 +20,7 @@ Current contract:
 - `urlGuard.ts` enforces the `fetch` tool's SSRF boundary.
 - Allow only documented public `http`/`https` targets.
 - Block private, loopback, link-local, multicast, unspecified, and cloud-metadata addresses.
+- Ordinary hostnames are resolved separately, but malformed colon-shaped IPv6 literals must fail closed rather than bypass literal-address checks.
 - Re-validate after DNS resolution and each redirect hop.
 - Keep error messages actionable without leaking internal network details unnecessarily.
 

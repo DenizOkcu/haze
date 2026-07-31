@@ -1,8 +1,21 @@
-import {spawn} from 'node:child_process';
+import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 
 export interface BoundedStream {text: string; totalBytes: number; retainedBytes: number; omittedBytes: number}
 export interface BoundedProcessResult {code: number | null; signal: NodeJS.Signals | null; stdout: BoundedStream; stderr: BoundedStream; timedOut: boolean; aborted: boolean; forced: boolean; durationMs: number; error?: string}
+
+export function signalProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, signal: NodeJS.Signals) {
+  if (child.pid == null) {
+    child.kill(signal);
+    return;
+  }
+  if (process.platform === 'win32') {
+    if (signal === 'SIGKILL') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {stdio: 'ignore'}).unref();
+    else child.kill('SIGTERM');
+    return;
+  }
+  try { process.kill(-child.pid, signal); } catch { child.kill(signal); }
+}
 
 function collector(limit: number) {
   const chunks: Buffer[] = [];
@@ -39,25 +52,16 @@ export async function runBoundedProcess(input: {command: string; args: string[];
   let aborted = false;
   let forced = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
-  const killTree = (signal: NodeJS.Signals) => {
-    if (child.pid == null) return;
-    if (process.platform === 'win32') {
-      if (signal === 'SIGKILL') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {stdio: 'ignore'}).unref();
-      else child.kill('SIGTERM');
-    } else {
-      try { process.kill(-child.pid, signal); } catch { child.kill(signal); }
-    }
-  };
-  const terminate = () => {
-    killTree('SIGTERM');
-    killTimer ??= setTimeout(() => { forced = true; killTree('SIGKILL'); }, input.killGraceMs ?? 500);
-    killTimer.unref?.();
-  };
-  const timeout = setTimeout(() => { timedOut = true; terminate(); }, input.timeoutMs);
-  const onAbort = () => { aborted = true; terminate(); };
-  input.signal?.addEventListener('abort', onAbort, {once: true});
-  child.stdout.on('data', (chunk: Buffer) => stdout.add(chunk));
-  child.stderr.on('data', (chunk: Buffer) => stderr.add(chunk));
+  let closeTimer: ReturnType<typeof setTimeout> | undefined;
+  let terminating = false;
+  let exitCode: number | null = null;
+  let exitSignal: NodeJS.Signals | null = null;
+  const killTree = (signal: NodeJS.Signals) => signalProcessTree(child, signal);
+  const stdoutData = (chunk: Buffer) => stdout.add(chunk);
+  const stderrData = (chunk: Buffer) => stderr.add(chunk);
+  child.stdout.on('data', stdoutData);
+  child.stderr.on('data', stderrData);
+
   return await new Promise(resolve => {
     let settled = false;
     const settle = (code: number | null, signal: NodeJS.Signals | null, error?: string) => {
@@ -65,10 +69,39 @@ export async function runBoundedProcess(input: {command: string; args: string[];
       settled = true;
       clearTimeout(timeout);
       if (killTimer) clearTimeout(killTimer);
+      if (closeTimer) clearTimeout(closeTimer);
       input.signal?.removeEventListener('abort', onAbort);
-      resolve({code, signal, stdout: stdout.result(), stderr: stderr.result(), timedOut, aborted, forced, durationMs: Date.now() - startedAt, ...(error ? {error} : {})});
+      child.stdout.off('data', stdoutData);
+      child.stderr.off('data', stderrData);
+      const stdoutResult = stdout.result();
+      const stderrResult = stderr.result();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolve({code, signal, stdout: stdoutResult, stderr: stderrResult, timedOut, aborted, forced, durationMs: Date.now() - startedAt, ...(error ? {error} : {})});
     };
+    const scheduleCloseFallback = () => {
+      closeTimer ??= setTimeout(() => settle(exitCode, exitSignal), 50);
+      closeTimer.unref?.();
+    };
+    const terminate = () => {
+      if (terminating || settled) return;
+      terminating = true;
+      killTree('SIGTERM');
+      killTimer = setTimeout(() => {
+        forced = true;
+        killTree('SIGKILL');
+        scheduleCloseFallback();
+      }, input.killGraceMs ?? 500);
+      killTimer.unref?.();
+    };
+    const timeout = setTimeout(() => { timedOut = true; terminate(); }, input.timeoutMs);
+    const onAbort = () => { aborted = true; terminate(); };
+    input.signal?.addEventListener('abort', onAbort, {once: true});
     child.once('error', error => settle(null, null, error.message));
+    child.once('exit', (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+    });
     child.once('close', (code, signal) => settle(code, signal));
   });
 }

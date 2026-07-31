@@ -1,6 +1,6 @@
 # src/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-07-10 for the 0.9.0 release.
 
 Instructions for haze source code.
 
@@ -17,6 +17,7 @@ Instructions for haze source code.
 - Prefer explicit narrow types at module boundaries and exported functions.
 - Avoid adding process-global mutable state. If unavoidable, expose reset/clear helpers and cover them in tests.
 - Prefer deterministic functions for core logic. Isolate filesystem, network, child-process, and terminal effects.
+- Shared child-process teardown belongs in `core/process`; consumers such as LSP should reuse process-tree signaling instead of implementing single-process cleanup.
 
 ## Public behavior
 

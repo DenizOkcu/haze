@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>haze: direct access to your AI model</title>
-  <meta name="description" content="A terminal AI agent with direct model access, an explicit toolset, command execution, public URL fetching, optional LSP navigation, and parsed validation feedback. Bring your own model.">
+  <meta name="description" content="A terminal coding agent that works with your model. It can edit files, run commands, fetch public URLs, use optional LSP navigation, and parse validation output.">
   <meta property="og:title" content="haze">
-  <meta property="og:description" content="A terminal AI agent with direct access to your model. Edit files, run commands, fetch public URLs, and navigate with optional LSP. There is no web UI, permission gate, or telemetry.">
+  <meta property="og:description" content="Bring your own model to the terminal. haze edits files, runs commands, fetches public URLs, and can use LSP navigation. It has no web UI, permission prompts, or telemetry.">
   <meta property="og:type" content="website">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#181823">
@@ -1333,7 +1333,7 @@
               <span class="em em-fill">close to<br>the model</span><span class="em">No guardrails</span>
             </h1>
             <p class="hero-sub">
-              Bring your own model, give it file, shell, fetch, optional LSP, task, subagent, and skill tools, and save repeated workflows as skills.
+              Bring your own model. haze gives it file, shell, fetch, task, subagent, and skill tools, plus optional LSP navigation. Repeated instructions can live in a Markdown skill.
             </p>
             <div class="hero-install">
               <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
@@ -1420,7 +1420,7 @@
             <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
           </li>
         </ol>
-        <p class="op-note reveal">That's the core, and there is no Pro plan. For repeatable workflows, open <strong>/skills</strong>, choose add skill, and use the wizard below.</p>
+        <p class="op-note reveal">That's the core. There is no Pro plan. To save a workflow, open <strong>/skills</strong>, choose add skill, and use the wizard below.</p>
       </div>
     </section>
 
@@ -1434,7 +1434,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Create skills<br><span class="em">inside haze.</span></h2>
-          <p class="sec-sub">Run <code class="cmd">/skills</code> and choose add skill. Give the skill a name and description, then the model writes its Markdown. You can call the finished skill like any built-in slash command. It needs no plugin runtime, schema file, or second binary.</p>
+          <p class="sec-sub">Run <code class="cmd">/skills</code> and choose add skill. Give it a name and describe the job. The model writes a Markdown file that you can call like any built-in slash command. There is no plugin runtime or second binary to install, and no schema file to maintain.</p>
         </div>
 
         <div class="skill-create-grid reveal">
@@ -1460,9 +1460,9 @@
             </div>
           </div>
           <div class="superpower">
-            <p>Skills are plain Markdown files that you can create from the chat. You do not need a plugin, another binary, or YAML syntax.</p>
-            <p>The model can load a skill when your request matches it, without making you open a menu or remember a command.</p>
-            <p>Put the detailed, repeatable instructions in the skill so the conversation can stay focused on the work.</p>
+            <p>A skill is a Markdown file created from the chat. You can open it, read it, and change it whenever you like. You never have to write YAML.</p>
+            <p>When a request matches, the model can load the skill on its own. You can also call it directly by name.</p>
+            <p>Keep the repeatable instructions in the skill and use the conversation for the work at hand.</p>
           </div>
         </div>
 
@@ -1510,10 +1510,11 @@
           </div>
           <h2 class="sec-headline">Watch it work.</h2>
           <div class="field-prose">
-            <p>Tool calls appear in per-turn activity blocks with compact live summaries. haze does not stop for permission prompts.</p>
-            <p>Assistant Markdown renders as terminal headings, tables, code, quotes, and links, which keeps the transcript readable while work is in progress.</p>
-            <p>The model decides when a request matches one of your skills. If you keep giving the same instructions, put them in a skill.</p>
-            <p>Failed or repeated tool calls include recovery hints so the model can reuse earlier results, change its inputs, or stop.</p>
+            <p>Tool calls appear in compact activity blocks as they run. haze does not stop to ask for permission.</p>
+            <p>Headings, tables, code, quotes, and links render directly in the terminal, so the transcript remains readable during a long job.</p>
+            <p>If you keep giving haze the same instructions, put them in a skill. The model can load it when a request matches.</p>
+            <p>A failed or repeated tool call includes a recovery hint. The model can adjust the input, reuse an earlier result, or stop.</p>
+            <p>File paging uses a small index of line offsets instead of starting at the top every time. Timed-out commands kill their process tree and return even if an escaped child keeps an output pipe open.</p>
             <p>Project instructions follow the files being edited. haze loads global CLAUDE.md and AGENTS.md files at startup, then loads nested files when it finds them and rereads them after changes.</p>
             <p>Durable sessions omit streaming updates from disk and replace large tool outputs with compact previews.</p>
           </div>
@@ -1555,7 +1556,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">The components.</h2>
-          <p class="sec-sub">The model gets the tools listed below. haze does not collect telemetry, and network access goes through a bounded <code class="cmd">fetch</code> tool that only reads public URLs.</p>
+          <p class="sec-sub">These are the built-in tools available to the model. haze collects no telemetry. Network reads go through the bounded <code class="cmd">fetch</code> tool, which only accepts public URLs.</p>
         </div>
         <div class="components reveal">
           <div class="comp-group">
@@ -1575,7 +1576,7 @@
                 <span class="comp-name">readFile</span>
                 <span class="comp-part">HAZE-R-002</span>
               </div>
-              <p class="comp-desc">Bounded, numbered UTF-8 reads with nextOffset paging.</p>
+              <p class="comp-desc">Read numbered UTF-8 lines in bounded pages. A small, signature-checked index makes later pages faster.</p>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
@@ -1596,7 +1597,7 @@
                 <span class="comp-name">lsp*</span>
                 <span class="comp-part">HAZE-R-005</span>
               </div>
-              <p class="comp-desc">Optional semantic symbols, definitions, and references via installed user-configured language servers.</p>
+              <p class="comp-desc">Look up symbols, definitions, and references through a language server you configure. haze kills the server process tree if normal shutdown fails.</p>
             </div>
           </div>
 
@@ -1638,7 +1639,7 @@
                 <span class="comp-name">bash</span>
                 <span class="comp-part">HAZE-S-001</span>
               </div>
-              <p class="comp-desc">Run commands with classification, cwd, duration, and parsed validation.</p>
+              <p class="comp-desc">Run commands with bounded output and report their cwd, duration, classification, and validation results. A timeout or abort kills the process tree without waiting forever on an open pipe.</p>
             </div>
           </div>
 
@@ -1652,7 +1653,7 @@
                 <span class="comp-name">fetch</span>
                 <span class="comp-part">HAZE-N-001</span>
               </div>
-              <p class="comp-desc">Read public http(s) URLs as Markdown, pretty JSON, or text with scheme, redirect, private-address, and DNS-rebinding guards that pin validated connection IPs.</p>
+              <p class="comp-desc">Read public http(s) URLs as Markdown, formatted JSON, or text. haze rejects unsafe schemes, private addresses, and malformed IPv6-like hosts. It checks redirects and pins each connection to the public IP it validated.</p>
             </div>
           </div>
 
@@ -1680,13 +1681,13 @@
                 <span class="comp-name">subagent</span>
                 <span class="comp-part">HAZE-A-003</span>
               </div>
-              <p class="comp-desc">Run one or more independent tasks in fresh, disposable contexts. Workers load the relevant project instructions, use the tools allowed by their mode, keep their working context private, and return compact results. A deadline returns control immediately. Work that ignores an abort stays quarantined and keeps its concurrency or mutation slot until it settles.</p>
+              <p class="comp-desc">Give independent tasks to disposable workers with fresh context. Each worker loads the project instructions for its scope and only gets the tools allowed by its mode. The parent receives a compact result, not the worker's private context. Deadlines return control immediately; a worker that ignores an abort stays quarantined and keeps its concurrency or mutation slot until it stops.</p>
             </div>
           </div>
         </div>
         <div class="reveal" style="margin-top: 24px; border: 1px solid var(--rule); padding: 18px 20px; background: rgba(0,0,0,.16);">
           <div class="eyebrow-stamp">OPTIONAL · LSP</div>
-          <p class="sec-sub" style="margin: 10px 0 0; max-width: 900px;">Configure read-only Language Server Protocol navigation with <code class="cmd">/lsp</code>. Presets cover TypeScript, Rust, Python, Go, and PHP. haze does not install language servers, and hides LSP tools from the model unless an enabled server command exists on <code class="cmd">PATH</code>; without LSP it falls back to <code class="cmd">grep</code>, <code class="cmd">listFiles</code>, and <code class="cmd">readFile</code>.</p>
+          <p class="sec-sub" style="margin: 10px 0 0; max-width: 900px;">Use <code class="cmd">/lsp</code> to configure read-only language-server navigation. Presets are included for TypeScript, Rust, Python, Go, and PHP, but haze does not install the servers. LSP tools only appear when an enabled server command is on <code class="cmd">PATH</code>. Otherwise the model uses <code class="cmd">grep</code>, <code class="cmd">listFiles</code>, and <code class="cmd">readFile</code>. When haze closes a server or receives bad protocol data, it terminates the server's process tree and forces it to exit if needed.</p>
         </div>
       </div>
     </section>
@@ -1701,7 +1702,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Bring your<br>own model.</h2>
-          <p class="sec-sub">Use any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys inside haze with <code class="cmd">/provider</code> and <code class="cmd">/model</code>, not environment variables. Remote endpoints with credentials require HTTPS, while loopback HTTP is supported. You supply the key and pay the bill.</p>
+          <p class="sec-sub">Use any OpenAI-compatible endpoint. Add providers, models, base URLs, and keys with <code class="cmd">/provider</code> and <code class="cmd">/model</code>; haze does not read them from environment variables. Remote endpoints need HTTPS when credentials are present. Loopback HTTP still works. You supply the key and pay the bill.</p>
         </div>
         <table class="compat-table reveal" aria-label="Supported providers">
           <thead>
@@ -1798,7 +1799,7 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>/fleet [--review] [--profile name] [--workers provider:model] [--concurrency n] &lt;prompt&gt;</code></td>
-              <td class="cmd-d">Run independent tasks in disposable contexts. The runtime enforces the selected profile, tool limits for each execution, deadlines, and turn-wide mutation serialization across retries. Work that ignores an abort stays quarantined, fleet control lasts for one run, and tasks that cannot run in parallel are declined.</td>
+              <td class="cmd-d">Run independent tasks in disposable contexts. The selected profile sets concurrency and deadlines, and every execution has a tool limit. Mutations remain serialized across retries. A worker that ignores an abort stays quarantined, fleet settings last for one run, and haze declines tasks that cannot run in parallel.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>

@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-07-10 for the 0.9.0 release.
 
 Vitest test suite instructions.
 
@@ -8,7 +8,7 @@ Vitest test suite instructions.
 
 Current regression priorities:
 
-- Cover explicit provider/model selection, malformed settings errors, LSP protocol isolation, bash classification-as-metadata, and byte-accurate fetch truncation.
+- Cover explicit provider/model selection, malformed settings errors, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.
@@ -21,7 +21,7 @@ Current regression priorities:
 
 - `tests/cli/**` covers slash commands, chat helpers, streaming helpers, formatters, wizards, and headless command behavior.
 - `tests/config/**` covers settings, providers, context files, LSP/MCP/skill settings, input history, update checks, private storage permissions, and endpoint security.
-- `tests/core/**` covers agent compaction/request assembly/events/work state, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
+- `tests/core/**` covers agent compaction/request assembly/events/work state, bounded I/O and sparse line paging, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
 - `tests/hazeTools/**` covers built-in tool behavior exposed from `src/llm/hazeTools.ts` and `src/llm/tools/**`.
 - `tests/llm/**` covers client/prompt/request context/LSP/MCP/web fetch/tool helper behavior.
 - `tests/skills/**` covers skill loader/registry/tool/builder.

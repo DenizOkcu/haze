@@ -6,6 +6,7 @@ import {assertRealPathInsideWorkspace, workspaceRelativePath, workspaceRoot} fro
 import {prepareWorkspaceRead} from './tools/workspaceFile.js';
 import {LSP_BUFFER_BYTES, LSP_DOCUMENT_BYTES, LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../core/limits/byteBudgets.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
+import {signalProcessTree} from '../core/process/runBoundedProcess.js';
 
 type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
 type JsonObject = {[key: string]: Json | undefined};
@@ -108,6 +109,7 @@ export class StdioLspClient {
   private id = 0;
   private buffer = Buffer.alloc(0);
   private pending = new Map<number, Pending>();
+  private terminating = false;
 
   constructor(private server: HazeLspServer, private child: ChildProcessWithoutNullStreams) {
     child.stdout.on('data', chunk => {
@@ -116,7 +118,7 @@ export class StdioLspClient {
       } catch (error) {
         const lspError = error instanceof Error ? error : new LspError(String(error));
         this.rejectAll(lspError);
-        this.child.kill('SIGTERM');
+        this.terminate();
       }
     });
     child.stderr.on('data', () => undefined);
@@ -126,7 +128,7 @@ export class StdioLspClient {
 
   static start(server: HazeLspServer) {
     if (!server.command) throw new LspError(`LSP server ${server.name} has no command.`);
-    const child = spawn(server.command, server.args ?? [], {cwd: workspaceRoot(), stdio: ['pipe', 'pipe', 'pipe']});
+    const child = spawn(server.command, server.args ?? [], {cwd: workspaceRoot(), detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe']});
     return new StdioLspClient(server, child);
   }
 
@@ -136,6 +138,17 @@ export class StdioLspClient {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private terminate() {
+    if (this.terminating) return;
+    this.terminating = true;
+    signalProcessTree(this.child, 'SIGTERM');
+    const forceTimer = setTimeout(() => signalProcessTree(this.child, 'SIGKILL'), 500);
+    forceTimer.unref?.();
+    this.child.stdin.destroy?.();
+    this.child.stdout.destroy?.();
+    this.child.stderr.destroy?.();
   }
 
   private onData(chunk: Buffer) {
@@ -215,11 +228,12 @@ export class StdioLspClient {
   }
 
   async close() {
+    if (this.terminating) return;
     try {
       await this.request('shutdown', null, 2000).catch(() => undefined);
       this.notify('exit');
     } finally {
-      this.child.kill('SIGTERM');
+      this.terminate();
     }
   }
 }

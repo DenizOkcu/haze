@@ -21,6 +21,22 @@ describe('runBoundedProcess', () => {
     expect(result.timedOut).toBe(true);
   });
 
+  it.runIf(process.platform !== 'win32')('settles after timeout when an escaped descendant retains stdout', async () => {
+    const escapedScript = 'setInterval(()=>{},2000)';
+    const parentScript = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',${JSON.stringify(escapedScript)}],{detached:true,stdio:['ignore',1,2]});child.unref();process.stdout.write(String(child.pid));setInterval(()=>{},1000)`;
+    const startedAt = Date.now();
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', parentScript], cwd: process.cwd(), timeoutMs: 50, killGraceMs: 30, maxStdoutBytes: 100, maxStderrBytes: 100});
+    const escapedPid = Number(result.stdout.text);
+    try {
+      expect(result.timedOut).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(750);
+    } finally {
+      if (Number.isInteger(escapedPid)) {
+        try { process.kill(escapedPid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
+  });
+
   it('does not spawn work for an already-aborted signal', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-process-abort-'));
     dirs.push(dir);
