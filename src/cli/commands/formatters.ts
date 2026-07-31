@@ -34,9 +34,12 @@ export function toolCallSummary(toolName: string, input: unknown) {
   }
   if (toolName === 'replaceLines' && typeof data?.path === 'string') return `replaceLines ${data.path}:${data.startLine}-${data.endLine}`;
   if ((toolName === 'editFile' || toolName === 'replaceLines') && (data == null || (typeof data === 'object' && Object.keys(data as object).length === 0))) return toolName;
-  if (toolName === 'subagent' && typeof data?.task === 'string') {
-    const taskPreview = data.task.length > 60 ? `${data.task.slice(0, 60).trimEnd()}…` : data.task;
-    return `subagent "${taskPreview}"`;
+  if (toolName === 'subagent') {
+    const task = typeof data?.objective === 'string' ? data.objective : typeof data?.task === 'string' ? data.task : undefined;
+    if (task) {
+      const taskPreview = task.length > 60 ? `${task.slice(0, 60).trimEnd()}…` : task;
+      return `subagent "${taskPreview}"`;
+    }
   }
   if (toolName === 'writeTasks') {
     const tasks = Array.isArray(data?.tasks) ? data.tasks as {title?: string}[] : [];
@@ -66,6 +69,18 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       ? ` (${(output.classification as {riskLevel: string}).riskLevel})`
       : '';
     return `exited with code ${output.code}${risk}`;
+  }
+  const resultOutput = output ?? {};
+  const capsule = typeof resultOutput.capsule === 'object' && resultOutput.capsule != null ? resultOutput.capsule as Record<string, unknown> : undefined;
+  if (capsule && typeof capsule.termination === 'string' && typeof capsule.deliverable === 'string') {
+    const summary = capsule.deliverable.split('\n')[0] ?? '';
+    const preview = summary.length > 120 ? `${summary.slice(0, 120).trimEnd()}…` : summary;
+    const telemetry = typeof resultOutput.telemetry === 'object' && resultOutput.telemetry != null ? resultOutput.telemetry as Record<string, unknown> : undefined;
+    const calls = typeof telemetry?.toolCallCount === 'number' ? telemetry.toolCallCount : typeof resultOutput.toolCallCount === 'number' ? resultOutput.toolCallCount : 0;
+    const durationMs = typeof telemetry?.durationMs === 'number' ? telemetry.durationMs : resultOutput.durationMs;
+    const duration = typeof durationMs === 'number' ? ` in ${(durationMs / 1000).toFixed(1)}s` : '';
+    const meta = calls > 0 ? ` (${calls} call${calls === 1 ? '' : 's'}${duration})` : '';
+    return `${capsule.termination}${capsule.usable === false ? ' · unusable' : ''}${capsule.truncated === true ? ' · truncated' : ''}${meta}: ${preview}`;
   }
   if (typeof output?.status === 'string' && typeof output?.summary === 'string') {
     const summary = (output.summary as string).split('\n')[0] ?? '';

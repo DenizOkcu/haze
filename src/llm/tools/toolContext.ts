@@ -4,6 +4,7 @@ import {readScopedContextFilesForPath, type ContextFile} from '../../config/cont
 import {workspaceRoot} from '../../utils/path.js';
 import {isFailedToolOutput, toolInputField} from '../../core/agent/toolResults.js';
 import {HazeToolError} from './failures.js';
+import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 
 /**
  * Turn-scoped tool-call orchestration shared by every built-in tool: in-flight
@@ -35,6 +36,8 @@ export type HazeToolContext = {
   pendingContextFiles?: ContextFile[];
   scopedContextDiscovery?: Promise<void>;
   onContextFileRead?: (path: string) => void;
+  mutationPolicy?: WorkspaceMutationPolicy;
+  mutationOwner?: WorkspaceMutationOwner;
 };
 
 function stableJsonStringify(value: unknown): string {
@@ -122,7 +125,9 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
 }
 
 function isMutatingTool(toolName: string) {
-  return ['editFile', 'replaceLines', 'writeFile'].includes(toolName);
+  // Bash is conservatively workspace-mutation-capable. Classification remains
+  // informational and is not a sandbox boundary.
+  return ['editFile', 'replaceLines', 'writeFile', 'bash'].includes(toolName);
 }
 
 function isReadOnlyFileTool(toolName: string) {
@@ -133,7 +138,7 @@ function isReadOnlyFileTool(toolName: string) {
 // turn (no side effects). File tools + bash + fetch; fetch has no path and is
 // network-side-effect-free for the agent's purposes.
 function isDeduplicableReadOnlyTool(toolName: string) {
-  return isReadOnlyFileTool(toolName) || toolName === 'bash' || toolName === 'fetch';
+  return isReadOnlyFileTool(toolName) || toolName === 'fetch';
 }
 
 /**
@@ -192,7 +197,17 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
   }
 
   if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths.add(pathForInput);
-  const promise = execute();
+  let releaseMutation: (() => void) | undefined;
+  const promise = (async () => {
+    if (isMutatingTool(toolName) && ctx.mutationPolicy) {
+      // A worker supplies its whole-run owner so nested tool calls are
+      // reentrant. Main-turn calls intentionally receive a fresh owner per
+      // mutation, serializing concurrent edit/bash calls.
+      const owner = ctx.mutationOwner ?? ctx.mutationPolicy.createOwner();
+      releaseMutation = await ctx.mutationPolicy.acquire(owner, context.abortSignal);
+    }
+    return await execute();
+  })();
   ctx.inFlightToolCalls.set(key, promise);
   try {
     const result = await promise;
@@ -224,6 +239,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
     }
     throw error;
   } finally {
+    releaseMutation?.();
     ctx.inFlightToolCalls.delete(key);
     if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths?.delete(pathForInput);
   }

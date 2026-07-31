@@ -96,6 +96,13 @@ describe('buildSubagentPrompt', () => {
     expect(prompt).toContain('Current working directory: /custom/workspace');
   });
 
+  it('includes the concrete worker budget and requires synthesis before exhaustion', () => {
+    const prompt = buildSubagentPrompt([], undefined, 'inspect', {maxToolCalls: 20, maxSteps: 25});
+    expect(prompt).toContain('at most 20 tool calls across 25 steps');
+    expect(prompt).toContain('stop gathering evidence early enough to synthesize');
+    expect(prompt).toContain('partial deliverable');
+  });
+
   it('produces byte-identical output across calls with the same session', () => {
     const session = {start: new Date('2024-01-15T03:30:00Z'), cwd: '/stable/path'};
     expect(buildSubagentPrompt([], session)).toBe(buildSubagentPrompt([], session));

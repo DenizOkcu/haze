@@ -290,9 +290,33 @@ npm install -g typescript typescript-language-server
 
 ## Subagents
 
-Subagents are a delegation feature, not another file operation. When a request clearly splits into independent parallel work, haze can spin up focused agents with fresh context, let them inspect or act with their own capped tool loop, then fold their concise summaries back into the main conversation.
+A subagent is a disposable context-isolation worker, not merely parallel fan-out. One substantial repository survey, log diagnosis, documentation research task, or noisy validation run may be delegated when its private exploration would be much larger than the result the main thread needs. The worker receives a bounded objective/deliverable/mode/scope capsule, no main or sibling conversation, independently loads applicable `AGENTS.md`/`CLAUDE.md`, and returns only a compact truthful result capsule. Tool logs, timings, usage, and heuristic context-savings estimates remain out of parent model context.
 
-Use them for parallel investigation across separate areas of a codebase. Do not use them for single sequential tasks where the main agent already has the best context.
+Modes are `inspect` (read-only), `research` (read-only plus public fetch), `implement` (file mutation and coordinated bash), and `validate` (reads plus coordinated bash). Read-only modes cannot mutate. Mutation-capable workers are serialized against each other and against main-turn mutation; this is coordination, not a shell sandbox. Tool-call budgets are checked at each actual execution, including calls emitted together. At deadline, haze returns a terminal result to restore control and aborts the worker; if underlying code ignores abort, it is explicitly quarantined and continues holding its real concurrency/mutation slot until it settles. Retries share that same turn scope. Result handles are process-local and non-durable, so the compact deliverable always stands alone.
+
+`/fleet` remains parallel-only model decomposition over the same worker primitive. Its control guidance is ephemeral and sessions retain only the original invocation, task/result capsules, and final answer. Supported one-run flags are:
+
+```text
+/fleet --review <prompt>
+/fleet --profile local-safe <prompt>
+/fleet --workers provider:model <prompt>
+/fleet --concurrency 2 <prompt>
+/fleet -- --prompt-that-starts-with-a-flag
+```
+
+Built-in profiles are `local-safe`, `local-throughput`, `cloud-balanced`, and `cloud-fast`. They are never inferred from provider names or endpoint URLs. With no selected profile, haze uses a provider-neutral compatibility baseline. With no worker model, the already explicitly selected active model is intentionally reused; an invalid explicit worker model/profile blocks execution rather than falling back. Settings may select or customize profiles:
+
+```json
+{
+  "subagents": {
+    "workerModel": "local:qwen3-coder",
+    "defaultProfile": "local-safe",
+    "profiles": {"local-safe": {"maxConcurrency": 1, "deadlineMs": 300000}}
+  }
+}
+```
+
+Keep trivial, conversation-coupled, sequential, user-interactive, or uncertain shared-mutation work in the main thread.
 
 ## Context files
 

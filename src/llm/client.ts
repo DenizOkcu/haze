@@ -1,16 +1,15 @@
 import {createOpenAI} from '@ai-sdk/openai';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
-import {activeModel, resolveModelSelector} from '../config/providers.js';
+import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
+import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
+export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
 
-export interface ProviderCapabilities {
-  reportsCacheUsage: boolean;
-  supportsPromptCacheKey: boolean;
-  supportsExtendedCacheRetention: boolean;
-  supportsStickySessionId: boolean;
-  supportsServerCompaction: boolean;
-  supportsTextVerbosity: boolean;
+export interface ModelRuntimeSelection {
+  model: WorkerRuntime['model'];
+  config: ModelRuntimeConfig;
+  selector: string;
 }
 
 export interface ModelRuntimeConfig {
@@ -49,6 +48,21 @@ function capabilities(providerName: string, baseURL: string): ProviderCapabiliti
   };
 }
 
+function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string): ModelRuntimeSelection {
+  const baseURL = selection.provider.url;
+  const configuredKey = selection.provider.key ?? settings.apiKey;
+  assertCredentialedEndpointSecure(baseURL, configuredKey);
+  const apiKey = configuredKey ?? 'not-needed';
+  const name = selection.model;
+  const cacheSeed = cwd ?? process.cwd();
+  const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
+  return {
+    model: createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)}).chat(name),
+    selector: modelSelector(selection.provider, name),
+    config: {providerName: selection.provider.name, baseURL, modelName: name, cacheKey, capabilities: capabilities(selection.provider.name, baseURL)},
+  };
+}
+
 export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string}) {
   const settings = await readSettings();
   const override = session?.modelSelector?.trim();
@@ -56,27 +70,19 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
   if (override) {
     const resolved = resolveModelSelector(settings, override);
     if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
-  } else {
-    selection = activeModel(settings);
+  } else selection = activeModel(settings);
+  return selection ? runtimeForSelection(settings, selection, session?.cwd) : undefined;
+}
+
+export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection; settings: Awaited<ReturnType<typeof readSettings>>; selector?: string; cwd?: string}): Promise<{status: 'found'; runtime: WorkerRuntime} | {status: 'missing' | 'ambiguous'; message: string}> {
+  const requested = input.selector?.trim();
+  let selected = input.active;
+  if (requested) {
+    const resolved = resolveModelSelector(input.settings, requested);
+    if (resolved.status !== 'found') return {status: resolved.status, message: resolved.status === 'ambiguous' ? `Worker model ${requested} is ambiguous; use provider:model.` : `Worker model ${requested} is not configured. Configure it via /provider or remove subagents.workerModel.`};
+    selected = runtimeForSelection(input.settings, {provider: resolved.provider, model: resolved.model}, input.cwd);
   }
-  if (!selection) return undefined;
-  const baseURL = selection.provider.url;
-  const configuredKey = selection.provider.key ?? settings.apiKey;
-  assertCredentialedEndpointSecure(baseURL, configuredKey);
-  const apiKey = configuredKey ?? 'not-needed';
-  const name = selection.model;
-  const cacheSeed = session?.cwd ?? process.cwd();
-  const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
-  return {
-    model: createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)}).chat(name),
-    config: {
-      providerName: selection.provider.name,
-      baseURL,
-      modelName: name,
-      cacheKey,
-      capabilities: capabilities(selection.provider.name, baseURL),
-    } satisfies ModelRuntimeConfig,
-  };
+  return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config)}};
 }
 
 export async function model() {
@@ -88,7 +94,7 @@ export function cacheKeyFor(name: string, cwd?: string) {
   return crypto.createHash('sha256').update(`${seed}\0${name}`).digest('hex').slice(0, 32);
 }
 
-export function providerRequestSettings(config: ModelRuntimeConfig) {
+export function providerRequestSettings(config: ModelRuntimeConfig): ProviderRequestOptions {
   return {
     ...(config.capabilities.supportsPromptCacheKey || config.capabilities.supportsTextVerbosity ? {
       providerOptions: {

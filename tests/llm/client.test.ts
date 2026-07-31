@@ -265,4 +265,31 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient();
     expect(await modelWithConfig({modelSelector: 'no-such-model'})).toBeUndefined();
   });
+
+  it('intentionally reuses the explicit active model when no worker selector is configured', async () => {
+    const settings = {providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['main', 'worker']}], provider: 'openai', model: 'main'};
+    await writeSettings(settings);
+    const {modelWithConfig, resolveWorkerRuntime} = await loadClient();
+    const active = (await modelWithConfig())!;
+    const resolved = await resolveWorkerRuntime({active, settings});
+    expect(resolved).toMatchObject({status: 'found', runtime: {selector: 'openai:main'}});
+  });
+
+  it('resolves an explicit alternate worker and preserves provider request options', async () => {
+    const settings = {providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['main', 'worker']}], provider: 'openai', model: 'main'};
+    await writeSettings(settings);
+    const {modelWithConfig, resolveWorkerRuntime} = await loadClient();
+    const active = (await modelWithConfig())!;
+    const resolved = await resolveWorkerRuntime({active, settings, selector: 'openai:worker'});
+    expect(resolved).toMatchObject({status: 'found', runtime: {selector: 'openai:worker', requestOptions: {providerOptions: {openai: {textVerbosity: 'low'}}}}});
+  });
+
+  it('blocks missing and ambiguous explicit worker selectors rather than falling back', async () => {
+    const settings = {providers: [{name: 'a', url: 'https://a.test/v1', key: 'k', models: ['shared']}, {name: 'b', url: 'https://b.test/v1', key: 'k', models: ['shared']}], provider: 'a', model: 'shared'};
+    await writeSettings(settings);
+    const {modelWithConfig, resolveWorkerRuntime} = await loadClient();
+    const active = (await modelWithConfig())!;
+    expect(await resolveWorkerRuntime({active, settings, selector: 'missing'})).toMatchObject({status: 'missing'});
+    expect(await resolveWorkerRuntime({active, settings, selector: 'shared'})).toMatchObject({status: 'ambiguous'});
+  });
 });

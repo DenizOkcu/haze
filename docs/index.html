@@ -1681,7 +1681,7 @@
                 <span class="comp-name">subagent</span>
                 <span class="comp-part">HAZE-A-003</span>
               </div>
-              <p class="comp-desc">Delegate genuinely independent investigations or actions with a capped focused tool loop.</p>
+              <p class="comp-desc">Spin off one or more independently described tasks into fresh disposable contexts. Workers load applicable project instructions, use mode-specific tools, keep exploration private, and return only compact truthful capsules. Deadlines restore control immediately; abort-ignoring work stays quarantined and retains its real concurrency/mutation slot until settled.</p>
             </div>
           </div>
         </div>
@@ -1798,8 +1798,8 @@
               <td class="cmd-d">Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.</td>
             </tr>
             <tr>
-              <td class="cmd-c"><code>/fleet &lt;prompt&gt;</code></td>
-              <td class="cmd-d">Analyze a prompt; if it splits into independent tasks, fan out one subagent per task (at most 5) in parallel and aggregate the results. Declines (no auto-run) when not parallelizable.</td>
+              <td class="cmd-c"><code>/fleet [--review] [--profile name] [--workers provider:model] [--concurrency n] &lt;prompt&gt;</code></td>
+              <td class="cmd-d">Run genuinely independent tasks in disposable contexts. Runtime enforces the selected profile, per-execution tool caps, deadlines, and turn-wide mutation serialization across retries; lingering abort-ignoring work is quarantined, fleet control is ephemeral, and non-parallel work is declined.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>

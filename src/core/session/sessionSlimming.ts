@@ -63,7 +63,14 @@ export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry |
     if (entry.name === 'tool_end' && entry.text) {
       try {
         const event = JSON.parse(entry.text) as Record<string, unknown>;
-        event.output = slimLargeValue(event.output);
+        if (event.name === 'subagent' && typeof event.output === 'object' && event.output != null) {
+          const output = event.output as Record<string, unknown>;
+          const telemetry = typeof output.telemetry === 'object' && output.telemetry != null ? output.telemetry as Record<string, unknown> : undefined;
+          event.output = {
+            capsule: output.capsule,
+            coordinator: telemetry ? {modelSelector: telemetry.modelSelector, profile: telemetry.profile, durationMs: telemetry.durationMs, queueMs: telemetry.queueMs, toolCallCount: telemetry.toolCallCount} : undefined,
+          };
+        } else event.output = slimLargeValue(event.output);
         event.error = slimLargeValue(event.error);
         return {...entry, text: JSON.stringify(event)};
       } catch {

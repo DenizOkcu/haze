@@ -26,6 +26,7 @@ Maintainability focus:
 - Tool result state drives model constraints in `prepareStep`; changes here can alter autonomy behavior and must be tested.
 - Token estimates are approximate display/control inputs, not billing truth. Preserve provider usage fields when available.
 - Context files discovered from tool outputs should be remembered for the active turn only; durable context loading belongs in `config/contextFiles.ts`.
+- Turn options separate durable user value from ephemeral synthetic control and subagent overrides. Reapply control on retry, strip it before conversation/session writes, and share one workspace mutation scope across main and worker tools.
 
 ## Tests
 

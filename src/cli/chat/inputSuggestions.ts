@@ -14,7 +14,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
   {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
   {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
-  {value: '/fleet ', description: 'Parallelize a multi-part prompt into concurrent subagents (≤5)', kind: 'command'},
+  {value: '/fleet ', description: 'Parallelize independent work in disposable contexts (flags: --review/--profile/--workers/--concurrency)', kind: 'command'},
   {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
   {value: '/session', description: 'Show current session path', kind: 'command'},
   {value: '/resume', description: 'Resume latest session for this workspace', kind: 'command'},

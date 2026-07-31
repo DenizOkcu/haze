@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 import {discoverScopedContext, runDedupedTool, type HazeToolContext} from '../../src/llm/tools/toolContext.js';
+import {WorkspaceMutationPolicy} from '../../src/core/subagent/workspaceMutationPolicy.js';
 
 let originalCwd: string | undefined;
 let tmp: string | undefined;
@@ -31,6 +32,21 @@ describe('toolContext', () => {
     expect(first).toEqual({ok: true});
     expect(second).toMatchObject({ok: true, duplicateSkipped: true});
     expect(executions).toBe(1);
+  });
+
+  it('serializes concurrent main-turn file mutation and bash under the workspace policy', async () => {
+    const context: HazeToolContext = {mutationPolicy: new WorkspaceMutationPolicy()};
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const order: string[] = [];
+    const first = runDedupedTool('editFile', {path: 'a.ts'}, {context}, async () => { order.push('edit-start'); await firstGate; order.push('edit-end'); return {ok: true}; });
+    await Promise.resolve();
+    const second = runDedupedTool('bash', {command: 'npm test'}, {context}, async () => { order.push('bash'); return {ok: true}; });
+    await Promise.resolve();
+    expect(order).toEqual(['edit-start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['edit-start', 'edit-end', 'bash']);
   });
 
   it('serializes concurrent scoped context discovery so an unchanged file is read once', async () => {

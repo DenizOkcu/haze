@@ -95,4 +95,20 @@ describe('settings', () => {
     await updateSettings({b: 2});
     expect(await readSettings()).toEqual({a: 1, b: 2});
   });
+
+  it('validates known subagent profile fields and fails loudly when malformed', async () => {
+    await fs.writeJson(settingsFile, {subagents: {defaultProfile: 'local-safe', profiles: {custom: {maxConcurrency: 99}}}});
+    const {readSettings} = await loadSettings();
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
+  it('patches nested subagent/profile fields while preserving unknown fields', async () => {
+    const {writeSettings, updateSubagentSettings, readSettings} = await loadSettings();
+    await writeSettings({rootPlugin: true, subagents: {pluginField: 'keep', profiles: {custom: {maxConcurrency: 1, pluginProfile: 'keep'}}}});
+    await updateSubagentSettings({workerModel: 'local:qwen', profiles: {custom: {maxSteps: 30}}});
+    expect(await readSettings()).toMatchObject({
+      rootPlugin: true,
+      subagents: {workerModel: 'local:qwen', pluginField: 'keep', profiles: {custom: {maxConcurrency: 1, maxSteps: 30, pluginProfile: 'keep'}}},
+    });
+  });
 });

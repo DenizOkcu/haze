@@ -2,6 +2,11 @@
 
 ## 0.9.0 - 2026-07-10
 
+### Added
+
+- Subagents now act as disposable context-isolation workers for one or more independently described tasks. They receive bounded task capsules and fresh scoped project instructions, use explicit mode/profile/model policy, and return compact truthful result capsules while private worker telemetry stays out of parent model context and durable sessions.
+- `/fleet` now supports ephemeral `--review`, `--profile`, `--workers`, and `--concurrency` controls. Runtime-enforced concurrency, deadlines, tool-call caps, retry-wide mutation serialization, and quarantine of abort-ignoring work replace prompt-only scheduling promises.
+
 ### Security
 
 - Private haze state now uses `0700` directories and `0600` files on POSIX. Bash/process output, raw-output handles, file reads, edits, LSP documents/frames, grep, and JSONL readers enforce collection-time byte limits; bash timeout/abort terminates process trees.
@@ -9,6 +14,7 @@
 
 ### Fixed
 
+- Subagent tool input now uses one flat required capsule schema instead of a legacy union, preventing local OpenAI-compatible models from emitting empty `{}` calls that fail validation. The orchestration tool no longer requires a per-tool Haze context that the main AI SDK turn does not provide. Verbose objectives and pre-mapped scopes are accepted within bounded ceilings, while prompts request compact handoffs, state concrete worker budgets, and prevent repeated broad retries.
 - Turn/tool status is authoritative across UI, events, logs, sessions, and headless output; retries expose one turn lifecycle and structured `{ok:false}` results remain failures.
 - Session/debug persistence is ordered and flushable, invalid skills are isolated, malformed settings remain visible, active provider/model removal clears selection, and stdio MCP setup no longer asks for HTTP headers.
 

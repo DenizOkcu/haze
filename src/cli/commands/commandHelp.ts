@@ -11,7 +11,7 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/settings', description: 'Show the configured provider, model, API key status, LSP/MCP servers, skills, and loaded context files.'},
   {usage: '/settings open', description: 'Open ~/.haze/settings.json with the OS default app.'},
   {usage: '/skills', description: 'Manage Markdown skills: generate a custom skill, show info, enable/disable, validate, or remove.'},
-  {usage: '/fleet <prompt>', description: 'Analyze a prompt; if it splits into independent tasks, fan out one subagent per task (at most 5) in parallel and aggregate the results. Declines (no auto-run) when not parallelizable.'},
+  {usage: '/fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] [--] <prompt>', description: 'Run genuinely independent tasks through disposable contexts. Runtime enforces profile concurrency, deadlines, and mutation serialization; control guidance is not persisted. Declines non-parallel work.'},
   {usage: '/init', description: 'Inspect the current workspace and create or update AGENTS.md project instructions.'},
   {usage: '/context', description: 'Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.'},
   {usage: '/session', description: 'Show the current durable session file.'},

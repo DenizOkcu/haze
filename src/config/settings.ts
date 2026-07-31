@@ -3,6 +3,7 @@ import path from 'node:path';
 import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
+import {customProfileSchema} from '../core/subagent/executionProfiles.js';
 
 export interface HazeProviderSettings {
   name: string;
@@ -46,6 +47,13 @@ export interface HazeSkillSetting {
   enabled?: boolean;
 }
 
+export interface HazeSubagentSettings {
+  workerModel?: string;
+  defaultProfile?: string;
+  profiles?: Record<string, Record<string, unknown>>;
+  [key: string]: unknown;
+}
+
 export interface HazeSettings {
   provider?: string;
   model?: string;
@@ -53,6 +61,7 @@ export interface HazeSettings {
   lspServers?: HazeLspServerSettings[];
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
+  subagents?: HazeSubagentSettings;
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
@@ -92,6 +101,11 @@ const mcpServerSchema = z.object({
 }).passthrough();
 
 const skillSettingSchema = z.object({name: z.string(), enabled: z.boolean().optional()}).passthrough();
+const subagentSettingsSchema = z.object({
+  workerModel: z.string().trim().min(1).optional(),
+  defaultProfile: z.string().trim().min(1).optional(),
+  profiles: z.record(z.string().min(1), customProfileSchema).optional(),
+}).passthrough();
 
 const settingsSchema = z.object({
   provider: z.string().optional(),
@@ -100,6 +114,7 @@ const settingsSchema = z.object({
   lspServers: z.array(lspServerSchema).optional(),
   mcpServers: z.array(mcpServerSchema).optional(),
   skills: z.array(skillSettingSchema).optional(),
+  subagents: subagentSettingsSchema.optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
 }).passthrough();
@@ -128,6 +143,23 @@ export async function writeSettings(settings: HazeSettings): Promise<void> {
 
 export async function updateSettings(patch: HazeSettings): Promise<HazeSettings> {
   const next = {...await readSettings(), ...patch};
+  await writeSettings(next);
+  return next;
+}
+
+/** Patch subagent settings without dropping unknown nested/profile fields. */
+export async function updateSubagentSettings(patch: HazeSubagentSettings): Promise<HazeSettings> {
+  const current = await readSettings();
+  const currentSubagents = current.subagents ?? {};
+  const profiles = patch.profiles
+    ? Object.fromEntries(Object.entries(patch.profiles).map(([name, value]) => [name, {...(currentSubagents.profiles?.[name] ?? {}), ...value}]))
+    : undefined;
+  const subagents: HazeSubagentSettings = {
+    ...currentSubagents,
+    ...patch,
+    ...(profiles ? {profiles: {...(currentSubagents.profiles ?? {}), ...profiles}} : {}),
+  };
+  const next = {...current, subagents};
   await writeSettings(next);
   return next;
 }

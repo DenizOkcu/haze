@@ -1,4 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
+import {z} from 'zod';
 import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/core/subagent/subagentRunner.js';
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
@@ -9,6 +10,7 @@ const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 type GenConfig = {
   messages?: Array<{role: string; content: string}>;
   abortSignal?: AbortSignal;
+  tools?: Record<string, {execute?: (...args: unknown[]) => unknown}>;
   prepareStep?: (args: {steps: Array<{toolCalls: unknown[]; text: string}>; messages: Array<{role: string; content: string}>}) => unknown;
 };
 type GenStep = {stepNumber: number; text: string};
@@ -63,6 +65,13 @@ describe('subagent internals.toolSummary', () => {
     expect(internals.toolSummary(null)).toBe('completed');
     expect(internals.toolSummary('string')).toBe('completed');
     expect(internals.toolSummary(42)).toBe('completed');
+  });
+});
+
+describe('subagent validation evidence', () => {
+  it('does not treat generic successful bash commands as validation', () => {
+    expect(internals.validationFromOutput('bash', {command: 'git status', ok: true, code: 0})).toBeUndefined();
+    expect(internals.validationFromOutput('bash', {command: 'npm test', ok: true, code: 0, validationSummary: {status: 'passed'}})).toEqual({command: 'npm test', ok: true});
   });
 });
 
@@ -162,6 +171,27 @@ describe('runSubagent status mapping', () => {
     expect(result.status).toBe('timeout');
   });
 
+  it('blocks excess executions from a single emitted tool-call burst', async () => {
+    let actualExecutions = 0;
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, generateText: async (config: GenConfig) => {
+        await Promise.all(Array.from({length: 12}, () => config.tools?.probe?.execute?.({})));
+        return genResult({text: 'partial evidence'});
+      }};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const profile = {...(await import('../../../src/core/subagent/executionProfiles.js')).COMPATIBILITY_PROFILE, maxToolCalls: 3};
+    const result = await runSubagent('burst', {model: noopModel, profile, contextBundle: {
+      instructions: [], systemPrompt: '', tools: {probe: {execute: async () => { actualExecutions++; return {ok: true}; }} as never}, taskTokens: 1, estimatedTokens: 1, validatedScope: [], loadedPaths: new Set(), loadedSignatures: new Map(),
+    }});
+    expect(actualExecutions).toBe(3);
+    expect(result.capsule.termination).toBe('tool_limit');
+    expect(result.telemetry.toolCallCount).toBe(3);
+    expect(result.telemetry.toolCalls.length).toBeLessThanOrEqual(3);
+  });
+
   it('returns cancelled status when the abort signal is already aborted', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -192,18 +222,12 @@ describe('runSubagent status mapping', () => {
     expect(result.error).toBe('boom');
   });
 
-  it('caps maxSteps at the configured STEP_LIMIT (25) even when caller asks for more', async () => {
-    // STEP_LIMIT caps maxSteps to 25, and isStepCount stops when steps.length
-    // === maxSteps. A result with 25 steps therefore reads as a timeout even
-    // though the caller requested 999.
-    vi.doMock('ai', async () => {
-      const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: '', steps: steps(25)})};
-    });
+  it('policy-blocks an out-of-range maxSteps instead of silently clamping it', async () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
     const result = await runSubagent('huge', {model: noopModel, contextFiles: [], maxSteps: 999});
-    expect(result.status).toBe('timeout');
+    expect(result.status).toBe('error');
+    expect(result.capsule.termination).toBe('policy_blocked');
   });
 
   it('uses a no-text fallback summary when the model produces no text', async () => {
@@ -217,7 +241,7 @@ describe('runSubagent status mapping', () => {
     expect(result.summary).toBe('Subagent completed without text output.');
   });
 
-  it('truncates summaries longer than MAX_SUMMARY (4000 chars)', async () => {
+  it('truncates oversized deliverables with explicit metadata and a handle', async () => {
     const huge = 'x'.repeat(5000);
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -226,7 +250,10 @@ describe('runSubagent status mapping', () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
     const result = await runSubagent('huge summary', {model: noopModel, contextFiles: []});
-    expect(result.summary.length).toBe(4000);
+    expect(result.summary.startsWith('x'.repeat(4000))).toBe(true);
+    expect(result.capsule.truncated).toBe(true);
+    expect(result.capsule.resultHandle).toMatch(/^output-/);
+    expect(result.summary).toContain('Result truncated');
   });
 
   it('reports token usage from the resolved result', async () => {
@@ -324,30 +351,32 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
 });
 
 describe('createSubagentTool', () => {
-  it('exposes a stable description that encourages parallel-only use', () => {
+  it('describes disposable context isolation and permits one substantial task', () => {
     const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
-    expect(toolObj.description).toContain('parallel');
-    expect(toolObj.description).toContain('no conversation history');
+    expect(toolObj.description).toContain('fresh disposable context');
+    expect(toolObj.description).toContain('one substantial task');
+    expect(toolObj.description).toContain('multiple calls');
   });
 
-  it('rejects an empty task via the input schema', () => {
+  it('requires the flat objective, deliverable, and mode capsule', () => {
     const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = toolObj.inputSchema.safeParse({task: ''});
-    expect(result.success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({objective: 'Inspect auth'}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({objective: 'Inspect auth', deliverable: 'Findings', mode: 'invalid'}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({objective: 'Inspect auth', deliverable: 'Findings', mode: 'inspect'}).success).toBe(true);
   });
 
-  it('rejects a negative maxSteps via the input schema', () => {
+  it('exposes one flat JSON schema without union branches for local model compatibility', () => {
     const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = toolObj.inputSchema.safeParse({task: 'x', maxSteps: -1});
-    expect(result.success).toBe(false);
+    const schema = z.toJSONSchema(toolObj.inputSchema) as {required?: string[]; anyOf?: unknown; oneOf?: unknown};
+    expect(schema.required).toEqual(expect.arrayContaining(['objective', 'deliverable', 'mode']));
+    expect(schema.anyOf).toBeUndefined();
+    expect(schema.oneOf).toBeUndefined();
   });
 
-  it('accepts a valid task', () => {
+  it('does not expose the ambiguous legacy task/tools/maxSteps shape', () => {
     const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = toolObj.inputSchema.safeParse({task: 'do something', tools: ['bash', 'grep'], maxSteps: 10});
-    expect(result.success).toBe(true);
-    expect(result.data?.tools).toEqual(['bash', 'grep']);
-    expect(result.data?.maxSteps).toBe(10);
+    expect(toolObj.inputSchema.safeParse({task: 'do something', tools: ['bash', 'grep'], maxSteps: 10}).success).toBe(false);
   });
 });
 
@@ -355,7 +384,7 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
   // The /fleet command relies on an existing core guarantee: the turn's AbortSignal
   // is forwarded from the tool execution context through runSubagent into the
   // generateText call, so one user abort cancels every in-flight subagent.
-  it('forwards the turn AbortSignal from the tool context and cancels the in-flight subagent', async () => {
+  it('cancels a queued/pre-aborted worker without invoking the provider', async () => {
     const captured: {abortSignal?: AbortSignal} = {};
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -372,11 +401,10 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
     const controller = new AbortController();
     controller.abort();
     const subagentTool = createSubagentTool({model: noopModel, contextFiles: []});
-    const result = await subagentTool.execute({task: 'abort me'}, {abortSignal: controller.signal} as never);
-    // The tool forwarded the turn's abort signal into the subagent run...
-    expect(captured.abortSignal).toBe(controller.signal);
-    // ...and the aborted run reports cancelled, restoring user control.
+    const result = await subagentTool.execute({objective: 'Abort me', deliverable: 'Return cancellation status', mode: 'inspect'}, {abortSignal: controller.signal} as never);
+    expect(captured.abortSignal).toBeUndefined();
     expect(result.status).toBe('cancelled');
+    expect(result.capsule.termination).toBe('cancelled');
   });
 });
 
@@ -390,9 +418,10 @@ describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
       return {
         ...actual,
         generateText: async (config: GenConfig) => {
-          const task = config.messages?.[0]?.content ?? '';
-          if (task === 'fail') throw new Error('boom');
-          return genResult({text: `ok: ${task}`});
+          const message = config.messages?.[0]?.content ?? '';
+          const objective = JSON.parse(message).objective as string;
+          if (objective === 'fail') throw new Error('boom');
+          return genResult({text: `ok: ${objective}`});
         },
       };
     });
@@ -439,8 +468,43 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
       runSubagent('task-b', {model: noopModel, contextFiles: []}),
     ]);
     expect(captured).toHaveLength(2);
-    // Each call sees exactly one user message — its own task — never its sibling's history.
-    expect(captured[0]).toEqual([{role: 'user', content: 'task-a'}]);
-    expect(captured[1]).toEqual([{role: 'user', content: 'task-b'}]);
+    // Each call sees one bounded JSON capsule—never sibling or parent history.
+    expect(captured.every(messages => messages.length === 1 && messages[0]?.role === 'user')).toBe(true);
+    const objectives = captured.map(messages => JSON.parse(messages[0]!.content).objective).sort();
+    expect(objectives).toEqual(['task-a', 'task-b']);
+    expect(captured.map(messages => messages[0]!.content).join(' ')).not.toContain('/fleet');
+  });
+});
+
+describe('subagent V2 boundary', () => {
+  it('accepts the preferred flat bounded capsule and rejects oversized fields', () => {
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    expect(toolObj.inputSchema.safeParse({objective: 'Inspect logs', deliverable: 'Root cause with evidence', mode: 'inspect', scope: ['src'], acceptanceCriteria: ['cite files']}).success).toBe(true);
+    expect(toolObj.inputSchema.safeParse({objective: 'Inspect mapped files', deliverable: 'Findings', mode: 'inspect', scope: Array.from({length: 13}, (_, i) => `src/file-${i}.ts`)}).success).toBe(true);
+    expect(toolObj.inputSchema.safeParse({objective: 'Too many paths', deliverable: 'Findings', mode: 'inspect', scope: Array.from({length: 33}, (_, i) => `src/file-${i}.ts`)}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({objective: 'x'.repeat(4001), deliverable: 'result', mode: 'inspect'}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({task: 'legacy', maxSteps: 10}).success).toBe(false);
+  });
+
+  it('serializes only the compact capsule to parent model context', async () => {
+    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const capsule = {id: 'w', termination: 'completed' as const, usable: true, deliverable: 'done', changedPaths: [], validation: [], coverageGaps: [], truncated: false};
+    const raw = {capsule, telemetry: {private: 'not model visible'}};
+    const modelOutput = await toolObj.toModelOutput!({toolCallId: 'call', input: {objective: 'x', deliverable: 'y', mode: 'inspect'}, output: raw as never});
+    expect(modelOutput).toEqual({type: 'json', value: capsule});
+    expect(JSON.stringify(modelOutput)).not.toContain('telemetry');
+  });
+
+  it('passes provider options and profile retry/output limits to worker generation', async () => {
+    let captured: Record<string, unknown> = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, generateText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const profile = {name: 'test', maxConcurrency: 1, maxSteps: 8, maxToolCalls: 6, maxOutputTokens: 2048, maxSummaryChars: 4000, maxInputTokens: 40000, deadlineMs: 1000, maxRetries: 1};
+    await runSubagent('provider parity', {contextFiles: [], runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
+    expect(captured).toMatchObject({providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}, maxRetries: 1, maxOutputTokens: 2048});
   });
 });

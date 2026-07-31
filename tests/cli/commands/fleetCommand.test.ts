@@ -3,124 +3,85 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import type {CommandContext} from '../../../src/cli/commands/commands.js';
-import {buildFleetPrompt, handleFleetCommand} from '../../../src/cli/commands/fleetCommand.js';
+import {buildFleetPrompt, handleFleetCommand, parseFleetArgs} from '../../../src/cli/commands/fleetCommand.js';
 
 function mockContext(overrides?: Partial<CommandContext>): CommandContext {
   return {
-    settings: {provider: 'openrouter', apiKey: 'test-key', model: 'test-model'},
-    contextFiles: [],
-    setMode: vi.fn(),
-    addSystemMessage: vi.fn(),
-    clearConversation: vi.fn(),
-    runAgentTurn: vi.fn(),
-    refreshContextFiles: vi.fn(() => Promise.resolve([])),
-    updateSettings: vi.fn(() => Promise.resolve({model: 'new-model'})),
-    ...overrides,
+    settings: {provider: 'openrouter', apiKey: 'test-key', model: 'test-model'}, contextFiles: [],
+    setMode: vi.fn(), addSystemMessage: vi.fn(), clearConversation: vi.fn(), runAgentTurn: vi.fn(),
+    refreshContextFiles: vi.fn(() => Promise.resolve([])), updateSettings: vi.fn(() => Promise.resolve({model: 'new-model'})), ...overrides,
   };
 }
 
+describe('fleet argument parsing', () => {
+  it('parses explicit ephemeral overrides without placing them in runtime policy text', () => {
+    expect(parseFleetArgs('--review --profile local-safe --workers local:qwen --concurrency 2 audit auth')).toEqual({ok: true, value: {
+      prompt: 'audit auth',
+      options: {ephemeralControl: buildFleetPrompt(), subagentOverrides: {forceMode: 'inspect', profile: 'local-safe', workerModel: 'local:qwen', maxConcurrency: 2}},
+    }});
+  });
+
+  it('supports -- for a prompt beginning with flags', () => {
+    expect(parseFleetArgs('-- --literal prompt')).toMatchObject({ok: true, value: {prompt: '--literal prompt'}});
+  });
+
+  it.each(['--auto x', '--profile', '--workers --review x', '--concurrency 0 x', '--concurrency 11 x', ''])('rejects malformed input %j', value => {
+    expect(parseFleetArgs(value).ok).toBe(false);
+  });
+});
+
 describe('handleFleetCommand', () => {
-  it('rejects an empty prompt with a usage message and does not fan out', async () => {
+  it('shows usage and starts no turn for invalid input', async () => {
     const ctx = mockContext();
     expect(await handleFleetCommand('', ctx)).toBe('handled');
     expect(ctx.runAgentTurn).not.toHaveBeenCalled();
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/fleet <prompt>'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/fleet ['));
   });
 
-  it('rejects a whitespace-only prompt', async () => {
+  it('keeps only the original invocation durable and passes fleet guidance ephemerally', async () => {
     const ctx = mockContext();
-    expect(await handleFleetCommand('   \t  ', ctx)).toBe('handled');
-    expect(ctx.runAgentTurn).not.toHaveBeenCalled();
-  });
-
-  it('delegates to a model turn carrying the fleet guidance and the prompt', async () => {
-    const ctx = mockContext();
-    const result = await handleFleetCommand('audit auth and research retries', ctx);
-    expect(result).toBe('handled');
+    await handleFleetCommand('--profile local-safe audit auth and retries', ctx);
     expect(ctx.runAgentTurn).toHaveBeenCalledTimes(1);
-    const call = (ctx.runAgentTurn as ReturnType<typeof vi.fn>).mock.calls[0];
-    const [prompt, displayValue] = call as [string, string];
-    // The turn is displayed as the original /fleet invocation, not the giant guidance blob.
-    expect(displayValue).toBe('/fleet audit auth and research retries');
-    // The user's prompt is the payload.
-    expect(prompt).toContain('audit auth and research retries');
-    // The fleet behavioral guidance is embedded in the directive.
-    expect(prompt).toContain('subagent');
-    expect(prompt.toLowerCase()).toContain('not parallelizable');
-    expect(prompt.toLowerCase()).toContain('aggregate');
+    const [value, display, options] = (ctx.runAgentTurn as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(value).toBe('/fleet --profile local-safe audit auth and retries');
+    expect(display).toBe(value);
+    expect(value).not.toContain('Runtime owns queueing');
+    expect(options.ephemeralControl).toContain('subagent');
+    expect(options.ephemeralControl).toContain('parallel-only');
+    expect(options.ephemeralControl.length).toBeLessThan(1200);
+    expect(options.subagentOverrides).toMatchObject({profile: 'local-safe'});
   });
 });
 
 describe('buildFleetPrompt', () => {
-  it('embeds the full behavioral contract (B1-B7) and the user payload', () => {
-    const prompt = buildFleetPrompt('do x, y, and z');
-    const lower = prompt.toLowerCase();
-    expect(lower).toContain('analyze for parallelism'); // B1
-    expect(lower).toMatch(/at most 5/); // B2 fan-out cap
-    expect(lower).toContain('disjoint set of files'); // B3
-    expect(lower).toContain('do not auto-run'); // B4 non-parallelizable decline
-    expect(lower).toContain('aggregate'); // B5
-    expect(lower).toContain('decomposition plan'); // B6
-    expect(lower).toContain('empty prompt guard'); // B7
-    expect(prompt).toContain('do x, y, and z'); // payload
-  });
-
-  it('frames subagent tasks so the final message is the deliverable (P0 budget/synthesis contract)', () => {
-    const lower = buildFleetPrompt('do x').toLowerCase();
-    expect(lower).toContain('final message'); // subagent's final message IS the result
-    expect(lower).toMatch(/budget/); // bounded budget awareness
-    expect(lower).toMatch(/narrat/); // do not end on process narration
-    expect(lower).toContain('no conversation history'); // still self-contained
-  });
-
-  it('uses bounded concurrency (waves), not a hard total cap, and scopes disjointness to writes', () => {
-    const lower = buildFleetPrompt('do x').toLowerCase();
-    // 5 is a concurrency cap, not a total-task cap; extras are queued in waves
-    expect(lower).toMatch(/in flight/);
-    expect(lower).toMatch(/wave/);
-    expect(lower).toMatch(/never drop/);
-    // a single-wave run (N <= 5) must not narrate redundant wave math — the plan already states the count
-    expect(lower).toMatch(/keep wave narration minimal/);
-    expect(lower).toMatch(/noise/);
-    // reads may overlap; only writes must be disjoint
-    expect(lower).toMatch(/reads? may overlap/);
-    expect(lower).toMatch(/disjoint writes/);
-    // context isolation is the stated rationale; worthwhile even for two tasks
-    expect(lower).toMatch(/context isolation/);
-    expect(lower).toMatch(/even for two tasks|two is fine/);
+  it('is concise and leaves scheduling/deadlines/mutation serialization to runtime', () => {
+    const lower = buildFleetPrompt().toLowerCase();
+    expect(lower).toContain('runtime owns queueing, concurrency, deadlines');
+    expect(lower).toContain('mutation serialization');
+    expect(lower).toContain('aggregate every capsule truthfully');
+    expect(lower).toContain('requires objective, deliverable, and mode');
+    expect(lower).toContain('objective under 1000 characters');
+    expect(lower).toContain('never call subagent with {}');
+    expect(lower).toContain('retry a failed/limited worker at most once');
+    expect(lower).not.toContain('spawn all');
+    expect(lower).not.toContain('wave');
   });
 });
 
-// Routing through the real slash-command dispatcher. Mock the paths module so the
-// command registry never touches the real ~/.haze (mirrors commands.test.ts).
 const commandHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-fleet-cmd-'));
-vi.doMock('../../../src/config/paths.js', () => ({
-  HAZE_DIR: commandHome,
-  GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills'),
-}));
+vi.doMock('../../../src/config/paths.js', () => ({HAZE_DIR: commandHome, GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills')}));
 const {handleSlashCommand} = await import('../../../src/cli/commands/commands.js');
 
-describe('handleSlashCommand /fleet routing (native command)', () => {
-  it('routes /fleet <prompt> to the fleet handler and runs a turn', async () => {
+describe('handleSlashCommand /fleet routing', () => {
+  it('routes a valid invocation with ephemeral options', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/fleet audit auth and research retries', ctx)).toBe('handled');
-    expect(ctx.runAgentTurn).toHaveBeenCalledTimes(1);
-    const call = (ctx.runAgentTurn as ReturnType<typeof vi.fn>).mock.calls[0];
-    const [prompt, displayValue] = call as [string, string];
-    expect(displayValue).toBe('/fleet audit auth and research retries');
-    expect(prompt).toContain('audit auth and research retries');
+    expect(await handleSlashCommand('/fleet --review audit auth', ctx)).toBe('handled');
+    expect(ctx.runAgentTurn).toHaveBeenCalledWith('/fleet --review audit auth', '/fleet --review audit auth', expect.objectContaining({subagentOverrides: expect.objectContaining({forceMode: 'inspect'})}));
   });
 
-  it('bare /fleet shows usage and does not fan out', async () => {
-    const ctx = mockContext();
-    expect(await handleSlashCommand('/fleet', ctx)).toBe('handled');
-    expect(ctx.runAgentTurn).not.toHaveBeenCalled();
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/fleet <prompt>'));
-  });
-
-  it('lists /fleet in /help as a native command', async () => {
+  it('lists fleet flags in help', async () => {
     const ctx = mockContext();
     await handleSlashCommand('/help', ctx);
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/fleet <prompt>'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/fleet'));
   });
 });

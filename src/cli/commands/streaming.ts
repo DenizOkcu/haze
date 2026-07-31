@@ -2,7 +2,7 @@ import {ToolLoopAgent, isStepCount, type ModelMessage} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
-import {assembleRequestContext} from '../../llm/requestContext.js';
+import {assembleRequestContext, type SubagentOverrides, type TurnExecutionScope} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
@@ -28,6 +28,7 @@ import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {terminalTurnStatus} from './streaming/turnOutcome.js';
 import {createIdleTimer} from './streaming/idleTimer.js';
+import {WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number};
@@ -37,6 +38,11 @@ export type TurnStatus = 'complete' | 'aborted' | 'failed';
 /** Authoritative outcome of a turn, so callers (esp. headless/CI) need not sniff message text. */
 export interface TurnResult {
   status: TurnStatus;
+}
+
+export interface TurnExecutionOptions {
+  ephemeralControl?: string;
+  subagentOverrides?: SubagentOverrides;
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -90,6 +96,8 @@ async function runAgentAttempt(
   session: PromptSession | undefined,
   modelOverride: string | undefined,
   abortController: AbortController,
+  turnOptions: TurnExecutionOptions,
+  turnScope: {executionScope?: TurnExecutionScope},
 ): Promise<AgentAttemptResult> {
   let thinkingLabel = modelThinkingLabel(undefined);
   callbacks.setBusyLabel?.(thinkingLabel);
@@ -121,7 +129,14 @@ async function runAgentAttempt(
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
     const providerSettings = providerRequestSettings(runtime.config);
-    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, abortSignal: abortController.signal});
+    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
+      ? {type: 'subagent_state', id: event.id, state: 'queued', mode: event.mode, queued: event.queued, running: event.running}
+      : event.type === 'started'
+        ? {type: 'subagent_state', id: event.id, state: 'started', mode: event.mode, queueMs: event.queueMs, running: event.running}
+        : event.type === 'terminal'
+          ? {type: 'subagent_state', id: event.id, state: 'terminal', mode: event.mode, queueMs: event.queueMs, durationMs: event.durationMs, termination: event.termination, execution: event.execution, running: event.running}
+          : {type: 'subagent_state', id: event.id, state: 'settled', mode: event.mode, queueMs: event.queueMs, durationMs: event.durationMs, termination: event.termination, execution: 'settled', running: event.running}))});
+    turnScope.executionScope ??= assembled.executionScope;
     const availableTools = assembled.availableTools;
     loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
@@ -142,6 +157,7 @@ async function runAgentAttempt(
     }
     requestMessages = withoutSystemMessages(requestMessages);
     callbacks.setConversation(stripSyntheticControls(requestMessages));
+    if (turnOptions.ephemeralControl) requestMessages = withSyntheticControl(requestMessages, turnOptions.ephemeralControl);
 
     const systemPrompt = assembled.systemPrompt;
     const inputBreakdown = estimateInputBreakdown({system: systemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: availableTools});
@@ -157,7 +173,8 @@ async function runAgentAttempt(
     };
 
     const contextFileSignatures = callbacks.contextFileSignatures ?? new Map(activeContextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-    const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path)};
+    const mutationPolicy = assembled.executionScope?.mutationPolicy ?? new WorkspaceMutationPolicy();
+    const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path), mutationPolicy};
     const startedTools = new Map<string, number>();
     const latestToolCalls = new Map<string, NativeToolCall>();
     let latestAccumulatedResponseMessages: ModelMessage[] = [];
@@ -458,6 +475,7 @@ export async function runAgentTurn(
   contextOverflowRecovered = false,
   session?: PromptSession,
   modelOverride?: string,
+  turnOptions: TurnExecutionOptions = {},
 ): Promise<TurnResult> {
   const abortController = new AbortController();
   let status: TurnStatus = 'failed';
@@ -466,11 +484,14 @@ export async function runAgentTurn(
   callbacks.setAbortController?.(abortController);
   if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayValue ?? value});
   try {
+    // Retries are one logical turn and therefore share coordinator admission and
+    // the workspace mutation lease, including quarantined lingering work.
+    const turnScope: {executionScope?: TurnExecutionScope} = {};
     let attempt = retryAttempt;
     let overflowRecovered = contextOverflowRecovered;
     let retrying = retryingExistingRequest;
     while (true) {
-      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController);
+      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, turnOptions, turnScope);
       status = result.status;
       if (!result.retry) break;
       attempt = result.retry.attempt;

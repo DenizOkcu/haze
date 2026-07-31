@@ -3,6 +3,11 @@ import {hazeTools} from './hazeTools.js';
 import {lspTools} from './lspTools.js';
 import {buildSystemPrompt, type PromptSession} from './systemPrompt.js';
 import {readSettings} from '../config/settings.js';
+import {resolveWorkerRuntime, type ModelRuntimeSelection} from './client.js';
+import {resolveExecutionProfile} from '../core/subagent/executionProfiles.js';
+import {SubagentCoordinator, type CoordinatorEvent} from '../core/subagent/subagentCoordinator.js';
+import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
+import type {WorkerRuntime} from '../core/subagent/contracts.js';
 import {installedLspServers} from '../config/lspSettings.js';
 import {configuredMcpServers} from '../config/mcpSettings.js';
 import {loadMcpTools, type LoadedMcpTools} from './mcp.js';
@@ -16,7 +21,19 @@ import {addCapabilityTools} from './capabilities.js';
 export type ToolCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
 
 /** Model type accepted by the subagent tool; derived so this module stays decoupled. */
-export type RequestModel = Parameters<typeof createSubagentTool>[0]['model'];
+export type RequestModel = NonNullable<Parameters<typeof createSubagentTool>[0]['model']>;
+
+export interface SubagentOverrides {
+  profile?: string;
+  workerModel?: string;
+  maxConcurrency?: number;
+  forceMode?: 'inspect';
+}
+
+export interface TurnExecutionScope {
+  coordinator: SubagentCoordinator;
+  mutationPolicy: WorkspaceMutationPolicy;
+}
 
 export interface AssembledRequestContext {
   systemPrompt: string;
@@ -24,6 +41,7 @@ export interface AssembledRequestContext {
   /** Tool name -> coarse origin bucket, used by /context to group token estimates. */
   toolCategories: Map<string, ToolCategory>;
   loadedMcp?: LoadedMcpTools;
+  executionScope: TurnExecutionScope;
 }
 
 /**
@@ -38,19 +56,40 @@ export async function assembleRequestContext(input: {
   contextFiles: ContextFile[];
   session?: PromptSession;
   model: RequestModel;
+  modelRuntime?: ModelRuntimeSelection;
+  subagentOverrides?: SubagentOverrides;
+  onSubagentEvent?: (event: CoordinatorEvent) => void;
   abortSignal?: AbortSignal;
+  executionScope?: TurnExecutionScope;
 }): Promise<AssembledRequestContext> {
   const settings = await readSettings();
   const skillRegistry = await loadSkillRegistry();
   const enabledSkills = new Map([...skillRegistry.skills.entries()].filter(([name]) => isSkillEnabled(settings, name)));
   const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
+  const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile;
+  const profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
+  const executionScope = input.executionScope ?? {
+    mutationPolicy: new WorkspaceMutationPolicy(),
+    coordinator: new SubagentCoordinator(profile ?? resolveExecutionProfile(undefined, undefined)!, input.onSubagentEvent),
+  };
+  const {coordinator, mutationPolicy} = executionScope;
+  let blockedReason = profile ? undefined : `Unknown subagent profile ${profileName}. Configure subagents.profiles or select a built-in profile.`;
+  let workerRuntime: WorkerRuntime | undefined;
+  if (input.modelRuntime) {
+    const resolution = await resolveWorkerRuntime({active: input.modelRuntime, settings, selector: input.subagentOverrides?.workerModel ?? settings.subagents?.workerModel, cwd: input.session?.cwd});
+    if (resolution.status === 'found') workerRuntime = resolution.runtime;
+    else blockedReason = resolution.message;
+  } else if (settings.subagents?.workerModel || input.subagentOverrides?.workerModel) {
+    blockedReason = 'An explicit worker model could not be resolved for this request. Configure it via /provider and retry.';
+  }
+  workerRuntime ??= {model: input.model, selector: input.modelRuntime?.selector ?? 'active-model', providerName: input.modelRuntime?.config.providerName ?? 'active', capabilities: input.modelRuntime?.config.capabilities ?? {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false}, requestOptions: {}};
 
   const toolCategories = new Map<string, ToolCategory>();
   const availableTools: ToolSet = {};
 
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'builtin', tools: hazeTools}});
   if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: lspTools}});
-  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({model: input.model, contextFiles: input.contextFiles, session: input.session})}}});
+  addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({runtime: workerRuntime, profile: profile ?? undefined, coordinator, mutationPolicy, blockedReason, forceMode: input.subagentOverrides?.forceMode, session: input.session})}}});
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills, errors: skillRegistry.errors ?? []})}});
 
   const mcpServers = configuredMcpServers(settings).filter(server => server.enabled !== false);
@@ -65,5 +104,5 @@ export async function assembleRequestContext(input: {
   const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.directory}: ${error.message}`);
   const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
-  return {systemPrompt, availableTools, toolCategories, loadedMcp};
+  return {systemPrompt, availableTools, toolCategories, loadedMcp, executionScope};
 }

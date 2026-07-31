@@ -980,7 +980,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       resumeSession: resumeLatestSession,
       sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
       compactConversation,
-      runAgentTurn: (prompt, displayValue) => doAgentTurn(prompt, displayValue),
+      runAgentTurn: (prompt, displayValue, options) => doAgentTurn(prompt, displayValue, options),
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
         setContextFiles(files);
@@ -1017,7 +1017,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     await doAgentTurn(value);
   }
 
-  async function doAgentTurn(value: string, displayValue?: string) {
+  async function doAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
     setDebugLogs([]);
     // When every task is already completed, start the new turn with a clean
     // slate: the task bar clears (nothing shown for simple questions) and the
@@ -1028,7 +1028,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setTaskBarPadding(0);
       await clearTasksFromStore().catch(() => undefined);
     }
-    await runSingleAgentTurn(value, displayValue);
+    await runSingleAgentTurn(value, displayValue, turnOptions);
     while (followUpQueueRef.current.length > 0) {
       const next = followUpQueueRef.current[0];
       followUpQueueRef.current = followUpQueueRef.current.slice(1);
@@ -1038,7 +1038,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
   }
 
-  async function runSingleAgentTurn(value: string, displayValue?: string) {
+  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
     const sessionRecorder = sessionRecorderRef.current!;
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
@@ -1095,7 +1095,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()});
+    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
   }

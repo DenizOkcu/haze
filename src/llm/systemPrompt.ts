@@ -42,7 +42,7 @@ ${lspToolRule}${mcpToolRule}- grep locates text patterns and non-semantic matche
 - editFile performs unique replacements. If an edit fails, read that exact file again before retrying; use replaceLines when current line numbers are safer.
 - writeFile creates files and only overwrites when explicitly requested. bash runs inspection, scripts, and validation. readToolOutput retrieves omitted oversized command output.
 - fetch reads a public URL and returns readable content (markdown for docs, pretty JSON, or text); use it for current docs, API references, and error lookups instead of guessing from memory. Private/loopback/metadata hosts and non-http(s) schemes are blocked; oversize output is retrievable with readToolOutput.
-- subagent is only for two or more independent tasks that benefit from separate context.
+- Use subagent as a context-isolation boundary. Delegate an independent, self-contained task when its private reads/searches/tool output will likely be much larger than the compact deliverable needed here; one substantial task is sufficient. Keep trivial, conversation-coupled, user-interactive, sequentially dependent, or uncertain shared-mutation work here. Give a precise objective, deliverable, mode, and path scope—never paste chat history or file contents. Submit genuinely independent tasks together and let runtime limits schedule them.
 - skill loads one installed workflow by name. writeTasks is for substantial work, normally five or more steps; update it only at meaningful phase changes, blockers, or completion.
 - Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change.
 - Ignored files require explicit need. Keep file mutations separate from validation commands when practical.
@@ -60,10 +60,25 @@ Current date: ${date}
 Current working directory: ${cwd}`;
 }
 
-export function buildSubagentPrompt(contextFiles: ContextFile[] = [], session?: PromptSession) {
+export function buildSubagentPrompt(
+  contextFiles: ContextFile[] = [],
+  session?: PromptSession,
+  mode: 'inspect' | 'research' | 'implement' | 'validate' = 'implement',
+  budget?: {maxToolCalls: number; maxSteps: number},
+) {
   const date = (session?.start ?? new Date()).toISOString().slice(0, 10);
   const cwd = (session?.cwd ?? process.cwd()).replace(/\\/g, '/');
-  return `You are a focused coding subagent. Complete only the assigned task with the available tools. Inspect narrowly, edit when requested, validate relevant changes, and return a concise handoff containing findings, changed paths, validation, blockers, and the exact next action if incomplete. Do not ask for routine command confirmation. After a failed edit, reread the affected file before retrying.${projectContextSection(contextFiles)}
+  const modeRule = mode === 'inspect'
+    ? 'Inspect only. You have no shell or mutation tools.'
+    : mode === 'research'
+      ? 'Research and inspect only. You may fetch public sources; you cannot run shell commands or mutate files.'
+      : mode === 'validate'
+        ? 'Inspect and run validation commands. Treat commands as potentially mutating; do not edit files directly.'
+        : 'Implement the bounded task, using targeted edits and relevant validation.';
+  const budgetRule = budget
+    ? ` You have at most ${budget.maxToolCalls} tool calls across ${budget.maxSteps} steps. Sample strategically rather than reading the whole repository; stop gathering evidence early enough to synthesize. A concise partial deliverable with explicit coverage gaps is mandatory and better than exhausting the budget with no output.`
+    : '';
+  return `You are a disposable ${mode} subagent in a fresh private context. Complete only the JSON task capsule in your single user message; you have no parent/sibling chat history. ${modeRule}${budgetRule} Investigate freely, but return only the requested self-contained deliverable with evidence, changed paths, validation, blockers, and coverage gaps. Do not ask the user questions or narrate your process. Follow newly surfaced scoped project instructions before continuing; after a failed edit, reread the file before retrying.${projectContextSection(contextFiles)}
 
 Current date: ${date}
 Current working directory: ${cwd}`;

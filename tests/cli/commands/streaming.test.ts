@@ -36,6 +36,7 @@ interface MocksConfig {
 const mocks = vi.hoisted(() => {
   return {
     assembledCalls: [] as unknown[],
+    streamedMessages: [] as unknown[][],
     closeMcpCalls: [] as unknown[],
     assembleContextResult: null as null | {
       systemPrompt: string;
@@ -73,12 +74,14 @@ async function loadStreaming(config: MocksConfig) {
   }));
 
   vi.doMock('../../../src/llm/requestContext.js', () => ({
-    assembleRequestContext: async () => {
-      mocks.assembledCalls.push(Date.now());
+    assembleRequestContext: async (input: {executionScope?: unknown}) => {
+      const executionScope = input.executionScope ?? {coordinator: {scope: 'shared'}, mutationPolicy: {scope: 'shared'}};
+      mocks.assembledCalls.push({input, executionScope});
       return mocks.assembleContextResult ?? {
         systemPrompt: 'You are haze.',
         availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
         toolCategories: new Map([['bash', 'builtin']]),
+        executionScope,
       };
     },
   }));
@@ -108,6 +111,7 @@ async function loadStreaming(config: MocksConfig) {
         agentCallCount += 1;
         const isFirstCall = agentCallCount === 1;
         this._fake.streamArgs.push({messages, abortSignal});
+        mocks.streamedMessages.push(messages);
         this._fake.options = this.options;
         this._fake.prepareStep = this.prepareStep;
         this._fake.onStepEnd = this.onStepEnd;
@@ -227,6 +231,7 @@ function makeCallbacks() {
 
 beforeEach(() => {
   mocks.assembledCalls.length = 0;
+  mocks.streamedMessages.length = 0;
   mocks.closeMcpCalls.length = 0;
   mocks.assembleContextResult = null;
 });
@@ -265,6 +270,19 @@ describe('runAgentTurn: setup', () => {
     const cb = makeCallbacks();
     await runAgentTurn('raw', 'display', [], cb);
     expect(cb.messages[0]).toEqual({role: 'user', text: 'display'});
+  });
+
+  it('applies ephemeral control to every request but never durable conversation/events', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'finish', finishReason: 'stop'}], responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('/fleet audit', '/fleet audit', [], cb, 0, false, false, undefined, undefined, {ephemeralControl: 'PRIVATE FLEET CONTROL'});
+    expect(JSON.stringify(mocks.streamedMessages)).toContain('PRIVATE FLEET CONTROL');
+    expect(JSON.stringify(cb.conversationSets)).not.toContain('PRIVATE FLEET CONTROL');
+    expect(JSON.stringify(cb.events)).not.toContain('PRIVATE FLEET CONTROL');
+    expect(JSON.stringify(cb.events)).toContain('/fleet audit');
   });
 
   it('forwards modelOverride (and cwd) to modelWithConfig for both the session and no-session branches', async () => {
@@ -417,6 +435,25 @@ describe('runAgentTurn: error paths', () => {
     await runAgentTurn('big', undefined, [], cb);
     expect(compactCalled).toBe(true);
     expect(mocks.assembledCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reuses one execution scope and reapplies ephemeral control across retries', async () => {
+    vi.useFakeTimers();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      retryable: true,
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const promise = runAgentTurn('/fleet audit', undefined, [], makeCallbacks(), 0, false, false, undefined, undefined, {ephemeralControl: 'PRIVATE FLEET CONTROL'});
+    await vi.runAllTimersAsync();
+    await promise;
+    expect(mocks.assembledCalls).toHaveLength(2);
+    const first = mocks.assembledCalls[0] as {executionScope: unknown};
+    const second = mocks.assembledCalls[1] as {input: {executionScope?: unknown}};
+    expect(second.input.executionScope).toBe(first.executionScope);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(mocks.streamedMessages.every(messages => JSON.stringify(messages).includes('PRIVATE FLEET CONTROL'))).toBe(true);
   });
 
   it('retries a retryable error up to maxRetries with backoff', async () => {

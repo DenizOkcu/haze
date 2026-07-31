@@ -30,6 +30,7 @@ Maintainability focus:
 
 - `/provider`, `/model`, `/settings`, `/skills`, `/lsp`, and `/mcp` are user-facing flows; update help text and tests when changing them.
 - `/clear` clears conversation display/conversation state and tasks.
+- `/fleet` persists its original invocation only; orchestration control and per-run profile/model/concurrency/review overrides are ephemeral and must be reapplied on retries without entering snapshots/events.
 - `/compact [instructions]` compacts model messages but should not persist synthetic control messages.
 - `/logs` reads historical debug logs, but file LLM logging is only started when `--debug` is active.
 - `/init` updates root project instructions; preserve useful user/project guidance.

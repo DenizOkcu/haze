@@ -50,7 +50,19 @@ describe('assembleRequestContext', () => {
     expect(result.toolCategories.get('readFile')).toBe('builtin');
     expect(result.toolCategories.get('skill')).toBeUndefined();
     expect(result.loadedMcp).toBeUndefined();
+    expect(result.executionScope.coordinator).toBeDefined();
+    expect(result.executionScope.mutationPolicy).toBeDefined();
     expect(result.systemPrompt).toContain('Tools');
+  });
+
+  it('reuses a supplied turn execution scope across request retries', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+    const first = await assembleRequestContext({contextFiles: [], model: fakeModel});
+    const retry = await assembleRequestContext({contextFiles: [], model: fakeModel, executionScope: first.executionScope});
+    expect(retry.executionScope).toBe(first.executionScope);
   });
 
   it('adds LSP and skill tools when available', async () => {

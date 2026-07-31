@@ -137,6 +137,38 @@ describe('sessionStore', () => {
     expect(event.output.preview?.length).toBeLessThan(10_000);
   });
 
+  it('persists only subagent capsule and bounded scheduler metadata in tool events', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const output = {capsule: {id: 'w', termination: 'completed', usable: true, deliverable: 'done'}, telemetry: {modelSelector: 'p:m', profile: 'local-safe', durationMs: 10, queueMs: 2, toolCallCount: 1, toolCalls: [{name: 'readFile', summary: 'private detail'}], usage: {inputTokens: 99}}};
+    await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_end', text: JSON.stringify({type: 'tool_end', id: 'call', name: 'subagent', success: true, output, durationMs: 1, at: '1'})});
+    const {entries} = await readSessionEntries(session);
+    const event = JSON.parse(entries[1]?.type === 'event' ? entries[1].text ?? '{}' : '{}');
+    expect(event.output.capsule.deliverable).toBe('done');
+    expect(event.output.coordinator).toMatchObject({modelSelector: 'p:m', profile: 'local-safe', toolCallCount: 1});
+    expect(JSON.stringify(event)).not.toContain('private detail');
+    expect(JSON.stringify(event)).not.toContain('inputTokens');
+  });
+
+  it('restores retry JSONL without ephemeral fleet control or private worker telemetry', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const durable: ModelMessage[] = [{role: 'user', content: '/fleet audit'}];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: durable});
+    await appendSessionEntry(session, {type: 'event', at: '2', name: 'retry', text: JSON.stringify({type: 'retry', attempt: 1, maxAttempts: 2, delayMs: 0, error: 'overloaded', at: '2'})});
+    const output = {capsule: {id: 'w', termination: 'completed', usable: true, deliverable: 'compact result'}, telemetry: {modelSelector: 'p:m', profile: 'local-safe', toolCalls: [{name: 'readFile', summary: 'PRIVATE WORKER DETAIL'}], usage: {inputTokens: 999}}};
+    await appendSessionEntry(session, {type: 'event', at: '3', name: 'tool_end', text: JSON.stringify({type: 'tool_end', id: 'sub', name: 'subagent', success: true, output, durationMs: 1, at: '3'})});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '4', messages: [...durable, {role: 'assistant', content: 'compact result'}]});
+
+    const restored = await restoreConversation(session);
+    const {entries} = await readSessionEntries(session);
+    const disk = JSON.stringify(entries);
+    expect(restored.messages).toEqual([...durable, {role: 'assistant', content: 'compact result'}]);
+    expect(disk).toContain('/fleet audit');
+    expect(disk).toContain('compact result');
+    expect(disk).not.toContain('PRIVATE FLEET CONTROL');
+    expect(disk).not.toContain('PRIVATE WORKER DETAIL');
+    expect(disk).not.toContain('inputTokens');
+  });
+
   it('slims large tool results in conversation snapshots', async () => {
     const session = await createSession({cwd, sessionsDir});
     const messages: ModelMessage[] = [{

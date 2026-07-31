@@ -10,6 +10,7 @@ import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
 import {formatSettingsSummary} from './settingsSummary.js';
+import type {TurnExecutionOptions} from './streaming.js';
 
 export type CommandContext = {
   settings: HazeSettings;
@@ -22,7 +23,7 @@ export type CommandContext = {
   resumeSession?: () => Promise<void>;
   sessionInfo?: () => string;
   compactConversation?: (instructions?: string) => boolean;
-  runAgentTurn: (prompt: string, displayValue?: string) => Promise<void>;
+  runAgentTurn: (prompt: string, displayValue?: string, options?: TurnExecutionOptions) => Promise<void>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
   getContextReport?: () => Promise<string>;

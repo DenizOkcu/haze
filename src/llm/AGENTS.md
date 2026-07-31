@@ -8,7 +8,8 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 
 - `client.ts` builds the active OpenAI-compatible model from configured settings. Return `undefined` when no provider/model is configured.
 - `systemPrompt.ts` and `initPrompt.ts` are model-facing behavior contracts; keep them concise, explicit, and synced with real tools.
-- `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, and context files for a turn. Close MCP clients in callers' `finally` paths.
+- `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, context files, and one shared turn execution scope. Close MCP clients in callers' `finally` paths.
+- `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
 - `hazeTools.ts` defines the public built-in tool catalog and schemas.
 - `tools/**` contains implementation helpers split out of `hazeTools.ts`.
 - `lsp.ts`/`lspTools.ts` provide optional read-only stdio LSP navigation.

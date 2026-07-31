@@ -81,10 +81,12 @@ export function stepCacheMetrics(usage: {inputTokens?: number; inputTokenDetails
 }
 
 export function subagentTokenEstimate(output: unknown) {
-  if (typeof output !== 'object' || output == null || !('tokens' in output)) return undefined;
-  const tokens = (output as {tokens?: {in?: unknown; out?: unknown}}).tokens;
-  const input = typeof tokens?.in === 'number' ? tokens.in : 0;
-  const outputTokens = typeof tokens?.out === 'number' ? tokens.out : 0;
+  if (typeof output !== 'object' || output == null) return undefined;
+  const value = output as {telemetry?: {usage?: {inputTokens?: unknown; outputTokens?: unknown}}; tokens?: {in?: unknown; out?: unknown}};
+  const inputValue = value.telemetry?.usage?.inputTokens ?? value.tokens?.in;
+  const outputValue = value.telemetry?.usage?.outputTokens ?? value.tokens?.out;
+  const input = typeof inputValue === 'number' ? inputValue : 0;
+  const outputTokens = typeof outputValue === 'number' ? outputValue : 0;
   return input > 0 || outputTokens > 0 ? {input, output: outputTokens} : undefined;
 }
 
