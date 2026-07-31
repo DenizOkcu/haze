@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>haze — a terminal agent for AI experts</title>
-  <meta name="description" content="A terminal AI agent CLI for expert users. Transparent tools, direct command execution, public URL fetch, optional LSP navigation, parsed validation feedback. Bring your own model.">
+  <title>haze: direct access to your AI model</title>
+  <meta name="description" content="A terminal AI agent with direct model access, an explicit toolset, command execution, public URL fetching, optional LSP navigation, and parsed validation feedback. Bring your own model.">
   <meta property="og:title" content="haze">
-  <meta property="og:description" content="A terminal AI agent for expert users. Read, edit, run, fetch, navigate with optional LSP, verify. No web UI, no permission gates, no telemetry.">
+  <meta property="og:description" content="A terminal AI agent with direct access to your model. Edit files, run commands, fetch public URLs, and navigate with optional LSP. There is no web UI, permission gate, or telemetry.">
   <meta property="og:type" content="website">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#181823">
@@ -363,7 +363,7 @@
     .hero-h1 {
       font-family: var(--font-display);
       font-weight: 900;
-      font-size: var(--t-hero);
+      font-size: clamp(2.75rem, 6vw, 4.75rem);
       line-height: 0.88;
       letter-spacing: 0.005em;
       text-transform: uppercase;
@@ -1327,13 +1327,13 @@
       <div class="container">
         <div class="hero-grid">
           <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE — CODING AGENT — REV 0.9.0</div>
+            <div class="hero-eyebrow">HAZE · CODING AGENT · REV 0.9.0</div>
             <h1 class="hero-h1">
-              A CLI agent for Experts
-              <span class="em em-fill">Close to<br>the model</span><span class="em">No guard rails</span>
+              A CLI agent
+              <span class="em em-fill">close to<br>the model</span><span class="em">No guardrails</span>
             </h1>
             <p class="hero-sub">
-              Agentic workflows for people who know what they're doing. Bring your own model. File, shell, fetch, optional LSP, task, subagent, and skill tools. Do something twice, make it a skill.
+              Bring your own model, give it file, shell, fetch, optional LSP, task, subagent, and skill tools, and save repeated workflows as skills.
             </p>
             <div class="hero-install">
               <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
@@ -1401,7 +1401,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Three commands.</h2>
-          <p class="sec-sub">haze starts intentionally small. Install it, point it at an OpenAI-compatible endpoint, and pick a model.</p>
+          <p class="sec-sub">Install haze, add an OpenAI-compatible endpoint, and pick a model.</p>
         </div>
         <ol class="op-list reveal">
           <li>
@@ -1420,7 +1420,7 @@
             <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
           </li>
         </ol>
-        <p class="op-note reveal">That's the whole core. There is no Pro plan. Anything more specific is grown with the model through <strong>/skills</strong> → add skill — the wizard below.</p>
+        <p class="op-note reveal">That's the core, and there is no Pro plan. For repeatable workflows, open <strong>/skills</strong>, choose add skill, and use the wizard below.</p>
       </div>
     </section>
 
@@ -1433,14 +1433,14 @@
             <span class="label">Native skill creation</span>
             <span class="spacer"></span>
           </div>
-          <h2 class="sec-headline">Skills, grown<br><span class="em">inside haze.</span></h2>
-          <p class="sec-sub">Run <code class="cmd">/skills</code> and choose add skill. Two prompts — name and description. The model writes the Markdown. The skill becomes a slash command on equal footing with the built-ins. <strong>This is the superpower.</strong> No plugin runtime, no schema file, no second binary.</p>
+          <h2 class="sec-headline">Create skills<br><span class="em">inside haze.</span></h2>
+          <p class="sec-sub">Run <code class="cmd">/skills</code> and choose add skill. Give the skill a name and description, then the model writes its Markdown. You can call the finished skill like any built-in slash command. It needs no plugin runtime, schema file, or second binary.</p>
         </div>
 
         <div class="skill-create-grid reveal">
           <div class="skill-wizard">
             <div class="skill-wizard-head">
-              <span>skill wizard — live in the chat</span>
+              <span>skill wizard · live in the chat</span>
               <span class="corner" aria-hidden="true"></span>
             </div>
             <div class="skill-wizard-body">
@@ -1460,15 +1460,15 @@
             </div>
           </div>
           <div class="superpower">
-            <p>You define skills in plain Markdown, right from the chat.<br><strong>No plugin. No second binary. No YAML to memorize.</strong></p>
-            <p>The model invokes a skill naturally during conversation in plain language — no command to type, no menu to open.<br><strong>Your workflow gets guided and stays expectable.</strong></p>
-            <p>Heavy lifting moves into the skill.<br><strong>The conversation itself stays simple and minimal. KISS.</strong></p>
+            <p>Skills are plain Markdown files that you can create from the chat. You do not need a plugin, another binary, or YAML syntax.</p>
+            <p>The model can load a skill when your request matches it, without making you open a menu or remember a command.</p>
+            <p>Put the detailed, repeatable instructions in the skill so the conversation can stay focused on the work.</p>
           </div>
         </div>
 
         <div class="recipes reveal">
           <div class="recipes-head">
-            <span>Try these — run /skills, choose add skill, and type them in</span>
+            <span>Try these: run /skills, choose add skill, and type them in</span>
             <span>· /skills</span>
           </div>
           <div class="recipe-grid">
@@ -1495,7 +1495,7 @@
           </div>
         </div>
 
-        <p class="op-note reveal">Prefer to be explicit? Skills are also first-class slash commands — type <strong>/code-review</strong> in the chat and the model loads it on the spot.</p>
+        <p class="op-note reveal">You can also load a skill directly. Type <strong>/code-review</strong> in the chat to run it as a slash command.</p>
       </div>
     </section>
 
@@ -1510,18 +1510,17 @@
           </div>
           <h2 class="sec-headline">Watch it work.</h2>
           <div class="field-prose">
-            <p>Tool calls are grouped into per-turn activity blocks with compact live summaries.<br><strong>haze has no permission gates, intentionally.</strong></p>
-            <p>Assistant Markdown renders as real terminal UI — headings, tables, code, quotes, links.<br><strong>The transcript stays readable during actual work.</strong></p>
-            <p>Skills are handed over to the model.<br><strong>The LLM decides when to use a skill.</strong></p>
-            <p>Skills are tools written by you.<br><strong>Create a skill if you have to do it multiple times.</strong></p>
-            <p>Failures and repeated identical tool calls get recovery hints.<br><strong>Reuse what already happened, change inputs, or stop cleanly.</strong></p>
-            <p>Project instructions follow the files being touched.<br><strong>Global CLAUDE.md and AGENTS.md are loaded up front; nested files are injected when discovered and reread when changed.</strong></p>
-            <p>Durable sessions stay useful without ballooning.<br><strong>Streaming updates are skipped on disk; large tool outputs become compact previews.</strong></p>
+            <p>Tool calls appear in per-turn activity blocks with compact live summaries. haze does not stop for permission prompts.</p>
+            <p>Assistant Markdown renders as terminal headings, tables, code, quotes, and links, which keeps the transcript readable while work is in progress.</p>
+            <p>The model decides when a request matches one of your skills. If you keep giving the same instructions, put them in a skill.</p>
+            <p>Failed or repeated tool calls include recovery hints so the model can reuse earlier results, change its inputs, or stop.</p>
+            <p>Project instructions follow the files being edited. haze loads global CLAUDE.md and AGENTS.md files at startup, then loads nested files when it finds them and rereads them after changes.</p>
+            <p>Durable sessions omit streaming updates from disk and replace large tool outputs with compact previews.</p>
           </div>
         </div>
         <div class="specimen reveal" aria-label="Example tool block">
           <div class="specimen-head">
-            <span>Calibration printout — one turn</span>
+            <span>Calibration printout · one turn</span>
             <span class="corner" aria-hidden="true"></span>
           </div>
           <div class="specimen-body">
@@ -1556,7 +1555,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">The components.</h2>
-          <p class="sec-sub">No hidden tools. What you see is what the model gets. No telemetry; network access is an explicit bounded <code class="cmd">fetch</code> tool for public URLs.</p>
+          <p class="sec-sub">The model gets the tools listed below. haze does not collect telemetry, and network access goes through a bounded <code class="cmd">fetch</code> tool that only reads public URLs.</p>
         </div>
         <div class="components reveal">
           <div class="comp-group">
@@ -1667,7 +1666,7 @@
                 <span class="comp-name">writeTasks</span>
                 <span class="comp-part">HAZE-A-001</span>
               </div>
-              <p class="comp-desc">Replace the workspace task list at meaningful phase changes; IDs are generated server-side and completed lists auto-clear on the next user turn.</p>
+              <p class="comp-desc">Replace the workspace task list when a phase changes. The server generates IDs, and completed lists clear on the next user turn.</p>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
@@ -1681,7 +1680,7 @@
                 <span class="comp-name">subagent</span>
                 <span class="comp-part">HAZE-A-003</span>
               </div>
-              <p class="comp-desc">Spin off one or more independently described tasks into fresh disposable contexts. Workers load applicable project instructions, use mode-specific tools, keep exploration private, and return only compact truthful capsules. Deadlines restore control immediately; abort-ignoring work stays quarantined and retains its real concurrency/mutation slot until settled.</p>
+              <p class="comp-desc">Run one or more independent tasks in fresh, disposable contexts. Workers load the relevant project instructions, use the tools allowed by their mode, keep their working context private, and return compact results. A deadline returns control immediately. Work that ignores an abort stays quarantined and keeps its concurrency or mutation slot until it settles.</p>
             </div>
           </div>
         </div>
@@ -1702,7 +1701,7 @@
             <span class="spacer"></span>
           </div>
           <h2 class="sec-headline">Bring your<br>own model.</h2>
-          <p class="sec-sub">Any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys via <code class="cmd">/provider</code> and <code class="cmd">/model</code> inside haze — not environment variables. Credentialed remote endpoints require HTTPS; loopback HTTP remains supported. Your key, your bill.</p>
+          <p class="sec-sub">Use any OpenAI-compatible endpoint. Configure providers, models, base URLs, and keys inside haze with <code class="cmd">/provider</code> and <code class="cmd">/model</code>, not environment variables. Remote endpoints with credentials require HTTPS, while loopback HTTP is supported. You supply the key and pay the bill.</p>
         </div>
         <table class="compat-table reveal" aria-label="Supported providers">
           <thead>
@@ -1733,7 +1732,7 @@
       <div class="container reveal">
         <div class="eyebrow-stamp">§06 · INSTALL</div>
         <h2 class="install-mark">Install <span class="em">haze</span>.</h2>
-        <p class="install-sub">MIT-licensed. Open source. No contact-sales button. Detailed LLM logs are off by default and only written with <code class="cmd">haze --debug</code>. Provider settings live in <code class="cmd">~/.haze/settings.json</code>, not environment variables, with private POSIX permissions.</p>
+        <p class="install-sub">haze is open source under the MIT license, with no contact-sales button. It writes detailed LLM logs only when you start it with <code class="cmd">haze --debug</code>. Provider settings stay in <code class="cmd">~/.haze/settings.json</code> with private POSIX permissions instead of environment variables.</p>
         <div class="install-cmd">
           <code><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
           <button id="copy-btn-cta" type="button" aria-label="Copy install command">Copy</button>
@@ -1754,8 +1753,8 @@
             <span class="label">Commands index</span>
             <span class="spacer"></span>
           </div>
-          <h2 class="sec-headline">Every command,<br><span class="em">all at once.</span></h2>
-          <p class="sec-sub">Core slash commands plus aliases, model/log subforms, and installed-skill invocations. Tasks are managed by the model via the <code class="cmd">writeTasks</code> tool — no command for them.</p>
+          <h2 class="sec-headline">Command<br><span class="em">reference.</span></h2>
+          <p class="sec-sub">This list covers the core slash commands, aliases, model and log subcommands, and installed skills. The model manages tasks through <code class="cmd">writeTasks</code>, so there is no task command.</p>
         </div>
 
         <table class="cmd-table reveal" aria-label="haze slash commands">
@@ -1799,7 +1798,7 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>/fleet [--review] [--profile name] [--workers provider:model] [--concurrency n] &lt;prompt&gt;</code></td>
-              <td class="cmd-d">Run genuinely independent tasks in disposable contexts. Runtime enforces the selected profile, per-execution tool caps, deadlines, and turn-wide mutation serialization across retries; lingering abort-ignoring work is quarantined, fleet control is ephemeral, and non-parallel work is declined.</td>
+              <td class="cmd-d">Run independent tasks in disposable contexts. The runtime enforces the selected profile, tool limits for each execution, deadlines, and turn-wide mutation serialization across retries. Work that ignores an abort stays quarantined, fleet control lasts for one run, and tasks that cannot run in parallel are declined.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
@@ -1849,7 +1848,7 @@
             <tr class="cmd-cat"><td colspan="2">Dynamic</td></tr>
             <tr>
               <td class="cmd-c"><code>/&lt;skill-name&gt;</code></td>
-              <td class="cmd-d">Invoke any installed skill directly — e.g. <code>/code-review</code>. The model can also invoke skills on its own.</td>
+              <td class="cmd-d">Invoke any installed skill directly, such as <code>/code-review</code>. The model can also invoke skills when they match a request.</td>
             </tr>
 
             <tr class="cmd-cat"><td colspan="2">Terminal flags (run <code>haze --help</code>)</td></tr>
@@ -1863,7 +1862,7 @@
             </tr>
             <tr>
               <td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td>
-              <td class="cmd-d">Override the model for this run only (no settings change) — a registered model <code>name</code> or <code>provider:name</code>. Must already be added under a provider via <code>/provider</code>; an unknown or ambiguous selector exits non-zero with a precise error.</td>
+              <td class="cmd-d">Override the model for this run without changing settings. Use the <code>name</code> or <code>provider:name</code> of a model already added through <code>/provider</code>. An unknown or ambiguous selector exits non-zero with a precise error.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>haze -c, --continue</code></td>
@@ -1881,7 +1880,7 @@
         </table>
 
         <p class="cmd-footnote reveal">
-          <strong>NOTE /</strong> Skills trigger naturally during chat in plain language, or explicitly as <code>/&lt;skill-name&gt;</code>. The model picks when they fit — you don't have to memorize anything.
+          <strong>NOTE /</strong> The model can load a skill when your request matches it. You can also load one directly with <code>/&lt;skill-name&gt;</code>.
         </p>
       </div>
     </section>
