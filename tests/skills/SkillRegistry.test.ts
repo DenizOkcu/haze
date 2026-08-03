@@ -11,7 +11,7 @@ vi.mock('../../src/config/paths.js', () => ({
   HAZE_DIR: tmp,
 }));
 
-const {loadSkillRegistry} = await import('../../src/skills/SkillRegistry.js');
+const {loadSkillRegistry, resolveSkillCandidates} = await import('../../src/skills/SkillRegistry.js');
 
 afterAll(async () => {
   await fs.remove(tmp);
@@ -75,5 +75,38 @@ describe('loadSkillRegistry', () => {
     const registry = await loadSkillRegistry();
     expect(registry.skills.get('duplicate')?.description).toBe('a');
     expect(registry.errors).toEqual([expect.objectContaining({directory: 'b', message: expect.stringContaining('duplicate')})]);
+  });
+
+  it('loads project skills and gives them precedence while retaining both candidates', async () => {
+    await writeSkill('shared', 'global body');
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-project-skills-'));
+    const dir = path.join(workspace, '.haze', 'skills', 'shared');
+    await fs.ensureDir(dir);
+    await fs.writeFile(path.join(dir, 'SKILL.md'), '---\nname: shared\ndescription: project\n---\n\nproject body\n');
+    try {
+      const registry = await loadSkillRegistry(workspace);
+      expect(registry.skills.get('shared')?.source).toBe('project');
+      expect(registry.candidates?.filter(skill => skill.name === 'shared').map(skill => skill.source)).toEqual(['project', 'global']);
+      const fallback = resolveSkillCandidates(registry.candidates ?? [], skill => skill.source !== 'project');
+      expect(fallback.get('shared')?.source).toBe('global');
+    } finally {
+      await fs.remove(workspace);
+    }
+  });
+
+  it('isolates project symlink escapes', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-project-skills-'));
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-skill-'));
+    await fs.writeFile(path.join(outside, 'SKILL.md'), '---\nname: escaped\ndescription: no\n---\n\nbody\n');
+    await fs.ensureDir(path.join(workspace, '.haze', 'skills'));
+    await fs.symlink(outside, path.join(workspace, '.haze', 'skills', 'escaped'));
+    try {
+      const registry = await loadSkillRegistry(workspace);
+      expect(registry.skills.has('escaped')).toBe(false);
+      expect(registry.errors).toEqual(expect.arrayContaining([expect.objectContaining({directory: 'escaped', source: 'project'})]));
+    } finally {
+      await fs.remove(workspace);
+      await fs.remove(outside);
+    }
   });
 });

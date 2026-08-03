@@ -49,6 +49,8 @@ export interface HazeMcpServer {
  */
 export interface HazeSkillSetting {
   name: string;
+  /** Omitted by older settings and interpreted as global. */
+  scope?: 'global' | 'project';
   enabled?: boolean;
 }
 
@@ -112,7 +114,7 @@ const mcpServerSchema = z.object({
   enabled: z.boolean().optional(),
 }).passthrough();
 
-const skillSettingSchema = z.object({name: z.string(), enabled: z.boolean().optional()}).passthrough();
+const skillSettingSchema = z.object({name: z.string(), scope: z.enum(['global', 'project']).optional(), enabled: z.boolean().optional()}).passthrough();
 const subagentSettingsSchema = z.object({
   workerModel: z.string().trim().min(1).optional(),
   defaultProfile: z.string().trim().min(1).optional(),

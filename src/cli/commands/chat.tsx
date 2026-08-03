@@ -23,7 +23,7 @@ import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} f
 import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
-import type {LoadedSkill} from '../../skills/types.js';
+import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import {formatSession, type HazeSession} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
@@ -110,6 +110,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const persistenceWarningShownRef = useRef(false);
   const skillErrorSignatureRef = useRef('');
+  const projectSkillSignatureRef = useRef('');
   const contextFileSignaturesRef = useRef<Map<string, string>>(new Map());
   const followUpQueueRef = useRef<string[]>([]);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
@@ -135,7 +136,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [suggestedModels, setSuggestedModels] = useState<string[]>([]);
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
-  const [skillDraft, setSkillDraft] = useState<{name?: string}>({});
+  const [skillDraft, setSkillDraft] = useState<{name?: string; scope?: SkillSource}>({});
   const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>();
   const [selectedLspName, setSelectedLspName] = useState<string | undefined>();
   const [lspDraft, setLspDraft] = useState<Partial<HazeLspServer>>({});
@@ -218,9 +219,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function refreshSkills() {
     const registry = await loadSkillRegistry();
-    const nextSkills = [...registry.skills.values()];
+    const nextSkills = registry.candidates ?? [...registry.skills.values()];
     setSkills(nextSkills);
-    const errorSignature = registry.errors.map(error => `${error.directory}: ${error.message}`).join('\n');
+    const projectSkills = nextSkills.filter(skill => skill.source === 'project');
+    const projectSignature = projectSkills.map(skill => `${skill.name}:${skill.path}`).join('\n');
+    if (projectSignature && projectSignature !== projectSkillSignatureRef.current) {
+      setMessages(messages => [...messages, {role: 'system', text: `Project skills discovered (repository-provided, untrusted content): ${projectSkills.map(skill => skill.name).join(', ')}`}]);
+    }
+    projectSkillSignatureRef.current = projectSignature;
+    const errorSignature = registry.errors.map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`).join('\n');
     if (errorSignature && errorSignature !== skillErrorSignatureRef.current) {
       setMessages(messages => [...messages, {role: 'system', text: `Invalid skills were isolated:\n${errorSignature}`}]);
     }
@@ -232,10 +239,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     if (!value.startsWith('/')) return undefined;
     const [name, ...args] = commandParts(value.slice(1));
     if (!name) return undefined;
-    const skill = skills.find(candidate => candidate.name === name);
-    // Disabled skills are not invocable: they are absent from the model catalog,
-    // mirroring how disabled LSP/MCP tools never load.
-    return skill && isSkillEnabled(settings, skill.name) ? {skill, args: args.join(' ')} : undefined;
+    const skill = skills.find(candidate => candidate.name === name && isSkillEnabled(settings, candidate.name, candidate.source));
+    // Candidates are ordered project-first, so disabling a project collision
+    // automatically re-surfaces the enabled global skill.
+    return skill ? {skill, args: args.join(' ')} : undefined;
   }
 
   function debugLog(line: string) {
@@ -578,7 +585,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     'while trying to stay scoped to this project.',
   ].join('\n');
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
-  const enabledSkillCount = skills.filter(skill => isSkillEnabled(settings, skill.name)).length;
+  const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [

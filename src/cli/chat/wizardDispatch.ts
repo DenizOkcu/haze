@@ -9,7 +9,7 @@ import {removeMcpServer} from '../../config/mcpSettings.js';
 import {findPreset, PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
-import type {LoadedSkill} from '../../skills/types.js';
+import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import type {Mode} from '../commands/chatModes.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from '../commands/wizardActions.js';
 import {captureLspName} from '../commands/wizardPrompts.js';
@@ -39,7 +39,7 @@ export interface WizardDispatchDeps {
   providerDraft: Partial<HazeProviderSettings>;
   lspDraft: Partial<HazeLspServer>;
   mcpDraft: Partial<HazeMcpServer>;
-  skillDraft: {name?: string};
+  skillDraft: {name?: string; scope?: SkillSource};
   setMode: (mode: Mode) => void;
   setSettings: (next: HazeSettings) => void;
   setSelectedProviderName: (name: string | undefined) => void;
@@ -48,7 +48,7 @@ export interface WizardDispatchDeps {
   setSelectedMcpName: (name: string | undefined) => void;
   setModelProviderFilter: (filter: string | undefined) => void;
   setProviderDraft: (draft: Partial<HazeProviderSettings>) => void;
-  setSkillDraft: (draft: {name?: string}) => void;
+  setSkillDraft: (draft: {name?: string; scope?: SkillSource}) => void;
   setLspDraft: (draft: Partial<HazeLspServer>) => void;
   setMcpDraft: (draft: Partial<HazeMcpServer>) => void;
   setDiscoveredModels: (models: string[]) => void;
@@ -415,7 +415,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (result.validate && result.skill) {
       const {loadSkill} = await import('../../skills/SkillLoader.js');
       try {
-        const loaded = await loadSkill(result.skill.dir, 'global');
+        const loaded = await loadSkill(result.skill.dir, result.skill.source);
         showMessage(loaded ? `Valid: ${loaded.name}` : 'No SKILL.md found');
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
@@ -432,14 +432,33 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage('Skill name must contain at least one letter or number. Try again, or press ESC to cancel.');
       return;
     }
-    const registry = await loadSkillRegistry();
-    if (registry.skills.has(dirName)) {
-      showMessage(`A skill named "${dirName}" already exists. Pick another name, or press ESC to cancel.`);
+    deps.setSkillDraft({...deps.skillDraft, name: dirName});
+    setMode('skillsAddScope');
+    showMessage(`Where should "${dirName}" be created? Choose this project or global explicitly.`);
+  }
+
+  async function captureSkillScope(value: string) {
+    const scope: SkillSource | undefined = value.trim().toLowerCase() === 'this project' ? 'project'
+      : value.trim().toLowerCase() === 'global' ? 'global' : undefined;
+    if (!scope) {
+      showMessage('Choose "this project" or "global".');
       return;
     }
-    deps.setSkillDraft({...deps.skillDraft, name: dirName});
+    const name = deps.skillDraft.name;
+    if (!name) {
+      deps.setSkillDraft({});
+      setMode('chat');
+      showMessage('Skill wizard lost the name. Start over with /skills.');
+      return;
+    }
+    const registry = await loadSkillRegistry();
+    if ((registry.candidates ?? [...registry.skills.values()]).some(skill => skill.name === name && skill.source === scope)) {
+      showMessage(`A ${scope} skill named "${name}" already exists. Choose another scope or press ESC to cancel.`);
+      return;
+    }
+    deps.setSkillDraft({...deps.skillDraft, scope});
     setMode('skillsAddDescription');
-    showMessage(`Describe what "${dirName}" should do. This is the work the LLM will expand into the skill body.`);
+    showMessage(`Describe what "${name}" should do. This is the work the LLM will expand into the skill body.`);
   }
 
   async function captureSkillDescription(value: string) {
@@ -453,7 +472,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       deps.setBusyLabel(result.busyLabel ?? 'Creating skill');
       deps.setBusy(true);
       try {
-        const created = await createSkill({name, description});
+        const created = await createSkill({name, description, scope: deps.skillDraft.scope ?? 'global'});
         showMessage(skillCreationMessage(created.name, created.file));
         await deps.refreshSkills();
       } catch (error) {
@@ -598,6 +617,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     skills: selectSkill,
     skillsAction: selectSkillAction,
     skillsAddName: captureSkillName,
+    skillsAddScope: captureSkillScope,
     skillsAddDescription: captureSkillDescription,
     skillsConfirmRemove: skillsConfirmRemoveMode,
     provider: selectProvider,

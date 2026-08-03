@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-08-03 for project-local skills (F05).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -11,7 +11,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
 - `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly.
 - `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.
-- `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations.
+- `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations. Skill overrides are keyed by name plus scope (`global` or `project`); an omitted scope is legacy-compatible and means `global`.
 - `inputHistory.ts` persists prompt history.
 - `updateCheck.ts` checks npm/latest version; keep it non-fatal.
 - `privateStorage.ts` is the single helper for `~/.haze` home-state writes: `0700` dirs, `0600` atomic/append files, and opportunistic tightening of pre-existing overly-broad modes. All settings/session/log/history/update state must go through it.
@@ -40,6 +40,7 @@ Current settings behavior:
 
 - Missing `settings.json` reads as `{}`; malformed JSON or invalid known-field shape should throw an actionable error with the settings path.
 - Settings writes should validate the public shape, preserve unknown fields, use temp-file-plus-rename style writes, and create/tighten files to `0600` under `0700` dirs via `privateStorage.ts`.
+- Skill settings remain override-only. Enabling removes the matching name/scope override; disabling one scope must not affect a same-named skill in the other scope.
 - `subagents` settings are passthrough-validated; `updateSubagentSettings` must preserve unknown root, subagent, and per-profile fields. Profiles and worker models are explicit—never inferred or silently replaced.
 - Credentialed endpoints (provider keys, MCP Authorization headers) must pass `assertCredentialedEndpointSecure` before persisting or sending; reject non-loopback `http:` with credentials.
 

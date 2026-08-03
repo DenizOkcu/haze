@@ -1,36 +1,40 @@
 import type {HazeSettings, HazeSkillSetting} from './settings.js';
-import {findByName, removeByName} from '../utils/collections.js';
+import type {SkillSource} from '../skills/types.js';
 
-/**
- * Normalized skill metadata overrides. The list is override-only: only skills that
- * deviate from the default (enabled) appear here, so it never desyncs from disk.
- */
+/** Normalized override-only skill settings. Legacy entries apply to global skills. */
 export function configuredSkillSettings(settings: HazeSettings): HazeSkillSetting[] {
   const result: HazeSkillSetting[] = [];
   for (const entry of settings.skills ?? []) {
     const name = entry.name?.trim();
     if (!name) continue;
-    result.push({name, ...(entry.enabled === false ? {enabled: false} : {})});
+    result.push({
+      name,
+      ...(entry.scope ? {scope: entry.scope} : {}),
+      ...(entry.enabled === false ? {enabled: false} : {}),
+    });
   }
   return result;
 }
 
-/** A skill is enabled unless an explicit override disables it. */
-export function isSkillEnabled(settings: HazeSettings, name: string): boolean {
-  const entry = findByName(configuredSkillSettings(settings), name);
+function settingScope(entry: HazeSkillSetting): SkillSource {
+  return entry.scope ?? 'global';
+}
+
+function matches(entry: HazeSkillSetting, name: string, scope: SkillSource) {
+  return entry.name === name && settingScope(entry) === scope;
+}
+
+/** A skill is enabled unless an explicit scope-aware override disables it. */
+export function isSkillEnabled(settings: HazeSettings, name: string, scope: SkillSource = 'global'): boolean {
+  const entry = configuredSkillSettings(settings).find(candidate => matches(candidate, name, scope));
   return entry ? entry.enabled !== false : true;
 }
 
-/**
- * Toggle a skill. Enabling clears its override (back to default); disabling records
- * `enabled: false`. Returns the next `skills` array for updateSettings.
- */
-export function setSkillEnabled(settings: HazeSettings, name: string, enabled: boolean): HazeSkillSetting[] {
-  const others = removeByName(configuredSkillSettings(settings), name);
-  return enabled ? others : [...others, {name, enabled: false}];
+export function setSkillEnabled(settings: HazeSettings, name: string, enabled: boolean, scope: SkillSource = 'global'): HazeSkillSetting[] {
+  const others = configuredSkillSettings(settings).filter(entry => !matches(entry, name, scope));
+  return enabled ? others : [...others, {name, ...(scope === 'project' ? {scope} : {}), enabled: false}];
 }
 
-/** Drop a skill's override entry. Called when a skill directory is removed. */
-export function removeSkillSetting(settings: HazeSettings, name: string): HazeSkillSetting[] {
-  return removeByName(configuredSkillSettings(settings), name);
+export function removeSkillSetting(settings: HazeSettings, name: string, scope: SkillSource = 'global'): HazeSkillSetting[] {
+  return configuredSkillSettings(settings).filter(entry => !matches(entry, name, scope));
 }

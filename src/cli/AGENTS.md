@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-08-03 for project-local skills (F05).
 
 CLI and terminal UI orchestration instructions.
 
@@ -29,6 +29,8 @@ Maintainability focus:
 ## Slash command contracts
 
 - `/provider`, `/model`, `/settings`, `/skills`, `/lsp`, and `/mcp` are user-facing flows; update help text and tests when changing them.
+- `/skills` displays every valid candidate, including shadowed global skills, with `project`/`global` provenance. Selection identity must remain unambiguous when names collide.
+- Skill creation asks for scope explicitly after the name. `this project` writes under `<cwd>/.haze/skills`; `global` writes under `~/.haze/skills`. Never infer the target silently.
 - `/clear` clears conversation display/conversation state and tasks.
 - `/fleet` persists its original invocation only; orchestration control and per-run profile/model/concurrency/review overrides are ephemeral and must be reapplied on retries without entering snapshots/events.
 - `/compact [instructions]` compacts model messages but should not persist synthetic control messages.
@@ -42,6 +44,7 @@ Maintainability focus:
 - Interactive and headless paths should both inspect `TurnResult.status` instead of sniffing assistant text.
 - Abort should stop the current turn cleanly and restore user control without corrupting session snapshots.
 - Scoped context files discovered by tools are injected into the next model step through `runAgentTurn`; keep startup context display, signature maps, and tool UI “understanding:” rows in sync.
+- Announce discovered project skills as untrusted repository content. Slash-command suggestions and invocation must use the enabled project-over-global winner; disabling a project collision re-surfaces the enabled global skill.
 - Follow-up queue behavior must preserve user-submitted text and not lose messages during busy turns.
 
 ## Tests

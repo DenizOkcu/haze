@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-07-10 for the 0.9.0 release.
+Last updated: 2026-08-03 for project-local skills (F05).
 
 Vitest test suite instructions.
 
@@ -8,7 +8,7 @@ Vitest test suite instructions.
 
 Current regression priorities:
 
-- Cover explicit provider/model selection, malformed settings errors, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
+- Cover explicit provider/model selection, malformed settings errors, project-skill precedence/provenance/symlink isolation, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.
@@ -24,7 +24,7 @@ Current regression priorities:
 - `tests/core/**` covers agent compaction/request assembly/events/work state, bounded I/O and sparse line paging, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
 - `tests/hazeTools/**` covers built-in tool behavior exposed from `src/llm/hazeTools.ts` and `src/llm/tools/**`.
 - `tests/llm/**` covers client/prompt/request context/LSP/MCP/web fetch/tool helper behavior.
-- `tests/skills/**` covers skill loader/registry/tool/builder.
+- `tests/skills/**` covers skill loader/registry/tool/builder, including project-over-global precedence, candidate retention, untrusted-content framing, and real-path confinement.
 - `tests/ui/**` covers input buffer and Markdown rendering.
 - `tests/utils/**` covers shared utilities.
 
@@ -40,7 +40,7 @@ npm run typecheck
 ## Mocking and isolation
 
 - Use Vitest mocks/spies sparingly and restore them.
-- Prefer real temp files for file-tool behavior; mock network/model providers.
+- Prefer real temp files for file-tool behavior; mock network/model providers. Project-skill tests must use an explicit temporary workspace and must not depend on the repository's own `.haze` directory.
 - For child-process behavior, avoid brittle exact shell output where platform differences are possible.
 - Keep snapshots small and meaningful; assert structured fields directly where possible.
 

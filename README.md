@@ -122,7 +122,7 @@ Image input is opt-in per provider. Mark a provider image-capable in `/provider`
 
 ## Skills that grow with your workflow
 
-Skills are Markdown workflows that haze creates with `/skills` and stores in `~/.haze/skills` so you can inspect or refine them later.
+Skills are Markdown workflows that haze creates with `/skills`. Choose **this project** to store a team workflow in `.haze/skills`, or **global** to store a personal workflow in `~/.haze/skills`. Project skills override same-named global skills in that workspace; `/skills` always shows each skill's provenance.
 
 If you do something for the second time, build a skill for it:
 
@@ -133,10 +133,11 @@ If you do something for the second time, build a skill for it:
 # Description: review the diff between my current branch and main, focusing on bugs, tests, DRY and KISS
 ```
 
-haze uses the model to create the skill file for you:
+haze uses the model to create the skill file for you at the explicitly selected scope:
 
 ```txt
-~/.haze/skills/<skill-name>/SKILL.md
+.haze/skills/<skill-name>/SKILL.md       # project
+~/.haze/skills/<skill-name>/SKILL.md     # global
 ```
 
 A skill is just Markdown with frontmatter, a role, a focused prompt, and a small output template:
@@ -364,6 +365,7 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and anyth
 - Bash commands are classified and shown with working-directory metadata, but haze does not use command confirmation gates.
 - The `fetch` tool only reads public `http(s)` URLs. It rejects other schemes along with private, loopback, link-local, cloud-metadata, and malformed IPv6-like hosts. On every redirect, haze connects to the public IP it already validated, which closes the DNS-rebinding gap.
 - Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.
+- Project skills under `.haze/skills` are repository-provided, untrusted instructions. haze announces them, labels their provenance, confines their real paths to the workspace, and frames their content so it cannot override higher-priority safeguards. Review project skills before using an unfamiliar repository.
 - haze can make substantial changes, and it still needs supervision.
 
 ## Local development

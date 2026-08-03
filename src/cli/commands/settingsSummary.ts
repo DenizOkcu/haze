@@ -25,8 +25,9 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
   }
   const lspServers = configuredLspServers(settings);
   const skillRegistry = await loadSkillRegistry();
-  const installedSkills = [...skillRegistry.skills.values()];
-  const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(settings, skill.name) ? '' : ' (disabled)'}`).join(', ');
+  const installedSkills = skillRegistry.candidates ?? [...skillRegistry.skills.values()];
+  const skillNames = installedSkills.map(skill => `${skill.name}${isSkillEnabled(settings, skill.name, skill.source) ? '' : ' (disabled)'} · ${skill.source}`).join(', ');
+  const projectSkillNames = installedSkills.filter(skill => skill.source === 'project').map(skill => skill.name).join(', ');
   const lines = [
     `Provider: ${activeProvider?.name ?? 'not configured'}`,
     `Model: ${settings.model ?? 'not set'}`,
@@ -38,6 +39,7 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
     `Skills: ${skillNames || 'none'}`,
     ...(skillRegistry.errors.length ? [`Skill load errors: ${skillRegistry.errors.map(error => `${error.directory}: ${error.message}`).join('; ')}`] : []),
     `Context files: ${contextFiles.length ? `${contextFiles.map(file => file.path).join(', ')} (~${contextTokens} tokens)` : 'none'}`,
+    `Project skills (repo context): ${projectSkillNames || 'none'}`,
   ];
   if (notes.length > 0) lines.push(`Context note: ${notes.join('; ')}`);
   return lines.join(' | ');

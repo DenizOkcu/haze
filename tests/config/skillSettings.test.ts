@@ -17,7 +17,18 @@ describe('skillSettings', () => {
     it('honors an explicit enabled:false override', () => {
       const settings = {skills: [{name: 'review', enabled: false}]} as HazeSettings;
       expect(isSkillEnabled(settings, 'review')).toBe(false);
+      expect(isSkillEnabled(settings, 'review', 'project')).toBe(true);
       expect(isSkillEnabled(settings, 'other')).toBe(true);
+    });
+
+    it('keeps project and global overrides independent', () => {
+      const settings = {skills: [{name: 'review', scope: 'project', enabled: false}]} as HazeSettings;
+      expect(isSkillEnabled(settings, 'review', 'project')).toBe(false);
+      expect(isSkillEnabled(settings, 'review', 'global')).toBe(true);
+      expect(setSkillEnabled(settings, 'review', false, 'global')).toEqual([
+        {name: 'review', scope: 'project', enabled: false},
+        {name: 'review', enabled: false},
+      ]);
     });
 
     it('configuredSkillSettings drops entries without a name', () => {

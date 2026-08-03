@@ -15,6 +15,7 @@ import {
   mcpTransportSuggestions,
   skillsSuggestions,
   skillsActionSuggestions,
+  skillScopeSuggestions,
 } from '../../src/cli/commands/wizardSuggestions.js';
 
 const settings = (overrides: Partial<HazeSettings> = {}): HazeSettings => ({...overrides});
@@ -145,6 +146,10 @@ describe('mcpTransportSuggestions', () => {
 });
 
 describe('skillsSuggestions / skillsActionSuggestions', () => {
+  it('offers an explicit project or global creation scope', () => {
+    expect(skillScopeSuggestions().map(item => item.value)).toEqual(['this project', 'global']);
+  });
+
   const skills: LoadedSkill[] = [
     {name: 'review', description: 'code review', dir: '/tmp/review', references: [], body: ''} as LoadedSkill,
   ];

@@ -66,7 +66,15 @@ export async function assembleRequestContext(input: {
 }): Promise<AssembledRequestContext> {
   const settings = input.settings ?? await readSettings();
   const skillRegistry = await loadSkillRegistry();
-  const enabledSkills = new Map([...skillRegistry.skills.entries()].filter(([name]) => isSkillEnabled(settings, name)));
+  const enabledSkills = new Map(skillRegistry.skills);
+  if (skillRegistry.candidates) {
+    enabledSkills.clear();
+    for (const skill of skillRegistry.candidates) {
+      if (isSkillEnabled(settings, skill.name, skill.source) && !enabledSkills.has(skill.name)) enabledSkills.set(skill.name, skill);
+    }
+  } else {
+    for (const [name, skill] of enabledSkills) if (!isSkillEnabled(settings, name, skill.source)) enabledSkills.delete(name);
+  }
   const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
   const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile;
   const profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
@@ -106,7 +114,7 @@ export async function assembleRequestContext(input: {
   }
 
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
-  const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.directory}: ${error.message}`);
+  const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`);
   const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {systemPrompt, availableTools, toolCategories, loadedMcp, executionScope};

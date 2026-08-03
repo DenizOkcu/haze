@@ -7,6 +7,7 @@ import {PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, MODEL_CHOICES, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
+import {findSelectedSkill, skillPickerValue} from './skillWizard.js';
 
 /**
  * Pure suggestion builders for the chat wizard pickers (provider / model / LSP /
@@ -178,17 +179,24 @@ export function mcpTransportSuggestions(): TextInputSuggestion[] {
 export function skillsSuggestions(settings: HazeSettings, skills: LoadedSkill[]): TextInputSuggestion[] {
   return [{value: SKILL_CHOICES.addSkill, description: 'describe a new skill for haze to generate', kind: 'skill' as const},
     ...skills.map(skill => ({
-      value: skill.name,
-      description: `${skill.description}${isSkillEnabled(settings, skill.name) ? '' : ' · disabled'}`,
+      value: skills.some(candidate => candidate !== skill && candidate.name === skill.name) ? skillPickerValue(skill) : skill.name,
+      description: `${skill.description} · ${skill.source}${isSkillEnabled(settings, skill.name, skill.source) ? '' : ' · disabled'}`,
       kind: 'skill' as const,
     }))];
 }
 
+export function skillScopeSuggestions(): TextInputSuggestion[] {
+  return [
+    {value: 'this project', description: 'create .haze/skills/<name>/SKILL.md for this repository', kind: 'skill' as const},
+    {value: 'global', description: 'create ~/.haze/skills/<name>/SKILL.md for your user', kind: 'skill' as const},
+  ];
+}
+
 export function skillsActionSuggestions(settings: HazeSettings, skills: LoadedSkill[], selectedSkillName: string | undefined): TextInputSuggestion[] {
-  const skill = selectedSkillName ? skills.find(candidate => candidate.name === selectedSkillName) : undefined;
+  const skill = findSelectedSkill(skills, selectedSkillName);
   const result: TextInputSuggestion[] = [];
   if (skill) {
-    const enabled = isSkillEnabled(settings, skill.name);
+    const enabled = isSkillEnabled(settings, skill.name, skill.source);
     result.push({value: enabled ? COMMON_ACTIONS.disable : COMMON_ACTIONS.enable, description: `${enabled ? COMMON_ACTIONS.disable : COMMON_ACTIONS.enable} this skill`, kind: 'skill' as const});
     result.push({value: SKILL_ACTIONS.showInfo, description: 'show description, references, and path', kind: 'skill' as const});
     result.push({value: SKILL_ACTIONS.validate, description: 're-load and validate SKILL.md', kind: 'skill' as const});

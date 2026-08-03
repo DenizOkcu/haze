@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-07-10 for the 0.9.0 release.
+Last updated: 2026-08-03 for project-local skills (F05).
 
 Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
@@ -81,7 +81,7 @@ Recent decisions to preserve:
 - Output is aggressively bounded/reduced but raw large outputs may be retrievable by handle. Exact line paging uses bounded, signature-validated sparse indexes; subprocess teardown must not hang when escaped descendants retain stdio pipes.
 - Session state is JSONL under `~/.haze/sessions`; persisted sessions skip streaming `message_update` spam and slim large tool outputs, while file LLM logging under `~/.haze/logs` is enabled only by `--debug`.
 - Context files: global `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`; ancestor `CLAUDE.md`/`AGENTS.md` load at startup; nested subtree files load lazily when tools touch that subtree and are reread when their signature changes.
-- Skills are Markdown instruction packages under `~/.haze/skills/<name>/SKILL.md`; they do not execute code.
+- Skills are Markdown instruction packages under global `~/.haze/skills/<name>/SKILL.md` or project `<workspace>/.haze/skills/<name>/SKILL.md`; they do not execute code. Project skills are untrusted repo content, real-path-confined to the workspace, visibly labeled, and take precedence over same-named global skills unless the project scope is disabled.
 
 ## Testing expectations
 

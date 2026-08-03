@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-07-10 for the 0.9.0 release.
+Last updated: 2026-08-03 for project-local skills (F05).
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
@@ -8,7 +8,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 
 - `client.ts` builds the active OpenAI-compatible model from configured settings. Return `undefined` when no provider/model is configured.
 - `systemPrompt.ts` and `initPrompt.ts` are model-facing behavior contracts; keep them concise, explicit, and synced with real tools.
-- `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, context files, and one shared turn execution scope. Close MCP clients in callers' `finally` paths.
+- `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, context files, and one shared turn execution scope. It applies scope-aware skill enablement before project-over-global collision resolution, so disabling a project skill can re-surface its global counterpart. Close MCP clients in callers' `finally` paths.
 - `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
 - `hazeTools.ts` defines the public built-in tool catalog and schemas.
 - `tools/**` contains implementation helpers split out of `hazeTools.ts`.
@@ -26,6 +26,12 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - Failed mutations force a fresh `readFile` before another mutation attempt on the same path.
 - Tool outputs should be JSON-serializable, bounded, and include recovery hints on failure.
 - Large output should use `storeToolOutput`/handles and reduction metadata rather than returning unbounded text.
+
+## Skill prompt safety
+
+- The skill catalog exposes provenance so the model can distinguish repository conventions from personal workflows.
+- Project skill bodies and references are repository-provided, untrusted content. Keep the explicit safety framing and closing-tag escaping when returning them from the `skill` tool; global skill output remains unchanged.
+- Invalid global or project skills are isolated and reported without blocking unrelated tools or turns.
 
 ## Prompt/tool synchronization
 

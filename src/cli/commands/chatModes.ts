@@ -1,7 +1,7 @@
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'modelAddProvider' | 'modelPick' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
+export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'modelAddProvider' | 'modelPick' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddScope' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
 
 /** Modes that show an always-on suggestion picker (server/preset lists). */
-export const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'modelAddProvider', 'modelPick', 'skills', 'skillsAction', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
+export const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'modelAddProvider', 'modelPick', 'skills', 'skillsAction', 'skillsAddScope', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
 
 /** Modes that mask input (secrets/API keys). */
 export const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
@@ -27,6 +27,7 @@ const PLACEHOLDERS: Partial<Record<Mode, string>> = {
   skills: 'Choose a skill or add skill',
   skillsAction: 'show info, enable, disable, validate, or remove',
   skillsAddName: 'Skill name (kebab-case, e.g. security-review)',
+  skillsAddScope: 'Choose this project or global',
   skillsAddDescription: 'Describe what the skill should do',
   skillsConfirmRemove: 'Type "yes" to confirm',
   lsp: 'Choose LSP server or add server',

@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 import YAML from 'yaml';
-import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter} from './types.js';
+import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter, SkillSource} from './types.js';
 import {assertRealPathInsideRoot} from '../utils/path.js';
 import {SKILL_MARKDOWN_BYTES} from '../core/limits/byteBudgets.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
@@ -58,7 +58,7 @@ async function loadReference(dir: string, referencePath: string): Promise<Loaded
   return {path: referencePath, absolutePath: realPath, content: prefix.content};
 }
 
-export async function loadSkill(dir: string, source: 'global' = 'global'): Promise<LoadedSkill | null> {
+export async function loadSkill(dir: string, source: SkillSource = 'global'): Promise<LoadedSkill | null> {
   const skillPath = path.join(dir, 'SKILL.md');
   if (!(await fs.pathExists(skillPath))) return null;
   const realSkillPath = await assertRealPathInsideRoot(dir, skillPath, 'SKILL.md', 'skill directory');

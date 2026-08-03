@@ -3,7 +3,7 @@ import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import type {Mode} from '../commands/chatModes.js';
-import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, modelAddProviderSuggestions, modelPickSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions} from '../commands/wizardSuggestions.js';
+import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, modelAddProviderSuggestions, modelPickSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions, skillScopeSuggestions} from '../commands/wizardSuggestions.js';
 
 const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/help', description: 'Show commands', kind: 'command'},
@@ -49,6 +49,7 @@ export function inputSuggestionsForState(state: InputSuggestionState): TextInput
   if (mode === 'modelPick') return modelPickSuggestions(settings, state.selectedProviderName ?? state.providerDraftName, state.discoveredModels ?? [], state.suggestedModels ?? []);
   if (mode === 'skills') return skillsSuggestions(settings, skills);
   if (mode === 'skillsAction') return skillsActionSuggestions(settings, skills, state.selectedSkillName);
+  if (mode === 'skillsAddScope') return skillScopeSuggestions();
   if (mode === 'lsp') return lspSuggestions(settings);
   if (mode === 'lspAction') return lspActionSuggestions(settings, state.selectedLspName);
   if (mode === 'lspAddPreset') return lspPresetSuggestions();
@@ -57,8 +58,10 @@ export function inputSuggestionsForState(state: InputSuggestionState): TextInput
   if (mode === 'mcpAddPreset') return mcpPresetSuggestions();
   if (mode === 'mcpAddTransport') return mcpTransportSuggestions();
   if (mode !== 'chat') return [];
+  const activeSkills = skills.filter((skill, index) => isSkillEnabled(settings, skill.name, skill.source)
+    && !skills.slice(0, index).some(candidate => candidate.name === skill.name && isSkillEnabled(settings, candidate.name, candidate.source)));
   return [
     ...CHAT_COMMAND_SUGGESTIONS,
-    ...skills.filter(skill => isSkillEnabled(settings, skill.name)).map(skill => ({value: `/${skill.name}`, description: skill.description, kind: 'skill' as const})),
+    ...activeSkills.map(skill => ({value: `/${skill.name}`, description: `${skill.description} · ${skill.source}`, kind: 'skill' as const})),
   ];
 }
