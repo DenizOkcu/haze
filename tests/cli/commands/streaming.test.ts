@@ -278,6 +278,36 @@ describe('runAgentTurn: setup', () => {
     expect(cb.messages[0]).toEqual({role: 'user', text: 'display'});
   });
 
+  it('sends image attachments as multipart user content and keeps text-only turns as strings (F03, AC1)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Fixed.'}, {type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const attachment = {
+      displayPath: 'shot.png', absolutePath: '/tmp/shot.png', fileName: 'shot.png',
+      mediaType: 'image/png', bytes: 3, data: new Uint8Array([1, 2, 3]),
+    };
+
+    // With attachments: the user message is multipart (text + file part).
+    const withImage = makeCallbacks();
+    await runAgentTurn('fix this layout', undefined, [], withImage, 0, false, false, undefined, undefined, {attachments: [attachment]});
+    const multipartCall = mocks.streamedMessages[0] as Array<{role: string; content: unknown}>;
+    const multipartUser = multipartCall.filter(message => message.role === 'user').at(-1);
+    expect(Array.isArray(multipartUser?.content)).toBe(true);
+    const parts = multipartUser?.content as Array<Record<string, unknown>>;
+    expect(parts[0]).toEqual({type: 'text', text: 'fix this layout'});
+    expect(parts[1]).toMatchObject({type: 'file', mediaType: 'image/png', filename: 'shot.png'});
+    expect((parts[1]?.data as Uint8Array).byteLength).toBe(3);
+
+    // Without attachments: the user message stays a plain string.
+    const textOnly = makeCallbacks();
+    await runAgentTurn('plain prompt', undefined, [], textOnly);
+    const textCall = mocks.streamedMessages[1] as Array<{role: string; content: unknown}>;
+    const textUser = textCall.filter(message => message.role === 'user').at(-1);
+    expect(textUser?.content).toBe('plain prompt');
+  });
+
   it('applies ephemeral control to every request but never durable conversation/events', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},

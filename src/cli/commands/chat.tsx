@@ -19,7 +19,7 @@ import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
 import {formatElapsedTimeWhole, imageAttachmentLine} from './formatters.js';
-import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
+import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} from '../../core/attachments/imageAttachments.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
@@ -421,7 +421,38 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    await doAgentTurn(value);
+    const prepared = await prepareUserInput(value);
+    if (!prepared) return;
+    await doAgentTurn(prepared.value, prepared.displayValue, prepared.options);
+  }
+
+  // F03: resolve @image mentions in a prompt the user typed into attachments and
+  // gate them on the active provider's explicit capability before any model call.
+  // Applied only to genuine user input (direct chat and queued follow-ups), never
+  // to synthetic control prompts (/init, /fleet, skill invocations). Resolution
+  // errors and capability rejections surface an actionable system message and
+  // return undefined instead of starting a turn.
+  async function prepareUserInput(value: string): Promise<{value: string; displayValue?: string; options: import('./streaming.js').TurnExecutionOptions} | undefined> {
+    let resolved;
+    try {
+      resolved = await resolveImageAttachments(value);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessages(m => [...m, {role: 'system', text}]);
+      return undefined;
+    }
+    if (resolved.attachments.length === 0) return {value, options: {}};
+    const gateError = imageCapabilityError(activeProvider(settings));
+    if (gateError) {
+      setMessages(m => [...m, {role: 'system', text: gateError}]);
+      return undefined;
+    }
+    const displayValue = [resolved.text, ...resolved.attachments.map(imageAttachmentLine)].filter(Boolean).join('\n');
+    return {
+      value: resolved.text || IMAGE_ONLY_PROMPT_TEXT,
+      displayValue,
+      options: {attachments: resolved.attachments},
+    };
   }
 
   async function doAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
@@ -441,38 +472,14 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       followUpQueueRef.current = followUpQueueRef.current.slice(1);
       setQueuedFollowUps(followUpQueueRef.current);
       setMessages(m => [...m, {role: 'system', text: `Running queued follow-up: ${next}`}]);
-      await runSingleAgentTurn(next);
+      const preparedFollowUp = await prepareUserInput(next);
+      if (!preparedFollowUp) continue;
+      await runSingleAgentTurn(preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
     }
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
     const sessionRecorder = sessionRecorderRef.current!;
-    // F03: resolve @image mentions into attachments and gate them on the active
-    // provider's explicit capability before any model call. Resolution errors
-    // (non-image, oversize, workspace escape) and capability rejections fail
-    // loudly with an actionable message instead of starting a turn.
-    let turnValue = value;
-    let turnDisplayValue = displayValue;
-    let attachments: readonly ImageAttachment[] | undefined = turnOptions.attachments;
-    if (!attachments) {
-      try {
-        const resolved = await resolveImageAttachments(value);
-        if (resolved.attachments.length > 0) {
-          const gateError = imageCapabilityError(activeProvider(settings));
-          if (gateError) {
-            setMessages(m => [...m, {role: 'system', text: gateError}]);
-            return;
-          }
-          attachments = resolved.attachments;
-          turnValue = resolved.text || IMAGE_ONLY_PROMPT_TEXT;
-          turnDisplayValue = [resolved.text, ...resolved.attachments.map(imageAttachmentLine)].filter(Boolean).join('\n');
-        }
-      } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        setMessages(m => [...m, {role: 'system', text}]);
-        return;
-      }
-    }
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
       const ordered = withDisplayOrder(msg);
@@ -480,7 +487,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       sessionRecorder.recordUiMessage(ordered);
     };
 
-    await runAgentTurn(turnValue, turnDisplayValue, contextFiles, {
+    await runAgentTurn(value, displayValue, contextFiles, {
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);
         if (ordered.streaming) {
@@ -528,7 +535,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, attachments ? {...turnOptions, attachments} : turnOptions);
+    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
   }
