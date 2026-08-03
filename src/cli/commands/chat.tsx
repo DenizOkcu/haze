@@ -34,6 +34,7 @@ import {createWizardDispatch} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
 import {startupContextInfo, startupInputTips, startupProviderInfo} from '../chat/startupInfo.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
+import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
 import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
@@ -187,7 +188,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setBranchName(branch);
       setContextFiles(files);
       contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}\n\n${startupInputTips()}`}]);
+      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
     }).catch(() => undefined);
     sessionLifecycle.initializeSession().catch(error => {
       const text = error instanceof Error ? error.message : String(error);
@@ -569,6 +570,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     'Start with simple chat, then teach haze your habits with skills:',
     '/skills  — add, enable/disable, validate, or remove Markdown skills.',
     '',
+    startupInputTips(),
+    '',
     'The most adaptive workflow is the one you shape as you go.',
     '',
     'Guardrails are light: haze lets the LLM work from the terminal almost like you,',
@@ -626,6 +629,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
           suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
           submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
           width={Math.max(20, width - 4)}
+          getMentionSuggestions={fileMentionSuggestions}
           onHistoryAdd={persistInputHistory}
           onToggleTasks={() => {
             if (!tasksExpanded) {

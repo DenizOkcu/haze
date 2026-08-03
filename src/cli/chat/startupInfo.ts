@@ -13,7 +13,15 @@ export function startupContextInfo(contextFiles: ContextFile[]) {
 }
 
 export function startupInputTips() {
-  return 'Input tips: type @path/to/image.png (or any path with a /) to attach png/jpg/jpeg/gif/webp images — backslash-escape spaces, e.g. @screen\\ 2026.png. Mentioning any file or directory by @path or a /-containing bare path also lets the model readFile or grep it for this turn, even outside the working directory. Edits and writes always stay workspace-confined.';
+  return [
+    'Type @path/to/image.png (or any path with a /) to send images to models with vision capabilities.',
+    '',
+    'Tab through files in your working directory after typing @',
+    '',
+    'Mentioning a file or directory with @path, or any /-containing path, lets the model read it, even outside the working directory.',
+    '',
+    'Edits and writes stay inside the workspace.',
+  ].join('\n');
 }
 
 export function startupProviderInfo(settings: HazeSettings) {

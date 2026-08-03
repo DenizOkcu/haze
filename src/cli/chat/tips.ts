@@ -9,6 +9,7 @@
  */
 export const TIPS: readonly string[] = [
   'Attach an image with @path/to/img.png — or any path with / — png/jpg/jpeg/gif/webp.',
+  'Type @ to browse workspace files; Tab completes the path.',
   'Mention any file or directory by @path (or paste a /-containing path) to let the model read it this turn, even outside the workspace.',
   'Backslash-escape spaces in paths: @screen\\ 2026.png works for macOS screenshots.',
   'Mark a provider image-capable in /provider so attached images actually get sent.',
