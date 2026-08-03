@@ -1,6 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
 import {Readable} from 'node:stream';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
 import {validateUrl, type UrlValidation, type DnsLookupFn} from '../core/safety/urlGuard.js';
 
 /**
@@ -59,7 +62,24 @@ export type {UrlValidation};
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
 const DEFAULT_MAX_REDIRECTS = 5;
-const USER_AGENT = 'haze/0.5 (+https://github.com/DenizOkcu/haze)';
+
+// Derive the version from package.json (as cli/index.ts does) so the user
+// agent never goes stale; fall back to an unversioned agent if the read fails
+// (CR-017).
+let cachedUserAgent: string | undefined;
+function userAgent(): string {
+  if (cachedUserAgent) return cachedUserAgent;
+  let version: string | undefined;
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf8')) as {version?: string};
+    version = pkg.version;
+  } catch {
+    version = undefined;
+  }
+  cachedUserAgent = version ? `haze/${version} (+https://github.com/DenizOkcu/haze)` : 'haze (+https://github.com/DenizOkcu/haze)';
+  return cachedUserAgent;
+}
 
 /** Error thrown when a URL is rejected by the SSRF guard. */
 export class BlockedUrlError extends Error {
@@ -306,16 +326,10 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
       response = await fetcher(currentUrl, currentPinnedIp, {
         redirect: 'manual',
         signal: combined,
-        headers: {accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.5,*/*;q=0.1', 'user-agent': USER_AGENT},
+        headers: {accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.5,*/*;q=0.1', 'user-agent': userAgent()},
       });
-    } catch (error) {
-      if (opts?.signal) opts.signal.removeEventListener('abort', onAbort);
-      if (abortController.signal.aborted && !timeoutSignal.aborted) {
-        // Aborted by caller or size cap; surface a clear error.
-        throw error;
-      }
-      throw error;
     } finally {
+      // Listener cleanup only; fetch errors propagate unchanged (CR-017).
       if (opts?.signal) opts.signal.removeEventListener('abort', onAbort);
     }
 

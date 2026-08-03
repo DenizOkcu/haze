@@ -1,6 +1,7 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import http from 'node:http';
 import type {AddressInfo} from 'node:net';
+import fs from 'node:fs/promises';
 import {fetchUrlContent, BlockedUrlError, extractContent, pinnedFetch} from '../../src/llm/webFetch.js';
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -58,6 +59,18 @@ describe('webFetch fetchUrlContent', () => {
     expect(result.extractionMethod).toBe('json');
     expect(result.content).toBe('{\n  "b": 2,\n  "a": 1\n}');
     expect(result.status).toBe(200);
+  });
+
+  it('sends a versioned user agent derived from package.json (regression CR-017)', async () => {
+    let sentUserAgent: string | undefined;
+    globalThis.fetch = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      sentUserAgent = headers?.['user-agent'];
+      return textResponse('ok');
+    }) as typeof globalThis.fetch;
+    await fetchUrlContent('https://93.184.216.34/ua');
+    const pkg = JSON.parse(await fs.readFile(new URL('../../package.json', import.meta.url), 'utf8')) as {version: string};
+    expect(sentUserAgent).toBe(`haze/${pkg.version} (+https://github.com/DenizOkcu/haze)`);
   });
 
   it('falls back to text when JSON is invalid', async () => {

@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Bash tool results carry byte statistics (`totalBytes`/`retainedBytes`/`omittedBytes`) instead of the raw retained stream text, so large outputs no longer duplicate into the model context. Retrieval by handle is unchanged.
+- `/compact` now condenses older messages into a bounded excerpt (most recent older messages first) and reports omitted entries, instead of embedding unbounded whitespace-collapsed text.
+- `readToolOutput` handles evict least-recently-used: reading an entry protects it until it becomes the oldest again.
+- Session IDs carry a short random suffix after the timestamp, so sessions created in the same millisecond no longer collide; newest-first ordering is unchanged.
+- Headless `haze -p ... --debug` prints `[haze]` progress lines on stderr. The undocumented `HAZE_DEBUG` environment variable is gone.
+- Branch display refreshes every 15s plus once after each turn instead of every 3s.
+
+### Fixed
+
+- `/clear` prints its "Cleared." message once.
+- Malformed or partially written `.haze/tasks.json` files load as an empty task list instead of passing unvalidated JSON to the UI.
+- Retry classification matches HTTP status codes as whole words, so messages like "processed 5000 files" are no longer treated as transient provider errors.
+- `readFile` outline paging resumes after the last included entry when the output cap truncates a page instead of skipping entries.
+- Session files no longer persist full `writeFile`/`editFile` inputs in `tool_start` events; inputs are slimmed to byte counts (and path).
+- Resuming a session scans the session file once instead of twice.
+- grep inherits the hardened bounded-process teardown (process group, `SIGTERM`→`SIGKILL` escalation, close fallback) shared with bash.
+- Fetch sends a user agent versioned from `package.json` instead of a stale hardcoded one.
+
 ## 0.9.0 - 2026-07-10
 
 ### Added
