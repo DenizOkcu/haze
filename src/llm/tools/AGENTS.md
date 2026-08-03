@@ -42,7 +42,7 @@ Current behavior:
 - `bashTool.ts` runs `bash -lc` through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
-- `grepRunner.ts` spawns ripgrep and parses `--json` incrementally, stopping at the true global match cap with separate stdout/stderr byte budgets and timeout/abort; do not route grep through an unbounded buffer.
+- `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer.
 
 ## Failure results
 

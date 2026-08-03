@@ -39,7 +39,7 @@ function collector(limit: number) {
   };
 }
 
-export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number}): Promise<BoundedProcessResult> {
+export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number; onStdoutChunk?: (chunk: Buffer) => boolean | void}): Promise<BoundedProcessResult> {
   const startedAt = Date.now();
   const stdout = collector(input.maxStdoutBytes);
   const stderr = collector(input.maxStderrBytes);
@@ -56,11 +56,6 @@ export async function runBoundedProcess(input: {command: string; args: string[];
   let terminating = false;
   let exitCode: number | null = null;
   let exitSignal: NodeJS.Signals | null = null;
-  const killTree = (signal: NodeJS.Signals) => signalProcessTree(child, signal);
-  const stdoutData = (chunk: Buffer) => stdout.add(chunk);
-  const stderrData = (chunk: Buffer) => stderr.add(chunk);
-  child.stdout.on('data', stdoutData);
-  child.stderr.on('data', stderrData);
 
   return await new Promise(resolve => {
     let settled = false;
@@ -97,6 +92,15 @@ export async function runBoundedProcess(input: {command: string; args: string[];
     const timeout = setTimeout(() => { timedOut = true; terminate(); }, input.timeoutMs);
     const onAbort = () => { aborted = true; terminate(); };
     input.signal?.addEventListener('abort', onAbort, {once: true});
+    const killTree = (signal: NodeJS.Signals) => signalProcessTree(child, signal);
+    const stdoutData = (chunk: Buffer) => {
+      stdout.add(chunk);
+      // Streaming interceptors (e.g. grep's early-stop) may request termination.
+      if (!terminating && input.onStdoutChunk?.(chunk)) terminate();
+    };
+    const stderrData = (chunk: Buffer) => stderr.add(chunk);
+    child.stdout.on('data', stdoutData);
+    child.stderr.on('data', stderrData);
     child.once('error', error => settle(null, null, error.message));
     child.once('exit', (code, signal) => {
       exitCode = code;

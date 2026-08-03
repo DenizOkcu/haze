@@ -6,7 +6,7 @@ Bounded subprocess execution shared by `bash` and `grep`.
 
 ## Responsibilities
 
-- `runBoundedProcess.ts` spawns a child process with independent stdout/stderr byte budgets, a timeout, an optional abort signal, and process-tree termination.
+- `runBoundedProcess.ts` spawns a child process with independent stdout/stderr byte budgets, a timeout, an optional abort signal, and process-tree termination. An optional `onStdoutChunk` interceptor lets callers inspect chunks as they arrive and request early termination (grep's match-cap early stop is built on this; CR-004).
 - `signalProcessTree` is the shared POSIX/Windows process-tree signaling helper used by bounded commands and LSP teardown.
 
 ## Contracts
