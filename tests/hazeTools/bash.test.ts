@@ -96,4 +96,15 @@ describe('bash tool safety', () => {
     const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 250000, limit: 20}, {abortSignal: undefined});
     expect(page.content).toContain('NEEDLE_END');
   }, 15_000);
+
+  it('does not embed raw stream text in the tool result (regression CR-001)', async () => {
+    const result = await bash("node -e \"process.stdout.write('y'.repeat(150000))\"");
+    expect(result.stdoutBytes.retainedBytes).toBeGreaterThan(100_000);
+    expect(result.stdoutBytes).toEqual({totalBytes: expect.any(Number), retainedBytes: expect.any(Number), omittedBytes: expect.any(Number)});
+    expect(result.stderrBytes).toEqual({totalBytes: expect.any(Number), retainedBytes: expect.any(Number), omittedBytes: expect.any(Number)});
+    const serialized = JSON.stringify(result);
+    expect(serialized.length).toBeLessThan(60_000);
+    expect('text' in result.stdoutBytes).toBe(false);
+    expect('text' in result.stderrBytes).toBe(false);
+  }, 15_000);
 });

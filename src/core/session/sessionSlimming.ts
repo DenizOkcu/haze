@@ -57,9 +57,28 @@ export function slimConversationSnapshot(messages: ModelMessage[]): ModelMessage
   return slimUnknown(messages) as ModelMessage[];
 }
 
+function slimToolStartInput(input: unknown): Record<string, unknown> {
+  // Full tool inputs (writeFile/editFile payloads can be tens of KB) are replaced
+  // with byte counts; raw inputs stay only in opt-in --debug LLM logs (CR-031).
+  const slimmed: Record<string, unknown> = {inputBytes: jsonByteLength(input)};
+  if (typeof input === 'object' && input != null && typeof (input as Record<string, unknown>).path === 'string') {
+    slimmed.path = (input as Record<string, unknown>).path;
+  }
+  return slimmed;
+}
+
 export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry | undefined {
   if (entry.type === 'event') {
     if (entry.name === 'message_update') return undefined;
+    if (entry.name === 'tool_start' && entry.text) {
+      try {
+        const event = JSON.parse(entry.text) as Record<string, unknown>;
+        event.input = slimToolStartInput(event.input);
+        return {...entry, text: JSON.stringify(event)};
+      } catch {
+        return entry;
+      }
+    }
     if (entry.name === 'tool_end' && entry.text) {
       try {
         const event = JSON.parse(entry.text) as Record<string, unknown>;

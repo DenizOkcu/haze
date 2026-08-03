@@ -67,6 +67,27 @@ describe('taskStorage', () => {
       const tasks = await loadTasks();
       expect(tasks).toEqual(taskData);
     });
+
+    it('returns empty array when the JSON is not an array (regression CR-012)', async () => {
+      const dir = path.join(tmp, '.haze');
+      await fs.ensureDir(dir);
+      await fs.writeFile(path.join(dir, 'tasks.json'), JSON.stringify({id: 'a', title: 'not a list'}), 'utf-8');
+      await expect(loadTasks()).resolves.toEqual([]);
+    });
+
+    it('returns empty array when a task has an invalid status (regression CR-012)', async () => {
+      const dir = path.join(tmp, '.haze');
+      await fs.ensureDir(dir);
+      await fs.writeFile(path.join(dir, 'tasks.json'), JSON.stringify([{id: 'a', title: 'Task', status: 'bogus', createdAt: '', updatedAt: ''}]), 'utf-8');
+      await expect(loadTasks()).resolves.toEqual([]);
+    });
+
+    it('returns empty array when task fields have the wrong types (regression CR-012)', async () => {
+      const dir = path.join(tmp, '.haze');
+      await fs.ensureDir(dir);
+      await fs.writeFile(path.join(dir, 'tasks.json'), JSON.stringify([{id: 42, title: null, status: 'pending', createdAt: '', updatedAt: ''}]), 'utf-8');
+      await expect(loadTasks()).resolves.toEqual([]);
+    });
   });
 
   describe('saveTasks', () => {

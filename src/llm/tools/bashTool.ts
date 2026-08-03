@@ -7,10 +7,15 @@ import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
-import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
+import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
 import {BASH_STREAM_BYTES} from '../../core/limits/byteBudgets.js';
 
 const SHORT_VALIDATION_CHARS = 2_000;
+
+/** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */
+function streamByteStats(stream: BoundedStream) {
+  return {totalBytes: stream.totalBytes, retainedBytes: stream.retainedBytes, omittedBytes: stream.omittedBytes};
+}
 
 export const bashTool = tool({
   description: 'Run workspace tests, builds, validation, or inspection. Risk classification is informational; use file tools for edits.',
@@ -39,7 +44,7 @@ export const bashTool = tool({
       code, command, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
       aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
       stdout: output.stdout, stderr: output.stderr, validationSummary,
-      stdoutBytes: processResult.stdout, stderrBytes: processResult.stderr,
+      stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),
       ...(processResult.error ? {error: processResult.error} : {}),
     };
   }),

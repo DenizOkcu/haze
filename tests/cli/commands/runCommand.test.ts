@@ -20,6 +20,7 @@ async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void
   vi.doMock('../../../src/cli/commands/streaming.js', () => ({runAgentTurn}));
   vi.doMock('../../../src/config/contextFiles.js', () => ({readContextFiles: async () => []}));
   vi.doMock('../../../src/config/settings.js', () => ({readSettings: async () => opts.settings ?? PROVIDER_SETTINGS}));
+  vi.doMock('../../../src/core/log/llmLog.js', () => ({createLog: async () => ({file: '/tmp/stub-llm.jsonl'}), endLog: async () => undefined}));
   vi.resetModules();
   const mod = await import('../../../src/cli/commands/runCommand.js');
   return {...mod, runAgentTurn};
@@ -130,6 +131,33 @@ describe('runHeadless: output', () => {
     const code = await runHeadless({prompt: 'do it', output: 'json'});
     expect(JSON.parse(writes.join('')).status).toBe('failed');
     expect(code).toBe(1);
+  });
+});
+
+describe('runHeadless: debug output', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('prints [haze] debug lines on stderr when --debug is set', async () => {
+    const errs = captureStderr();
+    captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => cb.debugLog('tool start: bash ls'),
+    });
+    await runHeadless({prompt: 'do it', output: 'text', debug: true});
+    expect(errs.some((line) => line.startsWith('[haze] tool start: bash ls'))).toBe(true);
+  });
+
+  it('keeps stderr clean without --debug (regression CR-003)', async () => {
+    const errs = captureStderr();
+    captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => cb.debugLog('tool start: bash ls'),
+    });
+    const code = await runHeadless({prompt: 'do it', output: 'text'});
+    expect(code).toBe(0);
+    expect(errs.join('')).not.toContain('[haze]');
   });
 });
 

@@ -137,6 +137,22 @@ describe('sessionStore', () => {
     expect(event.output.preview?.length).toBeLessThan(10_000);
   });
 
+  it('slims tool_start inputs to byte counts so written file content never reaches the session file (regression CR-031)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const writtenContent = 'SECRET_FILE_CONTENT '.repeat(4_000);
+    await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_start', text: JSON.stringify({type: 'tool_start', id: 'call', name: 'writeFile', input: {path: 'src/app.ts', content: writtenContent}, at: '1'})});
+
+    const raw = await fs.readFile(session.file, 'utf-8');
+    expect(raw).not.toContain('SECRET_FILE_CONTENT');
+    const {entries} = await readSessionEntries(session);
+    const event = JSON.parse(entries[1]?.type === 'event' ? entries[1].text ?? '{}' : '{}') as {id: string; name: string; input: {inputBytes?: number; path?: string; content?: string}};
+    expect(event.id).toBe('call');
+    expect(event.name).toBe('writeFile');
+    expect(event.input.content).toBeUndefined();
+    expect(event.input.path).toBe('src/app.ts');
+    expect(event.input.inputBytes).toBeGreaterThan(50_000);
+  });
+
   it('persists only subagent capsule and bounded scheduler metadata in tool events', async () => {
     const session = await createSession({cwd, sessionsDir});
     const output = {capsule: {id: 'w', termination: 'completed', usable: true, deliverable: 'done'}, telemetry: {modelSelector: 'p:m', profile: 'local-safe', durationMs: 10, queueMs: 2, toolCallCount: 1, toolCalls: [{name: 'readFile', summary: 'private detail'}], usage: {inputTokens: 99}}};

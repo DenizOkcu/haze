@@ -37,10 +37,6 @@ type HeadlessStreamEvent =
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
-function debug(line: string) {
-  if (process.env.HAZE_DEBUG) process.stderr.write(`[haze] ${line}\n`);
-}
-
 function pinnedUsage(usage: TokenUsage): HeadlessUsage {
   // Normalize every field to a number: TokenUsage seeds most fields to 0 but
   // inputTokens/outputTokens may be undefined until the first report. A uniform ?? 0
@@ -117,6 +113,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     return 1;
   }
 
+  // stderr keeps stdout clean for --output json/stream-json consumers.
+  const debugLog = (line: string) => {
+    if (options.debug) process.stderr.write(`[haze] ${line}\n`);
+  };
+
   const contextFiles: ContextFile[] = await readContextFiles(process.cwd());
   const session: PromptSession = {start: new Date(), cwd: process.cwd()};
   let conversation: ModelMessage[] = [];
@@ -150,7 +151,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     },
     setBusy: () => undefined,
     setBusyLabel: () => undefined,
-    debugLog: debug,
+    debugLog,
     getConversation: () => conversation,
     getLastAssistantText: () => lastAssistantText,
     setLastAssistantText: (text: string) => {

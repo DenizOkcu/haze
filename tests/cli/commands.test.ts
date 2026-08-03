@@ -64,11 +64,12 @@ describe('handleSlashCommand', () => {
     expect(ctx2.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown command'));
   });
 
-  it('clears conversation for /clear', async () => {
+  it('clears conversation for /clear without duplicating the Cleared. message', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/clear', ctx)).toBe('handled');
     expect(ctx.clearConversation).toHaveBeenCalled();
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Cleared'));
+    // "Cleared. …" is owned by clearConversation(); the handler must not add it again (CR-002).
+    expect(ctx.addSystemMessage).not.toHaveBeenCalled();
   });
 
   it('shows settings for /settings', async () => {
