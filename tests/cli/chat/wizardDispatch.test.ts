@@ -158,6 +158,17 @@ describe('wizardDispatch provider actions with model discovery', () => {
     expect(deps.selectedProviderName).toBe('LM Studio');
     expect(deps.setMode).toHaveBeenLastCalledWith('providerConfirmRemove');
   });
+
+  it('toggles the image-capable flag and returns to chat (F03)', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('provider', 'LM Studio');
+    await wizard.dispatch('providerAction', 'mark image-capable');
+    expect(mocks.updateSettings).toHaveBeenCalledWith({providers: [{name: 'LM Studio', url: 'http://localhost:1234/v1', models: ['qwen3'], capabilities: {images: true}}]});
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('marked image-capable'));
+  });
 });
 
 describe('wizardDispatch /model add-models flow', () => {

@@ -53,6 +53,20 @@ describe('formatSettingsSummary', () => {
     expect(out).toContain('Configured providers: openrouter, local');
   });
 
+  it('annotates image-capable providers (F03)', async () => {
+    mocks.loadSkillRegistry.mockResolvedValue(skills());
+    const settings: HazeSettings = {
+      providers: [
+        {name: 'cloud', url: 'https://x/v1', models: ['m'], capabilities: {images: true}},
+        {name: 'local', url: 'http://localhost:1234/v1', models: ['m']},
+      ],
+      provider: 'cloud',
+      model: 'm',
+    };
+    const out = await formatSettingsSummary(settings, []);
+    expect(out).toContain('Configured providers: cloud (images), local');
+  });
+
   it('falls back to not configured when no provider is set', async () => {
     mocks.loadSkillRegistry.mockResolvedValue(skills());
     const out = await formatSettingsSummary({model: 'm'}, []);
