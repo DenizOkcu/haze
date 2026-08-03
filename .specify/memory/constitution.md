@@ -4,7 +4,7 @@
 ==============================================================================
   Version change: 1.2.0 → 1.3.0 (MINOR: release behavior materially expands
   the extension, path-boundary, process, configuration, and session contracts).
-  Context: Aligned governance with the complete haze 0.9.0 release on
+  Context: Aligned governance with the complete haze 0.10.0 release on
            2026-08-03.
 
   Amendment 1.3.0 (2026-08-03):
@@ -31,9 +31,9 @@
       quality-gate phases can carry coordinator, cancellation, and persistence
       tasks.
     - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
-    - README.md / CHANGELOG.md              — ✅ aligned with the complete 0.9.0
+    - README.md / CHANGELOG.md              — ✅ aligned with the complete 0.10.0
       feature and security contract.
-    - All AGENTS.md files                   — ✅ refreshed for the 0.9.0 release.
+    - All AGENTS.md files                   — ✅ refreshed for the 0.10.0 release.
 
   Follow-up TODOs: none for propagation. Code-review findings are reported
   separately and do not change the governance contract.

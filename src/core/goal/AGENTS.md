@@ -1,6 +1,6 @@
 # src/core/goal/AGENTS.md
 
-Last updated: 2026-08-03 for the complete 0.9.0 release.
+Last updated: 2026-08-03 for the complete 0.10.0 release.
 
 Request intent classification and lightweight goal/completion policy.
 

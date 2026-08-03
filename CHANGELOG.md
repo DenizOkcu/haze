@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.9.0 - 2026-08-03
+## 0.10.0 - 2026-08-03
 
 ### Added
 
@@ -27,19 +27,30 @@
 
 ### Security
 
-- Private haze state uses `0700` directories and `0600` files on POSIX. Session and debug writes are ordered, flushable, and surface persistence failures.
-- Bash/grep output, raw-output handles, file operations, LSP documents and frames, skill files, and JSONL readers apply byte limits while collecting data. Exact line paging uses a bounded, signature-validated sparse index.
-- Timed-out or aborted subprocesses terminate their process trees, escalate from `SIGTERM` to `SIGKILL`, and settle even when escaped descendants retain output pipes. Bash, grep, LSP, and managed processes share teardown primitives.
-- Grep rejects ignored roots unless explicitly allowed. Workspace skills, runtime paths, and LSP documents enforce real-path boundaries. MCP discovery and cleanup are deadline- and abort-aware.
-- Public URL validation fails closed for malformed IP-shaped hosts and pins each connection to a validated address. Credentials cannot be sent over remote plaintext HTTP; loopback HTTP remains supported.
+- Project skills and their references remain real-path-confined to the workspace and are framed as untrusted repository content before entering model context.
+- User-typed host paths grant read access only for the current turn. Mutating tools never honor the blessing set.
+- Grep now shares bash's bounded process-group teardown, including `SIGTERM` to `SIGKILL` escalation and a close fallback for retained output pipes.
+- Managed background processes keep byte-bounded rolling output and are terminated as process trees on session reset or haze exit.
 
 ### Fixed
 
-- Turn and tool status now agrees across UI, events, logs, sessions, headless envelopes, and exit codes. Empty answers, unresolved tool failures, and hard budget exhaustion report `failed`.
 - Subagent synthesis retains the task and gathered tool results, and long active worker waves no longer trip the idle timer. Flat required tool input avoids empty union-schema calls from local providers.
+- Bash results no longer duplicate retained stream text into model context. Raw output remains available by handle.
 - `/clear` prints once. Malformed `.haze/tasks.json` loads as an empty list. Retry classification matches status codes as whole words.
 - `readFile` outline paging no longer skips entries after output truncation. Session files slim large mutation inputs to path and byte counts.
-- Fetch derives its user agent from `package.json`. Invalid skills remain isolated, malformed settings remain visible, active selections clear when removed, and stdio MCP setup no longer asks for HTTP headers.
+- Fetch derives its user agent from `package.json`, and session restore reads conversation and work state in one pass.
+
+## 0.9.0 - 2026-07-10
+
+### Security
+
+- Private haze state now uses `0700` directories and `0600` files on POSIX. Bash/process output, raw-output handles, file reads, edits, LSP documents/frames, grep, and JSONL readers enforce collection-time byte limits; bash timeout/abort terminates process trees.
+- Grep rejects explicitly ignored roots unless requested, skills and LSP enforce real workspace/root boundaries, MCP discovery and cleanup are bounded and abort-aware, and credentials are rejected on remote plaintext HTTP endpoints.
+
+### Fixed
+
+- Turn/tool status is authoritative across UI, events, logs, sessions, and headless output; retries expose one turn lifecycle and structured `{ok:false}` results remain failures.
+- Session/debug persistence is ordered and flushable, invalid skills are isolated, malformed settings remain visible, active provider/model removal clears selection, and stdio MCP setup no longer asks for HTTP headers.
 
 ## 0.8.0 - 2026-07-09
 

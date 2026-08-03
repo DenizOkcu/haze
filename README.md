@@ -2,9 +2,9 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.9.0
+## What's new in 0.10.0
 
-haze 0.9.0 adds richer input, isolated parallel work, and better control over long-running sessions while completing a broad security and correctness pass.
+haze 0.10.0 adds richer input, isolated parallel work, and better control over long-running sessions.
 
 - Attach png, jpeg, gif, or webp files by typing `@path` or a path containing `/`. Explicitly mentioned non-image files and directories can be read for that turn, including outside the workspace; mutating tools remain workspace-confined. `@` autocomplete browses workspace files.
 - `/fleet` decomposes genuinely independent work across disposable, context-isolated subagents. Explicit profiles, model selection, concurrency and mutation coordination keep parallel execution bounded and predictable.
@@ -12,10 +12,11 @@ haze 0.9.0 adds richer input, isolated parallel work, and better control over lo
 - The agent can register up to five dev servers or watchers as managed background processes. Their bounded rolling output is readable by handle, and haze terminates every registered process tree when the session ends.
 - `/model` and provider setup can discover models from OpenAI-compatible `/models` endpoints. Curated models are pinned when available, and the provider wizard includes a larger preset catalog without silently selecting a default.
 - Rotating busy-state tips are controlled by `/tips`; terminal tabs identify the active workspace.
-- Private state uses `0700` directories and `0600` files on POSIX. Turn status is authoritative across UI, events, sessions, headless output, and exit codes. File/process/LSP/MCP collection is byte-bounded, process teardown cannot hang on retained pipes, real-path and URL boundaries fail closed, and credentialed remote plaintext HTTP is rejected.
+- Follow-up hardening removes duplicated bash stream text from model context, gives grep the same process-tree teardown as bash, slims mutation inputs in saved sessions, fixes outline paging after truncation, and makes retry classification stricter.
 
 Previous releases:
 
+- `0.9.0`: private home-state storage, authoritative turn status, collection-time byte bounds, hardened process teardown, stronger real-path and network boundaries, and ordered persistence.
 - `0.8.0`: AI SDK v7 runtime, live status with model, elapsed time, and tool labels; bounded bash output processing; lowercase `haze` naming.
 - `0.7.0`: headless `-p`, `--output json`, and `--output stream-json`; pinned-connection `fetch` safety; scoped instruction refresh; smaller sessions; startup context visibility.
 - `0.6.0`: AI SDK-native ToolLoopAgent core, optional LSP navigation, MCP support, unified configuration pickers, cleaner transcripts, `/context`, and startup update checks.
