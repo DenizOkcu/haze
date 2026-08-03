@@ -68,6 +68,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},
   {match: exact('/skills'), run: (_args, ctx) => { ctx.setMode('skills'); ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.'); return HANDLED; }},
+  {match: exact('/tips'), run: async (_args, ctx) => {
+    const currentlyEnabled = ctx.settings.tips?.enabled !== false;
+    await ctx.updateSettings({tips: {enabled: !currentlyEnabled}});
+    ctx.addSystemMessage(`Tips rotation ${currentlyEnabled ? 'disabled' : 'enabled'}.`);
+    return HANDLED;
+  }},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
 ];
 

@@ -67,6 +67,8 @@ export interface HazeSettings {
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
   subagents?: HazeSubagentSettings;
+  /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
+  tips?: {enabled?: boolean};
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
@@ -125,6 +127,7 @@ const settingsSchema = z.object({
   mcpServers: z.array(mcpServerSchema).optional(),
   skills: z.array(skillSettingSchema).optional(),
   subagents: subagentSettingsSchema.optional(),
+  tips: z.object({enabled: z.boolean().optional()}).optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
 }).passthrough();

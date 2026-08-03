@@ -34,6 +34,7 @@ Maintainability focus:
 - `/compact [instructions]` compacts model messages but should not persist synthetic control messages.
 - `/logs` reads historical debug logs, but file LLM logging is only started when `--debug` is active.
 - `/init` updates root project instructions; preserve useful user/project guidance.
+- `/tips` toggles the rotating tips under the busy label; persisted at `tips.enabled` (default `true`). Tips come from `chat/tips.ts` data, not code — reword or prune there.
 
 ## Agent-turn integration
 

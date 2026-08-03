@@ -33,6 +33,7 @@ import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
 import {startupContextInfo, startupInputTips, startupProviderInfo} from '../chat/startupInfo.js';
+import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
 import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
@@ -154,6 +155,18 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     const heartbeat = setInterval(() => setBusyTick(tick => tick + 1), 1000);
     return () => clearInterval(heartbeat);
   }, [busy]);
+
+  // One tip per thinking section, shown under the busy label while the model
+  // is purely thinking (no tool running) and the user has not disabled tips.
+  // A fresh tip is picked each time the model enters thinking mode; no
+  // rotation during a single thinking section.
+  const [tipIndex, setTipIndex] = useState(() => randomTipIndex());
+  const thinkingLabel = thinkingLabelForSettings(settings);
+  const showingTip = busy && busyLabel === thinkingLabel && tipsEnabled(settings);
+  useEffect(() => {
+    if (!showingTip) return;
+    setTipIndex(current => randomTipIndex(current));
+  }, [showingTip]);
 
   // Refresh the branch at turn boundaries so switching branches during a turn
   // shows up promptly without tight idle polling (CR-026).
@@ -591,8 +604,15 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
-    {busy && <Box flexShrink={0}>
-      <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted} dimColor> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+    {busy && <Box flexDirection="column" flexShrink={0}>
+      <Box>
+        <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted} dimColor> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+      </Box>
+      {showingTip && (
+        <Box>
+          <Text color={theme.muted}><Text bold>Tip:</Text> {TIPS[tipIndex] ?? ''}</Text>
+        </Box>
+      )}
     </Box>}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
