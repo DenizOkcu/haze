@@ -1,5 +1,5 @@
 import React from 'react';
-import {Box, Text, useStdout} from 'ink';
+import {Box, Text, useWindowSize} from 'ink';
 import {marked, type Tokens} from 'marked';
 import {highlight} from 'cli-highlight';
 import stripAnsi from 'strip-ansi';
@@ -7,8 +7,8 @@ import {theme} from '../theme.js';
 
 export function MarkdownText({content}: {content: string}) {
   const tokens = marked.lexer(content, {gfm: true, breaks: true});
-  const {stdout} = useStdout();
-  const width = Math.max(20, (stdout.columns ?? process.stdout.columns ?? 100) - 2);
+  const {columns} = useWindowSize();
+  const width = Math.max(20, columns - 2);
   return <Box flexDirection="column">
     {tokens.map((token, index) => <MarkdownBlock key={index} token={token} width={width} />)}
   </Box>;

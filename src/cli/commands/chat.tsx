@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import {Box, render, Static, Text, useApp, useStdout} from 'ink';
+import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
@@ -77,8 +77,7 @@ function thinkingLabelForSettings(settings: HazeSettings) {
 
 function ChatScreen({debug = false, version, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
   const {exit} = useApp();
-  const {stdout} = useStdout();
-  const width = stdout.columns ?? process.stdout.columns ?? 80;
+  const {columns: width} = useWindowSize();
   const nextDisplayOrderRef = useRef(1);
   const withDisplayOrder = (message: Message): Message => {
     if (message.displayOrder != null) return message;
