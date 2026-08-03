@@ -3,6 +3,7 @@ import type {HazeMcpServer, HazeProviderSettings, HazeSettings} from '../../conf
 import type {HazeLspServer} from '../../config/lspSettings.js';
 import {updateSettings} from '../../config/settings.js';
 import {findProvider, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {discoverProviderModels} from '../../config/modelDiscovery.js';
 import {removeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
 import {findPreset} from '../../config/providerPresets.js';
@@ -10,7 +11,7 @@ import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {Mode} from '../commands/chatModes.js';
-import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from '../commands/wizardActions.js';
+import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from '../commands/wizardActions.js';
 import {captureLspName} from '../commands/wizardPrompts.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../commands/lspWizard.js';
 import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/mcpWizard.js';
@@ -50,6 +51,7 @@ export interface WizardDispatchDeps {
   setSkillDraft: (draft: {name?: string}) => void;
   setLspDraft: (draft: Partial<HazeLspServer>) => void;
   setMcpDraft: (draft: Partial<HazeMcpServer>) => void;
+  setDiscoveredModels: (models: string[]) => void;
   showMessage: (message: string | undefined) => void;
   refreshSkills: () => Promise<unknown>;
   setBusyLabel: (label: string) => void;
@@ -69,6 +71,8 @@ export interface WizardDispatch {
   dispatch: (mode: Mode, value: string) => Promise<boolean>;
   /** Exposed for the MCP field-transition path in submit(). */
   finishMcpCustom: (keyValue?: string, draft?: Partial<HazeMcpServer>) => Promise<void>;
+  /** Exposed for the provider field-transition path: discover models for a provider draft after its key step. */
+  discoverProviderModelsForDraft: (draft: Partial<HazeProviderSettings>) => Promise<void>;
 }
 
 export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
@@ -129,10 +133,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       setMode('providerAddKey');
       showMessage(`${preset.name} (${preset.baseUrl})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`);
     } else {
-      // Local/keyless: skip API key, go straight to models
-      setMode('providerAddModels');
+      // Local/keyless: no API key step — jump straight to model discovery
       const hint = preset.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
-      showMessage(`${preset.name} (${preset.baseUrl}) — no API key needed.\nComma-separated model names?${hint}`);
+      await discoverModelsFor({name: existingName, url: preset.baseUrl}, `Comma-separated model names?${hint}`);
     }
   }
 
@@ -168,13 +171,60 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       await useProvider(deps.selectedProviderName);
       return;
     }
+    if (action === PROVIDER_ACTIONS.addModels) {
+      deps.setSelectedProviderName(provider.name);
+      await discoverModelsFor(provider, `Comma-separated model names to add to ${provider.name}?`);
+      return;
+    }
     const actionResult = providerActionResult(action, provider);
-    if (actionResult.selectedName === undefined) deps.setSelectedProviderName(undefined);
+    if ('selectedName' in actionResult) deps.setSelectedProviderName(actionResult.selectedName);
     if (actionResult.mode) setMode(actionResult.mode);
     showMessage(actionResult.message);
   }
 
+  /**
+   * Shared discovery step for every add-models flow: fetch the provider's
+   * OpenAI-compatible /models list and let the user pick. Falls back to the
+   * manual comma-separated prompt when the endpoint is unavailable.
+   */
+  async function discoverModelsFor(target: {name?: string; url?: string; key?: string}, fallbackPrompt: string) {
+    if (!target.name || !target.url) {
+      showMessage('Provider name and URL are required to discover models.');
+      setMode('chat');
+      return;
+    }
+    deps.setBusyLabel(`Discovering models on ${target.name}`);
+    deps.setBusy(true);
+    let result: Awaited<ReturnType<typeof discoverProviderModels>>;
+    try {
+      result = await discoverProviderModels({url: target.url, key: target.key});
+    } finally {
+      deps.setBusy(false);
+      deps.setBusyLabel(deps.idleBusyLabel);
+    }
+    if (result.status === 'ok') {
+      deps.setDiscoveredModels(result.models);
+      setMode('modelPick');
+      showMessage(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'} on ${target.name}. Choose one to add, or select "${MODEL_CHOICES.enterModelNames}".`);
+      return;
+    }
+    const existing = findProvider(deps.settings, target.name);
+    setMode(existing ? 'providerAppendModels' : 'providerAddModels');
+    showMessage(`Could not list models on ${target.name} (${result.error}).\n${fallbackPrompt}`);
+  }
+
   async function selectModel(selector: string) {
+    if (selector === MODEL_CHOICES.addModels) {
+      const filteredProvider = deps.modelProviderFilter ? findProvider(deps.settings, deps.modelProviderFilter) : undefined;
+      if (filteredProvider) {
+        deps.setSelectedProviderName(filteredProvider.name);
+        await discoverModelsFor(filteredProvider, `Comma-separated model names to add to ${filteredProvider.name}?`);
+        return;
+      }
+      setMode('modelAddProvider');
+      showMessage('Choose a provider to add models to.');
+      return;
+    }
     const scopedSelector = deps.modelProviderFilter ? `${deps.modelProviderFilter}:${selector}` : selector;
     const resolved = resolveModelSelector(deps.settings, scopedSelector);
     if (resolved.status === 'ambiguous') {
@@ -182,7 +232,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       return;
     }
     if (resolved.status === 'missing') {
-      showMessage(`No configured model named ${selector}. Use /provider, select a provider, then choose add models.`);
+      showMessage(`No configured model named ${selector}. Select "add models" in /model to fetch and add it from a provider.`);
       return;
     }
     const next = await updateSettings({provider: resolved.provider.name, model: resolved.model});
@@ -192,9 +242,52 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage(`Model set to ${resolved.model} on ${resolved.provider.name}.\n\n${startupProviderInfo(next)}`);
   }
 
+  async function selectProviderForAddModels(providerName: string) {
+    const provider = findProvider(deps.settings, providerName);
+    if (!provider) {
+      showMessage(`No provider named ${providerName}. Use /provider and choose add provider.`);
+      setMode('chat');
+      return;
+    }
+    deps.setSelectedProviderName(provider.name);
+    await discoverModelsFor(provider, `Comma-separated model names to add to ${provider.name}?`);
+  }
+
+  async function pickModelToAdd(value: string) {
+    const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
+    if (value === MODEL_CHOICES.enterModelNames) {
+      deps.setDiscoveredModels([]);
+      if (provider) {
+        setMode('providerAppendModels');
+        showMessage(`Comma-separated model names to add to ${provider.name}?`);
+        return;
+      }
+      setMode('providerAddModels');
+      showMessage('Comma-separated model names?');
+      return;
+    }
+    // Anything typed — picked suggestion or free text — is added as model
+    // names, so the flow never dead-ends when the list is incomplete.
+    if (provider) {
+      await appendModelsToProvider(value);
+      return;
+    }
+    await finishProviderAdd(value);
+  }
+
+  async function discoverProviderModelsForDraft(draft: Partial<HazeProviderSettings>) {
+    if (!draft.name || !draft.url) {
+      setMode('providerAddModels');
+      showMessage('Comma-separated model names?');
+      return;
+    }
+    await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key}, 'Comma-separated model names?');
+  }
+
   async function appendModelsToProvider(modelsValue: string) {
     const result = providerAppendModels(deps.settings, deps.selectedProviderName, modelsValue);
     if (!result.provider) {
+      deps.setDiscoveredModels([]);
       showMessage(result.message);
       setMode('chat');
       return;
@@ -206,6 +299,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
     deps.setSelectedProviderName(undefined);
+    deps.setDiscoveredModels([]);
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
@@ -217,11 +311,13 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage(result.message);
       setMode('chat');
       deps.setProviderDraft({});
+      deps.setDiscoveredModels([]);
       return;
     }
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
     deps.setProviderDraft({});
+    deps.setDiscoveredModels([]);
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
@@ -488,6 +584,8 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     providerAction: selectProviderAction,
     providerAddPreset: selectPreset,
     model: selectModel,
+    modelAddProvider: selectProviderForAddModels,
+    modelPick: pickModelToAdd,
     providerAddModels: finishProviderAdd,
     providerAppendModels: appendModelsToProvider,
     providerSetKey: providerSetKeyMode,
@@ -515,5 +613,6 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       return true;
     },
     finishMcpCustom,
+    discoverProviderModelsForDraft,
   };
 }

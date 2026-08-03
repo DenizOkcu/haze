@@ -6,7 +6,7 @@ import {isSkillEnabled} from '../../config/skillSettings.js';
 import {PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
-import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
+import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, MODEL_CHOICES, PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
 
 /**
  * Pure suggestion builders for the chat wizard pickers (provider / model / LSP /
@@ -31,7 +31,7 @@ export function providerActionSuggestions(settings: HazeSettings, selectedProvid
   const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
   return [
     {value: PROVIDER_ACTIONS.useProvider, description: 'Set this provider and choose a model', kind: 'provider' as const},
-    {value: PROVIDER_ACTIONS.addModels, description: 'Append comma-separated model names', kind: 'provider' as const},
+    {value: PROVIDER_ACTIONS.addModels, description: 'Fetch the provider model list and add models', kind: 'provider' as const},
     {value: PROVIDER_ACTIONS.setApiKey, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const},
     ...(provider?.models?.length ? [{value: PROVIDER_ACTIONS.removeModels, description: 'Remove models from this provider', kind: 'provider' as const}] : []),
     {value: PROVIDER_ACTIONS.removeProvider, description: 'Delete this provider from settings', kind: 'provider' as const},
@@ -58,11 +58,35 @@ export function presetSuggestions(): TextInputSuggestion[] {
 
 export function modelSuggestions(settings: HazeSettings, modelProviderFilter: string | undefined): TextInputSuggestion[] {
   const providers = configuredProviders(settings).filter(provider => !modelProviderFilter || provider.name === modelProviderFilter);
-  return providers.flatMap(provider => provider.models.map(model => ({
-    value: modelProviderFilter ? model : modelSelector(provider, model),
-    description: provider.name,
-    kind: 'model' as const,
-  })));
+  return [
+    ...providers.flatMap(provider => provider.models.map(model => ({
+      value: modelProviderFilter ? model : modelSelector(provider, model),
+      description: provider.name,
+      kind: 'model' as const,
+    }))),
+    {value: MODEL_CHOICES.addModels, description: modelProviderFilter ? `Add models to ${modelProviderFilter} (fetched from its models endpoint)` : 'Add models to a provider (fetched from its models endpoint)', kind: 'model' as const},
+  ];
+}
+
+export function modelAddProviderSuggestions(settings: HazeSettings): TextInputSuggestion[] {
+  return configuredProviders(settings).map(provider => ({
+    value: provider.name,
+    description: `${provider.models.length} model${provider.models.length === 1 ? '' : 's'} configured`,
+    kind: 'provider' as const,
+  }));
+}
+
+export function modelPickSuggestions(settings: HazeSettings, providerName: string | undefined, discoveredModels: string[]): TextInputSuggestion[] {
+  const provider = providerName ? findProvider(settings, providerName) : undefined;
+  const configured = new Set(provider?.models ?? []);
+  return [
+    ...discoveredModels.filter(model => !configured.has(model)).map(model => ({
+      value: model,
+      description: providerName,
+      kind: 'model' as const,
+    })),
+    {value: MODEL_CHOICES.enterModelNames, description: 'Type comma-separated model names instead', kind: 'model' as const},
+  ];
 }
 
 export function lspSuggestions(settings: HazeSettings): TextInputSuggestion[] {

@@ -3,7 +3,7 @@ import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import type {Mode} from '../commands/chatModes.js';
-import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions} from '../commands/wizardSuggestions.js';
+import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, modelAddProviderSuggestions, modelPickSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions} from '../commands/wizardSuggestions.js';
 
 const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/help', description: 'Show commands', kind: 'command'},
@@ -31,6 +31,8 @@ interface InputSuggestionState {
   skills: LoadedSkill[];
   selectedProviderName?: string;
   modelProviderFilter?: string;
+  providerDraftName?: string;
+  discoveredModels?: string[];
   selectedSkillName?: string;
   selectedLspName?: string;
   selectedMcpName?: string;
@@ -42,6 +44,8 @@ export function inputSuggestionsForState(state: InputSuggestionState): TextInput
   if (mode === 'providerAction') return providerActionSuggestions(settings, state.selectedProviderName);
   if (mode === 'providerAddPreset') return presetSuggestions();
   if (mode === 'model') return modelSuggestions(settings, state.modelProviderFilter);
+  if (mode === 'modelAddProvider') return modelAddProviderSuggestions(settings);
+  if (mode === 'modelPick') return modelPickSuggestions(settings, state.selectedProviderName ?? state.providerDraftName, state.discoveredModels ?? []);
   if (mode === 'skills') return skillsSuggestions(settings, skills);
   if (mode === 'skillsAction') return skillsActionSuggestions(settings, skills, state.selectedSkillName);
   if (mode === 'lsp') return lspSuggestions(settings);

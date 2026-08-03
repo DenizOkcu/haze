@@ -62,7 +62,7 @@ On first run, create or choose a provider, then choose your first model:
 
 `/provider` sets up any OpenAI-compatible endpoint, such as OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. haze asks for a provider name, base URL, optional API key, and model names.
 
-`/model` selects the model haze should use. You can also set one directly:
+`/model` selects the model haze should use. The picker also offers `add models`, which fetches a provider's model list from its OpenAI-compatible `/models` endpoint so you can pick instead of typing; if the endpoint is unavailable you can still type model names. You can also set one directly:
 
 ```txt
 /model anthropic/claude-sonnet-4.6

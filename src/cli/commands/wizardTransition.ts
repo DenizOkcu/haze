@@ -8,18 +8,18 @@ type SharedWizardEffect =
 
 export type ProviderWizardEffect = SharedWizardEffect
   | {type: 'provider-draft'; patch: Partial<HazeProviderSettings>; replace?: boolean}
+  | {type: 'discover-provider-models'; draft: Partial<HazeProviderSettings>};
 
 export type McpWizardEffect = SharedWizardEffect
   | {type: 'mcp-draft'; patch: Partial<HazeMcpServer>}
   | {type: 'finish-mcp-stdio'; draft: Partial<HazeMcpServer>};
 
-export function transitionProviderField(input: {mode: Mode; value: string; settings: HazeSettings}): ProviderWizardEffect[] | undefined {
+export function transitionProviderField(input: {mode: Mode; value: string; settings: HazeSettings; draft: Partial<HazeProviderSettings>}): ProviderWizardEffect[] | undefined {
   if (input.mode === 'providerAddKey') {
     const key = input.value.trim();
     return [
       {type: 'provider-draft', patch: key ? {key} : {}},
-      {type: 'mode', mode: 'providerAddModels'},
-      {type: 'message', text: 'Comma-separated model names? Example: llama3.1, qwen2.5-coder, gpt-4o'},
+      {type: 'discover-provider-models', draft: {...input.draft, ...(key ? {key} : {})}},
     ];
   }
   const result = input.mode === 'providerAddName' ? captureProviderName(input.settings, input.value)

@@ -11,6 +11,11 @@ export const PROVIDER_ACTIONS = {
   removeProvider: 'remove provider',
 } as const;
 
+export const MODEL_CHOICES = {
+  addModels: 'add models',
+  enterModelNames: 'enter model names',
+} as const;
+
 export const SERVER_CHOICES = {
   addServer: 'add server',
   custom: 'custom',

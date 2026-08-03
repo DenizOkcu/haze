@@ -6,6 +6,8 @@ import {
   providerActionSuggestions,
   presetSuggestions,
   modelSuggestions,
+  modelAddProviderSuggestions,
+  modelPickSuggestions,
   lspSuggestions,
   lspActionSuggestions,
   mcpSuggestions,
@@ -60,9 +62,44 @@ describe('modelSuggestions', () => {
       {name: 'a', url: 'ua', models: ['m1']},
       {name: 'b', url: 'ub', models: ['m2']},
     ]});
-    expect(modelSuggestions(s, 'a').map(r => r.value)).toEqual(['m1']);
+    expect(modelSuggestions(s, 'a').map(r => r.value)).toEqual(['m1', 'add models']);
     // Unfiltered: model values are provider-scoped selectors.
-    expect(modelSuggestions(s, undefined).map(r => r.value)).toEqual(['a:m1', 'b:m2']);
+    expect(modelSuggestions(s, undefined).map(r => r.value)).toEqual(['a:m1', 'b:m2', 'add models']);
+  });
+
+  it('adapts the add-models description to the provider filter', () => {
+    const s = settings({providers: [{name: 'lmstudio', url: 'http://localhost:1234/v1', models: ['m1']}]});
+    expect(modelSuggestions(s, 'lmstudio').find(r => r.value === 'add models')?.description).toContain('Add models to lmstudio');
+    expect(modelSuggestions(s, undefined).find(r => r.value === 'add models')?.description).toContain('Add models to a provider');
+  });
+});
+
+describe('modelAddProviderSuggestions', () => {
+  it('lists configured providers without the add-provider entry', () => {
+    const s = settings({providers: [
+      {name: 'openrouter', url: 'https://openrouter.ai/api/v1', models: ['a', 'b']},
+      {name: 'lmstudio', url: 'http://localhost:1234/v1', models: ['m']},
+    ]});
+    const result = modelAddProviderSuggestions(s);
+    expect(result.map(r => r.value)).toEqual(['openrouter', 'lmstudio']);
+    expect(result[0]?.description).toBe('2 models configured');
+    expect(result[1]?.description).toBe('1 model configured');
+  });
+});
+
+describe('modelPickSuggestions', () => {
+  const s = settings({providers: [{name: 'lmstudio', url: 'http://localhost:1234/v1', models: ['qwen3']}]});
+
+  it('offers discovered models minus the configured ones, plus the manual escape hatch', () => {
+    const result = modelPickSuggestions(s, 'lmstudio', ['qwen3', 'llama3.1', 'mistral']);
+    expect(result.map(r => r.value)).toEqual(['llama3.1', 'mistral', 'enter model names']);
+    expect(result[0]?.kind).toBe('model');
+    expect(result.at(-1)?.description).toContain('comma-separated');
+  });
+
+  it('supports provider drafts that are not saved yet', () => {
+    const result = modelPickSuggestions({}, 'new-provider', ['a', 'b']);
+    expect(result.map(r => r.value)).toEqual(['a', 'b', 'enter model names']);
   });
 });
 

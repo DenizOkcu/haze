@@ -127,6 +127,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
   const [skillDraft, setSkillDraft] = useState<{name?: string}>({});
@@ -279,6 +280,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     if (mode !== 'chat') {
       setMode('chat');
       setModelProviderFilter(undefined);
+      setDiscoveredModels([]);
       setSelectedProviderName(undefined);
       setProviderDraft({});
       setSkillDraft({});
@@ -302,7 +304,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     providerDraft, lspDraft, mcpDraft, skillDraft,
     setMode, setSettings,
     setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName,
-    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft,
+    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft, setDiscoveredModels,
     showMessage: showWizardMessage, refreshSkills,
     setBusyLabel, setBusy: setBusyWithHeartbeat,
     idleBusyLabel: thinkingLabelForSettings(settings),
@@ -328,7 +330,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       return;
     }
 
-    const providerEffects = transitionProviderField({mode, value, settings});
+    const providerEffects = transitionProviderField({mode, value, settings, draft: providerDraft});
     if (providerEffects) {
       for (const effect of providerEffects) {
         if (effect.type === 'message') showWizardMessage(effect.text);
@@ -336,6 +338,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         else if (effect.type === 'provider-draft') {
           if (effect.replace) setProviderDraft(effect.patch);
           else setProviderDraft(draft => ({...draft, ...effect.patch}));
+        } else if (effect.type === 'discover-provider-models') {
+          // The draft patch above is still pending React state, so discovery
+          // receives the merged draft explicitly (same pattern as MCP stdio).
+          await wizard.discoverProviderModelsForDraft(effect.draft);
         }
       }
       return;
@@ -520,7 +526,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = skills.filter(skill => isSkillEnabled(settings, skill.name)).length;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, selectedSkillName, selectedLspName, selectedMcpName});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),

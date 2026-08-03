@@ -5,7 +5,7 @@ export async function handleModelCommand(value: string, ctx: CommandContext): Pr
   if (value === '/model') {
     ctx.setModelProviderFilter?.(undefined);
     ctx.setMode('model');
-    ctx.addSystemMessage('Choose a model. Selecting a model also sets its provider.');
+    ctx.addSystemMessage('Choose a model, or select "add models" to fetch a provider\'s model list and pick from it. Selecting a model also sets its provider.');
     return 'handled';
   }
   if (value === '/model list') {
