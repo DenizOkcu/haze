@@ -1778,8 +1778,8 @@
               <td class="cmd-d">Start a fresh durable session for this workspace.</td>
             </tr>
             <tr>
-              <td class="cmd-c"><code>/resume</code></td>
-              <td class="cmd-d">Resume the latest saved session.</td>
+              <td class="cmd-c"><code>/resume [id]</code></td>
+              <td class="cmd-d">Browse this workspace’s sessions, then resume or fork one. Supplying an exact id resumes it directly.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>/session</code></td>
@@ -1855,7 +1855,7 @@
             <tr class="cmd-cat"><td colspan="2">Terminal flags (run <code>haze --help</code>)</td></tr>
             <tr>
               <td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td>
-              <td class="cmd-d">Print mode: run a single non-interactive turn with the full toolset, print the final reply, and exit (<code>0</code> = complete; non-zero = aborted/failed). Reads the prompt from <code>-p</code>, else from piped stdin (e.g. <code>echo "…" | haze</code>). Non-durable: <code>--continue</code> is ignored and no session is saved.</td>
+              <td class="cmd-d">Print mode: run a single non-interactive turn with the full toolset, print the final reply, and exit (<code>0</code> = complete; non-zero = aborted/failed). Reads the prompt from <code>-p</code>, else from piped stdin (e.g. <code>echo "…" | haze</code>). Non-durable: <code>--continue</code> is ignored and no session is saved; <code>--resume &lt;id&gt;</code> may load context without changing the source session.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>haze --output &lt;text|json|stream-json&gt;</code></td>
@@ -1868,6 +1868,10 @@
             <tr>
               <td class="cmd-c"><code>haze -c, --continue</code></td>
               <td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td>
+            </tr>
+            <tr>
+              <td class="cmd-c"><code>haze --resume &lt;id&gt;</code></td>
+              <td class="cmd-d">Resume an exact workspace session. Combine with <code>-p</code> to load its context for one non-durable turn. Unknown ids exit non-zero.</td>
             </tr>
             <tr>
               <td class="cmd-c"><code>haze --no-session</code></td>

@@ -198,7 +198,7 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /init
 /context
 /session
-/resume
+/resume [id]
 /new
 /compact [instructions]
 /clear
@@ -213,8 +213,9 @@ CLI flags:
 
 ```bash
 haze --debug       # show model/tool debug logs and write detailed JSONL logs to ~/.haze/logs
-haze --continue    # resume the latest saved session for this workspace
-haze --no-session  # run without durable session storage
+haze --continue      # resume the latest saved session for this workspace
+haze --resume <id>   # resume an exact session id for this workspace
+haze --no-session    # run without durable session storage
 ```
 
 Non-interactive / print mode:
@@ -222,6 +223,7 @@ Non-interactive / print mode:
 ```bash
 haze -p "refactor utils.ts to remove the unused export"
 haze -p "summarize this repo" --model openai:gpt-4o-mini
+haze --resume <id> -p "continue the investigation"
 haze -p "list the top 3 bugs in src/api.ts" --output json
 haze -p "audit src/auth.ts" --output stream-json   # live NDJSON events, then the result envelope
 echo "what does this project do?" | haze
@@ -229,7 +231,7 @@ echo "what does this project do?" | haze
 
 `-p` and `--prompt` run one agentic turn with the full tool set and print the final assistant text. `--model` accepts a bare model name or `provider:name` and overrides the active model for that run without changing `~/.haze/settings.json`. The model must already be registered under a provider's `models`; add it once with `/provider`. Unknown or ambiguous selectors print a specific error to stderr and exit nonzero.
 
-If you pipe stdin without `-p`, haze reads the prompt from stdin. One-shot runs do not start or resume durable sessions, and they ignore `--continue`. They also do not compact automatically after a context overflow, so keep large CI prompts within the model's context window. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
+If you pipe stdin without `-p`, haze reads the prompt from stdin. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. They also do not compact automatically after a context overflow, so keep large CI prompts within the model's context window. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
 
 `--output` controls the result format: `text` is the default, `json` prints one final envelope, and `stream-json` writes live NDJSON events followed by the same envelope.
 
@@ -341,7 +343,7 @@ Keep trivial, conversation-coupled, sequential, user-interactive, or uncertain s
 
 ## Context files
 
-haze saves durable workspace sessions in `~/.haze/sessions`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to condense older model context into a bounded excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+haze saves durable workspace sessions in `~/.haze/sessions`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, and `/resume` to browse workspace sessions, resume one, or fork its latest snapshot into a new session. `/resume <id>` and `haze --resume <id>` select an exact session. Use `/compact` to condense older model context into a bounded excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
 
 Session files are optimized for resume and audit, not token-by-token playback: completed user/assistant messages, tool lifecycle events, conversation snapshots, and work-state snapshots are persisted, but streaming `message_update` events are skipped. Large persisted tool outputs are replaced with previews and byte counts so a resumed model can reread current files instead of carrying stale megabytes forward.
 

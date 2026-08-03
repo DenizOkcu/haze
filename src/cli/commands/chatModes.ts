@@ -1,7 +1,7 @@
-export type Mode = 'chat' | 'provider' | 'providerAction' | 'model' | 'modelAddProvider' | 'modelPick' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddScope' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
+export type Mode = 'chat' | 'sessions' | 'sessionAction' | 'provider' | 'providerAction' | 'model' | 'modelAddProvider' | 'modelPick' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddScope' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
 
 /** Modes that show an always-on suggestion picker (server/preset lists). */
-export const PICKER_MODES: ReadonlySet<Mode> = new Set(['provider', 'providerAction', 'providerAddPreset', 'model', 'modelAddProvider', 'modelPick', 'skills', 'skillsAction', 'skillsAddScope', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
+export const PICKER_MODES: ReadonlySet<Mode> = new Set(['sessions', 'sessionAction', 'provider', 'providerAction', 'providerAddPreset', 'model', 'modelAddProvider', 'modelPick', 'skills', 'skillsAction', 'skillsAddScope', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
 
 /** Modes that mask input (secrets/API keys). */
 export const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
@@ -10,6 +10,8 @@ export const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'provi
 export const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'mcpAddKey']);
 
 const PLACEHOLDERS: Partial<Record<Mode, string>> = {
+  sessions: 'Choose a saved session',
+  sessionAction: 'Resume or fork this session',
   provider: 'Choose provider',
   providerAction: 'Choose provider action',
   providerAddPreset: 'Choose a provider preset or custom',

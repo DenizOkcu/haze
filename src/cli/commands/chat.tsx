@@ -24,7 +24,7 @@ import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
-import {formatSession, type HazeSession} from '../../core/session/sessionStore.js';
+import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
@@ -42,11 +42,13 @@ import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
 import {commandParts} from './wizardInput.js';
+import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
 
 interface ChatOptions {
   debug?: boolean;
   version?: string;
   continueSession?: boolean;
+  resumeSessionId?: string;
   noSession?: boolean;
 }
 
@@ -72,7 +74,7 @@ function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
 }
 
-function ChatScreen({debug = false, version, continueSession = false, noSession = false}: ChatOptions) {
+function ChatScreen({debug = false, version, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {stdout} = useStdout();
   const width = stdout.columns ?? process.stdout.columns ?? 80;
@@ -117,6 +119,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
   // Heartbeat for the busy indicator: ticks every second while haze is working
@@ -262,6 +266,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const sessionLifecycle = createSessionLifecycle({
     version,
     continueSession,
+    resumeSessionId,
     noSession,
     debug,
     contextFiles: () => contextFiles,
@@ -279,7 +284,22 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     debugLog,
     showPersistenceWarning,
   });
-  const {clearConversation, compactConversation, resumeLatestSession} = sessionLifecycle;
+  const {clearConversation, compactConversation} = sessionLifecycle;
+
+  async function openSessionPicker() {
+    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
+    const next = await listSessions();
+    setSessions(next);
+    setSelectedSessionId(undefined);
+    if (next.length === 0) {
+      setMessages(m => [...m, {role: 'system', text: 'No saved sessions found for this workspace.'}]);
+      setMode('chat');
+      return;
+    }
+    setMode('sessions');
+    const hidden = Math.max(0, next.length - MAX_SESSION_PICKER_RESULTS);
+    setMessages(m => [...m, {role: 'system', text: `Choose a saved session (newest first)${hidden ? `. Showing ${MAX_SESSION_PICKER_RESULTS} of ${next.length}; ${hidden} older sessions are hidden.` : '.'}`}]);
+  }
 
   function cancelThinking() {
     if (!busy) return;
@@ -303,6 +323,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   function closeInputList() {
     if (mode !== 'chat') {
       setMode('chat');
+      setSessions([]);
+      setSelectedSessionId(undefined);
       setModelProviderFilter(undefined);
       setDiscoveredModels([]);
       setSuggestedModels([]);
@@ -326,9 +348,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   // see current state without new React state.
   const wizard = createWizardDispatch({
     settings, skills, modelProviderFilter, selectedProviderName, selectedSkillName, selectedLspName, selectedMcpName,
+    sessions, selectedSessionId,
     providerDraft, lspDraft, mcpDraft, skillDraft,
     setMode, setSettings,
-    setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName,
+    setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName, setSelectedSessionId,
+    resumeSessionById: sessionLifecycle.resumeSessionById,
+    forkSessionById: sessionLifecycle.forkSessionById,
     setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft, setDiscoveredModels, setSuggestedModels,
     showMessage: showWizardMessage, refreshSkills,
     setBusyLabel, setBusy: setBusyWithHeartbeat,
@@ -406,7 +431,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
         await sessionLifecycle.startNewSession('Started a new session.');
       },
-      resumeSession: resumeLatestSession,
+      resumeSession: noSession ? undefined : async id => {
+        if (id) await sessionLifecycle.resumeSessionById(id);
+        else await openSessionPicker();
+      },
       sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
       compactConversation,
       runAgentTurn: (prompt, displayValue, options) => doAgentTurn(prompt, displayValue, options),
@@ -587,7 +615,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
@@ -681,7 +709,7 @@ export async function chatCommand(options: ChatOptions = {}) {
     process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
   }
   await clearTasksFromStore().catch(() => undefined);
-  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} noSession={options.noSession} />);
+  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />);
   await app.waitUntilExit();
   await clearTasksFromStore().catch(() => undefined);
 }

@@ -10,7 +10,7 @@ import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export type SessionEntry =
-  | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string}
+  | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string; forkedFrom?: string}
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
@@ -42,13 +42,21 @@ function newSessionId(now = new Date()) {
   return `${now.toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
-export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string} = {}): Promise<HazeSession> {
+export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string; forkedFrom?: string} = {}): Promise<HazeSession> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const id = newSessionId();
   const file = sessionFile(id, cwd, options.sessionsDir);
   await ensurePrivateDir(path.dirname(file));
-  await appendSessionEntry({id, file, cwd}, {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion});
+  await appendSessionEntry({id, file, cwd}, {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom});
   return {id, file, cwd};
+}
+
+export async function findSession(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
+  const normalizedId = id.trim();
+  if (!normalizedId || path.basename(normalizedId) !== normalizedId || normalizedId.endsWith('.jsonl')) return undefined;
+  const file = sessionFile(normalizedId, cwd, sessionsDir);
+  if (!await fs.pathExists(file)) return undefined;
+  return {id: normalizedId, file, cwd: path.resolve(cwd)};
 }
 
 export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
@@ -153,6 +161,84 @@ export interface RestoreWorkStateResult {
 export async function restoreWorkState(session: HazeSession): Promise<RestoreWorkStateResult> {
   const {workState, parseErrors} = await restoreSessionState(session);
   return {state: workState, parseErrors};
+}
+
+const SESSION_PREVIEW_CHARS = 120;
+/** Acceptance budget for listing 50 ordinary workspace sessions. */
+export const SESSION_LIST_LATENCY_BUDGET_MS = 2_000;
+
+export interface SessionSummary {
+  id: string;
+  createdAt: string;
+  lastActivityAt: string;
+  messageCount: number;
+  firstUserPreview: string;
+  sizeBytes: number;
+  lastStatus?: string;
+  parseErrors: string[];
+}
+
+function previewText(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > SESSION_PREVIEW_CHARS ? `${compact.slice(0, SESSION_PREVIEW_CHARS - 1)}…` : compact;
+}
+
+/** List this workspace's sessions newest-first while retaining only summary state per file. */
+export async function listSessions(cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<SessionSummary[]> {
+  const dir = sessionDir(cwd, sessionsDir);
+  await ensurePrivateDir(dir);
+  const files = (await fs.readdir(dir).catch(() => [])).filter(file => file.endsWith('.jsonl'));
+  const summaries = await Promise.all(files.map(async fileName => {
+    const id = path.basename(fileName, '.jsonl');
+    const session: HazeSession = {id, file: path.join(dir, fileName), cwd: path.resolve(cwd)};
+    const stat = await fs.stat(session.file);
+    let createdAt = stat.birthtime.toISOString();
+    let lastActivityAt = stat.mtime.toISOString();
+    let messageCount = 0;
+    let firstUserPreview = '';
+    let lastStatus: string | undefined;
+    const parseErrors = await scanSessionEntries(session, entry => {
+      if (entry.type === 'header') createdAt = entry.createdAt || createdAt;
+      if ('at' in entry && entry.at) lastActivityAt = entry.at;
+      if (entry.type === 'ui_message') {
+        messageCount++;
+        if (!firstUserPreview && entry.role === 'user') firstUserPreview = previewText(entry.text);
+      }
+      if (entry.type === 'conversation_snapshot') {
+        if (messageCount === 0) messageCount = entry.messages.length;
+        if (!firstUserPreview) {
+          const firstUser = entry.messages.find(message => message.role === 'user');
+          if (firstUser) firstUserPreview = previewText(typeof firstUser.content === 'string' ? firstUser.content : JSON.stringify(firstUser.content));
+        }
+      }
+      if (entry.type === 'event' && entry.name === 'turn_end' && entry.text) {
+        try {
+          const event = JSON.parse(entry.text) as {status?: unknown};
+          if (typeof event.status === 'string') lastStatus = event.status;
+        } catch {
+          // The outer entry remains valid; malformed optional event metadata is ignored.
+        }
+      }
+    });
+    return {id, createdAt, lastActivityAt, messageCount, firstUserPreview, sizeBytes: stat.size, lastStatus, parseErrors};
+  }));
+  return summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
+}
+
+export interface ForkSessionResult {
+  session: HazeSession;
+  parseErrors: string[];
+}
+
+/** Create a new session from the source's latest durable snapshots without mutating it. */
+export async function forkSession(source: HazeSession, options: {hazeVersion?: string; sessionsDir?: string} = {}): Promise<ForkSessionResult> {
+  const restored = await restoreSessionState(source);
+  if (restored.messages.length === 0) throw new Error(`Session ${source.id} has no conversation snapshot to fork.`);
+  const session = await createSession({cwd: source.cwd, sessionsDir: options.sessionsDir, hazeVersion: options.hazeVersion, forkedFrom: source.id});
+  const at = new Date().toISOString();
+  await appendSessionEntry(session, {type: 'conversation_snapshot', at, messages: restored.messages});
+  if (restored.workState) await appendSessionEntry(session, {type: 'work_state_snapshot', at, state: restored.workState});
+  return {session, parseErrors: restored.parseErrors};
 }
 
 export function formatSession(session: HazeSession) {

@@ -16,7 +16,7 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/init', description: 'Inspect the current workspace and create or update AGENTS.md project instructions.'},
   {usage: '/context', description: 'Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.'},
   {usage: '/session', description: 'Show the current durable session file.'},
-  {usage: '/resume', description: 'Resume the latest saved session for this workspace.'},
+  {usage: '/resume [id]', description: 'Browse this workspace’s saved sessions, or resume an exact session id.'},
   {usage: '/new', description: 'Start a fresh durable session.'},
   {usage: '/logs', description: 'List recent log files with sizes and dates.'},
   {usage: '/lsp', description: 'Configure Language Server Protocol navigation tools (interactive picker).'},

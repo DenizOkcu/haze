@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
 
 describe('sessionStore', () => {
@@ -77,6 +77,62 @@ describe('sessionStore', () => {
     const latest = await latestSession(cwd, sessionsDir);
     expect(latest?.id).toBe(second.id);
     expect(latest?.id).not.toBe(first.id);
+  });
+
+  it('lists workspace sessions newest-first with bounded summaries and malformed-line warnings (F02)', async () => {
+    const older = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(older, {type: 'ui_message', at: '2026-08-01T10:00:00.000Z', role: 'user', text: '  investigate   the flaky test  '});
+    await appendSessionEntry(older, {type: 'ui_message', at: '2026-08-01T10:01:00.000Z', role: 'assistant', text: 'working'});
+    await fs.appendFile(older.file, '{bad json\n');
+
+    const newer = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(newer, {type: 'ui_message', at: '2026-08-02T10:00:00.000Z', role: 'user', text: 'ship the fix'});
+    await appendSessionEntry(newer, {type: 'event', at: '2026-08-02T10:02:00.000Z', name: 'turn_end', text: JSON.stringify({status: 'complete'})});
+
+    const summaries = await listSessions(cwd, sessionsDir);
+    expect(summaries.map(summary => summary.id)).toEqual([newer.id, older.id]);
+    expect(summaries[0]).toMatchObject({messageCount: 1, firstUserPreview: 'ship the fix', lastStatus: 'complete'});
+    expect(summaries[0]?.sizeBytes).toBeGreaterThan(0);
+    expect(summaries[1]).toMatchObject({messageCount: 2, firstUserPreview: 'investigate the flaky test'});
+    expect(summaries[1]?.parseErrors[0]).toContain('Line 4');
+  });
+
+  it('lists 50 ordinary sessions within the explicit picker latency budget (F02 AC4)', async () => {
+    await Promise.all(Array.from({length: 50}, async (_, index) => {
+      const session = await createSession({cwd, sessionsDir});
+      await appendSessionEntry(session, {type: 'ui_message', at: new Date(2026, 7, 3, 10, index).toISOString(), role: 'user', text: `request ${index}`});
+    }));
+    const startedAt = performance.now();
+    const summaries = await listSessions(cwd, sessionsDir);
+    expect(summaries).toHaveLength(50);
+    expect(performance.now() - startedAt).toBeLessThan(SESSION_LIST_LATENCY_BUDGET_MS);
+  });
+
+  it('finds only exact, path-safe session ids in the current workspace (F02)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toEqual(session);
+    await expect(findSession(`${session.id}.jsonl`, cwd, sessionsDir)).resolves.toBeUndefined();
+    await expect(findSession('../other', cwd, sessionsDir)).resolves.toBeUndefined();
+    await expect(findSession('missing', cwd, sessionsDir)).resolves.toBeUndefined();
+  });
+
+  it('forks the latest conversation and work-state snapshots without changing the source (F02)', async () => {
+    const source = await createSession({cwd, sessionsDir});
+    const oldMessages: ModelMessage[] = [{role: 'user', content: 'old'}];
+    const latestMessages: ModelMessage[] = [{role: 'user', content: 'branch here'}, {role: 'assistant', content: 'ready'}];
+    const state = createWorkState('fork goal', 'implementation', ['test']);
+    await appendSessionEntry(source, {type: 'conversation_snapshot', at: '1', messages: oldMessages});
+    await appendSessionEntry(source, {type: 'conversation_snapshot', at: '2', messages: latestMessages});
+    await appendSessionEntry(source, {type: 'work_state_snapshot', at: '3', state});
+    const before = await fs.readFile(source.file);
+
+    const result = await forkSession(source, {sessionsDir, hazeVersion: 'test'});
+
+    expect(await fs.readFile(source.file)).toEqual(before);
+    expect(result.session.id).not.toBe(source.id);
+    const {entries} = await readSessionEntries(result.session);
+    expect(entries[0]).toMatchObject({type: 'header', forkedFrom: source.id});
+    await expect(restoreSessionState(result.session)).resolves.toMatchObject({messages: latestMessages, workState: state, parseErrors: []});
   });
 
   it('reports parse errors for malformed lines instead of silently dropping them', async () => {

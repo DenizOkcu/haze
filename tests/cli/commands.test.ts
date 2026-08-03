@@ -229,6 +229,13 @@ describe('handleSlashCommand', () => {
     expect(resumeSession).toHaveBeenCalled();
   });
 
+  it('forwards an exact id from /resume <id>', async () => {
+    const resumeSession = vi.fn().mockResolvedValue(undefined);
+    const ctx = mockContext({resumeSession});
+    expect(await handleSlashCommand('/resume 2026-session-id', ctx)).toBe('handled');
+    expect(resumeSession).toHaveBeenCalledWith('2026-session-id');
+  });
+
   it('reports session persistence unavailable for /resume without a callback', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/resume', ctx)).toBe('handled');

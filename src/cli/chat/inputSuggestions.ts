@@ -1,9 +1,11 @@
 import type {HazeSettings} from '../../config/settings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {LoadedSkill} from '../../skills/types.js';
+import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import type {Mode} from '../commands/chatModes.js';
 import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, modelAddProviderSuggestions, modelPickSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions, skillScopeSuggestions} from '../commands/wizardSuggestions.js';
+import {sessionActionSuggestions, sessionSuggestions} from '../commands/sessionPicker.js';
 
 const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/help', description: 'Show commands', kind: 'command'},
@@ -17,7 +19,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/fleet ', description: 'Parallelize independent work in disposable contexts (flags: --review/--profile/--workers/--concurrency)', kind: 'command'},
   {value: '/init', description: 'Create or update AGENTS.md project instructions', kind: 'command'},
   {value: '/session', description: 'Show current session path', kind: 'command'},
-  {value: '/resume', description: 'Resume latest session for this workspace', kind: 'command'},
+  {value: '/resume', description: 'Browse saved sessions for this workspace', kind: 'command'},
   {value: '/new', description: 'Start a new session', kind: 'command'},
   {value: '/compact ', description: 'Summarize older context and keep recent messages', kind: 'command'},
   {value: '/clear', description: 'Clear conversation history', kind: 'command'},
@@ -37,10 +39,13 @@ interface InputSuggestionState {
   selectedSkillName?: string;
   selectedLspName?: string;
   selectedMcpName?: string;
+  sessions?: SessionSummary[];
 }
 
 export function inputSuggestionsForState(state: InputSuggestionState): TextInputSuggestion[] {
   const {mode, settings, skills} = state;
+  if (mode === 'sessions') return sessionSuggestions(state.sessions ?? []);
+  if (mode === 'sessionAction') return sessionActionSuggestions();
   if (mode === 'provider') return providerSuggestions(settings);
   if (mode === 'providerAction') return providerActionSuggestions(settings, state.selectedProviderName);
   if (mode === 'providerAddPreset') return presetSuggestions();

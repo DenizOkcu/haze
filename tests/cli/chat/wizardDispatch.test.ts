@@ -73,6 +73,29 @@ function makeDeps(overrides: Partial<TestDeps> = {}): TestDeps {
 const discovered = (models: string[]) => ({status: 'ok' as const, models});
 const discoveryFailed = (error: string) => ({status: 'failed' as const, error});
 
+describe('wizardDispatch session picker', () => {
+  it('routes the selected session through resume and fork actions (F02)', async () => {
+    const resumeSessionById = vi.fn().mockResolvedValue(true);
+    const forkSessionById = vi.fn().mockResolvedValue(true);
+    const deps = makeDeps({
+      sessions: [{id: 'session-1', createdAt: '2026-08-03T10:00:00Z', lastActivityAt: '2026-08-03T10:01:00Z', messageCount: 2, firstUserPreview: 'fix it', sizeBytes: 100, parseErrors: []}],
+      resumeSessionById,
+      forkSessionById,
+    });
+    deps.setSelectedSessionId = vi.fn(id => { deps.selectedSessionId = id; });
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('sessions', 'session-1');
+    expect(deps.selectedSessionId).toBe('session-1');
+    expect(deps.setMode).toHaveBeenLastCalledWith('sessionAction');
+
+    await wizard.dispatch('sessionAction', 'fork');
+    expect(forkSessionById).toHaveBeenCalledWith('session-1');
+    expect(resumeSessionById).not.toHaveBeenCalled();
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+  });
+});
+
 describe('wizardDispatch provider actions with model discovery', () => {
   beforeEach(() => {
     mocks.updateSettings.mockReset();

@@ -11,7 +11,7 @@ function fullUsage(partial: {inputTokens?: number; outputTokens?: number; cacheR
   };
 }
 
-async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; settings?: unknown}) {
+async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
   const status = opts.status ?? 'complete';
   const runAgentTurn = vi.fn(async (_value: unknown, _display: unknown, _ctx: unknown, callbacks: any) => {
     await opts.runAgentTurnImpl?.(callbacks);
@@ -21,6 +21,10 @@ async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void
   vi.doMock('../../../src/config/contextFiles.js', () => ({readContextFiles: async () => []}));
   vi.doMock('../../../src/config/settings.js', () => ({readSettings: async () => opts.settings ?? PROVIDER_SETTINGS}));
   vi.doMock('../../../src/core/log/llmLog.js', () => ({createLog: async () => ({file: '/tmp/stub-llm.jsonl'}), endLog: async () => undefined}));
+  vi.doMock('../../../src/core/session/sessionStore.js', () => ({
+    findSession: async (id: string) => opts.sessionFound === false ? undefined : ({id, file: `/tmp/${id}.jsonl`, cwd: process.cwd()}),
+    restoreSessionState: async () => ({messages: opts.sessionMessages ?? [], workState: undefined, parseErrors: opts.sessionParseErrors ?? []}),
+  }));
   vi.resetModules();
   const mod = await import('../../../src/cli/commands/runCommand.js');
   return {...mod, runAgentTurn};
@@ -158,6 +162,37 @@ describe('runHeadless: debug output', () => {
     const code = await runHeadless({prompt: 'do it', output: 'text'});
     expect(code).toBe(0);
     expect(errs.join('')).not.toContain('[haze]');
+  });
+});
+
+describe('runHeadless: exact session resume', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('loads a selected session as the initial one-turn context without writing it (F02)', async () => {
+    captureStdout();
+    const saved = [{role: 'user', content: 'saved request'}, {role: 'assistant', content: 'saved answer'}];
+    const {runHeadless, runAgentTurn} = await loadRunCommand({
+      sessionMessages: saved,
+      runAgentTurnImpl: cb => {
+        expect(cb.getConversation()).toEqual(saved);
+        cb.addMessage({role: 'assistant', text: 'continued'});
+      },
+    });
+    const code = await runHeadless({prompt: 'next', resumeSessionId: 'session-1', output: 'text'});
+    expect(code).toBe(0);
+    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails loudly for an unknown selected session before invoking the model (F02)', async () => {
+    captureStdout();
+    const errs = captureStderr();
+    const {runHeadless, runAgentTurn} = await loadRunCommand({sessionFound: false});
+    const code = await runHeadless({prompt: 'next', resumeSessionId: 'missing', output: 'text'});
+    expect(code).toBe(1);
+    expect(errs.join('')).toContain('No session named missing exists for this workspace.');
+    expect(runAgentTurn).not.toHaveBeenCalled();
   });
 });
 

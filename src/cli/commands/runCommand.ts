@@ -7,12 +7,14 @@ import {readSettings} from '../../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {AgentEvent} from '../../core/agent/events.js';
+import {findSession, restoreSessionState} from '../../core/session/sessionStore.js';
 
 export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
 export interface HeadlessOptions {
   prompt: string;
   modelOverride?: string;
+  resumeSessionId?: string;
   output: HeadlessOutput;
   debug?: boolean;
 }
@@ -107,6 +109,11 @@ async function resolveModelOrError(modelOverride?: string): Promise<string | und
 }
 
 export async function runHeadless(options: HeadlessOptions): Promise<number> {
+  const resumed = options.resumeSessionId ? await findSession(options.resumeSessionId) : undefined;
+  if (options.resumeSessionId && !resumed) {
+    process.stderr.write(`No session named ${options.resumeSessionId} exists for this workspace.\n`);
+    return 1;
+  }
   const modelError = await resolveModelOrError(options.modelOverride);
   if (modelError) {
     process.stderr.write(`${modelError}\n`);
@@ -121,6 +128,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   const contextFiles: ContextFile[] = await readContextFiles(process.cwd());
   const session: PromptSession = {start: new Date(), cwd: process.cwd()};
   let conversation: ModelMessage[] = [];
+  if (resumed) {
+    const restored = await restoreSessionState(resumed);
+    conversation = restored.messages;
+    for (const error of restored.parseErrors) process.stderr.write(`Session parse error: ${error}\n`);
+  }
   // Assistant text is delivered in two stages by runAgentTurn: an initial streaming
   // `addMessage`, then a finalizing `updateMessage` with the complete text. We key
   // segments by id and patch them on update so finalized (and multi-segment) text is captured.

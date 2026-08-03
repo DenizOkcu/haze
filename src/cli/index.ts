@@ -6,6 +6,7 @@ import {Command, Option} from 'commander';
 import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
+import {findSession} from '../core/session/sessionStore.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
@@ -17,6 +18,7 @@ program
   .version(pkg.version)
   .option('--debug', 'show model/tool debug logs and write a detailed JSONL log to ~/.haze/logs/')
   .option('-c, --continue', 'resume the latest saved session for this workspace')
+  .addOption(new Option('--resume <id>', 'resume an exact saved session id for this workspace').conflicts(['continue', 'session']))
   .option('--no-session', 'run without saving or resuming a durable session')
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
@@ -30,6 +32,7 @@ Examples:
   $ haze -p "list the top 3 bugs" --output json    emit a JSON envelope { type, status, result, usage }
   $ haze -p "audit src/" --output stream-json       stream NDJSON events live, then the final result envelope
   $ haze -p "summarize" --model openai:gpt-4o-mini override the model for this run only
+  $ haze --resume <id> -p "continue the review"   load a saved context for one print-mode turn
   $ haze -p "audit auth.ts" --debug                also write a detailed JSONL log to ~/.haze/logs/
 
 Print mode (-p):
@@ -42,7 +45,8 @@ Print mode (-p):
   harnesses live progress and stagnation detection. --model overrides the model for this
   run only (no settings change) and must already be registered under a provider (add it once via
   the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
-  saved, and there is no automatic context-overflow recovery.
+  saved. --resume <id> loads saved context for the turn without changing that session. There is no
+  automatic context-overflow recovery.
 `);
 
 async function readStdinPrompt(): Promise<string | undefined> {
@@ -62,16 +66,20 @@ async function readStdinPrompt(): Promise<string | undefined> {
 }
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; session?: boolean; prompt?: string; model?: string; output?: string}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string}>();
   // Name the terminal tab for the run; no-op unless stdout is a real TTY.
   installTerminalTitle(terminalTitleLabel(process.cwd()));
   // -p takes precedence; otherwise fall back to piped stdin. An empty stdin yields no prompt.
   const prompt = opts.prompt?.trim() ? opts.prompt : await readStdinPrompt();
+  if (opts.resume && !await findSession(opts.resume)) {
+    throw new Error(`No session named ${opts.resume} exists for this workspace.`);
+  }
   if (prompt) {
     // One-shot runs are always fresh and non-durable; --continue is ignored in this mode.
     const code = await runHeadless({
       prompt,
       modelOverride: opts.model,
+      resumeSessionId: opts.resume,
       // commander validates --output against the choices above, so opts.output is one of
       // 'text' | 'json' | 'stream-json'; default to text for piped/stdin runs without the flag.
       output: opts.output === 'json' || opts.output === 'stream-json' ? opts.output : 'text',
@@ -82,7 +90,7 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
-  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), noSession: opts.session === false, version: pkg.version});
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version: pkg.version});
 });
 
 program.parseAsync().catch((error) => {

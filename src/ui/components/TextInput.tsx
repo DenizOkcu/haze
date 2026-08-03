@@ -29,7 +29,7 @@ export function shouldInsertNewline(input: string, key: TextInputKey) {
 export type TextInputSuggestion = {
   value: string;
   description?: string;
-  kind?: 'command' | 'skill' | 'provider' | 'model' | 'lsp' | 'mcp' | 'file';
+  kind?: 'command' | 'skill' | 'provider' | 'model' | 'lsp' | 'mcp' | 'session' | 'file';
 };
 
 /** Cursor-aware path completer for `@token` mentions; receives the token verbatim. */

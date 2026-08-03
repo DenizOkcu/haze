@@ -3,7 +3,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
-import {createSession, formatSession, latestSession, restoreSessionState, type HazeSession} from '../../core/session/sessionStore.js';
+import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type HazeSession} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message, TokenUsage} from '../commands/streaming.js';
 import type {SessionRecorder} from './sessionRecorder.js';
@@ -19,6 +19,7 @@ import {EMPTY_TOKEN_USAGE} from './turnState.js';
 export interface SessionLifecycleDeps {
   version?: string;
   continueSession: boolean;
+  resumeSessionId?: string;
   noSession: boolean;
   debug: boolean;
   contextFiles: () => ContextFile[];
@@ -41,6 +42,8 @@ export interface SessionLifecycle {
   initializeSession: () => Promise<void>;
   startNewSession: (message?: string) => Promise<void>;
   resumeLatestSession: () => Promise<void>;
+  resumeSessionById: (id: string) => Promise<boolean>;
+  forkSessionById: (id: string) => Promise<boolean>;
   clearConversation: () => Promise<void>;
   compactConversation: (instructions?: string) => boolean;
 }
@@ -92,7 +95,13 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
 
   return {
     async initializeSession() {
-      if (deps.noSession) {
+      if (deps.noSession) return;
+      if (deps.resumeSessionId) {
+        const session = await findSession(deps.resumeSessionId);
+        if (!session) throw new Error(`No session named ${deps.resumeSessionId} exists for this workspace.`);
+        await resumeSession(session, false);
+        deps.sessionStartRef.current = new Date();
+        await startNewLog();
         return;
       }
       if (deps.continueSession) {
@@ -118,6 +127,46 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       }
       clearToolOutputs();
       await resumeSession(session, true);
+      deps.sessionStartRef.current = new Date();
+      await startNewLog();
+    },
+
+    async resumeSessionById(id: string) {
+      await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
+      const session = await findSession(id);
+      if (!session) {
+        deps.setMessages(m => [...m, {role: 'system', text: `No session named ${id} exists for this workspace.`}]);
+        return false;
+      }
+      clearToolOutputs();
+      await resumeSession(session, true);
+      deps.sessionStartRef.current = new Date();
+      await startNewLog();
+      return true;
+    },
+
+    async forkSessionById(id: string) {
+      await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
+      const source = await findSession(id);
+      if (!source) {
+        deps.setMessages(m => [...m, {role: 'system', text: `No session named ${id} exists for this workspace.`}]);
+        return false;
+      }
+      let forked: Awaited<ReturnType<typeof forkSession>>;
+      try {
+        forked = await forkSession(source, {hazeVersion: deps.version});
+      } catch (error) {
+        deps.setMessages(m => [...m, {role: 'system', text: error instanceof Error ? error.message : String(error)}]);
+        return false;
+      }
+      const {session, parseErrors} = forked;
+      for (const error of parseErrors) deps.debugLog(`Session parse error: ${error}`);
+      clearToolOutputs();
+      await resumeSession(session, true);
+      deps.sessionStartRef.current = new Date();
+      await startNewLog();
+      deps.setMessages(m => [...m, {role: 'system', text: `Forked from session ${id}. The original was left unchanged.`}]);
+      return true;
     },
 
     async clearConversation() {

@@ -10,6 +10,7 @@ import {findPreset, PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
+import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {Mode} from '../commands/chatModes.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from '../commands/wizardActions.js';
 import {captureLspName} from '../commands/wizardPrompts.js';
@@ -21,6 +22,7 @@ import {captureSkillDescription as captureSkillDescriptionResult, skillCreationF
 import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillConfirmRemove.js';
 import {isYesConfirmation} from '../commands/wizardInput.js';
 import {startupProviderInfo} from './startupInfo.js';
+import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
 
 /**
  * Wizard submit dispatch (CR-006): one table-driven entry point for every
@@ -36,6 +38,8 @@ export interface WizardDispatchDeps {
   selectedSkillName: string | undefined;
   selectedLspName: string | undefined;
   selectedMcpName: string | undefined;
+  sessions?: SessionSummary[];
+  selectedSessionId?: string;
   providerDraft: Partial<HazeProviderSettings>;
   lspDraft: Partial<HazeLspServer>;
   mcpDraft: Partial<HazeMcpServer>;
@@ -46,6 +50,9 @@ export interface WizardDispatchDeps {
   setSelectedSkillName: (name: string | undefined) => void;
   setSelectedLspName: (name: string | undefined) => void;
   setSelectedMcpName: (name: string | undefined) => void;
+  setSelectedSessionId?: (id: string | undefined) => void;
+  resumeSessionById?: (id: string) => Promise<boolean>;
+  forkSessionById?: (id: string) => Promise<boolean>;
   setModelProviderFilter: (filter: string | undefined) => void;
   setProviderDraft: (draft: Partial<HazeProviderSettings>) => void;
   setSkillDraft: (draft: {name?: string; scope?: SkillSource}) => void;
@@ -85,6 +92,34 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
+  }
+
+  async function selectSession(id: string) {
+    if (!deps.sessions?.some(session => session.id === id)) {
+      showMessage(`No session named ${id} exists for this workspace.`);
+      setMode('chat');
+      return;
+    }
+    deps.setSelectedSessionId?.(id);
+    setMode('sessionAction');
+    showMessage(`Session ${id}: press Enter to resume, or choose fork.`);
+  }
+
+  async function selectSessionAction(action: string) {
+    const id = deps.selectedSessionId;
+    if (!id) {
+      showMessage('No session selected. Start over with /resume.');
+      setMode('chat');
+      return;
+    }
+    if (action === SESSION_ACTIONS.resume) await deps.resumeSessionById?.(id);
+    else if (action === SESSION_ACTIONS.fork) await deps.forkSessionById?.(id);
+    else {
+      showMessage(`Unknown session action: ${action}.`);
+      return;
+    }
+    deps.setSelectedSessionId?.(undefined);
+    setMode('chat');
   }
 
   async function selectProvider(providerName: string) {
@@ -614,6 +649,8 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   }
 
   const handlers: Partial<Record<Mode, (value: string) => Promise<void>>> = {
+    sessions: selectSession,
+    sessionAction: selectSessionAction,
     skills: selectSkill,
     skillsAction: selectSkillAction,
     skillsAddName: captureSkillName,
