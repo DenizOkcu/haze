@@ -110,6 +110,16 @@ Useful starters:
 
 `/init` creates or updates `AGENTS.md` so future sessions understand the project.
 
+## Attach images
+
+Reference a workspace image in your prompt to attach it, and haze sends it to the model alongside your text:
+
+```txt
+@docs/screenshot.png the button in this shot is misaligned — fix it
+```
+
+Image input is opt-in per provider. Mark a provider image-capable in `/provider` before attaching, and haze shows which providers accept images in `/settings`. Attachments are limited to png, jpeg, gif, and webp files inside the workspace, up to 5 MB and 4 per message. A non-capable provider, a non-image path, or an oversized file fails with a clear message before any model call. Resumed sessions keep a short placeholder instead of the image bytes.
+
 ## Skills that grow with your workflow
 
 Skills are Markdown workflows that haze creates with `/skills` and stores in `~/.haze/skills` so you can inspect or refine them later.

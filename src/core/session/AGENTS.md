@@ -30,6 +30,7 @@ Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt 
 - Do not persist streaming `message_update` events by default. They are UI progress, not durable resume state.
 - Keep completed messages, tool lifecycle events, work-state snapshots, and conversation snapshots useful for resume.
 - Large persisted tool outputs/errors should be replaced with previews, byte counts, and omission metadata. Active in-memory model context can stay richer than the persisted JSONL audit trail.
+- User-attached image `file` parts (F03) are slimmed to a short text placeholder (filename, media type, byte count) so sessions never store image bytes. The placeholder is a valid text part, so resumed conversations stay protocol-safe for any provider.
 
 ## Restore behavior
 

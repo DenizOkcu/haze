@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Image input: attach a workspace image by mentioning its path in your prompt (for example `@docs/screenshot.png fix this layout`). haze sends it as an image part, but only to a provider you have explicitly marked image-capable via `/provider` (mark image-capable). Attachments are limited to png/jpeg/gif/webp, capped at 5 MB and 4 per message, and must live inside the workspace. Resumed sessions keep a small placeholder instead of image bytes. Non-image paths, oversized files, and non-capable providers fail with an actionable message before any model call.
+
 ### Changed
 
 - Bash tool results carry byte statistics (`totalBytes`/`retainedBytes`/`omittedBytes`) instead of the raw retained stream text, so large outputs no longer duplicate into the model context. Retrieval by handle is unchanged.
