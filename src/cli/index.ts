@@ -5,6 +5,7 @@ import {dirname, join} from 'node:path';
 import {Command, Option} from 'commander';
 import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
+import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
@@ -62,6 +63,8 @@ async function readStdinPrompt(): Promise<string | undefined> {
 
 program.action(async () => {
   const opts = program.opts<{debug?: boolean; continue?: boolean; session?: boolean; prompt?: string; model?: string; output?: string}>();
+  // Name the terminal tab for the run; no-op unless stdout is a real TTY.
+  installTerminalTitle(terminalTitleLabel(process.cwd()));
   // -p takes precedence; otherwise fall back to piped stdin. An empty stdin yields no prompt.
   const prompt = opts.prompt?.trim() ? opts.prompt : await readStdinPrompt();
   if (prompt) {
