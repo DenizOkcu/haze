@@ -85,15 +85,6 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
   return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config)}};
 }
 
-export async function model() {
-  return (await modelWithConfig())?.model;
-}
-
-export function cacheKeyFor(name: string, cwd?: string) {
-  const seed = cwd ?? process.cwd();
-  return crypto.createHash('sha256').update(`${seed}\0${name}`).digest('hex').slice(0, 32);
-}
-
 export function providerRequestSettings(config: ModelRuntimeConfig): ProviderRequestOptions {
   return {
     ...(config.capabilities.supportsPromptCacheKey || config.capabilities.supportsTextVerbosity ? {

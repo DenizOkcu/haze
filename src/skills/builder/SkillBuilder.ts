@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import YAML from 'yaml';
 import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
-import {model} from '../../llm/client.js';
+import {modelWithConfig} from '../../llm/client.js';
 import {loadSkill} from '../SkillLoader.js';
 import {z} from 'zod';
 
@@ -190,7 +190,7 @@ function assertSafeGeneratedFile(filePath: string) {
 }
 
 async function generateSkill(input: CreateSkillInput): Promise<GeneratedSkill> {
-  const activeModel = await model();
+  const activeModel = (await modelWithConfig())?.model;
   if (!activeModel) throw new Error('No model provider configured. Run /provider to choose or add a provider before creating a skill via /skills.');
   const role = input.role?.trim() || DEFAULT_SKILL_ROLE;
   const result = await generateObject({

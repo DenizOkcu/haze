@@ -7,6 +7,7 @@ Centralized byte budgets.
 ## Responsibilities
 
 - `byteBudgets.ts` exports every collection-time and storage-time byte limit.
+- `textBudgets.ts` exports the model-facing character caps (tool output pages, grep rendering, session previews) so those live in one place too (CR-014).
 
 ## Contracts
 

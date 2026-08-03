@@ -105,4 +105,15 @@ describe('agent provider error classification', () => {
     expect(isRetryableModelError(new Error('invalid api key'))).toBe(false);
     expect(isRetryableModelError(new Error('maximum context length exceeded'))).toBe(false);
   });
+
+  it('matches status codes as whole words, not substrings (regression CR-020)', () => {
+    expect(isRetryableModelError(new Error('HTTP 500 from provider'))).toBe(true);
+    expect(isRetryableModelError(new Error('429 rate limit'))).toBe(true);
+    expect(isRetryableModelError(new Error('processed 5000 files'))).toBe(false);
+    expect(isRetryableModelError(new Error('context of 15000 tokens'))).toBe(false);
+    expect(isRetryableModelError(new Error('streaming response closed'))).toBe(false);
+    expect(isRetryableModelError(new Error('stream disconnected unexpectedly'))).toBe(true);
+    expect(isRetryableModelError(new Error('bad request 400'))).toBe(false);
+    expect(isRetryableModelError(new Error('payment method declined (card 4001)'))).toBe(false);
+  });
 });

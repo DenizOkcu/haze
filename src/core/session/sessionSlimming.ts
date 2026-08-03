@@ -1,9 +1,6 @@
 import type {ModelMessage} from 'ai';
 import type {SessionEntry} from './sessionStore.js';
-
-const INLINE_VALUE_BYTES = 32 * 1024;
-const PREVIEW_CHARS = 4 * 1024;
-const LARGE_STRING_CHARS = 8 * 1024;
+import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits/textBudgets.js';
 
 function jsonByteLength(value: unknown) {
   try {

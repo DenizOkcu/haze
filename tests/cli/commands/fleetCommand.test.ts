@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import type {CommandContext} from '../../../src/cli/commands/commands.js';
-import {buildFleetPrompt, handleFleetCommand, parseFleetArgs} from '../../../src/cli/commands/fleetCommand.js';
+import {handleFleetCommand, parseFleetArgs} from '../../../src/cli/commands/fleetCommand.js';
 
 function mockContext(overrides?: Partial<CommandContext>): CommandContext {
   return {
@@ -15,10 +15,12 @@ function mockContext(overrides?: Partial<CommandContext>): CommandContext {
 
 describe('fleet argument parsing', () => {
   it('parses explicit ephemeral overrides without placing them in runtime policy text', () => {
-    expect(parseFleetArgs('--review --profile local-safe --workers local:qwen --concurrency 2 audit auth')).toEqual({ok: true, value: {
-      prompt: 'audit auth',
-      options: {ephemeralControl: buildFleetPrompt(), subagentOverrides: {forceMode: 'inspect', profile: 'local-safe', workerModel: 'local:qwen', maxConcurrency: 2}},
-    }});
+    const parsed = parseFleetArgs('--review --profile local-safe --workers local:qwen --concurrency 2 audit auth');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.prompt).toBe('audit auth');
+    expect(parsed.value.options.subagentOverrides).toEqual({forceMode: 'inspect', profile: 'local-safe', workerModel: 'local:qwen', maxConcurrency: 2});
+    expect(parsed.value.options.ephemeralControl).toContain('parallel-only');
   });
 
   it('supports -- for a prompt beginning with flags', () => {
@@ -53,9 +55,15 @@ describe('handleFleetCommand', () => {
   });
 });
 
-describe('buildFleetPrompt', () => {
+describe('fleet ephemeral control text', () => {
+  function controlText() {
+    const parsed = parseFleetArgs('x');
+    if (!parsed.ok) throw new Error('expected parse to succeed');
+    return parsed.value.options.ephemeralControl;
+  }
+
   it('is concise and leaves scheduling/deadlines/mutation serialization to runtime', () => {
-    const lower = buildFleetPrompt().toLowerCase();
+    const lower = controlText().toLowerCase();
     expect(lower).toContain('runtime owns queueing, concurrency, deadlines');
     expect(lower).toContain('mutation serialization');
     expect(lower).toContain('aggregate every capsule truthfully');

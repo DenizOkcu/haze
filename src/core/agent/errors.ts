@@ -9,6 +9,9 @@ export function isContextOverflowError(error: unknown) {
 
 export function isRetryableModelError(error: unknown) {
   const text = errorText(error);
-  if (isContextOverflowError(error) || /quota|billing|balance|auth|api key|invalid request|permission|forbidden|401|403|400/.test(text)) return false;
-  return /overload|rate limit|429|500|502|503|504|network|connection|stream|timeout|timed? out|terminated|econnreset|etimedout|fetch failed/.test(text);
+  if (isContextOverflowError(error)) return false;
+  // Status codes are matched as whole words so "15000 tokens" or "processed
+  // 5000 files" are not misclassified (CR-020).
+  if (/\b(?:400|401|403)\b/.test(text) || /quota|billing|balance|auth|api key|invalid request|permission|forbidden/.test(text)) return false;
+  return /\b(?:429|500|502|503|504)\b/.test(text) || /overload|rate limit|network|connection|timeout|timed? out|terminated|econnreset|etimedout|fetch failed|stream disconnected|stream closed|stream aborted|stream error/.test(text);
 }

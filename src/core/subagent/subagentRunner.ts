@@ -16,6 +16,7 @@ import {buildSubagentPrompt, projectContextSection} from '../../llm/systemPrompt
 import {hazeTools} from '../../llm/hazeTools.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {
+  fallbackWorkerRuntime,
   normalizeSubagentInput,
   subagentInputSchema,
   withLegacyProjection,
@@ -127,7 +128,7 @@ export async function runSubagent(
   },
 ): Promise<SubagentExecutionResult> {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
-  const runtime: WorkerRuntime = options.runtime ?? {model: options.model!, selector: 'active-model', providerName: 'active', capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false}, requestOptions: {}};
+  const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
   const task: SubagentTaskCapsule = typeof taskInput === 'string'
     ? {id: 'worker', objective: taskInput, deliverable: 'Return a concise self-contained result.', mode: options.allowedTools ? (options.allowedTools.some(name => ['editFile', 'replaceLines', 'writeFile'].includes(name)) ? 'implement' : options.allowedTools.includes('bash') ? 'validate' : options.allowedTools.includes('fetch') ? 'research' : 'inspect') : 'implement', scope: [], acceptanceCriteria: [], legacyMaxSteps: options.maxSteps}
     : taskInput;
@@ -260,7 +261,7 @@ export function createSubagentTool(options: {
   session?: PromptSession;
 }) {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
-  const runtime: WorkerRuntime = options.runtime ?? {model: options.model!, selector: 'active-model', providerName: 'active', capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false}, requestOptions: {}};
+  const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
   const coordinator = options.coordinator ?? new SubagentCoordinator(profile);
   return tool<SubagentToolInput, SubagentExecutionResult, HazeToolContext>({
     description: 'Run independent work in a fresh disposable context and return only its deliverable. Always provide objective, deliverable, and mode (inspect, research, implement, or validate); keep objective under 1000 characters; scope and acceptanceCriteria are optional. Use when private repository/log/docs/audit/debugging work would add much more context than the result needed here; one substantial task is enough. Use multiple calls for genuinely independent work. Do not use for trivial, sequential, user-interactive, shared-mutation, or unsummarized conversation-dependent work.',

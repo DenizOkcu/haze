@@ -32,6 +32,17 @@ describe('sessionStore', () => {
     expect(entries[0]).toMatchObject({type: 'header', cwd, hazeVersion: 'test'});
   });
 
+  it('creates distinct sessions even within the same millisecond (regression CR-025)', async () => {
+    const [first, second] = await Promise.all([createSession({cwd, sessionsDir}), createSession({cwd, sessionsDir})]);
+    expect(first.id).not.toBe(second.id);
+    expect(first.file).not.toBe(second.file);
+    expect(await fs.pathExists(first.file)).toBe(true);
+    expect(await fs.pathExists(second.file)).toBe(true);
+    // Timestamp prefix still drives latestSession() ordering.
+    const latest = await latestSession(cwd, sessionsDir);
+    expect([first.id, second.id]).toContain(latest?.id);
+  });
+
   it('appends and reads JSONL entries', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: 'now', role: 'user', text: 'hello'});

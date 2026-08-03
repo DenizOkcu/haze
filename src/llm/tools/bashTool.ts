@@ -9,8 +9,7 @@ import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
 import {BASH_STREAM_BYTES} from '../../core/limits/byteBudgets.js';
-
-const SHORT_VALIDATION_CHARS = 2_000;
+import {SHORT_VALIDATION_CHARS} from '../../core/limits/textBudgets.js';
 
 /** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */
 function streamByteStats(stream: BoundedStream) {

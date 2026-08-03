@@ -3,13 +3,20 @@ import {compactHomePath, estimateConversationTokens, formatTokenCount, toolCallC
 import type {Message} from '../../src/cli/commands/streaming.js';
 
 describe('chat metrics', () => {
-  it('counts tool calls from grouped summaries and rows', () => {
+  it('prefers the structured toolCount carried by live tool groups', () => {
     const messages: Message[] = [
-      {role: 'tool', text: 'Tools: 3 calls'},
-      {role: 'tool', text: '  ✓ readFile\n  ✗ grep ×2'},
+      {role: 'tool', text: '3 calls · 1 changes · 2s', toolCount: 3},
+      {role: 'tool', text: 'any future caption format', toolCount: 5},
       {role: 'assistant', text: 'ignored'},
     ];
-    expect(toolCallCount(messages)).toBe(6);
+    expect(toolCallCount(messages)).toBe(8);
+  });
+
+  it('falls back to counting rendered rows for restored historical transcripts', () => {
+    const messages: Message[] = [
+      {role: 'tool', text: '1 calls · 0 changes · 1s\n  ✓ readFile — ok\n  ✗ grep — error'},
+    ];
+    expect(toolCallCount(messages)).toBe(2);
   });
 
   it('formats token counts compactly', () => {

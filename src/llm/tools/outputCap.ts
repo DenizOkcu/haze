@@ -1,11 +1,7 @@
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
+import {COMPACT_COMMAND_CHARS, GREP_MAX_LINE_CHARS, GREP_MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
 
-/** Default ceiling for capped tool outputs (bash, fetch). */
-export const COMPACT_COMMAND_CHARS = 12_000;
-/** Default ceiling for rendered grep output. */
-export const GREP_MAX_OUTPUT_CHARS = 30_000;
-/** Default ceiling for a single grep match line. */
-export const GREP_MAX_LINE_CHARS = 500;
+export {COMPACT_COMMAND_CHARS, GREP_MAX_OUTPUT_CHARS, GREP_MAX_LINE_CHARS};
 
 /**
  * Cap a string to `maxChars` characters, keeping a head + tail and storing the

@@ -15,8 +15,8 @@ export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 
 type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean; caption?: string};
 
 export interface ToolGroupRendererDeps {
-  addMessage: (msg: {id: string; role: 'tool'; text: string; streaming: boolean}) => void;
-  updateMessage: (id: string, update: {text?: string; streaming?: boolean}) => void;
+  addMessage: (msg: {id: string; role: 'tool'; text: string; streaming: boolean; toolCount: number}) => void;
+  updateMessage: (id: string, update: {text?: string; streaming?: boolean; toolCount?: number}) => void;
   debugLog: (line: string) => void;
   onEvent?: AgentEventSink;
   log?: LlmLog;
@@ -71,13 +71,15 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
 
   const updateToolGroup = (streaming = true, group: ToolDisplayGroup = toolGroup) => {
     const text = renderToolGroup(group);
+    // toolCount is carried structurally so metrics never depend on the rendered
+    // caption/row format (CR-015).
     if (!group.started) {
       group.started = true;
       group.finalized = !streaming;
-      deps.addMessage({id: group.id, role: 'tool', text, streaming});
+      deps.addMessage({id: group.id, role: 'tool', text, streaming, toolCount: group.items.length});
     } else {
       group.finalized = !streaming;
-      deps.updateMessage(group.id, {text, streaming});
+      deps.updateMessage(group.id, {text, streaming, toolCount: group.items.length});
     }
   };
 

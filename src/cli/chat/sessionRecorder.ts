@@ -1,18 +1,20 @@
 import type {ModelMessage} from 'ai';
-import {appendSessionEntry, type HazeSession} from '../../core/session/sessionStore.js';
+import {appendSessionEntry, type HazeSession, type SessionEntry} from '../../core/session/sessionStore.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 import type {WorkState} from '../../core/agent/workState.js';
+import {OrderedFileWriter} from '../../core/persistence/orderedFileWriter.js';
 import type {Message} from '../commands/streaming.js';
 
 export function createSessionRecorder(getSession: () => HazeSession | undefined) {
-  let tail: Promise<void> = Promise.resolve();
-  let firstError: Error | undefined;
-  const append = (entry: Parameters<typeof appendSessionEntry>[1]) => {
+  // Ordered appends and first-error capture come from the shared writer
+  // primitive; entries recorded before a session exists are dropped (CR-005).
+  const writer = new OrderedFileWriter<{session: HazeSession; entry: SessionEntry}>(
+    ({session, entry}) => appendSessionEntry(session, entry),
+  );
+  const append = (entry: SessionEntry) => {
     const session = getSession();
     if (!session) return;
-    tail = tail.then(() => appendSessionEntry(session, entry)).catch(error => {
-      firstError ??= error instanceof Error ? error : new Error(String(error));
-    });
+    void writer.append({session, entry});
   };
   return {
     recordUiMessage(message: Message) {
@@ -31,10 +33,9 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
       append({type: 'event', at: new Date().toISOString(), name, text});
     },
     async flush() {
-      await tail;
-      if (firstError) throw firstError;
+      await writer.flush();
     },
-    error() { return firstError; },
+    error() { return writer.error(); },
   };
 }
 

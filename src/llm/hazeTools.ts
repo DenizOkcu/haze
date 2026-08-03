@@ -118,9 +118,16 @@ export const hazeTools = {
         const endLine = mode === 'outline'
           ? displayLines[Math.max(0, includedLines - 1)]?.lineNumber ?? start + 1
           : start + includedLines;
+        const outlineDroppedEntries = mode === 'outline' ? displayLines.length - includedLines : 0;
         const hasMore = mode === 'outline'
-          ? requestedEnd < totalLines
+          ? requestedEnd < totalLines || outlineDroppedEntries > 0
           : endLine < totalLines;
+        // Outline pages resume after the last *included* entry: the output cap can
+        // stop a page before requestedEnd, and jumping to requestedEnd + 1 would
+        // silently skip the entries in between (CR-028).
+        const nextOffset = hasMore
+          ? (mode === 'outline' && includedLines > 0 ? endLine + 1 : requestedEnd + 1)
+          : undefined;
         const scopedContext = await discoverScopedContext(filePath, context);
         return withScopedContext({
           path: filePath,
@@ -129,10 +136,10 @@ export const hazeTools = {
           endLine,
           totalLines,
           content: numberedLines.join('\n'),
-          nextOffset: hasMore ? requestedEnd + 1 : undefined,
+          nextOffset,
           truncated: hasMore || lineTruncated,
           lineTruncated,
-          ...(mode === 'outline' ? {outline: true, outlineEntries: includedLines, warning: 'Outline mode is lossy discovery output. Use exact readFile around relevant lines before editing.'} : {}),
+          ...(mode === 'outline' ? {outline: true, outlineEntries: includedLines, ...(outlineDroppedEntries > 0 ? {outlineDroppedEntries} : {}), warning: 'Outline mode is lossy discovery output. Use exact readFile around relevant lines before editing.'} : {}),
         }, scopedContext);
       } catch (error) {
         return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);

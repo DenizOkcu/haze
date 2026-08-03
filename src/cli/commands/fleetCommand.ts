@@ -9,8 +9,6 @@ export interface ParsedFleetCommand {
   options: TurnExecutionOptions;
 }
 
-export function buildFleetPrompt(_args = ''): string { return FLEET_CONTROL; }
-
 export function parseFleetArgs(args: string): {ok: true; value: ParsedFleetCommand} | {ok: false; error: string} {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   const overrides: NonNullable<TurnExecutionOptions['subagentOverrides']> = {};

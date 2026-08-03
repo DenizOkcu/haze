@@ -2,9 +2,9 @@ import {afterEach, beforeEach, describe, it, expect} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {listFilesRecursive, walkDir} from '../../src/utils/fs.js';
+import {walkDir} from '../../src/utils/fs.js';
 
-describe('listFilesRecursive', () => {
+describe('walkDir', () => {
   let tmp: string;
 
   beforeEach(async () => {
@@ -15,13 +15,17 @@ describe('listFilesRecursive', () => {
     await fs.remove(tmp);
   });
 
+  function filePaths(entries: Awaited<ReturnType<typeof walkDir>>): string[] {
+    return entries.filter(entry => entry.isFile).map(entry => entry.path);
+  }
+
   it('lists files recursively', async () => {
     await fs.ensureDir(path.join(tmp, 'src'));
     await fs.writeFile(path.join(tmp, 'a.txt'), 'a');
     await fs.writeFile(path.join(tmp, 'src', 'b.txt'), 'b');
-    const files = await listFilesRecursive(tmp);
-    expect(files).toContain('a.txt');
-    expect(files).toContain(path.join('src', 'b.txt'));
+    const entries = await walkDir(tmp, {recursive: true});
+    expect(filePaths(entries)).toContain('a.txt');
+    expect(filePaths(entries)).toContain(path.join('src', 'b.txt'));
   });
 
   it('skips node_modules and .git', async () => {
@@ -30,22 +34,22 @@ describe('listFilesRecursive', () => {
     await fs.writeFile(path.join(tmp, 'node_modules', 'pkg', 'index.js'), '');
     await fs.writeFile(path.join(tmp, '.git', 'objects', 'abc'), '');
     await fs.writeFile(path.join(tmp, 'real.txt'), 'content');
-    const files = await listFilesRecursive(tmp);
-    expect(files).toEqual(['real.txt']);
+    const entries = await walkDir(tmp, {recursive: true});
+    expect(filePaths(entries)).toEqual(['real.txt']);
   });
 
   it('returns empty for nonexistent directory', async () => {
-    const files = await listFilesRecursive(path.join(tmp, 'nope'));
-    expect(files).toEqual([]);
+    const entries = await walkDir(path.join(tmp, 'nope'), {recursive: true});
+    expect(entries).toEqual([]);
   });
 
   it('returns relative paths', async () => {
     await fs.writeFile(path.join(tmp, 'top.txt'), '');
     await fs.ensureDir(path.join(tmp, 'sub'));
     await fs.writeFile(path.join(tmp, 'sub', 'deep.txt'), '');
-    const files = await listFilesRecursive(tmp);
-    for (const f of files) {
-      expect(path.isAbsolute(f)).toBe(false);
+    const entries = await walkDir(tmp, {recursive: true});
+    for (const entry of entries) {
+      expect(path.isAbsolute(entry.path)).toBe(false);
     }
   });
 

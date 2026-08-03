@@ -102,6 +102,19 @@ describe('readFile tool', () => {
     expect(result.warning).toContain('Use exact readFile');
   });
 
+  it('outline paging resumes after the last included entry when the output cap truncates (regression CR-028)', async () => {
+    const longName = 'x'.repeat(4000);
+    const lines = Array.from({length: 20}, (_unused, index) => `def f${index}_${longName}():`);
+    await fs.writeFile(path.join(tmp, 'big.py'), lines.join('\n'));
+    const first = await readFile({path: 'big.py', mode: 'outline'});
+    expect(first.outlineEntries).toBeGreaterThan(0);
+    expect(first.outlineEntries).toBeLessThan(20);
+    expect(first.outlineDroppedEntries).toBe(20 - first.outlineEntries);
+    expect(first.nextOffset).toBe(first.endLine + 1);
+    const second = await readFile({path: 'big.py', mode: 'outline', offset: first.nextOffset});
+    expect(second.content).toContain(`f${first.outlineEntries}_`);
+  });
+
   it('returns scoped instructions for nested paths once', async () => {
     await fs.outputFile(path.join(tmp, 'pkg/CLAUDE.md'), 'pkg rules');
     await fs.outputFile(path.join(tmp, 'pkg/src/a.ts'), 'export const a = 1;');

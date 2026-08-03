@@ -7,7 +7,7 @@ import {resolveWorkerRuntime, type ModelRuntimeSelection} from './client.js';
 import {resolveExecutionProfile} from '../core/subagent/executionProfiles.js';
 import {SubagentCoordinator, type CoordinatorEvent} from '../core/subagent/subagentCoordinator.js';
 import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
-import type {WorkerRuntime} from '../core/subagent/contracts.js';
+import {fallbackProviderCapabilities, fallbackWorkerRuntime, type WorkerRuntime} from '../core/subagent/contracts.js';
 import {installedLspServers} from '../config/lspSettings.js';
 import {configuredMcpServers} from '../config/mcpSettings.js';
 import {loadMcpTools, type LoadedMcpTools} from './mcp.js';
@@ -82,7 +82,10 @@ export async function assembleRequestContext(input: {
   } else if (settings.subagents?.workerModel || input.subagentOverrides?.workerModel) {
     blockedReason = 'An explicit worker model could not be resolved for this request. Configure it via /provider and retry.';
   }
-  workerRuntime ??= {model: input.model, selector: input.modelRuntime?.selector ?? 'active-model', providerName: input.modelRuntime?.config.providerName ?? 'active', capabilities: input.modelRuntime?.config.capabilities ?? {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false}, requestOptions: {}};
+  workerRuntime ??= {
+    ...fallbackWorkerRuntime(input.model, input.modelRuntime?.selector, input.modelRuntime?.config.providerName),
+    capabilities: input.modelRuntime?.config.capabilities ?? fallbackProviderCapabilities(),
+  };
 
   const toolCategories = new Map<string, ToolCategory>();
   const availableTools: ToolSet = {};

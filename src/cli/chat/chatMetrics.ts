@@ -6,10 +6,10 @@ import type {Message} from '../commands/streaming.js';
 export function toolCallCount(messages: Message[]) {
   return messages.reduce((total, message) => {
     if (message.role !== 'tool') return total;
-    const headerCount = /Tools: (\d+) calls?/.exec(message.text)?.[1];
-    if (headerCount) return total + Number(headerCount);
-    const rows = message.text.split('\n').filter(line => /^\s+[✓✗…]\s/.test(line));
-    return total + rows.reduce((rowTotal, row) => rowTotal + Number(/×(\d+)/.exec(row)?.[1] ?? 1), 0);
+    // Live tool groups carry a structured count; only restored historical
+    // transcripts fall back to counting rendered per-call rows (CR-015).
+    if (typeof message.toolCount === 'number') return total + message.toolCount;
+    return total + message.text.split('\n').filter(line => /^\s+[✓✗…]\s/.test(line)).length;
   }, 0);
 }
 

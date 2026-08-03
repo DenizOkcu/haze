@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {cacheKeyFor, providerRequestSettings, type ModelRuntimeConfig} from '../../src/llm/client.js';
+import {providerRequestSettings, type ModelRuntimeConfig} from '../../src/llm/client.js';
 
 let tmp = '';
 let settingsFile = '';
@@ -71,27 +71,6 @@ describe('providerRequestSettings', () => {
       providerOptions: {openai: {promptCacheKey: 'stable-cache-key'}},
       headers: {'x-session-id': 'stable-cache-key'},
     });
-  });
-});
-
-describe('cacheKeyFor', () => {
-  it('differs when cwd differs and stays stable when cwd is the same', () => {
-    const a1 = cacheKeyFor('gpt-4o', '/ws/a');
-    const a2 = cacheKeyFor('gpt-4o', '/ws/a');
-    const b = cacheKeyFor('gpt-4o', '/ws/b');
-    expect(a1).toBe(a2);
-    expect(a1).not.toBe(b);
-    expect(a1).toHaveLength(32);
-  });
-
-  it('changes when the model name changes', () => {
-    expect(cacheKeyFor('gpt-4o', '/ws')).not.toBe(cacheKeyFor('gpt-4o-mini', '/ws'));
-  });
-
-  it('uses process.cwd() when cwd is omitted', () => {
-    const k = cacheKeyFor('gpt-4o');
-    expect(k).toHaveLength(32);
-    expect(k).toBe(cacheKeyFor('gpt-4o', process.cwd()));
   });
 });
 
@@ -226,8 +205,22 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient();
     const runtimeA = await modelWithConfig({cwd: '/ws/a'});
     const runtimeB = await modelWithConfig({cwd: '/ws/b'});
+    const runtimeA2 = await modelWithConfig({cwd: '/ws/a'});
     expect(runtimeA!.config.cacheKey).not.toBe(runtimeB!.config.cacheKey);
+    expect(runtimeA!.config.cacheKey).toBe(runtimeA2!.config.cacheKey);
     expect(runtimeA!.config.cacheKey).toHaveLength(32);
+  });
+
+  it('changes the cache key when the model name changes', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o', 'gpt-4o-mini']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+    const {modelWithConfig} = await loadClient();
+    const main = await modelWithConfig({cwd: '/ws'});
+    const mini = await modelWithConfig({cwd: '/ws', modelSelector: 'openai:gpt-4o-mini'});
+    expect(main!.config.cacheKey).not.toBe(mini!.config.cacheKey);
   });
 
   it('resolves a model override via resolveModelSelector (provider:model)', async () => {

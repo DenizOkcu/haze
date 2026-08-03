@@ -37,7 +37,9 @@ function sessionFile(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESS
 }
 
 function newSessionId(now = new Date()) {
-  return now.toISOString().replace(/[:.]/g, '-');
+  // Timestamp prefix keeps latestSession() lexicographic ordering; the random
+  // suffix prevents same-millisecond collisions (CR-025).
+  return `${now.toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
 export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string} = {}): Promise<HazeSession> {

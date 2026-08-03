@@ -101,6 +101,23 @@ export interface WorkerRuntime {
   requestOptions: ProviderRequestOptions;
 }
 
+/** All-false capabilities + empty request options, used when no real provider runtime is known (CR-018). */
+export function fallbackProviderCapabilities(): ProviderCapabilities {
+  return {
+    reportsCacheUsage: false,
+    supportsPromptCacheKey: false,
+    supportsExtendedCacheRetention: false,
+    supportsStickySessionId: false,
+    supportsServerCompaction: false,
+    supportsTextVerbosity: false,
+  };
+}
+
+/** Single source for the placeholder runtime used when only a bare model is available (CR-018). */
+export function fallbackWorkerRuntime(model: WorkerRuntime['model'], selector = 'active-model', providerName = 'active'): WorkerRuntime {
+  return {model, selector, providerName, capabilities: fallbackProviderCapabilities(), requestOptions: {}};
+}
+
 export function normalizeSubagentInput(input: SubagentToolInput, id: string): SubagentTaskCapsule {
   return {id, objective: input.objective, deliverable: input.deliverable, mode: input.mode, scope: input.scope ?? [], acceptanceCriteria: input.acceptanceCriteria ?? []};
 }

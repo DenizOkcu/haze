@@ -1,19 +1,17 @@
 import {describe, expect, it} from 'vitest';
-import {classifyRequestIntent, isActionRequest, isPlanOnlyRequest, isValidationRequest} from '../../src/core/goal/requestClassifier.js';
+import {classifyRequestIntent, isPlanOnlyRequest} from '../../src/core/goal/requestClassifier.js';
 import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
 
 describe('requestClassifier', () => {
   it('classifies plan-only requests without treating them as actions', () => {
     expect(isPlanOnlyRequest('create a plan for auth')).toBe(true);
-    expect(isActionRequest('create a plan for auth')).toBe(false);
     expect(classifyRequestIntent('create a plan for auth')).toBe('plan');
   });
 
-  it('classifies implementation and validation requests', () => {
-    expect(isActionRequest('add password reset emails')).toBe(true);
+  it('classifies implementation, fix, and validation requests', () => {
+    expect(classifyRequestIntent('add password reset emails')).toBe('implement');
     expect(classifyRequestIntent('fix login tests')).toBe('fix');
-    expect(isValidationRequest('run npm test')).toBe(true);
     expect(classifyRequestIntent('run npm test')).toBe('test');
   });
 });

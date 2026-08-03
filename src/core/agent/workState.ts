@@ -19,12 +19,12 @@ export interface WorkState {
   touchedFiles: string[];
   validations: Array<{command: string; status: Exclude<WorkValidationStatus, 'pending'>; summary: string}>;
   validationCommands: Array<{command: string; status: WorkValidationStatus}>;
+  /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
   nextAction?: string;
   status: WorkStatus;
   phase: WorkPhase;
-  blocker?: string;
   lastProgressAt: number;
   revision: number;
 }
@@ -108,9 +108,7 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       state.phase = 'editing';
       state.lastProgressAt = now;
       state.blockers = state.blockers.filter(blocker => !blocker.includes(path));
-      if (state.blocker?.includes(path)) state.blocker = undefined;
     } else {
-      state.blocker = `File edit failed for ${path}; recovery read is required before retry.`;
       state.blockers = [...new Set([...state.blockers, `Edit failed for ${path}: ${outputSummary(event.output) || 'fresh read required'}`])];
       state.nextAction = `Read ${path}, then retry the edit with current content.`;
     }
@@ -125,7 +123,6 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       state.phase = 'validating';
       state.lastProgressAt = now;
       if (!ok) {
-        state.blocker = `Validation command failed: ${command}`;
         state.blockers = [...new Set([...state.blockers, `Validation failed: ${command}`])];
       }
     }

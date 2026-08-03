@@ -47,8 +47,3 @@ export async function walkDir(root: string, options: WalkOptions = {}): Promise<
   if (await fs.pathExists(root)) await walk(root);
   return result;
 }
-
-export async function listFilesRecursive(root: string): Promise<string[]> {
-  const entries = await walkDir(root, {recursive: true});
-  return entries.filter(e => e.isFile).map(e => e.path).sort();
-}

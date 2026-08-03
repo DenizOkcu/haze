@@ -1,11 +1,12 @@
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
 import {workspaceRelativePath, workspaceRoot} from '../../utils/path.js';
+import {MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
 import {HazeToolError} from './failures.js';
 
 const execFile = promisify(execFileCallback);
 
-export const MAX_OUTPUT_CHARS = 50_000;
+export {MAX_OUTPUT_CHARS};
 export const DEFAULT_READ_LINES = 300;
 /** Inline diff lines beyond this count are omitted (just the count is returned). */
 export const INLINE_DIFF_LINE_LIMIT = 20;
@@ -16,9 +17,9 @@ export async function isGitIgnored(absolutePath: string) {
   try {
     await execFile('git', ['-C', workspaceRoot(), 'check-ignore', '-q', '--', relative]);
     return true;
-  } catch (error) {
-    const status = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
-    if (status === 1 || status === 128) return false;
+  } catch {
+    // Fail open: exit 1 means "not ignored", exit 128 means "not a repo", and
+    // any other git failure should not block workspace reads (CR-016).
     return false;
   }
 }

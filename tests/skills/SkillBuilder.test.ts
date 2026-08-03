@@ -192,7 +192,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('writes a generated SKILL.md to ~/.haze/skills/<name>/SKILL.md when a model returns content', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => ({}) as never,
+      modelWithConfig: async () => ({model: {}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -226,7 +226,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('coerces the user-supplied name into a directory-safe kebab-case slug', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => ({}) as never,
+      modelWithConfig: async () => ({model: {}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -249,7 +249,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('uses the fallback skill when the model call fails with a non-config error', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => ({}) as never,
+      modelWithConfig: async () => ({model: {}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -271,7 +271,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('throws when no model is configured', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => undefined,
+      modelWithConfig: async () => undefined,
     }));
     const mod = await loadSkillBuilder();
     await expect(mod.createSkill({name: 'no-model', description: 'review'})).rejects.toThrow(/No model provider configured/);
@@ -279,7 +279,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('writes referenced extra files alongside SKILL.md when the model returns them', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => ({}) as never,
+      modelWithConfig: async () => ({model: {}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
@@ -306,7 +306,7 @@ describe('SkillBuilder.createSkill', () => {
 
   it('refuses to overwrite an existing skill at the same directory', async () => {
     vi.doMock('../../src/llm/client.js', () => ({
-      model: async () => ({}) as never,
+      modelWithConfig: async () => ({model: {}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
