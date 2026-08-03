@@ -33,6 +33,9 @@ User-attached images for chat prompts.
 - `isImageFilePart`/`imageFilePartBytes` are shared by `core/agent`
   (token estimates) and `core/session` (slimming); do not serialize image
   bytes in either caller.
+- Attached images are model-visible user input — the same trust class as pasted
+  text, not untrusted fetched content. haze does not parse or execute them; it
+  only reads the bytes, bounds them, and forwards them to a capable provider.
 
 ## Tests
 
