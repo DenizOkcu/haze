@@ -7,8 +7,10 @@ import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 import {findSession} from '../core/session/sessionStore.js';
+import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+installBackgroundProcessSignalHandlers();
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
 
 const program = new Command();
@@ -93,7 +95,8 @@ program.action(async () => {
   await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version: pkg.version});
 });
 
-program.parseAsync().catch((error) => {
+program.parseAsync().catch(async (error) => {
   console.error(error instanceof Error ? error.message : error);
+  await teardownBackgroundProcesses().catch(() => undefined);
   process.exit(1);
 });

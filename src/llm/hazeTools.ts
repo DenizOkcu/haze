@@ -19,6 +19,7 @@ import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContex
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
+import {processTool} from './tools/processTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 import {runRipgrepBounded} from './tools/grepRunner.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
@@ -372,6 +373,8 @@ export const hazeTools = {
   fetch: fetchTool,
 
   bash: bashTool,
+
+  process: processTool,
 
 };
 

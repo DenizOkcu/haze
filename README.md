@@ -96,6 +96,8 @@ create a calculator in calc-app in ruby with add subtract multiply divide
 
 haze can inspect and edit files, fetch public URLs, and run commands. Tool activity stays compact in the transcript. Small edits show a colorized diff with one line of context on either side; large diffs get a short summary instead. Bash output is capped while the command runs, then filtered according to the command type. Validation failures keep the useful diagnostics. Raw output handles have per-entry and total memory limits, and tell you how many bytes were dropped. Sessions are saved by default, so you can pick up the latest workspace conversation with `haze --continue` or `/resume`.
 
+The agent can start up to five dev servers or watchers as registered background processes. Their rolling output is capped at 256 KB and remains available through `readToolOutput`; the `process` tool lists, reads, and kills them. The status bar shows the live count. Starting a new session or exiting haze terminates every registered process tree, while aborting an individual turn leaves background work running. Background processes are unavailable inside fleet workers and never survive haze itself.
+
 Use `/` to discover commands and skills. `Tab` completes the top suggestion.
 
 Useful starters:

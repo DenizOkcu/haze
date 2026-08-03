@@ -16,6 +16,7 @@ export interface StoredToolOutputPage {
 }
 
 const outputs = new Map<string, {content: string; bytes: number; originalBytes: number}>();
+const dynamicOutputs = new Map<string, () => {content: string; totalBytes: number}>();
 const MAX_STORED_OUTPUTS = 100;
 let storedBytes = 0;
 
@@ -25,6 +26,16 @@ function utf8Prefix(content: string, maxBytes: number) {
   let end = maxBytes;
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
   return bytes.subarray(0, end).toString('utf8');
+}
+
+export function registerDynamicToolOutput(read: () => {content: string; totalBytes: number}) {
+  const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
+  dynamicOutputs.set(handle, read);
+  return handle;
+}
+
+export function unregisterDynamicToolOutput(handle: string) {
+  dynamicOutputs.delete(handle);
 }
 
 export function storeToolOutput(content: string) {
@@ -69,11 +80,16 @@ function searchOutput(output: string, query: string, limit: number, contextLines
 }
 
 export function readToolOutput(handle: string, offset = 0, limit = 12_000, options?: {query?: string; contextLines?: number}): StoredToolOutputPage | undefined {
-  const stored = outputs.get(handle);
+  const dynamic = dynamicOutputs.get(handle)?.();
+  const stored = dynamic
+    ? {content: dynamic.content, bytes: Buffer.byteLength(dynamic.content, 'utf8'), originalBytes: dynamic.totalBytes}
+    : outputs.get(handle);
   if (stored == null) return undefined;
   // Refresh recency so reads protect entries from LRU eviction (CR-019).
-  outputs.delete(handle);
-  outputs.set(handle, stored);
+  if (!dynamic) {
+    outputs.delete(handle);
+    outputs.set(handle, stored);
+  }
   const output = stored.content;
   if (options?.query?.trim()) {
     const result = searchOutput(output, options.query.trim(), limit, options.contextLines);

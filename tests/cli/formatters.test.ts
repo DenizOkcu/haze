@@ -48,6 +48,13 @@ describe('toolCallSummary', () => {
     expect(toolCallSummary('bash', {command: 'sleep', timeoutSeconds: 30})).toBe('bash $ sleep (timeout 30s)');
   });
 
+  it('formats background process starts and controls (F09)', () => {
+    expect(toolCallSummary('bash', {command: 'npm run dev', background: true})).toBe('bash $ npm run dev (background)');
+    expect(toolCallSummary('process', {action: 'kill', backgroundId: 'background-3'})).toBe('process kill background-3');
+    expect(toolResultSummary({success: true, output: {ok: true, background: true, backgroundId: 'background-3', command: 'npm run dev', pid: 41213}})).toBe('⏵ background-3 npm run dev (pid 41213)');
+    expect(busyToolLabel('bash', {background: true})).toBe('Starting background process');
+  });
+
   it('formats listFiles', () => {
     expect(toolCallSummary('listFiles', {path: 'src'})).toBe('listFiles src');
   });

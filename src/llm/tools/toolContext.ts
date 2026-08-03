@@ -39,6 +39,8 @@ export type HazeToolContext = {
   onContextFileRead?: (path: string) => void;
   mutationPolicy?: WorkspaceMutationPolicy;
   mutationOwner?: WorkspaceMutationOwner;
+  /** True in disposable worker contexts; background processes are main-turn-only. */
+  isSubagent?: boolean;
   /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
   blessedPaths?: readonly BlessedPath[];
 };
@@ -70,7 +72,7 @@ export function hazeContext(context: ToolExecutionContext): HazeToolContext | un
 }
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
-  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'bash', 'fetch']);
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'bash', 'process', 'fetch']);
   return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 

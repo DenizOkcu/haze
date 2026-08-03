@@ -4,6 +4,8 @@ export const MAIN_STEP_LIMIT = 64;
 export const MAIN_TOOL_CALL_LIMIT = 120;
 export const MAIN_TOOL_ONLY_STEP_LIMIT = 24;
 export const ACTIVE_CONTEXT_TOKEN_BUDGET = 40_000;
+export const BACKGROUND_PROCESS_MAX_CONCURRENCY = 5;
+export const BACKGROUND_PROCESS_HISTORY_LIMIT = 20;
 
 // Disposable worker/task-capsule limits. Keep these centralized so model-facing
 // schemas and runtime enforcement cannot drift.

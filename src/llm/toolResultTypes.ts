@@ -8,6 +8,14 @@ export type ToolFailureReasonCode =
   | 'io_error'
   | 'file_too_large'
   | 'blocked_url'
+  | 'background_limit'
+  | 'background_not_allowed'
+  | 'process_id_required'
+  | 'process_not_found'
+  | 'process_already_exited'
+  | 'process_kill_failed'
+  | 'output_expired'
+  | 'aborted'
   | 'scoped_instructions_discovered';
 
 export type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};

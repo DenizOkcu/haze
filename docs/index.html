@@ -1632,14 +1632,21 @@
           <div class="comp-group">
             <div class="comp-group-head">
               <span class="comp-group-name">Shell</span>
-              <span class="comp-group-code">HAZE-S · 1</span>
+              <span class="comp-group-code">HAZE-S · 2</span>
             </div>
             <div class="comp-item">
               <div class="comp-item-head">
                 <span class="comp-name">bash</span>
                 <span class="comp-part">HAZE-S-001</span>
               </div>
-              <p class="comp-desc">Run commands with bounded output and report their cwd, duration, classification, and validation results. A timeout or abort kills the process tree without waiting forever on an open pipe.</p>
+              <p class="comp-desc">Run commands with bounded output and report their cwd, duration, classification, and validation results. Set <code>background=true</code> for a registered dev server or watcher. A foreground timeout or abort kills the process tree without waiting forever on an open pipe.</p>
+            </div>
+            <div class="comp-item">
+              <div class="comp-item-head">
+                <span class="comp-name">process</span>
+                <span class="comp-part">HAZE-S-002</span>
+              </div>
+              <p class="comp-desc">List, read output from, or kill registered background work. Up to five processes may run; each keeps a truthful 256 KB rolling output window. The status bar shows the live count, and session reset or haze exit tears every owned tree down.</p>
             </div>
           </div>
 

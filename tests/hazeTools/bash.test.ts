@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';
+import {teardownBackgroundProcesses} from '../../src/core/process/backgroundRegistry.js';
 
 describe('bash tool safety', () => {
   let tmp: string;
@@ -12,14 +13,15 @@ describe('bash tool safety', () => {
   });
 
   afterEach(async () => {
+    await teardownBackgroundProcesses(25);
     await fs.remove(tmp);
   });
 
-  async function bash(command: string, allowMutation = false, abortSignal?: AbortSignal) {
+  async function bash(command: string, allowMutation = false, abortSignal?: AbortSignal, background = false) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.bash.execute({command, allowMutation}, {abortSignal});
+      return await hazeTools.bash.execute({command, allowMutation, background}, {abortSignal});
     } finally {
       process.chdir(originalCwd);
     }
@@ -80,6 +82,42 @@ describe('bash tool safety', () => {
     const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000}, {abortSignal: undefined});
     expect(page.content).toHaveLength(1000);
   }, 15_000);
+
+  it('starts background commands immediately and manages them through the process tool (F09)', async () => {
+    const result = await bash("node -e \"console.log('server ready');setInterval(()=>console.log('tick'),25)\"", false, undefined, true);
+    expect(result).toMatchObject({ok: true, background: true, backgroundId: expect.any(String), pid: expect.any(Number), outputHandle: expect.stringMatching(/^output-/)});
+    if (!('backgroundId' in result) || !('outputHandle' in result)) throw new Error('Expected a background result.');
+    let output: Awaited<ReturnType<typeof hazeTools.process.execute>> | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      output = await hazeTools.process.execute({action: 'output', backgroundId: result.backgroundId, offset: 0, limit: 12_000}, {abortSignal: undefined});
+      if ('content' in output && output.content.includes('server ready')) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+
+    const listed = await hazeTools.process.execute({action: 'list', offset: 0, limit: 12_000}, {abortSignal: undefined});
+    expect(listed).toMatchObject({ok: true, processes: [expect.objectContaining({backgroundId: result.backgroundId, status: 'running'})]});
+    expect(output).toMatchObject({ok: true, outputHandle: result.outputHandle});
+    expect(output && 'content' in output && output.content).toContain('server ready');
+    const killed = await hazeTools.process.execute({action: 'kill', backgroundId: result.backgroundId, offset: 0, limit: 12_000}, {abortSignal: undefined});
+    expect(killed).toMatchObject({ok: true, process: expect.objectContaining({status: 'killed'})});
+  });
+
+  it('does not start background work after turn abort or inside a worker', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = await bash('sleep 30', false, controller.signal, true);
+    expect(aborted).toMatchObject({ok: false, reasonCode: 'aborted'});
+
+    const originalCwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const worker = await hazeTools.bash.execute({command: 'sleep 30', allowMutation: false, background: true}, {context: {isSubagent: true}});
+      expect(worker).toMatchObject({ok: false, reasonCode: 'background_not_allowed'});
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
 
   it('reports explicit abort separately from timeout', async () => {
     const controller = new AbortController();

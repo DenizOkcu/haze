@@ -17,9 +17,10 @@ export function compact(value: unknown, maxLength = 180) {
 export function toolCallSummary(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
   if (toolName === 'bash' && typeof data?.command === 'string') {
-    const timeout = typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
-    return `bash $ ${data.command}${timeout}`;
+    const mode = data.background === true ? ' (background)' : typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
+    return `bash $ ${data.command}${mode}`;
   }
+  if (toolName === 'process' && typeof data?.action === 'string') return `process ${data.action}${typeof data.backgroundId === 'string' ? ` ${data.backgroundId}` : ''}`;
   if (toolName === 'grep' && typeof data?.pattern === 'string') {
     const path = typeof data.path === 'string' && data.path !== '.' ? ` in ${data.path}` : '';
     const glob = typeof data.glob === 'string' ? ` (${data.glob})` : '';
@@ -57,6 +58,9 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
   const output = event.output as Record<string, unknown> | undefined;
   if (!event.success) return `failed: ${compact(event.error ?? output?.error ?? event.output)}`;
   if (output?.duplicateSkipped === true) return 'skipped duplicate';
+  if (output?.background === true && typeof output.backgroundId === 'string') {
+    return `⏵ ${output.backgroundId} ${compact(output.command, 80)}${typeof output.pid === 'number' ? ` (pid ${output.pid})` : ''}`;
+  }
   if (typeof output?.totalMatches === 'number') {
     const count = output.totalMatches as number;
     return count === 0 ? 'no matches' : `${output.matchCountIsLowerBound === true ? 'at least ' : ''}${count} match${count === 1 ? '' : 'es'}`;
@@ -129,7 +133,9 @@ export function busyToolLabel(toolName: string, input: unknown) {
   const pathLabel = typeof data?.path === 'string' ? compact(data.path, 80) : undefined;
   switch (toolName) {
     case 'bash':
-      return 'Running command';
+      return data?.background === true ? 'Starting background process' : 'Running command';
+    case 'process':
+      return 'Managing background process';
     case 'grep':
       return 'Searching';
     case 'listFiles':

@@ -151,6 +151,7 @@ export async function runSubagent(
   const mutationPolicy = options.mutationPolicy;
   const mutationOwner = mutationPolicy?.createOwner();
   const toolExecutionContext: HazeToolContext = {
+    isSubagent: true,
     inFlightToolCalls: new Map(), loadedContextFilePaths: new Set(bundle.loadedPaths),
     loadedContextFileSignatures: new Map(bundle.loadedSignatures),
     ...(mutationPolicy && mutationOwner ? {mutationPolicy, mutationOwner} : {}),

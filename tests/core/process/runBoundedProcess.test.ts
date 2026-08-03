@@ -31,7 +31,7 @@ describe('runBoundedProcess', () => {
       expect(result.timedOut).toBe(true);
       expect(Date.now() - startedAt).toBeLessThan(750);
     } finally {
-      if (Number.isInteger(escapedPid)) {
+      if (Number.isInteger(escapedPid) && escapedPid > 0) {
         try { process.kill(escapedPid, 'SIGKILL'); } catch { /* already exited */ }
       }
     }
@@ -59,9 +59,9 @@ describe('runBoundedProcess', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-process-tree-'));
     dirs.push(dir);
     const pidFile = path.join(dir, 'child.pid');
-    const childScript = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));setInterval(()=>{},1000)`;
-    const parentScript = `require('child_process').spawn(process.execPath,['-e',${JSON.stringify(childScript)}],{stdio:'ignore'});setInterval(()=>{},1000)`;
-    const result = await runBoundedProcess({command: process.execPath, args: ['-e', parentScript], cwd: dir, timeoutMs: 1000, killGraceMs: 50, maxStdoutBytes: 100, maxStderrBytes: 100});
+    const childScript = 'setInterval(()=>{},1000)';
+    const parentScript = `const child=require('child_process').spawn(process.execPath,['-e',${JSON.stringify(childScript)}],{stdio:'ignore'});require('fs').writeFileSync(${JSON.stringify(pidFile)},String(child.pid));setInterval(()=>{},1000)`;
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', parentScript], cwd: dir, timeoutMs: 2000, killGraceMs: 50, maxStdoutBytes: 100, maxStderrBytes: 100});
     expect(result.timedOut).toBe(true);
     const pid = Number(await fs.readFile(pidFile, 'utf8'));
     let alive = true;

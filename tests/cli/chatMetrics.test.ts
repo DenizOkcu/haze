@@ -54,4 +54,10 @@ describe('chat metrics', () => {
     expect(metrics.outputEstimated).toBe(false);
     expect(metrics.hasTokenBreakdown).toBe(true);
   });
+
+  it('shows live background process count only when nonzero (F09)', () => {
+    const base = {messages: [], tokenUsage: {...EMPTY_TOKEN_USAGE}, enabledSkillCount: 0};
+    expect(statusBarMetrics({...base, backgroundProcessCount: 2}).statusDetailLabel).toContain('⏵ 2 bg');
+    expect(statusBarMetrics({...base, backgroundProcessCount: 0}).statusDetailLabel).not.toContain(' bg');
+  });
 });

@@ -8,6 +8,7 @@ import {activeModel, modelSelector, resolveModelSelector} from '../../config/pro
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 import {findSession, restoreSessionState} from '../../core/session/sessionStore.js';
+import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 
 export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
@@ -179,6 +180,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   let status: TurnStatus;
   let result: string;
   let persistenceError: string | undefined;
+  let backgroundTeardownError: string | undefined;
   try {
     ({status} = await runAgentTurn(options.prompt, options.prompt, contextFiles, callbacks, 0, false, false, session, options.modelOverride));
     result = segments.filter((s) => !s.hidden && s.text).map((s) => s.text).join('\n');
@@ -186,10 +188,14 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     status = 'failed';
     result = error instanceof Error ? error.message : String(error);
   } finally {
+    await teardownBackgroundProcesses().catch(error => {
+      backgroundTeardownError = error instanceof Error ? error.message : String(error);
+    });
     if (log) await endLog(log).catch(error => {
       persistenceError = error instanceof Error ? error.message : String(error);
     });
   }
+  if (backgroundTeardownError) process.stderr.write(`haze background teardown warning: ${backgroundTeardownError}\n`);
   if (persistenceError) process.stderr.write(`haze persistence warning: ${persistenceError}\n`);
 
   if (options.output === 'json' || options.output === 'stream-json') {

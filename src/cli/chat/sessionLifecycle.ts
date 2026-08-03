@@ -9,6 +9,7 @@ import type {Message, TokenUsage} from '../commands/streaming.js';
 import type {SessionRecorder} from './sessionRecorder.js';
 import {displayMessagesFromConversation, estimateConversationTokens} from './chatMetrics.js';
 import {EMPTY_TOKEN_USAGE} from './turnState.js';
+import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 
 /**
  * Session lifecycle controller extracted from `chat.tsx` (CR-006): session
@@ -60,6 +61,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
   }
 
   async function startNewSession(message = 'Started a new session.') {
+    await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
     await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
     clearToolOutputs();
     deps.contextFileSignaturesRef.current = new Map(deps.contextFiles().flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
@@ -125,6 +127,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         deps.setMessages(m => [...m, {role: 'system', text: 'No previous session found for this workspace.'}]);
         return;
       }
+      await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
       clearToolOutputs();
       await resumeSession(session, true);
       deps.sessionStartRef.current = new Date();
@@ -138,6 +141,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         deps.setMessages(m => [...m, {role: 'system', text: `No session named ${id} exists for this workspace.`}]);
         return false;
       }
+      await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
       clearToolOutputs();
       await resumeSession(session, true);
       deps.sessionStartRef.current = new Date();
@@ -161,6 +165,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       }
       const {session, parseErrors} = forked;
       for (const error of parseErrors) deps.debugLog(`Session parse error: ${error}`);
+      await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
       clearToolOutputs();
       await resumeSession(session, true);
       deps.sessionStartRef.current = new Date();

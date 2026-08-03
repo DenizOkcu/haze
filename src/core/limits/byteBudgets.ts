@@ -1,4 +1,5 @@
 export const BASH_STREAM_BYTES = 2 * 1024 * 1024;
+export const BACKGROUND_PROCESS_OUTPUT_BYTES = 256 * 1024;
 export const GREP_STREAM_BYTES = 8 * 1024 * 1024;
 export const PROCESS_STDERR_BYTES = 64 * 1024;
 export const TOOL_OUTPUT_ENTRY_BYTES = 2 * 1024 * 1024;

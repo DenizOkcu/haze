@@ -42,6 +42,7 @@ import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
 import {commandParts} from './wizardInput.js';
+import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
 
 interface ChatOptions {
@@ -122,6 +123,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  const [backgroundCount, setBackgroundCount] = useState(backgroundProcessCount);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
   // Heartbeat for the busy indicator: ticks every second while haze is working
   // so the developer always sees rolling activity (elapsed turn time) even when
@@ -156,6 +158,8 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     if (!nextBusy) turnStartedAtRef.current = undefined;
     setBusy(nextBusy);
   };
+  useEffect(() => subscribeBackgroundProcesses(() => setBackgroundCount(backgroundProcessCount())), []);
+
   useEffect(() => {
     if (!busy) return;
     const heartbeat = setInterval(() => setBusyTick(tick => tick + 1), 1000);
@@ -460,6 +464,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       return;
     }
     if (result === 'exit') {
+      await teardownBackgroundProcesses().catch(showPersistenceWarning);
       await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
       if (llmLogRef.current) await endLlmLog(llmLogRef.current).catch(showPersistenceWarning);
       return exit();
@@ -614,7 +619,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   ].join('\n');
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
-  const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
+  const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
@@ -711,5 +716,6 @@ export async function chatCommand(options: ChatOptions = {}) {
   await clearTasksFromStore().catch(() => undefined);
   const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />);
   await app.waitUntilExit();
+  await teardownBackgroundProcesses().catch(() => undefined);
   await clearTasksFromStore().catch(() => undefined);
 }

@@ -40,7 +40,8 @@ Current behavior:
 - `bashTool.ts` always executes commands and returns informational risk classification; `allowMutation` is compatibility-only and should not affect behavior.
 - Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
-- `bashTool.ts` runs `bash -lc` through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`.
+- `bashTool.ts` runs `bash -lc` through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`. With `background=true`, it instead registers a main-turn-only long-running process and returns immediately.
+- `processTool.ts` is the single control surface for listing, reading, and killing registered background processes. Output remains accessible through the same `readToolOutput` handle path; do not expose background spawning to fleet workers.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
 - `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer.
