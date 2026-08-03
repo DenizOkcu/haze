@@ -21,7 +21,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 
 - Tools are intentionally small, structured, and workspace-safe.
 - File tools are confined to `process.cwd()` via workspace path helpers and respect `.gitignore` unless explicit `allowIgnored`/`includeIgnored` options are used.
-- `listFiles`, `readFile`, `grep`, `bash`, and `fetch` are deduplicated within a turn when no mutation occurred.
+- `listFiles`, `readFile`, `grep`, and `fetch` are deduplicated within a turn when no mutation occurred. `bash` is never deduplicated because commands may observe changed external state between identical calls.
 - `editFile`, `replaceLines`, and `writeFile` are mutating; they must check scoped nested instructions before writing and pause if new applicable instructions are discovered.
 - Failed mutations force a fresh `readFile` before another mutation attempt on the same path.
 - Tool outputs should be JSON-serializable, bounded, and include recovery hints on failure.

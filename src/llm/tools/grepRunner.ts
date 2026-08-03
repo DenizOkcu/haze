@@ -46,6 +46,8 @@ export async function runRipgrepBounded(input: {executable: string; args: string
       lines.push(line);
       retainedBytes += lineBytes;
       try { if ((JSON.parse(line) as {type?: string}).type === 'match') matches++; } catch { /* parser reports malformed data later */ }
+      // Global match cap is enforced here (source of truth). The `--max-count`
+      // flag passed to ripgrep is a per-file safeguard only (CR-021).
       if (matches > input.maxMatches) { capped = true; stop(); }
     }
   });

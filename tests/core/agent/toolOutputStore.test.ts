@@ -44,24 +44,24 @@ describe('storeToolOutput', () => {
     expect(readToolOutput(handles.at(-1)!)).toBeDefined();
   });
 
-  it('caps the number of stored outputs, evicting oldest first (FIFO)', () => {
+  it('caps the number of stored outputs and evicts least-recently-used first (LRU)', () => {
     const handles: string[] = [];
     // Fill exactly to the cap (100): nothing evicted yet.
     for (let index = 0; index < 100; index++) {
       handles.push(storeToolOutput(`entry-${index}`));
     }
+    // Reading entry-0 refreshes its recency (CR-019).
     expect(readToolOutput(handles[0]!)).toBeDefined();
-    expect(readToolOutput(handles[99]!)).toBeDefined();
 
-    // One over the cap: the oldest (entry-0) is evicted.
+    // One over the cap: the least recently used (entry-1) is evicted, not the read entry-0.
     const over = storeToolOutput('entry-100');
-    expect(readToolOutput(handles[0]!)).toBeUndefined();
-    expect(readToolOutput(handles[1]!)).toBeDefined();
+    expect(readToolOutput(handles[1]!)).toBeUndefined();
+    expect(readToolOutput(handles[0]!)).toBeDefined();
     expect(readToolOutput(over)).toBeDefined();
 
-    // The bound is maintained, not exceeded by more than the single added entry.
+    // The bound is maintained; the next eviction takes the new LRU entry.
     const again = storeToolOutput('entry-101');
-    expect(readToolOutput(handles[1]!)).toBeUndefined();
+    expect(readToolOutput(handles[2]!)).toBeUndefined();
     expect(readToolOutput(again)).toBeDefined();
   });
 

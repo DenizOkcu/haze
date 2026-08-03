@@ -135,8 +135,8 @@ function isReadOnlyFileTool(toolName: string) {
 }
 
 // Read-only tools that participate in completed-call deduplication within a
-// turn (no side effects). File tools + bash + fetch; fetch has no path and is
-// network-side-effect-free for the agent's purposes.
+// turn (no side effects). Bash is deliberately excluded: commands can observe
+// external state changes between identical calls (CR-007).
 function isDeduplicableReadOnlyTool(toolName: string) {
   return isReadOnlyFileTool(toolName) || toolName === 'fetch';
 }
@@ -180,11 +180,9 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
       ok: true,
       duplicateSkipped: true,
       toolName,
-      reason: toolName === 'bash'
-        ? 'Skipped duplicate bash command; no files changed since the previous run.'
-        : toolName === 'fetch'
-          ? 'Skipped duplicate fetch with identical URL; no files changed since the previous call.'
-          : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
+      reason: toolName === 'fetch'
+        ? 'Skipped duplicate fetch with identical URL; no files changed since the previous call.'
+        : 'Skipped duplicate read-only tool call with identical input; no files changed since the previous call.',
     };
   }
   if (ctx.inFlightToolCalls.has(key)) {

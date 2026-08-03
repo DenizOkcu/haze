@@ -71,6 +71,9 @@ function searchOutput(output: string, query: string, limit: number, contextLines
 export function readToolOutput(handle: string, offset = 0, limit = 12_000, options?: {query?: string; contextLines?: number}): StoredToolOutputPage | undefined {
   const stored = outputs.get(handle);
   if (stored == null) return undefined;
+  // Refresh recency so reads protect entries from LRU eviction (CR-019).
+  outputs.delete(handle);
+  outputs.set(handle, stored);
   const output = stored.content;
   if (options?.query?.trim()) {
     const result = searchOutput(output, options.query.trim(), limit, options.contextLines);

@@ -148,7 +148,7 @@ export const hazeTools = {
       path: z.string().default('.').describe('Workspace-relative file or directory'),
       glob: z.string().optional().describe('Optional file glob, e.g. "*.ts"'),
       contextLines: z.number().int().nonnegative().max(5).default(2).describe('Context lines before/after each match'),
-      maxMatches: z.number().int().positive().max(200).default(50).describe('Global match limit'),
+      maxMatches: z.number().int().positive().max(200).default(50).describe('Global match limit (enforced by the runner; ripgrep also applies it as a per-file cap)'),
       caseInsensitive: z.boolean().default(false).describe('Ignore case'),
       includeIgnored: z.boolean().default(false).describe('Search ignored paths only when explicitly needed'),
     }),
