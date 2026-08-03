@@ -6,7 +6,7 @@ import {findProvider, modelSelector, resolveModelSelector} from '../../config/pr
 import {discoverProviderModels} from '../../config/modelDiscovery.js';
 import {removeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
-import {findPreset} from '../../config/providerPresets.js';
+import {findPreset, PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import type {LoadedSkill} from '../../skills/types.js';
@@ -52,6 +52,8 @@ export interface WizardDispatchDeps {
   setLspDraft: (draft: Partial<HazeLspServer>) => void;
   setMcpDraft: (draft: Partial<HazeMcpServer>) => void;
   setDiscoveredModels: (models: string[]) => void;
+  /** Curated preset models pinned atop discovered ones; cleared with discovered models. */
+  setSuggestedModels: (models: string[]) => void;
   showMessage: (message: string | undefined) => void;
   refreshSkills: () => Promise<unknown>;
   setBusyLabel: (label: string) => void;
@@ -128,10 +130,12 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
 
     deps.setProviderDraft({name: existingName, url: preset.baseUrl});
+    deps.setSuggestedModels(preset.suggestedModels ?? []);
 
     if (preset.needsApiKey) {
       setMode('providerAddKey');
-      showMessage(`${preset.name} (${preset.baseUrl})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`);
+      const keyHint = preset.apiKeyHint ?? (preset.apiKeyEnvVar ? `commonly ${preset.apiKeyEnvVar}` : undefined);
+      showMessage(`${preset.name} (${preset.baseUrl})\nAPI key${keyHint ? ` (${keyHint})` : ''}?`);
     } else {
       // Local/keyless: no API key step — jump straight to model discovery
       const hint = preset.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
@@ -257,6 +261,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
     if (value === MODEL_CHOICES.enterModelNames) {
       deps.setDiscoveredModels([]);
+      deps.setSuggestedModels([]);
       if (provider) {
         setMode('providerAppendModels');
         showMessage(`Comma-separated model names to add to ${provider.name}?`);
@@ -281,13 +286,17 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage('Comma-separated model names?');
       return;
     }
-    await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key}, 'Comma-separated model names?');
+    // Preset match by URL restores curated hints on the cloud key-step path.
+    const preset = PROVIDER_PRESETS.find(candidate => draft.url === candidate.baseUrl);
+    const hint = preset?.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
+    await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key}, `Comma-separated model names?${hint}`);
   }
 
   async function appendModelsToProvider(modelsValue: string) {
     const result = providerAppendModels(deps.settings, deps.selectedProviderName, modelsValue);
     if (!result.provider) {
       deps.setDiscoveredModels([]);
+      deps.setSuggestedModels([]);
       showMessage(result.message);
       setMode('chat');
       return;
@@ -300,6 +309,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     setSettings(next);
     deps.setSelectedProviderName(undefined);
     deps.setDiscoveredModels([]);
+    deps.setSuggestedModels([]);
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
@@ -312,12 +322,14 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       setMode('chat');
       deps.setProviderDraft({});
       deps.setDiscoveredModels([]);
+      deps.setSuggestedModels([]);
       return;
     }
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
     deps.setProviderDraft({});
     deps.setDiscoveredModels([]);
+    deps.setSuggestedModels([]);
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);

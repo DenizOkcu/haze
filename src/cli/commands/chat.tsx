@@ -128,6 +128,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [suggestedModels, setSuggestedModels] = useState<string[]>([]);
   const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
   const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
   const [skillDraft, setSkillDraft] = useState<{name?: string}>({});
@@ -281,6 +282,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMode('chat');
       setModelProviderFilter(undefined);
       setDiscoveredModels([]);
+      setSuggestedModels([]);
       setSelectedProviderName(undefined);
       setProviderDraft({});
       setSkillDraft({});
@@ -304,7 +306,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     providerDraft, lspDraft, mcpDraft, skillDraft,
     setMode, setSettings,
     setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName,
-    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft, setDiscoveredModels,
+    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft, setDiscoveredModels, setSuggestedModels,
     showMessage: showWizardMessage, refreshSkills,
     setBusyLabel, setBusy: setBusyWithHeartbeat,
     idleBusyLabel: thinkingLabelForSettings(settings),
@@ -526,7 +528,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = skills.filter(skill => isSkillEnabled(settings, skill.name)).length;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, selectedSkillName, selectedLspName, selectedMcpName});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
     ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),

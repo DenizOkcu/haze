@@ -101,6 +101,23 @@ describe('modelPickSuggestions', () => {
     const result = modelPickSuggestions({}, 'new-provider', ['a', 'b']);
     expect(result.map(r => r.value)).toEqual(['a', 'b', 'enter model names']);
   });
+
+  it('pins curated suggestions that the endpoint actually serves', () => {
+    const result = modelPickSuggestions(s, 'lmstudio', ['alpha', 'beta', 'gamma'], ['gamma', 'alpha']);
+    expect(result.map(r => r.value)).toEqual(['gamma', 'alpha', 'beta', 'enter model names']);
+    expect(result[0]?.description).toBe('suggested');
+    expect(result[2]?.description).toBe('lmstudio');
+  });
+
+  it('drops stale suggestions the endpoint no longer serves', () => {
+    const result = modelPickSuggestions(s, 'lmstudio', ['alpha', 'beta'], ['retired-model', 'beta']);
+    expect(result.map(r => r.value)).toEqual(['beta', 'alpha', 'enter model names']);
+  });
+
+  it('does not pin suggestions that are already configured', () => {
+    const result = modelPickSuggestions(s, 'lmstudio', ['qwen3', 'alpha'], ['qwen3', 'alpha']);
+    expect(result.map(r => r.value)).toEqual(['alpha', 'enter model names']);
+  });
 });
 
 describe('lspSuggestions / lspActionSuggestions', () => {

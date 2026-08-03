@@ -1,5 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import type {HazeSettings} from '../../../src/config/settings.js';
+import {findPreset} from '../../../src/config/providerPresets.js';
 import type {WizardDispatchDeps} from '../../../src/cli/chat/wizardDispatch.js';
 import type {Mode} from '../../../src/cli/commands/chatModes.js';
 
@@ -18,7 +19,7 @@ vi.mock('../../../src/config/modelDiscovery.js', () => ({
 
 const {createWizardDispatch} = await import('../../../src/cli/chat/wizardDispatch.js');
 
-type TestDeps = WizardDispatchDeps & {discoveredModels: string[]};
+type TestDeps = WizardDispatchDeps & {discoveredModels: string[]; suggestedModels: string[]};
 
 const baseSettings = (): HazeSettings => ({
   providers: [{name: 'LM Studio', url: 'http://localhost:1234/v1', models: ['qwen3']}],
@@ -38,6 +39,7 @@ function makeDeps(overrides: Partial<TestDeps> = {}): TestDeps {
     mcpDraft: {},
     skillDraft: {},
     discoveredModels: [] as string[],
+    suggestedModels: [] as string[],
     setMode: vi.fn(),
     setSettings: vi.fn(),
     setSelectedProviderName: vi.fn(),
@@ -50,6 +52,7 @@ function makeDeps(overrides: Partial<TestDeps> = {}): TestDeps {
     setLspDraft: vi.fn(),
     setMcpDraft: vi.fn(),
     setDiscoveredModels: vi.fn(),
+    setSuggestedModels: vi.fn(),
     showMessage: vi.fn(),
     refreshSkills: vi.fn(() => Promise.resolve()),
     setBusyLabel: vi.fn(),
@@ -62,6 +65,7 @@ function makeDeps(overrides: Partial<TestDeps> = {}): TestDeps {
   deps.setSelectedProviderName = vi.fn((value: string | undefined) => { deps.selectedProviderName = value; });
   deps.setModelProviderFilter = vi.fn((value: string | undefined) => { deps.modelProviderFilter = value; });
   deps.setDiscoveredModels = vi.fn((value: string[]) => { deps.discoveredModels = value; });
+  deps.setSuggestedModels = vi.fn((value: string[]) => { deps.suggestedModels = value; });
   deps.setProviderDraft = vi.fn((value: TestDeps['providerDraft']) => { deps.providerDraft = value; });
   return deps;
 }
@@ -260,6 +264,39 @@ describe('wizardDispatch provider creation discovery', () => {
     await wizard.discoverProviderModelsForDraft({});
     expect(deps.setMode).toHaveBeenLastCalledWith('providerAddModels');
     expect(mocks.discoverProviderModels).not.toHaveBeenCalled();
+  });
+
+  it('includes preset suggested models in the creation fallback prompt', async () => {
+    mocks.discoverProviderModels.mockResolvedValue(discoveryFailed('endpoint returned HTTP 404'));
+    const preset = findPreset('ollama')!;
+    const deps = makeDeps({providerDraft: {name: preset.name, url: preset.baseUrl}});
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.discoverProviderModelsForDraft(deps.providerDraft);
+    expect(deps.setMode).toHaveBeenLastCalledWith('providerAddModels');
+    const message = (deps.showMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
+    expect(message).toContain(`Example: ${preset.suggestedModels!.join(', ')}`);
+  });
+
+  it('seeds suggested models from the chosen preset before discovery', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('providerAddPreset', 'ollama');
+    const preset = findPreset('ollama')!;
+    expect(deps.suggestedModels).toEqual(preset.suggestedModels);
+    expect(mocks.discoverProviderModels).toHaveBeenCalledWith({url: preset.baseUrl, key: undefined});
+    expect(deps.setMode).toHaveBeenLastCalledWith('modelPick');
+  });
+
+  it('seeds suggested models for cloud presets before the key step', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('providerAddPreset', 'deepseek');
+    const preset = findPreset('deepseek')!;
+    expect(deps.suggestedModels).toEqual(preset.suggestedModels);
+    expect(deps.setMode).toHaveBeenLastCalledWith('providerAddKey');
   });
 });
 

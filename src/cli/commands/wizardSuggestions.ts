@@ -76,11 +76,25 @@ export function modelAddProviderSuggestions(settings: HazeSettings): TextInputSu
   }));
 }
 
-export function modelPickSuggestions(settings: HazeSettings, providerName: string | undefined, discoveredModels: string[]): TextInputSuggestion[] {
+/**
+ * Model picker fed by live /models discovery. Curated `suggestedModels`
+ * (from provider presets) are pinned atop the discovered list when the
+ * endpoint actually serves them — stale curation entries simply don't pin.
+ */
+export function modelPickSuggestions(settings: HazeSettings, providerName: string | undefined, discoveredModels: string[], suggestedModels: string[] = []): TextInputSuggestion[] {
   const provider = providerName ? findProvider(settings, providerName) : undefined;
   const configured = new Set(provider?.models ?? []);
+  const available = discoveredModels.filter(model => !configured.has(model));
+  const availableSet = new Set(available);
+  const pinned = suggestedModels.filter(model => availableSet.has(model));
+  const pinnedSet = new Set(pinned);
   return [
-    ...discoveredModels.filter(model => !configured.has(model)).map(model => ({
+    ...pinned.map(model => ({
+      value: model,
+      description: 'suggested',
+      kind: 'model' as const,
+    })),
+    ...available.filter(model => !pinnedSet.has(model)).map(model => ({
       value: model,
       description: providerName,
       kind: 'model' as const,

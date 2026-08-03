@@ -33,6 +33,7 @@ interface InputSuggestionState {
   modelProviderFilter?: string;
   providerDraftName?: string;
   discoveredModels?: string[];
+  suggestedModels?: string[];
   selectedSkillName?: string;
   selectedLspName?: string;
   selectedMcpName?: string;
@@ -45,7 +46,7 @@ export function inputSuggestionsForState(state: InputSuggestionState): TextInput
   if (mode === 'providerAddPreset') return presetSuggestions();
   if (mode === 'model') return modelSuggestions(settings, state.modelProviderFilter);
   if (mode === 'modelAddProvider') return modelAddProviderSuggestions(settings);
-  if (mode === 'modelPick') return modelPickSuggestions(settings, state.selectedProviderName ?? state.providerDraftName, state.discoveredModels ?? []);
+  if (mode === 'modelPick') return modelPickSuggestions(settings, state.selectedProviderName ?? state.providerDraftName, state.discoveredModels ?? [], state.suggestedModels ?? []);
   if (mode === 'skills') return skillsSuggestions(settings, skills);
   if (mode === 'skillsAction') return skillsActionSuggestions(settings, skills, state.selectedSkillName);
   if (mode === 'lsp') return lspSuggestions(settings);
