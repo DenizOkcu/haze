@@ -50,18 +50,40 @@ describe('providerPresets', () => {
     expect(ids).toContain('anthropic');
     expect(ids).toContain('google-gemini');
     expect(ids).toContain('mistral');
+    expect(ids).toContain('deepseek');
+    expect(ids).toContain('xai');
     expect(ids).toContain('z-ai');
     expect(ids).toContain('z-ai-coding');
+    expect(ids).toContain('kimi-code');
+    expect(ids).toContain('moonshot');
+    expect(ids).toContain('minimax-coding');
+    expect(ids).toContain('groq');
+    expect(ids).toContain('cerebras');
+    expect(ids).toContain('together');
+    expect(ids).toContain('fireworks');
+    expect(ids).toContain('huggingface');
+    expect(ids).toContain('nvidia');
+    expect(ids).toContain('qwen-token-plan');
+    expect(ids).toContain('opencode-zen');
+    expect(ids).toContain('requesty');
+    expect(ids).toContain('thesean');
+    expect(ids).toContain('atlas-cloud');
     expect(ids).toContain('github-models');
     expect(ids).toContain('github-copilot');
     expect(ids).toContain('chatgpt-codex');
-    expect(ids).toContain('kimi-code');
-    expect(ids).toContain('minimax-coding');
     expect(ids).toContain('poe');
     // Local
     expect(ids).toContain('ollama');
     expect(ids).toContain('llamacpp');
     expect(ids).toContain('mlx-server');
     expect(ids).toContain('lmstudio');
+  });
+
+  it('uses SCREAMING_SNAKE_CASE env var names for apiKeyEnvVar', () => {
+    for (const preset of PROVIDER_PRESETS) {
+      if (preset.apiKeyEnvVar) {
+        expect(preset.apiKeyEnvVar).toMatch(/^[A-Z][A-Z0-9_]*$/);
+      }
+    }
   });
 });
