@@ -4,13 +4,15 @@ A minimal LLM harness for your terminal.
 
 ## What's new in 0.9.0
 
-haze 0.9.0 addresses the security and correctness issues found during the 0.8.0 code review.
+haze 0.9.0 adds richer input, isolated parallel work, and better control over long-running sessions while completing a broad security and correctness pass.
 
-- Settings, sessions, logs, and history now use `0700` directories and `0600` files on POSIX. haze also tightens permissions on older files and directories when it can.
-- Turn and tool status now agrees across the UI, events, logs, sessions, and headless exit codes. A turn reports `failed` if it ends without a substantive answer, leaves a tool failure unresolved, or reaches a hard step or tool budget, even if the provider returned normally.
-- File reads, bash and grep output, LSP traffic, and stored handles are byte-bounded as data arrives. `readFile` keeps a small sparse index of line offsets for paging. When bash times out or is aborted, haze kills the process tree and returns even if an escaped child still has an output pipe open.
-- `grep` rejects directly named ignored files. Skills and LSP stay within real workspace or root paths, including through symlinks. MCP discovery has deadlines and responds to aborts. Credentials cannot be sent over remote plaintext HTTP, though loopback HTTP still works.
-- Sessions and debug logs preserve write order, flush at the end of a turn and during shutdown, and report persistence failures.
+- Attach png, jpeg, gif, or webp files by typing `@path` or a path containing `/`. Explicitly mentioned non-image files and directories can be read for that turn, including outside the workspace; mutating tools remain workspace-confined. `@` autocomplete browses workspace files.
+- `/fleet` decomposes genuinely independent work across disposable, context-isolated subagents. Explicit profiles, model selection, concurrency and mutation coordination keep parallel execution bounded and predictable.
+- `/resume` now opens a workspace session browser and can resume or fork a saved snapshot. Session IDs are collision-resistant, persisted entries stay compact, and ordered writes flush at turn and shutdown boundaries.
+- The agent can register up to five dev servers or watchers as managed background processes. Their bounded rolling output is readable by handle, and haze terminates every registered process tree when the session ends.
+- `/model` and provider setup can discover models from OpenAI-compatible `/models` endpoints. Curated models are pinned when available, and the provider wizard includes a larger preset catalog without silently selecting a default.
+- Rotating busy-state tips are controlled by `/tips`; terminal tabs identify the active workspace.
+- Private state uses `0700` directories and `0600` files on POSIX. Turn status is authoritative across UI, events, sessions, headless output, and exit codes. File/process/LSP/MCP collection is byte-bounded, process teardown cannot hang on retained pipes, real-path and URL boundaries fail closed, and credentialed remote plaintext HTTP is rejected.
 
 Previous releases:
 
@@ -98,7 +100,7 @@ haze can inspect and edit files, fetch public URLs, and run commands. Tool activ
 
 The agent can start up to five dev servers or watchers as registered background processes. Their rolling output is capped at 256 KB and remains available through `readToolOutput`; the `process` tool lists, reads, and kills them. The status bar shows the live count. Starting a new session or exiting haze terminates every registered process tree, while aborting an individual turn leaves background work running. Background processes are unavailable inside fleet workers and never survive haze itself.
 
-Use `/` to discover commands and skills. `Tab` completes the top suggestion.
+Use `/` to discover commands and skills. Type `@` to browse workspace files; `Tab` completes the top suggestion.
 
 Useful starters:
 
@@ -114,13 +116,13 @@ Useful starters:
 
 ## Attach images
 
-Reference a workspace image in your prompt to attach it, and haze sends it to the model alongside your text:
+Reference an image in your prompt to attach it, and haze sends it to the model alongside your text:
 
 ```txt
 @docs/screenshot.png the button in this shot is misaligned — fix it
 ```
 
-Image input is opt-in per provider. Mark a provider image-capable in `/provider` before attaching, and haze shows which providers accept images in `/settings`. Attachments are limited to png, jpeg, gif, and webp files inside the workspace, up to 5 MB and 4 per message. A non-capable provider, a non-image path, or an oversized file fails with a clear message before any model call. Resumed sessions keep a short placeholder instead of the image bytes.
+Image input is opt-in per provider. Mark a provider image-capable in `/provider` before attaching, and haze shows which providers accept images in `/settings`. Attachments are limited to png, jpeg, gif, and webp files, up to 5 MB and 4 per message. Explicit user-typed paths may point outside the workspace; this exception is read-only and never expands mutation access. A non-capable provider, an invalid image path, or an oversized file fails with a clear message before any model call. Resumed sessions keep a short placeholder instead of the image bytes.
 
 ## Skills that grow with your workflow
 
@@ -207,6 +209,8 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /exit
 
 /skills
+/tips
+/fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] <prompt>
 ```
 
 Skill management is a single interactive picker, mirroring `/provider`, `/lsp`, and `/mcp`: generate a custom skill from a description, then show info, enable/disable, validate, or remove. Disabled skills drop out of the model catalog and the `/<name>` command list until re-enabled.
@@ -214,7 +218,7 @@ Skill management is a single interactive picker, mirroring `/provider`, `/lsp`, 
 CLI flags:
 
 ```bash
-haze --debug       # show model/tool debug logs and write detailed JSONL logs to ~/.haze/logs
+haze --debug         # show model/tool debug logs and write detailed JSONL logs to ~/.haze/logs
 haze --continue      # resume the latest saved session for this workspace
 haze --resume <id>   # resume an exact session id for this workspace
 haze --no-session    # run without durable session storage
@@ -363,9 +367,9 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and anyth
 
 ## Safety model
 
-- File tools are restricted to the current workspace.
-- File tools follow `.gitignore` by default.
-- Ignored files require an explicit override.
+- Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
+- A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access.
+- Ignored workspace files require an explicit override unless covered by that user-granted read exception.
 - Bash commands are classified and shown with working-directory metadata, but haze does not use command confirmation gates.
 - The `fetch` tool only reads public `http(s)` URLs. It rejects other schemes along with private, loopback, link-local, cloud-metadata, and malformed IPv6-like hosts. On every redirect, haze connects to the public IP it already validated, which closes the DNS-rebinding gap.
 - Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.

@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-07-10 for the 0.9.0 release.
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 
@@ -15,9 +15,10 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `agent/` — context accounting, model-message compaction, request assembly, tool-result helpers, turn budgets, events, and work state.
 - `bashOutput/` — command-aware reduction of bash stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
 - `goal/` — user-request classification, session-goal state, completion/continuation prompts.
+- `attachments/` — user-typed image attachment resolution and turn-scoped read blessings for explicit paths.
 - `safety/` — bash command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
 - `session/` — durable JSONL session store, restore helpers, and disk-size slimming for streaming events/large tool outputs.
-- `subagent/` — independent tool-loop runner used by the `subagent` tool.
+- `subagent/` — independent tool-loop runner, execution profiles, coordination, and mutation policy used by the `subagent` tool and `/fleet`.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.
 - `toolOutput/` — shared token/char reduction metrics.

@@ -1,6 +1,6 @@
 # src/skills/AGENTS.md
 
-Last updated: 2026-08-03 for project-local skills (F05).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Markdown skill loading, registry, model-facing skill tool, and skill builder.
 

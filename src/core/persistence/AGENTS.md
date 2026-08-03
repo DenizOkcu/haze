@@ -1,6 +1,6 @@
 # src/core/persistence/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Ordered, flushable append writers for durable state.
 

@@ -1,6 +1,6 @@
 # src/core/session/AGENTS.md
 
-Last updated: 2026-07-10 for the security/correctness remediation (unreleased).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Durable session storage.
 
@@ -9,7 +9,7 @@ Durable session storage.
 - Sessions are JSONL files under `~/.haze/sessions/<cwd-hash>/<session-id>.jsonl` unless tests/CLI options pass another directory.
 - Session files and their parent directories use private POSIX permissions (`0600`/`0700`) via `config/privateStorage.ts`. Writes are ordered and flushable: callers preserve append invocation order and `flush()` at turn end, session switch, and shutdown, surfacing one concise persistence warning on failure rather than swallowing it.
 - Each non-empty line is one `SessionEntry` JSON object.
-- Session IDs are timestamp-derived and filenames end with `.jsonl`.
+- Session IDs use a lexicographically sortable timestamp plus a short random suffix so same-millisecond creation cannot collide; filenames end with `.jsonl`.
 - Workspace separation uses a hash of resolved cwd.
 
 ## Entry types
@@ -41,6 +41,7 @@ Maintainability focus:
 - `restoreConversation` and `restoreWorkState` return the latest snapshot of their type.
 - Malformed JSONL lines are reported in `parseErrors` with 1-based line numbers; do not silently discard corruption.
 - UI/headless callers decide how to surface parse errors.
+- `listSessions` scans workspace sessions into bounded summaries for the `/resume` picker. Resuming in place keeps the original session; forking restores its latest snapshot into a newly created session whose header records `forkedFrom`.
 
 ## Tests
 

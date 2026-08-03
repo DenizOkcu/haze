@@ -2,50 +2,44 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-08-03
+
 ### Added
 
-- Image input: attach a workspace image by mentioning its path in your prompt (for example `@docs/screenshot.png fix this layout`). haze sends it as an image part, but only to a provider you have explicitly marked image-capable via `/provider` (mark image-capable). Attachments are limited to png/jpeg/gif/webp, capped at 5 MB and 4 per message, and must live inside the workspace. Resumed sessions keep a small placeholder instead of image bytes. Non-image paths, oversized files, and non-capable providers fail with an actionable message before any model call.
+- Added image input for png/jpeg/gif/webp files mentioned with `@path` or a slash-containing bare path. Providers must be explicitly marked image-capable; each message is limited to four images and 5 MB per image, and resumed sessions store placeholders instead of bytes.
+- Added turn-scoped read blessings for user-typed file and directory paths, including host paths outside the workspace. `@` autocomplete browses gitignore-aware workspace paths. Mutating tools never honor the read exception.
+- Added context-isolated subagents with explicit modes, profiles, models, deadlines, concurrency, tool budgets, cancellation quarantine, and shared mutation coordination. `/fleet` exposes parallel-only decomposition with temporary `--review`, `--profile`, `--workers`, and `--concurrency` options.
+- Added managed background processes for up to five dev servers or watchers. Rolling output stays byte-bounded and retrievable by handle; the `process` tool lists, reads, and kills registrations, and haze tears down all process trees on session reset or exit.
+- Added a workspace session browser to `/resume`, including resume-in-place and fork-from-snapshot actions. Session headers record fork provenance.
+- Added live model discovery from OpenAI-compatible `/models` endpoints to `/model` and provider setup, with curated models pinned when served and manual entry retained as fallback. Expanded the provider preset catalog.
+- Added project-local Markdown skills under `.haze/skills`. Project skills are labeled as untrusted repository content, override same-named global skills, remain real-path-confined, and can be managed independently by scope.
+- Added rotating busy-state tips, toggled with `/tips`, cursor-aware `@` completion, and a TTY-only `haze - <cwd>` terminal title.
+- Added the spec-kit workspace and project constitution.
 
 ### Changed
 
-- Bash tool results carry byte statistics (`totalBytes`/`retainedBytes`/`omittedBytes`) instead of the raw retained stream text, so large outputs no longer duplicate into the model context. Retrieval by handle is unchanged.
-- `/compact` now condenses older messages into a bounded excerpt (most recent older messages first) and reports omitted entries, instead of embedding unbounded whitespace-collapsed text.
-- `readToolOutput` handles evict least-recently-used: reading an entry protects it until it becomes the oldest again.
-- Session IDs carry a short random suffix after the timestamp, so sessions created in the same millisecond no longer collide; newest-first ordering is unchanged.
-- Headless `haze -p ... --debug` prints `[haze]` progress lines on stderr. The undocumented `HAZE_DEBUG` environment variable is gone.
-- Branch display refreshes every 15s plus once after each turn instead of every 3s.
-
-### Fixed
-
-- `/clear` prints its "Cleared." message once.
-- Malformed or partially written `.haze/tasks.json` files load as an empty task list instead of passing unvalidated JSON to the UI.
-- Retry classification matches HTTP status codes as whole words, so messages like "processed 5000 files" are no longer treated as transient provider errors.
-- `readFile` outline paging resumes after the last included entry when the output cap truncates a page instead of skipping entries.
-- Session files no longer persist full `writeFile`/`editFile` inputs in `tool_start` events; inputs are slimmed to byte counts (and path).
-- Resuming a session scans the session file once instead of twice.
-- grep inherits the hardened bounded-process teardown (process group, `SIGTERM`→`SIGKILL` escalation, close fallback) shared with bash.
-- Fetch sends a user agent versioned from `package.json` instead of a stale hardcoded one.
-
-## 0.9.0 - 2026-07-10
-
-### Added
-
-- Subagents can handle one or more independent tasks in disposable, isolated contexts. Each worker receives a bounded task description and fresh project instructions for its scope. Mode, profile, and model selection are explicit. Workers return compact results, while their private telemetry stays out of the parent context and saved sessions.
-- `/fleet` accepts temporary `--review`, `--profile`, `--workers`, and `--concurrency` options. The runtime now enforces concurrency, deadlines, and tool-call limits. It serializes mutations across retries and quarantines work that ignores an abort instead of relying on scheduling instructions in the prompt.
+- Bash tool results carry byte statistics instead of duplicating retained stream text into model context; raw retrieval by handle is unchanged.
+- `/compact` now builds a bounded recent-first excerpt and reports omitted entries rather than embedding unbounded collapsed text.
+- `readToolOutput` eviction is true LRU: reading an entry refreshes its recency.
+- Session IDs include a random suffix to avoid same-millisecond collisions. Session restore reads conversation and work state in one scan.
+- Headless `--debug` progress uses stderr; the undocumented `HAZE_DEBUG` environment variable was removed.
+- Branch display refreshes every 15 seconds and after each turn. Chat session and wizard orchestration were split into focused helpers without changing public flows.
 
 ### Security
 
-- Private haze state uses `0700` directories and `0600` files on POSIX. Bash and process output, raw-output handles, file operations, LSP documents and frames, grep, and JSONL readers apply byte limits while collecting data. Bash timeouts and aborts terminate process trees.
-- Grep rejects ignored roots unless they are requested explicitly. Skills and LSP enforce real workspace or root boundaries. MCP discovery and cleanup have deadlines and respond to aborts. Remote plaintext HTTP endpoints cannot receive credentials.
+- Private haze state uses `0700` directories and `0600` files on POSIX. Session and debug writes are ordered, flushable, and surface persistence failures.
+- Bash/grep output, raw-output handles, file operations, LSP documents and frames, skill files, and JSONL readers apply byte limits while collecting data. Exact line paging uses a bounded, signature-validated sparse index.
+- Timed-out or aborted subprocesses terminate their process trees, escalate from `SIGTERM` to `SIGKILL`, and settle even when escaped descendants retain output pipes. Bash, grep, LSP, and managed processes share teardown primitives.
+- Grep rejects ignored roots unless explicitly allowed. Workspace skills, runtime paths, and LSP documents enforce real-path boundaries. MCP discovery and cleanup are deadline- and abort-aware.
+- Public URL validation fails closed for malformed IP-shaped hosts and pins each connection to a validated address. Credentials cannot be sent over remote plaintext HTTP; loopback HTTP remains supported.
 
 ### Fixed
 
-- `readFile` exact line pages now use a bounded, signature-validated sparse byte-offset index. Later pages no longer rescan from the beginning, cached indexes are invalidated when files change, and empty or trailing-newline final lines retain their previous behavior.
-- Timed-out or aborted commands now settle even when an escaped descendant retains stdout or stderr. Forced teardown has a short close fallback, destroys owned streams, and shares process-tree signaling with LSP servers; LSP shutdown and protocol failures now terminate the whole server tree and escalate to `SIGKILL` when needed.
-- Malformed IPv6-shaped URL hosts now fail closed instead of bypassing literal-address blocking.
-- Subagent input now uses one flat, required capsule schema instead of the old union. This prevents local OpenAI-compatible models from sending empty `{}` calls that fail validation. The orchestration tool no longer expects per-tool Haze context that the main AI SDK turn does not provide. It accepts verbose objectives and pre-mapped scopes within fixed limits, while prompts ask for compact handoffs, spell out worker budgets, and discourage repeated broad retries.
-- Turn and tool status now agrees across the UI, events, logs, sessions, and headless output. Retries expose one turn lifecycle, and structured `{ok:false}` results still count as failures.
-- Session and debug writes are ordered and flushable. Invalid skills are isolated, malformed settings remain visible, removing the active provider or model clears the selection, and stdio MCP setup no longer asks for HTTP headers.
+- Turn and tool status now agrees across UI, events, logs, sessions, headless envelopes, and exit codes. Empty answers, unresolved tool failures, and hard budget exhaustion report `failed`.
+- Subagent synthesis retains the task and gathered tool results, and long active worker waves no longer trip the idle timer. Flat required tool input avoids empty union-schema calls from local providers.
+- `/clear` prints once. Malformed `.haze/tasks.json` loads as an empty list. Retry classification matches status codes as whole words.
+- `readFile` outline paging no longer skips entries after output truncation. Session files slim large mutation inputs to path and byte counts.
+- Fetch derives its user agent from `package.json`. Invalid skills remain isolated, malformed settings remain visible, active selections clear when removed, and stdio MCP setup no longer asks for HTTP headers.
 
 ## 0.8.0 - 2026-07-09
 

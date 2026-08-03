@@ -1,6 +1,6 @@
 # src/core/validation/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Validation-output parsing.
 

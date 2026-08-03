@@ -2,28 +2,23 @@
 ==============================================================================
   Sync Impact Report
 ==============================================================================
-  Version change: 1.1.0 → 1.2.0 (MINOR: one principle added and existing
-  resource/orchestration guidance materially expanded).
-  Context: Updated after the 2026-08-03 full-codebase review of the current
-           /fleet and context-isolated subagent implementation.
+  Version change: 1.2.0 → 1.3.0 (MINOR: release behavior materially expands
+  the extension, path-boundary, process, configuration, and session contracts).
+  Context: Aligned governance with the complete haze 0.9.0 release on
+           2026-08-03.
 
-  Amendment 1.2.0 (2026-08-03):
-    - Principle II now records /fleet as the sole approved native workflow
-      exception. It remains a thin command over the existing subagent tool.
-    - Principle III now covers bounded memory, exact-page indexing, deadlines,
-      cancellation, process-tree teardown, and physical quarantine.
-    - Principle IV now requires fail-closed malformed IP-literal handling and
-      connection pinning to the validated address at every redirect hop.
-    - Added Principle IX, 'Controlled Delegation and Parallel Work', covering
-      fresh worker context, fixed mode toolsets, explicit profiles/models,
-      hard admission limits, mutation coordination, and capsule-only handoff.
+  Amendment 1.3.0 (2026-08-03):
+    - Principle II adds project-local skills, provenance, precedence, and
+      untrusted repository-content handling.
+    - Principle III adds managed background-process lifetime and output rules.
+    - Principle IV records the explicit user-path read exception while keeping
+      all mutation access workspace-confined.
+    - Principle VII permits bounded model discovery without implicit selection.
+    - Principle VIII covers collision-resistant session IDs, browsing, and
+      fork provenance.
 
-  Modified principles:
-    - II. Minimal Core, Skills as First-Class Tools
-    - III. Bounded Resources and Lifecycles
-    - IV. Strong Real-Path Boundaries and Network Safety
-  Added principles:
-    - IX. Controlled Delegation and Parallel Work
+  Modified principles: II, III, IV, VII, VIII.
+  Added principles: none.
   Removed sections: none.
 
   Templates requiring updates (propagation checklist):
@@ -36,11 +31,9 @@
       quality-gate phases can carry coordinator, cancellation, and persistence
       tasks.
     - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
-    - README.md / docs/index.html           — ✅ already describe /fleet,
-      context-isolated workers, explicit profiles, quarantine, and mutation
-      serialization.
-    - src/core/subagent/AGENTS.md, src/llm/AGENTS.md,
-      src/cli/commands/streaming/AGENTS.md — ✅ already aligned with Principle IX.
+    - README.md / CHANGELOG.md              — ✅ aligned with the complete 0.9.0
+      feature and security contract.
+    - All AGENTS.md files                   — ✅ refreshed for the 0.9.0 release.
 
   Follow-up TODOs: none for propagation. Code-review findings are reported
   separately and do not change the governance contract.
@@ -84,9 +77,13 @@ core does not grow to absorb every workflow.
   Any further native workflow exception requires an explicit constitution or
   feature-plan exception with the simpler skill alternative documented.
 - Users extend haze through skills created with the `/skills` picker (or
-  generated from a description) and stored as Markdown under
-  `~/.haze/skills/<name>/SKILL.md`. Skills are the primary, intended extension
-  mechanism — "do normal work, notice friction, create a skill, keep going."
+  generated from a description) and stored as Markdown under either
+  `~/.haze/skills/<name>/SKILL.md` (global) or
+  `<workspace>/.haze/skills/<name>/SKILL.md` (project). Project skills are
+  untrusted repository content, MUST be visibly labeled and real-path-confined,
+  and take precedence over same-named global skills unless disabled. Skills are
+  the primary extension mechanism — "do normal work, notice friction, create a
+  skill, keep going."
 - User-created skills are FIRST-CLASS objects for the model, on the same level
   as native tools: each installed skill is invocable as a `/<name>` slash
   command and discoverable through the single `skill` catalog tool, alongside
@@ -128,6 +125,10 @@ resource.
   cleanup path. A timeout or abort MUST terminate owned process trees, escalate
   when graceful shutdown fails, and settle even when a descendant retains an
   output pipe.
+- Registered background servers/watchers MUST have a hard count limit and a
+  byte-bounded rolling output tail. They MAY survive an individual turn abort,
+  but MUST be unavailable to workers and MUST be terminated on session reset or
+  haze exit.
 - Logical cancellation MAY return control before uncooperative work physically
   stops only when that work is quarantined and continues to hold its real
   concurrency and mutation capacity until settlement. A busy marker MUST NOT
@@ -142,13 +143,18 @@ capacity has been reassigned.
 The agent runs with the user's privileges; boundaries MUST prevent accidental
 exfiltration, traversal, and local-network reach.
 
-- File tools MUST confine to `process.cwd()` via shared workspace path helpers
-  and MUST follow `.gitignore` by default. Ignored paths require an explicit
-  override (`allowIgnored`/`includeIgnored`).
+- Model-selected file tools MUST confine to `process.cwd()` via shared workspace
+  path helpers and MUST follow `.gitignore` by default. Ignored paths require an
+  explicit override (`allowIgnored`/`includeIgnored`). A path explicitly typed
+  by the user as `@path` or a slash-containing bare path MAY bless that file or
+  directory for read-only tools during the turn, including outside the
+  workspace. Mutating tools MUST never honor this exception.
 - Real-path confinement (`assertRealPathInsideRoot`/`assertPathInsideRoot`)
-  MUST be reused across file tools, workspace-owned context files, workspace
-  runtime state, skills, LSP, and the skill registry so symlink escapes are
-  rejected. A repository-controlled `AGENTS.md`, `CLAUDE.md`, or `.haze` path
+  MUST be reused across mutation tools, ordinary workspace reads,
+  workspace-owned context files, workspace runtime state, project skills, LSP,
+  and the skill registry so symlink escapes are rejected. The explicit
+  user-path read exception MUST originate from genuine user input and remain
+  turn-scoped. A repository-controlled `AGENTS.md`, `CLAUDE.md`, or `.haze` path
   MUST NOT follow a symlink to read or overwrite data outside its allowed root.
 - The `fetch` tool MUST allow only public `http(s)`, blocking private,
   loopback, link-local, multicast, unspecified, cloud-metadata, and malformed
@@ -206,7 +212,9 @@ haze is transparent and opt-in by default.
 
 - There MUST be no default provider or model. Resolution requires explicit
   saved settings; an unknown or ambiguous selector MUST exit non-zero with a
-  precise error.
+  precise error. Bounded `/models` discovery MAY populate a picker, but MUST NOT
+  activate a provider or model, and manual entry MUST remain available when
+  discovery fails.
 - There MUST be no user-facing environment variables for provider/model
   configuration. Users configure via `/provider`, `/model`, and `/settings`.
 - Detailed LLM logs are OFF by default and written only with `--debug`. No
@@ -235,6 +243,10 @@ User state is private by default and crash-safe.
   events and large tool outputs MUST be slimmed to previews + byte counts, and
   malformed JSONL lines MUST be reported with 1-based line numbers rather than
   silently replaced with empty defaults.
+- Session IDs MUST preserve newest-first timestamp ordering while preventing
+  same-millisecond collisions. Browsing and restoring MUST remain scoped to the
+  current workspace; a fork creates a new session and records its source rather
+  than mutating the original snapshot.
 
 Rationale: secrets and transcripts stay private by default; ordered, flushable
 writes prevent state corruption and silent data loss on crash or shutdown.
@@ -290,9 +302,10 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
   Tool schemas and generated objects MUST use Zod. MCP tools are optional per
   turn, MUST be isolated on failure, and MUST never shadow built-ins.
 - **Skills**: the first-class extension surface. User-created skills live as
-  Markdown under `~/.haze/skills/<name>/SKILL.md`, are managed via the
-  `/skills` picker, and reach the model as `/<name>` slash commands plus the
-  single `skill` catalog tool — peers to native tools, not subordinate to them.
+  Markdown under global `~/.haze/skills/<name>/SKILL.md` or project
+  `<workspace>/.haze/skills/<name>/SKILL.md`, are managed via the `/skills`
+  picker, and reach the model as `/<name>` slash commands plus the single
+  `skill` catalog tool — peers to native tools, not subordinate to them.
 - **UI layer**: React 19 + Ink 7. Presentation lives in `src/ui/**`;
   orchestration lives in `src/cli/**`. Theme values (`theme.ts`) MUST be used
   instead of hardcoded colors. No new Markdown-rendering dependencies without
@@ -356,4 +369,4 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
 - If version-bump type is ambiguous, the proposer MUST state reasoning before
   finalizing.
 
-**Version**: 1.2.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-03
+**Version**: 1.3.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-03

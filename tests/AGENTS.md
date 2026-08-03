@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-08-03 for project-local skills (F05).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Vitest test suite instructions.
 
@@ -8,7 +8,7 @@ Vitest test suite instructions.
 
 Current regression priorities:
 
-- Cover explicit provider/model selection, malformed settings errors, project-skill precedence/provenance/symlink isolation, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
+- Cover explicit provider/model selection and discovery fallback, malformed settings errors, image/path mention parsing and read-only blessings, project-skill precedence/provenance/symlink isolation, session browsing/forking, managed background-process cleanup, subagent/fleet isolation, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.

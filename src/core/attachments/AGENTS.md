@@ -1,6 +1,6 @@
 # src/core/attachments/AGENTS.md
 
-Last updated: 2026-08-03 for F03 image input + read-blessings.
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 User-mentioned paths for chat prompts: image attachments (`imageAttachments.ts`)
 and read-blessings (`readBlessings.ts`). Both resolve from the same `@path` /

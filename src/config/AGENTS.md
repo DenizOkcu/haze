@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-08-03 for project-local skills (F05).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -9,7 +9,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `paths.ts` defines haze's user-data roots such as `~/.haze` and global skills paths.
 - `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types.
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
-- `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly.
+- `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly. `modelDiscovery.ts` performs bounded OpenAI-compatible `/models` discovery for pickers and falls back to manual entry on failure.
 - `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.
 - `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations. Skill overrides are keyed by name plus scope (`global` or `project`); an omitted scope is legacy-compatible and means `global`.
 - `inputHistory.ts` persists prompt history.

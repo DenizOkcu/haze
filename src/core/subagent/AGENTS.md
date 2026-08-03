@@ -1,12 +1,12 @@
 # src/core/subagent/AGENTS.md
 
-Last updated: 2026-07-09 for the 0.8.0 release.
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Subagent runner and model-facing subagent tool.
 
 ## Purpose
 
-Subagents are disposable context-isolation workers for one or more independently describable tasks. They receive no parent/sibling conversation and return only a compact result capsule to the parent model.
+Subagents are disposable context-isolation workers for one or more independently describable tasks. They receive no parent/sibling conversation and return only a compact result capsule to the parent model. `/fleet` is an ephemeral parallel-only wrapper over this same primitive, not a second orchestration engine.
 
 ## Contracts
 

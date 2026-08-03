@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-08-03 for project-local skills (F05).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
@@ -11,7 +11,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, context files, and one shared turn execution scope. It applies scope-aware skill enablement before project-over-global collision resolution, so disabling a project skill can re-surface its global counterpart. Close MCP clients in callers' `finally` paths.
 - `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
 - `hazeTools.ts` defines the public built-in tool catalog and schemas.
-- `tools/**` contains implementation helpers split out of `hazeTools.ts`.
+- `tools/**` contains implementation helpers split out of `hazeTools.ts`, including managed background-process registration/control.
 - `lsp.ts`/`lspTools.ts` provide optional read-only stdio LSP navigation.
 - `mcp.ts` loads tools from configured MCP servers and skips collisions rather than shadowing built-ins.
 - `toolResultTypes.ts` contains structured result types and guards shared by tools, formatters, and tests.

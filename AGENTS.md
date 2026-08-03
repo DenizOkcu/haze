@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Last updated: 2026-08-03 for project-local skills (F05).
+Last updated: 2026-08-03 for the complete 0.9.0 release.
 
 Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
-Last analysis: 2026-07-09.
+Last analysis: 2026-08-03.
 
 ## Project overview
 
@@ -14,7 +14,7 @@ Core shape:
 
 - React + Ink interactive terminal chat UI.
 - Vercel AI SDK with OpenAI-compatible providers.
-- Local tools for file discovery/read/search/edit/write, public URL fetch, bash execution, LSP/MCP integration, skills, subagents, task tracking, sessions, and compaction.
+- Local tools for file discovery/read/search/edit/write, public URL fetch, foreground and managed background processes, LSP/MCP integration, global/project skills, image attachments, subagents/fleet, task tracking, session browsing/forking, and compaction.
 - Source lives in `src/`; generated `dist/` must not be edited.
 
 Verify current package version in `package.json` before release work.
