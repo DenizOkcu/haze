@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation, restoreWorkState} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, createSession, latestSession, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
 
 describe('sessionStore', () => {
@@ -214,5 +214,21 @@ describe('sessionStore', () => {
     const toolResult = Array.isArray(content) ? content[0] as {output?: {omitted?: boolean; originalBytes?: number}} : undefined;
     expect(toolResult?.output?.omitted).toBe(true);
     expect(toolResult?.output?.originalBytes).toBeGreaterThan(32_000);
+  });
+
+  it('restores conversation and work state in one pass with parse errors reported once (regression CR-013)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const messages: ModelMessage[] = [{role: 'user', content: 'hello'}];
+    const state = createWorkState('goal', 'implementation', ['done']);
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
+    await appendSessionEntry(session, {type: 'work_state_snapshot', at: '2', state});
+    await fs.appendFile(session.file, '{not valid json\n');
+
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual(messages);
+    expect(restored.workState).toEqual(state);
+    // One scan: each malformed line surfaces exactly once.
+    expect(restored.parseErrors).toHaveLength(1);
+    expect(restored.parseErrors[0]).toContain('Line 4');
   });
 });

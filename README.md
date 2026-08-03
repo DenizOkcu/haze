@@ -330,7 +330,7 @@ Keep trivial, conversation-coupled, sequential, user-interactive, or uncertain s
 
 ## Context files
 
-haze saves durable workspace sessions in `~/.haze/sessions`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to summarize older model context. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+haze saves durable workspace sessions in `~/.haze/sessions`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, `/resume` to restore the latest session, and `/compact` to condense older model context into a bounded excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
 
 Session files are optimized for resume and audit, not token-by-token playback: completed user/assistant messages, tool lifecycle events, conversation snapshots, and work-state snapshots are persisted, but streaming `message_update` events are skipped. Large persisted tool outputs are replaced with previews and byte counts so a resumed model can reread current files instead of carrying stale megabytes forward.
 

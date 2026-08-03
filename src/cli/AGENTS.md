@@ -7,17 +7,17 @@ CLI and terminal UI orchestration instructions.
 ## Responsibilities
 
 - `index.ts` is the Commander entrypoint: parse flags, load package version, and dispatch to chat or headless command mode.
-- `commands/chat.tsx` owns the interactive Ink screen, session lifecycle, slash command wiring, mode/picker state, input history, context refresh/signature tracking, tasks display, token display, abort handling, and debug logging.
+- `commands/chat.tsx` owns the interactive Ink screen: mode/picker state, input history, context refresh/signature tracking, tasks display, token display, abort handling, and debug logging. Session lifecycle and wizard submit dispatch are delegated to `chat/sessionLifecycle.ts` and `chat/wizardDispatch.ts` (CR-006).
 - `commands/runCommand.ts` is the non-interactive/headless path; keep behavior aligned with interactive turns where practical.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
 - `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, `wizardSuggestions.ts`, and `wizardTransition.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests. `wizardTransition.ts` holds the pure typed field-transition/effect functions for provider and MCP flows; prefer extending it over adding more inline branching in `chat.tsx`.
-- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`. Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
+- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (table-driven picker/wizard submit dispatch with one shared settings-patch applier), and `chatMetrics.ts` (token/status-bar math). Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
 
 ## UI state rules
 
 Maintainability focus:
 
-- Treat `commands/chat.tsx` as orchestration glue; prefer extracting session, wizard, and turn controllers over adding more inline branches.
+- Treat `commands/chat.tsx` as orchestration glue; session and wizard behavior belong in `chat/sessionLifecycle.ts` / `chat/wizardDispatch.ts`. New picker modes should be added to the dispatch table there, not as inline branches in `submit()`.
 - Avoid dead React state. If a value is not rendered or passed to durable logic, remove it rather than keeping setter-only state.
 
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.

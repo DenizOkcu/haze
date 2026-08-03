@@ -79,6 +79,22 @@ describe('agent compaction', () => {
     expect(result.summary).toContain(longText);
   });
 
+  it('keeps the older-context excerpt bounded for very long conversations (regression CR-008)', () => {
+    const messages: ModelMessage[] = [];
+    for (let index = 0; index < 100; index++) {
+      messages.push(msg(index % 2 === 0 ? 'user' : 'assistant', `message ${index} `.repeat(200)));
+    }
+    messages.push(msg('user', 'recent'));
+    const result = compactModelMessages(messages, {keepRecentMessages: 1});
+    expect(result.compacted).toBe(true);
+    expect(result.summary!.length).toBeLessThan(20_000);
+    expect(result.summary).toContain('omitted from the excerpt');
+    // The most recent older messages survive; the oldest do not.
+    expect(result.summary).toContain('message 99');
+    expect(result.summary).not.toContain('message 0 ');
+    expect(result.messages.at(-1)).toEqual(messages.at(-1));
+  });
+
   it('does not split a retained tool result from its preceding tool call', () => {
     const messages = [
       msg('user', 'old request '.repeat(100)),

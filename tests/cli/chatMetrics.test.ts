@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {compactHomePath, estimateConversationTokens, formatTokenCount, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
+import {compactHomePath, estimateConversationTokens, formatTokenCount, statusBarMetrics, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
+import {EMPTY_TOKEN_USAGE} from '../../src/cli/chat/turnState.js';
 import type {Message} from '../../src/cli/commands/streaming.js';
 
 describe('chat metrics', () => {
@@ -37,5 +38,20 @@ describe('chat metrics', () => {
       {role: 'tool', text: 'abcd'},
       {role: 'assistant', text: 'abcdefgh'},
     ])).toEqual({input: 3, output: 2});
+  });
+
+  it('computes the status-bar detail label from structured metrics', () => {
+    const metrics = statusBarMetrics({
+      messages: [
+        {role: 'assistant', text: 'answer'},
+        {role: 'tool', text: '2 calls · 0 changes · 1s', toolCount: 2},
+      ],
+      tokenUsage: {...EMPTY_TOKEN_USAGE, inputTokens: 100, outputTokens: 50},
+      enabledSkillCount: 1,
+    });
+    expect(metrics.statusDetailLabel).toBe('1 haze message / 2 tool calls / LLM ↑100 ↓50 / 1 skill');
+    expect(metrics.inputEstimated).toBe(false);
+    expect(metrics.outputEstimated).toBe(false);
+    expect(metrics.hasTokenBreakdown).toBe(true);
   });
 });

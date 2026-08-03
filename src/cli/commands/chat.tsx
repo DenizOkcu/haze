@@ -1,7 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import fs from 'fs-extra';
 import {Box, render, Static, Text, useApp, useStdout} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
@@ -11,49 +10,34 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, findProvider, modelSelector, resolveModelSelector} from '../../config/providers.js';
-import {removeLspServer, type HazeLspServer} from '../../config/lspSettings.js';
-import {removeMcpServer} from '../../config/mcpSettings.js';
+import {activeModel} from '../../config/providers.js';
+import {type HazeLspServer} from '../../config/lspSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
-import {formatContextReport, formatElapsedTimeWhole} from './formatters.js';
-import {type LlmLog, createLog as createLlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
+import {formatElapsedTimeWhole} from './formatters.js';
+import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
-import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
-import {findPreset} from '../../config/providerPresets.js';
 import type {LoadedSkill} from '../../skills/types.js';
-import {createSession, formatSession, latestSession, restoreConversation, restoreWorkState, type HazeSession} from '../../core/session/sessionStore.js';
-import {compactModelMessages} from '../../core/agent/compaction.js';
-import {contextBreakdown} from '../../core/agent/contextBudget.js';
-import {stripSyntheticControls} from '../../core/agent/requestAssembly.js';
-import {modelWithConfig} from '../../llm/client.js';
-import {assembleRequestContext} from '../../llm/requestContext.js';
-import {closeMcpClients} from '../../llm/mcp.js';
+import {formatSession, type HazeSession} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
-import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
+import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
+import {createWizardDispatch} from '../chat/wizardDispatch.js';
+import {buildContextReport} from '../chat/contextReport.js';
 import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
-import {compactHomePath, displayMessagesFromConversation, estimateConversationTokens, formatTokenCount, toolCallCount} from '../chat/chatMetrics.js';
+import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
-import {PROVIDER_ACTIONS, PROVIDER_CHOICES, SERVER_CHOICES} from './wizardActions.js';
-import {captureLspName} from './wizardPrompts.js';
 import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
-import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from './lspWizard.js';
-import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from './mcpWizard.js';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from './providerWizard.js';
-import {selectSkillActionResult, selectSkillResult} from './skillWizard.js';
-import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from './skillCreation.js';
-import {skillConfirmRemoveResult as skillConfirmRemove} from './skillConfirmRemove.js';
-import {commandParts, isYesConfirmation} from './wizardInput.js';
+import {commandParts} from './wizardInput.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -167,6 +151,13 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     return () => clearInterval(heartbeat);
   }, [busy]);
 
+  // Refresh the branch at turn boundaries so switching branches during a turn
+  // shows up promptly without tight idle polling (CR-026).
+  useEffect(() => {
+    if (busy) return;
+    currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
+  }, [busy]);
+
   useEffect(() => {
     Promise.all([
       readSettings().then(value => ({value, error: undefined as string | undefined})).catch(error => ({value: {} as HazeSettings, error: error instanceof Error ? error.message : String(error)})),
@@ -181,7 +172,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
       setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
     }).catch(() => undefined);
-    initializeSession().catch(error => {
+    sessionLifecycle.initializeSession().catch(error => {
       const text = error instanceof Error ? error.message : String(error);
       setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
     });
@@ -199,7 +190,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
     const branchTimer = setInterval(() => {
       currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
-    }, 3000);
+    }, 15_000);
     return () => clearInterval(branchTimer);
   }, []);
 
@@ -241,139 +232,29 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     setMessages(messages => [...messages, {role: 'system', text: `Persistence warning: ${text}`}]);
   }
 
-  async function startNewLog() {
-    if (!debug) return undefined;
-    if (llmLogRef.current) {
-      await endLlmLog(llmLogRef.current).catch(showPersistenceWarning);
-    }
-    const log = await createLlmLog();
-    llmLogRef.current = log;
-    return log;
-  }
-
-  async function startNewSession(message = 'Started a new session.') {
-    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
-    clearToolOutputs();
-    contextFileSignaturesRef.current = new Map(contextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-    workStateRef.current = undefined;
-    sessionStartRef.current = new Date();
-    if (noSession) {
-      sessionRef.current = undefined;
-      return;
-    }
-    const session = await createSession({hazeVersion: version});
-    sessionRef.current = session;
-    setTokenUsage({...EMPTY_TOKEN_USAGE});
-    await startNewLog();
-    setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
-  }
-
-  async function initializeSession() {
-    if (noSession) {
-      return;
-    }
-    if (continueSession) {
-      const session = await latestSession();
-      if (session) {
-        const {messages: conversation, parseErrors: conversationErrors} = await restoreConversation(session);
-        sessionRef.current = session;
-        sessionStartRef.current = new Date();
-        conversationRef.current = conversation;
-        setLiveMessagesState(() => []);
-        const restoredMessages = displayMessagesFromConversation(conversation);
-        setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
-        const {state: workState, parseErrors: workStateErrors} = await restoreWorkState(session);
-        workStateRef.current = workState;
-        for (const error of [...conversationErrors, ...workStateErrors]) {
-          debugLog(`Session parse error: ${error}`);
-        }
-        setMessages(m => [...m, {role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...restoredMessages]);
-        await startNewLog();
-        return;
-      }
-    }
-    await startNewSession(continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.');
-  }
-
-  async function clearConversation() {
-    clearToolOutputs();
-    conversationRef.current = [];
-    lastAssistantTextRef.current = '';
-    setTokenUsage({...EMPTY_TOKEN_USAGE});
-    workStateRef.current = undefined;
-    setLiveMessagesState(() => []);
-    setMessages([{role: 'system', text: 'Cleared. The void is productive.'}]);
-    sessionRecorderRef.current?.recordNamedEvent('clear', 'Conversation cleared');
-    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
-    await startNewLog().catch(showPersistenceWarning);
-  }
-
-  function compactConversation(instructions?: string) {
-    const result = compactModelMessages(conversationRef.current, {instructions, tokenBudget: 40_000, workState: workStateRef.current});
-    if (!result.compacted) {
-      setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
-      return false;
-    }
-    conversationRef.current = result.messages;
-    sessionRecorderRef.current?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`);
-    sessionRecorderRef.current?.recordConversation(result.messages);
-    setMessages(m => [...m, {role: 'system', text: `Compacted context: summarized ${result.olderCount} older model messages and kept the last ${result.keptCount}.`}]);
-    return true;
-  }
-
-  async function resumeLatestSession() {
-    await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
-    const session = await latestSession();
-    if (!session) {
-      setMessages(m => [...m, {role: 'system', text: 'No previous session found for this workspace.'}]);
-      return;
-    }
-    const {messages: conversation, parseErrors: conversationErrors} = await restoreConversation(session);
-    const {state: workState, parseErrors: workStateErrors} = await restoreWorkState(session);
-    for (const error of [...conversationErrors, ...workStateErrors]) {
-      debugLog(`Session parse error: ${error}`);
-    }
-    clearToolOutputs();
-    sessionRef.current = session;
-    conversationRef.current = conversation;
-    workStateRef.current = workState;
-    setTokenUsage({...EMPTY_TOKEN_USAGE});
-    setLiveMessagesState(() => []);
-    setMessages([{role: 'system', text: `Resumed session: ${formatSession(session)}`}, ...displayMessagesFromConversation(conversation)]);
-  }
-
-  async function buildContextReport(): Promise<string> {
-    const runtime = await modelWithConfig({cwd: process.cwd()});
-    if (!runtime?.model) {
-      return 'No model provider configured. Run /provider to choose or add a provider before /context can estimate tokens.';
-    }
-    const session = {start: sessionStartRef.current, cwd: process.cwd()};
-    const assembled = await assembleRequestContext({contextFiles, session, model: runtime.model});
-    try {
-      const messages = stripSyntheticControls(conversationRef.current);
-      const breakdown = contextBreakdown({system: assembled.systemPrompt, contextFiles, messages, tools: assembled.availableTools});
-      const tools = breakdown.toolSchemas.map(tool => ({
-        name: tool.name,
-        tokens: tool.tokens,
-        category: assembled.toolCategories.get(tool.name) ?? 'builtin',
-      }));
-      return formatContextReport({
-        modelLabel: `${runtime.config.providerName}:${runtime.config.modelName}`,
-        systemTokens: breakdown.system,
-        projectContext: breakdown.projectContext,
-        tools,
-        messagesByRole: breakdown.messagesByRole,
-        toolResults: breakdown.toolResults,
-        toolInputs: breakdown.toolInputs,
-        syntheticControl: breakdown.syntheticControl,
-        logicalInputEstimate: breakdown.logicalInputEstimate,
-        messageCount: messages.length,
-        mcpErrors: assembled.loadedMcp?.errors ?? [],
-      });
-    } finally {
-      if (assembled.loadedMcp?.clients.length) await closeMcpClients(assembled.loadedMcp.clients);
-    }
-  }
+  // Session lifecycle (init/continue/resume/new/clear/compact) lives in a
+  // dedicated controller so this component stays orchestration glue (CR-006).
+  const sessionLifecycle = createSessionLifecycle({
+    version,
+    continueSession,
+    noSession,
+    debug,
+    contextFiles: () => contextFiles,
+    sessionRef,
+    sessionRecorder: () => sessionRecorderRef.current,
+    sessionStartRef,
+    conversationRef,
+    workStateRef,
+    lastAssistantTextRef,
+    llmLogRef,
+    contextFileSignaturesRef,
+    setMessages,
+    setLiveMessagesState,
+    setTokenUsage,
+    debugLog,
+    showPersistenceWarning,
+  });
+  const {clearConversation, compactConversation, resumeLatestSession} = sessionLifecycle;
 
   function cancelThinking() {
     if (!busy) return;
@@ -409,304 +290,23 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     }
   }
 
-  async function selectProvider(providerName: string) {
-    if (providerName === PROVIDER_CHOICES.addProvider) {
-      setProviderDraft({});
-      setMode('providerAddPreset');
-      setMessages(m => [...m, {role: 'system', text: 'Choose a provider preset, or select "custom" to enter details manually.'}]);
-      return;
-    }
-    const provider = findProvider(settings, providerName);
-    if (!provider) {
-      setMessages(m => [...m, {role: 'system', text: `No provider named ${providerName}. Use /provider and choose add provider.`}]);
-      setMode('chat');
-      return;
-    }
-    setSelectedProviderName(provider.name);
-    setMode('providerAction');
-    setMessages(m => [...m, {role: 'system', text: `${provider.name}: choose an action.`}]);
-  }
-
-  async function selectPreset(presetId: string) {
-    if (presetId === PROVIDER_CHOICES.custom) {
-      setProviderDraft({});
-      setMode('providerAddName');
-      setMessages(m => [...m, {role: 'system', text: 'Provider name? Example: openrouter, local, lmstudio.'}]);
-      return;
-    }
-
-    const preset = findPreset(presetId);
-    if (!preset) {
-      setMessages(m => [...m, {role: 'system', text: `Unknown preset: ${presetId}.`}]);
-      return;
-    }
-
-    // Check if a provider with this name already exists
-    const existingName = settings.providers?.some(p => p.name === preset.name) ? preset.id : preset.name;
-    const nameConflict = settings.providers?.some(p => p.name === existingName);
-    if (nameConflict) {
-      setMessages(m => [...m, {role: 'system', text: `Provider ${existingName} already exists. Use /provider to manage existing providers.`}]);
-      setMode('chat');
-      setProviderDraft({});
-      return;
-    }
-
-    setProviderDraft({name: existingName, url: preset.baseUrl});
-
-    if (preset.needsApiKey) {
-      setMode('providerAddKey');
-      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl})\nAPI key${preset.apiKeyHint ? ` (${preset.apiKeyHint})` : ''}?`}]);
-    } else {
-      // Local/keyless: skip API key, go straight to models
-      setMode('providerAddModels');
-      const hint = preset.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
-      setMessages(m => [...m, {role: 'system', text: `${preset.name} (${preset.baseUrl}) — no API key needed.\nComma-separated model names?${hint}`}]);
-    }
-  }
-
-  async function useProvider(providerName: string) {
-    const provider = findProvider(settings, providerName);
-    if (!provider) {
-      setMessages(m => [...m, {role: 'system', text: `No provider named ${providerName}.`}]);
-      setMode('chat');
-      setSelectedProviderName(undefined);
-      return;
-    }
-    const next = await updateSettings({provider: provider.name});
-    setSettings(next);
-    setSelectedProviderName(undefined);
-    setModelProviderFilter(provider.name);
-    setMode('model');
-    setMessages(m => [...m, {role: 'system', text: `Provider set to ${provider.name}. Choose a model.`}]);
-  }
-
-  async function selectProviderAction(action: string) {
-    if (!selectedProviderName) {
-      setMode('provider');
-      return;
-    }
-    const provider = findProvider(settings, selectedProviderName);
-    if (!provider) {
-      setMessages(m => [...m, {role: 'system', text: `Provider ${selectedProviderName} not found.`}]);
-      setMode('chat');
-      setSelectedProviderName(undefined);
-      return;
-    }
-    if (action === PROVIDER_ACTIONS.useProvider) {
-      await useProvider(selectedProviderName);
-      return;
-    }
-    const actionResult = providerActionResult(action, provider);
-    if (actionResult.selectedName === undefined) setSelectedProviderName(undefined);
-    if (actionResult.mode) setMode(actionResult.mode);
-    showWizardMessage(actionResult.message);
-  }
-
-  async function selectModel(selector: string) {
-    const scopedSelector = modelProviderFilter ? `${modelProviderFilter}:${selector}` : selector;
-    const resolved = resolveModelSelector(settings, scopedSelector);
-    if (resolved.status === 'ambiguous') {
-      setMessages(m => [...m, {role: 'system', text: `Model ${resolved.model} exists on multiple providers: ${resolved.providers.map(provider => modelSelector(provider, resolved.model)).join(', ')}`}]);
-      return;
-    }
-    if (resolved.status === 'missing') {
-      setMessages(m => [...m, {role: 'system', text: `No configured model named ${selector}. Use /provider, select a provider, then choose add models.`}]);
-      return;
-    }
-    const next = await updateSettings({provider: resolved.provider.name, model: resolved.model});
-    setSettings(next);
-    setModelProviderFilter(undefined);
-    setMode('chat');
-    setMessages(m => [...m, {role: 'system', text: `Model set to ${resolved.model} on ${resolved.provider.name}.\n\n${startupProviderInfo(next)}`}]);
-  }
-
-  async function appendModelsToProvider(modelsValue: string) {
-    const result = providerAppendModels(settings, selectedProviderName, modelsValue);
-    if (!result.provider) {
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      setMode('chat');
-      return;
-    }
-    if (!result.settingsPatch) {
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      return;
-    }
-    const next = await updateSettings(result.settingsPatch);
-    setSettings(next);
-    setSelectedProviderName(undefined);
-    setModelProviderFilter(result.provider.name);
-    setMode('model');
-    setMessages(m => [...m, {role: 'system', text: result.message}]);
-  }
-
-  async function finishProviderAdd(modelsValue: string) {
-    const result = providerFinishAdd(settings, providerDraft, modelsValue);
-    if (!result.provider || !result.settingsPatch) {
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      setMode('chat');
-      setProviderDraft({});
-      return;
-    }
-    const next = await updateSettings(result.settingsPatch);
-    setSettings(next);
-    setProviderDraft({});
-    setModelProviderFilter(result.provider.name);
-    setMode('model');
-    setMessages(m => [...m, {role: 'system', text: result.message}]);
-  }
-
-  // --- LSP wizard handlers (mirror the provider wizard) ---
-
   function showWizardMessage(message: string | undefined) {
     if (message) setMessages(m => [...m, {role: 'system', text: message}]);
   }
 
-  async function selectLspServer(serverName: string) {
-    const result = selectLspServerResult(settings, serverName);
-    if (result.clearDraft) setLspDraft({});
-    if (serverName === SERVER_CHOICES.addServer) setMode('lspAddPreset');
-    else if (result.mode) setMode(result.mode);
-    if (result.selectedName !== undefined) setSelectedLspName(result.selectedName);
-    showWizardMessage(result.message);
-  }
-
-  async function selectLspPreset(presetId: string) {
-    const result = selectLspPresetResult(settings, presetId);
-    if (result.clearDraft) setLspDraft({});
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function selectLspAction(action: string) {
-    const result = selectLspActionResult(settings, selectedLspName, action);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) setSelectedLspName(result.selectedName);
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function finishLspCustom(commandLine: string) {
-    const result = finishLspCustomResult(settings, lspDraft.name, commandLine);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if (result.clearDraft) setLspDraft({});
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  // --- MCP wizard handlers (mirror the provider wizard) ---
-
-  async function selectMcpServer(serverName: string) {
-    const result = selectMcpServerResult(settings, serverName);
-    if (result.clearDraft) setMcpDraft({});
-    if (serverName === SERVER_CHOICES.addServer) setMode('mcpAddPreset');
-    else if (result.mode) setMode(result.mode);
-    if (result.selectedName !== undefined) setSelectedMcpName(result.selectedName);
-    showWizardMessage(result.message);
-  }
-
-  async function selectMcpPreset(presetId: string) {
-    const result = selectMcpPresetResult(settings, presetId);
-    if (result.clearDraft) setMcpDraft({});
-    if (result.draft) setMcpDraft(result.draft);
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function selectMcpAction(action: string) {
-    const result = selectMcpActionResult(settings, selectedMcpName, action);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function finishMcpCustom(keyValue?: string, draft = mcpDraft) {
-    const result = finishMcpCustomResult(settings, draft, keyValue);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if (result.clearDraft) setMcpDraft({});
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function setMcpServerKey(keyValue: string) {
-    const result = setMcpServerKeyResult(settings, selectedMcpName, keyValue);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  // --- Skills wizard handlers (mirror the provider/LSP/MCP wizards) ---
-
-  async function selectSkill(name: string) {
-    const result = selectSkillResult(skills, name);
-    if (result.clearDraft) setSkillDraft({});
-    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
-    if (result.mode) setMode(result.mode);
-    showWizardMessage(result.message);
-  }
-
-  async function selectSkillAction(action: string) {
-    const result = selectSkillActionResult(settings, skills, selectedSkillName, action);
-    if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
-    if (result.mode) setMode(result.mode);
-    if (result.validate && result.skill) {
-      const {loadSkill} = await import('../../skills/SkillLoader.js');
-      try {
-        const loaded = await loadSkill(result.skill.dir, 'global');
-        showWizardMessage(loaded ? `Valid: ${loaded.name}` : 'No SKILL.md found');
-      } catch (error) {
-        const text = error instanceof Error ? error.message : String(error);
-        showWizardMessage(`Invalid skill: ${text}`);
-      }
-      return;
-    }
-    showWizardMessage(result.message);
-  }
-
-  async function captureSkillName(value: string) {
-    const dirName = toSkillDirName(value);
-    if (!dirName) {
-      setMessages(m => [...m, {role: 'system', text: 'Skill name must contain at least one letter or number. Try again, or press ESC to cancel.'}]);
-      return;
-    }
-    const registry = await loadSkillRegistry();
-    if (registry.skills.has(dirName)) {
-      setMessages(m => [...m, {role: 'system', text: `A skill named "${dirName}" already exists. Pick another name, or press ESC to cancel.`}]);
-      return;
-    }
-    setSkillDraft(d => ({...d, name: dirName}));
-    setMode('skillsAddDescription');
-    setMessages(m => [...m, {role: 'system', text: `Describe what "${dirName}" should do. This is the work the LLM will expand into the skill body.`}]);
-  }
-
-  async function captureSkillDescription(value: string) {
-    const result = captureSkillDescriptionResult(value, skillDraft.name);
-    if (result.message) {
-      const message = result.message;
-      setMessages(m => [...m, {role: 'system', text: message}]);
-    }
-    if (result.mode === 'chat') setMode('chat');
-    if (result.clearDraft) setSkillDraft({});
-    if (result.description && result.draftName) {
-      const name = result.draftName;
-      const description = result.description;
-      setBusyLabel(result.busyLabel ?? 'Creating skill');
-      setBusyWithHeartbeat(true);
-      try {
-        const created = await createSkill({name, description});
-        setMessages(m => [...m, {role: 'system', text: skillCreationMessage(created.name, created.file)}]);
-        await refreshSkills();
-      } catch (error) {
-        setMessages(m => [...m, {role: 'system', text: skillCreationFailure(error)}]);
-      } finally {
-        setBusyWithHeartbeat(false);
-        setBusyLabel(thinkingLabelForSettings(settings));
-      }
-    }
-  }
+  // Wizard/picker submit dispatch lives in one table-driven module with a
+  // shared settings-patch applier (CR-006). Rebuilt every render so handlers
+  // see current state without new React state.
+  const wizard = createWizardDispatch({
+    settings, skills, modelProviderFilter, selectedProviderName, selectedSkillName, selectedLspName, selectedMcpName,
+    providerDraft, lspDraft, mcpDraft, skillDraft,
+    setMode, setSettings,
+    setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName,
+    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft,
+    showMessage: showWizardMessage, refreshSkills,
+    setBusyLabel, setBusy: setBusyWithHeartbeat,
+    idleBusyLabel: thinkingLabelForSettings(settings),
+  });
 
   async function submit(value: string) {
     if (settingsError) {
@@ -747,214 +347,12 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         if (effect.type === 'message') showWizardMessage(effect.text);
         else if (effect.type === 'mode') setMode(effect.mode);
         else if (effect.type === 'mcp-draft') setMcpDraft(draft => ({...draft, ...effect.patch}));
-        else if (effect.type === 'finish-mcp-stdio') await finishMcpCustom(undefined, effect.draft);
+        else if (effect.type === 'finish-mcp-stdio') await wizard.finishMcpCustom(undefined, effect.draft);
       }
       return;
     }
 
-    if (mode === 'skills') {
-      await selectSkill(value);
-      return;
-    }
-    if (mode === 'skillsAction') {
-      await selectSkillAction(value);
-      return;
-    }
-    if (mode === 'skillsAddName') {
-      await captureSkillName(value);
-      return;
-    }
-    if (mode === 'skillsAddDescription') {
-      await captureSkillDescription(value);
-      return;
-    }
-    if (mode === 'skillsConfirmRemove') {
-      const result = skillConfirmRemove(settings, skills, selectedSkillName, value);
-      if (result.message) {
-        const message = result.message;
-        setMessages(m => [...m, {role: 'system', text: message}]);
-      }
-      if (result.selectedName === undefined) setSelectedSkillName(undefined);
-      if (result.mode === 'chat') setMode('chat');
-      if (result.removedDir) await fs.remove(result.removedDir);
-      if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-      if (result.removedDir) await refreshSkills();
-      return;
-    }
-
-    if (mode === 'provider') {
-      await selectProvider(value);
-      return;
-    }
-
-    if (mode === 'providerAction') {
-      await selectProviderAction(value);
-      return;
-    }
-
-    if (mode === 'providerAddPreset') {
-      await selectPreset(value);
-      return;
-    }
-
-    if (mode === 'model') {
-      await selectModel(value);
-      return;
-    }
-
-    if (mode === 'providerAddModels') {
-      await finishProviderAdd(value);
-      return;
-    }
-
-    if (mode === 'providerAppendModels') {
-      await appendModelsToProvider(value);
-      return;
-    }
-
-    if (mode === 'providerSetKey') {
-      const result = providerSetKey(settings, selectedProviderName, value);
-      if (!result.provider) {
-        setMessages(m => [...m, {role: 'system', text: result.message}]);
-        setMode('chat');
-        return;
-      }
-      if (!result.settingsPatch) {
-        setMessages(m => [...m, {role: 'system', text: result.message}]);
-        return;
-      }
-      setSettings(await updateSettings(result.settingsPatch));
-      setSelectedProviderName(undefined);
-      setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      return;
-    }
-
-    if (mode === 'providerRemoveModels') {
-      const result = providerRemoveModels(settings, selectedProviderName, value);
-      if (!result.provider) {
-        setMessages(m => [...m, {role: 'system', text: result.message}]);
-        setMode('chat');
-        return;
-      }
-      if (!result.settingsPatch) {
-        setMessages(m => [...m, {role: 'system', text: result.message}]);
-        return;
-      }
-      const next = await updateSettings(result.settingsPatch);
-      setSettings(next);
-      setSelectedProviderName(undefined);
-      setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      return;
-    }
-
-    if (mode === 'providerConfirmRemove') {
-      const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
-      if (!provider) {
-        setMessages(m => [...m, {role: 'system', text: 'No provider selected.'}]);
-        setMode('chat');
-        return;
-      }
-      if (!isYesConfirmation(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Cancelled. Provider not removed.'}]);
-        setSelectedProviderName(undefined);
-        setMode('chat');
-        return;
-      }
-      const result = providerRemove(settings, selectedProviderName);
-      const next = await updateSettings(result.settingsPatch ?? {});
-      setSettings(next);
-      setSelectedProviderName(undefined);
-      setMode('chat');
-      setMessages(m => [...m, {role: 'system', text: result.message}]);
-      return;
-    }
-
-    if (mode === 'lsp') {
-      await selectLspServer(value);
-      return;
-    }
-    if (mode === 'lspAction') {
-      await selectLspAction(value);
-      return;
-    }
-    if (mode === 'lspAddPreset') {
-      await selectLspPreset(value);
-      return;
-    }
-    if (mode === 'lspAddName') {
-      const result = captureLspName(settings, value);
-      if (result.message) {
-        showWizardMessage(result.message);
-        return;
-      }
-      if (result.draft) setLspDraft({name: result.draft.name});
-      if (result.nextMode) setMode(result.nextMode as typeof mode);
-      showWizardMessage(result.systemMessage);
-      return;
-    }
-    if (mode === 'lspAddCommand') {
-      await finishLspCustom(value);
-      return;
-    }
-    if (mode === 'lspConfirmRemove') {
-      if (!selectedLspName) {
-        setMode('chat');
-        return;
-      }
-      if (!isYesConfirmation(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Cancelled. LSP server not removed.'}]);
-        setSelectedLspName(undefined);
-        setMode('chat');
-        return;
-      }
-      const next = await updateSettings({lspServers: removeLspServer(settings, selectedLspName)});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `Removed LSP server ${selectedLspName}.`}]);
-      setSelectedLspName(undefined);
-      setMode('chat');
-      return;
-    }
-
-    if (mode === 'mcp') {
-      await selectMcpServer(value);
-      return;
-    }
-    if (mode === 'mcpAction') {
-      await selectMcpAction(value);
-      return;
-    }
-    if (mode === 'mcpAddPreset') {
-      await selectMcpPreset(value);
-      return;
-    }
-    if (mode === 'mcpAddKey') {
-      await finishMcpCustom(value);
-      return;
-    }
-    if (mode === 'mcpSetKey') {
-      await setMcpServerKey(value);
-      return;
-    }
-    if (mode === 'mcpConfirmRemove') {
-      if (!selectedMcpName) {
-        setMode('chat');
-        return;
-      }
-      if (!isYesConfirmation(value)) {
-        setMessages(m => [...m, {role: 'system', text: 'Cancelled. MCP server not removed.'}]);
-        setSelectedMcpName(undefined);
-        setMode('chat');
-        return;
-      }
-      const next = await updateSettings({mcpServers: removeMcpServer(settings, selectedMcpName)});
-      setSettings(next);
-      setMessages(m => [...m, {role: 'system', text: `Removed MCP server ${selectedMcpName}.`}]);
-      setSelectedMcpName(undefined);
-      setMode('chat');
-      return;
-    }
+    if (await wizard.dispatch(mode, value)) return;
 
     const invokedSkill = skillInvocation(value);
     if (invokedSkill) {
@@ -975,7 +373,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         lastAssistantTextRef.current = '';
         setLiveMessagesState(() => []);
         setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
-        await startNewSession('Started a new session.');
+        await sessionLifecycle.startNewSession('Started a new session.');
       },
       resumeSession: resumeLatestSession,
       sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
@@ -992,7 +390,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         setSettings(next);
         return next;
       },
-      getContextReport: async () => buildContextReport(),
+      getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
     };
     let result;
     try {
@@ -1120,19 +518,8 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     'while trying to stay scoped to this project.',
   ].join('\n');
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
-  const allDisplayMessages = [...messages, ...liveMessages];
-  const hazeMessages = allDisplayMessages.filter(message => message.role === 'assistant' && !message.hidden).length;
-  const toolsUsed = toolCallCount(allDisplayMessages);
-  const fallbackTokens = estimateConversationTokens(allDisplayMessages);
-  const estimatedLogicalInput = tokenUsage.logicalInputEstimate || fallbackTokens.input || 0;
-  const providerInput = tokenUsage.inputTokens;
-  const effectiveInput = providerInput == null ? estimatedLogicalInput : Math.max(providerInput, estimatedLogicalInput);
-  const effectiveOutput = tokenUsage.outputTokens ?? (fallbackTokens.output || 0);
-  const inputEstimated = providerInput == null || effectiveInput !== providerInput;
-  const outputEstimated = tokenUsage.outputTokens == null;
-  const enabledSkills = skills.filter(skill => isSkillEnabled(settings, skill.name));
-  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkills.length} skill${enabledSkills.length === 1 ? '' : 's'}`;
-  const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
+  const enabledSkillCount = skills.filter(skill => isSkillEnabled(settings, skill.name)).length;
+  const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, selectedProviderName, modelProviderFilter, selectedSkillName, selectedLspName, selectedMcpName});
   const staticItems = [
     {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
@@ -1196,16 +583,16 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
         />
       </Box>
     </Box>
-    {debug && hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
-      <Text color={theme.muted} bold>Token usage {inputEstimated || outputEstimated ? '(estimated)' : '(precise)'}</Text>
-      <Text color={theme.muted}>  in={formatTokenCount(effectiveInput)} out={formatTokenCount(effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
+    {debug && metrics.hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
+      <Text color={theme.muted} bold>Token usage {metrics.inputEstimated || metrics.outputEstimated ? '(estimated)' : '(precise)'}</Text>
+      <Text color={theme.muted}>  in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
       <Text color={theme.muted}>  logical={formatTokenCount(tokenUsage.logicalInputEstimate)}{tokenUsage.effectiveNonCachedInput != null ? ` effective_non_cached=${formatTokenCount(tokenUsage.effectiveNonCachedInput)}` : ''}</Text>
       <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>
     </Box>}
     <Box flexShrink={0} justifyContent="space-between">
       <Box flexDirection="column" flexShrink={1} minWidth={0}>
         <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>
-        <Text color={theme.muted} dimColor wrap="truncate-end">{statusDetailLabel}</Text>
+        <Text color={theme.muted} dimColor wrap="truncate-end">{metrics.statusDetailLabel}</Text>
       </Box>
       <Box flexShrink={0} marginLeft={2}>
         <Text color={theme.muted} dimColor wrap="truncate-start">{activeModelName}</Text>

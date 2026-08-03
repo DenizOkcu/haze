@@ -92,6 +92,12 @@ async function loadStreaming(config: MocksConfig) {
     },
   }));
 
+  // The turn reads settings once at start (CR-024); keep tests home-isolated.
+  vi.doMock('../../../src/config/settings.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../src/config/settings.js')>();
+    return {...actual, readSettings: async () => ({})};
+  });
+
   vi.doMock('ai', async () => {
     const actual = await vi.importActual<typeof import('ai')>('ai');
     class FakeToolLoopAgent {

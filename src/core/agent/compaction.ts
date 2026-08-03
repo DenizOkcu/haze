@@ -1,6 +1,7 @@
 import type {ModelMessage} from 'ai';
 import {estimateValueTokens} from './contextBudget.js';
 import {workStatePrompt, type WorkState} from './workState.js';
+import {COMPACTION_OLDER_CHARS} from '../limits/textBudgets.js';
 
 export interface CompactionResult {
   compacted: boolean;
@@ -42,10 +43,21 @@ export function compactModelMessages(
   if (recentStart === 0) return {compacted: false, messages, olderCount: 0, keptCount: messages.length};
   const older = messages.slice(0, recentStart);
   const recent = messages.slice(recentStart);
-  const oldText = older.map(message => {
+  const olderEntries = older.map(message => {
     const text = modelMessageText(message).replace(/\s+/g, ' ').trim();
     return text ? `- ${message.role}: ${text}` : '';
-  }).filter(Boolean).join('\n');
+  }).filter(Boolean);
+  // Keep the excerpt bounded, favoring the most recent older messages (CR-008).
+  const keptEntries: string[] = [];
+  let excerptChars = 0;
+  for (let index = olderEntries.length - 1; index >= 0; index--) {
+    const entry = olderEntries[index]!;
+    if (excerptChars + entry.length + 1 > COMPACTION_OLDER_CHARS && keptEntries.length > 0) break;
+    keptEntries.unshift(entry);
+    excerptChars += entry.length + 1;
+  }
+  const omittedEntries = olderEntries.length - keptEntries.length;
+  const oldText = keptEntries.join('\n');
   const summary = [
     'Compacted prior haze conversation. Treat this as continuity context, not a new user request.',
     'Preserve especially: current user goal and success condition; explicit user constraints/preferences/decisions; files created/changed/read; validation commands and pass/fail results; blockers or pending product decisions; exact next action if work was unfinished.',
@@ -53,8 +65,9 @@ export function compactModelMessages(
     options.instructions ? `User compaction instructions: ${options.instructions}` : undefined,
     options.workState ? workStatePrompt(options.workState) : undefined,
     '',
-    'Older context summary:',
+    'Older context excerpt (whitespace-collapsed, most recent first within a bounded budget):',
     oldText || '- Older messages were tool-only or non-text.',
+    omittedEntries > 0 ? `[${omittedEntries} older message(s) omitted from the excerpt to keep compaction bounded; rely on the preserved points above.]` : undefined,
   ].filter((line): line is string => line !== undefined).join('\n');
 
   return {

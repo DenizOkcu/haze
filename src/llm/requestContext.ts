@@ -61,8 +61,10 @@ export async function assembleRequestContext(input: {
   onSubagentEvent?: (event: CoordinatorEvent) => void;
   abortSignal?: AbortSignal;
   executionScope?: TurnExecutionScope;
+  /** Pre-read settings so a turn performs a single settings read (CR-024). */
+  settings?: Awaited<ReturnType<typeof readSettings>>;
 }): Promise<AssembledRequestContext> {
-  const settings = await readSettings();
+  const settings = input.settings ?? await readSettings();
   const skillRegistry = await loadSkillRegistry();
   const enabledSkills = new Map([...skillRegistry.skills.entries()].filter(([name]) => isSkillEnabled(settings, name)));
   const hasInstalledLsp = (await installedLspServers(settings)).length > 0;

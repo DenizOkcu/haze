@@ -9,6 +9,8 @@ vi.doMock('../../src/config/paths.js', () => ({
   HAZE_DIR: commandHome,
   GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills'),
 }));
+const openPathSpy = vi.fn();
+vi.doMock('../../src/utils/openPath.js', () => ({openPath: openPathSpy}));
 const {handleSlashCommand} = await import('../../src/cli/commands/commands.js');
 
 afterAll(async () => {
@@ -87,6 +89,14 @@ describe('handleSlashCommand', () => {
     await handleSlashCommand('/settings', ctx);
     const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(msg).toContain('missing');
+  });
+
+  it('opens the settings file via the platform handler for /settings open', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/settings open', ctx)).toBe('handled');
+    expect(openPathSpy).toHaveBeenCalledTimes(1);
+    expect(openPathSpy.mock.calls[0]?.[0]).toContain('settings.json');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Opened settings file'));
   });
 
   it('enters model mode for /model', async () => {

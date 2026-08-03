@@ -44,6 +44,7 @@ Current settings behavior:
 
 - Settings may contain API keys. Never log full settings or print secret fields unless the user explicitly asks and understands the risk.
 - Write JSON/YAML atomically enough for normal CLI use and preserve unrelated existing fields where possible.
+- haze assumes a single writer for `settings.json`. Writes are read-modify-write with an atomic temp-file-plus-rename, so the file cannot corrupt, but two concurrent haze instances can lose each other's updates. This is an accepted limitation (CR-027); do not add file locking unless a real need appears.
 - Keep tests isolated from the real home directory by using temp dirs/mocks.
 
 ## Tests

@@ -1,7 +1,7 @@
-import {spawn} from 'node:child_process';
 import fs from 'fs-extra';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
+import {openPath} from '../../utils/openPath.js';
 import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
@@ -39,15 +39,6 @@ type SlashCommand = {
 async function ensureSettingsFile(settings: HazeSettings) {
   if (!await fs.pathExists(SETTINGS_FILE)) await writeSettings(settings);
   return SETTINGS_FILE;
-}
-
-function openPath(filePath: string) {
-  if (process.env.VITEST || process.env.NODE_ENV === 'test') return;
-  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', filePath] : [filePath];
-  const child = spawn(command, args, {stdio: 'ignore', detached: true});
-  child.on('error', () => undefined);
-  child.unref();
 }
 
 const HANDLED: CommandResult = 'handled';

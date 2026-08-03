@@ -14,6 +14,8 @@ export const SHORT_VALIDATION_CHARS = 2_000;
 export const GREP_MAX_OUTPUT_CHARS = 30_000;
 /** Per-line cap for rendered grep matches. */
 export const GREP_MAX_LINE_CHARS = 500;
+/** Bounded excerpt of older messages kept by /compact-style compaction. */
+export const COMPACTION_OLDER_CHARS = 8_000;
 /** Session JSONL values up to this size stay inline; larger ones become previews. */
 export const SESSION_INLINE_VALUE_BYTES = 32 * 1024;
 /** Preview length for slimmed session values. */

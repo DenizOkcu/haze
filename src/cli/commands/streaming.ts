@@ -6,6 +6,7 @@ import {assembleRequestContext, type SubagentOverrides, type TurnExecutionScope}
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
+import {readSettings} from '../../config/settings.js';
 import {toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds} from './formatters.js';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
@@ -116,7 +117,10 @@ async function runAgentAttempt(
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
 
   try {
-    const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride});
+    // Single choke point: one fresh settings read per turn, shared by model
+    // resolution and request assembly (CR-024).
+    const turnSettings = await readSettings();
+    const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride}, turnSettings);
     if (!runtime?.model) {
       callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
       turnStatus = 'failed';
@@ -129,7 +133,7 @@ async function runAgentAttempt(
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
     const providerSettings = providerRequestSettings(runtime.config);
-    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
+    const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
       ? {type: 'subagent_state', id: event.id, state: 'queued', mode: event.mode, queued: event.queued, running: event.running}
       : event.type === 'started'
         ? {type: 'subagent_state', id: event.id, state: 'started', mode: event.mode, queueMs: event.queueMs, running: event.running}

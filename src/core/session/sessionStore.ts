@@ -119,11 +119,29 @@ export interface RestoreConversationResult {
   parseErrors: string[];
 }
 
-export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
+export interface RestoreSessionStateResult {
+  messages: ModelMessage[];
+  workState: WorkState | undefined;
+  parseErrors: string[];
+}
+
+/**
+ * Restore conversation and work state in one file scan (CR-013). Session
+ * files grow to megabytes in long workspaces; resuming should not parse the
+ * JSONL twice.
+ */
+export async function restoreSessionState(session: HazeSession): Promise<RestoreSessionStateResult> {
   let messages: ModelMessage[] = [];
+  let workState: WorkState | undefined;
   const parseErrors = await scanSessionEntries(session, entry => {
     if (entry.type === 'conversation_snapshot') messages = entry.messages;
+    if (entry.type === 'work_state_snapshot') workState = entry.state;
   });
+  return {messages, workState, parseErrors};
+}
+
+export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
+  const {messages, parseErrors} = await restoreSessionState(session);
   return {messages, parseErrors};
 }
 
@@ -133,11 +151,8 @@ export interface RestoreWorkStateResult {
 }
 
 export async function restoreWorkState(session: HazeSession): Promise<RestoreWorkStateResult> {
-  let state: WorkState | undefined;
-  const parseErrors = await scanSessionEntries(session, entry => {
-    if (entry.type === 'work_state_snapshot') state = entry.state;
-  });
-  return {state, parseErrors};
+  const {workState, parseErrors} = await restoreSessionState(session);
+  return {state: workState, parseErrors};
 }
 
 export function formatSession(session: HazeSession) {

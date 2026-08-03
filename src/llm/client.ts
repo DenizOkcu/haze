@@ -63,15 +63,17 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   };
 }
 
-export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string}) {
-  const settings = await readSettings();
+export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string}, settings?: Awaited<ReturnType<typeof readSettings>>) {
+  // Callers may pass pre-read settings so a turn performs a single settings
+  // read (CR-024); otherwise read fresh.
+  const resolvedSettings = settings ?? await readSettings();
   const override = session?.modelSelector?.trim();
   let selection: {provider: HazeProviderSettings; model: string} | undefined;
   if (override) {
-    const resolved = resolveModelSelector(settings, override);
+    const resolved = resolveModelSelector(resolvedSettings, override);
     if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
-  } else selection = activeModel(settings);
-  return selection ? runtimeForSelection(settings, selection, session?.cwd) : undefined;
+  } else selection = activeModel(resolvedSettings);
+  return selection ? runtimeForSelection(resolvedSettings, selection, session?.cwd) : undefined;
 }
 
 export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection; settings: Awaited<ReturnType<typeof readSettings>>; selector?: string; cwd?: string}): Promise<{status: 'found'; runtime: WorkerRuntime} | {status: 'missing' | 'ambiguous'; message: string}> {
