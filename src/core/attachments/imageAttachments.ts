@@ -77,6 +77,14 @@ function notAnImageError(token: string) {
   return new Error(`Not an image: @${token}. Only ${IMAGE_EXTENSIONS.join(', ')} files can be attached.`);
 }
 
+async function statFile(absolutePath: string): Promise<import('node:fs').Stats | undefined> {
+  try {
+    return await fs.stat(absolutePath);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Resolve `@path` mentions into image attachments.
  *
@@ -106,24 +114,41 @@ export async function resolveImageAttachments(text: string): Promise<ResolvedIma
       throw outsideWorkspaceError(token);
     }
 
-    let stats;
-    try {
-      stats = await fs.stat(absolutePath);
-    } catch {
-      continue; // Not an existing path: leave the mention as literal text.
+    // Resolve the mentioned file. A sentence-ending period ("@shot.png.") is
+    // not part of the filename, so fall back to the trailing-dot-stripped form
+    // when the verbatim path does not exist; the image is then attached instead
+    // of being silently left as text.
+    let fileToken = token;
+    let stats = await statFile(absolutePath);
+    if (!stats) {
+      const trimmed = token.replace(/\.+$/, '');
+      if (trimmed && trimmed !== token) {
+        try {
+          const trimmedPath = resolveWorkspacePath(trimmed);
+          const trimmedStats = await statFile(trimmedPath);
+          if (trimmedStats) {
+            fileToken = trimmed;
+            absolutePath = trimmedPath;
+            stats = trimmedStats;
+          }
+        } catch {
+          // Trimmed form escapes the workspace; leave the mention literal.
+        }
+      }
     }
-    if (!stats.isFile()) throw notAnImageError(token);
+    if (!stats) continue; // Not an existing path: leave the mention as literal text.
+    if (!stats.isFile()) throw notAnImageError(fileToken);
 
-    const realPath = await assertRealPathInsideRoot(workspaceRoot(), absolutePath, token, 'workspace');
+    const realPath = await assertRealPathInsideRoot(workspaceRoot(), absolutePath, fileToken, 'workspace');
     if (seenRealPaths.has(realPath)) {
       strippedTokens.add(token); // Same file already attached; still strip the repeat.
       continue;
     }
 
-    const mediaType = IMAGE_MEDIA_TYPES[path.extname(token).toLowerCase()];
-    if (!mediaType) throw notAnImageError(token);
+    const mediaType = IMAGE_MEDIA_TYPES[path.extname(fileToken).toLowerCase()];
+    if (!mediaType) throw notAnImageError(fileToken);
     if (stats.size > IMAGE_ATTACHMENT_BYTES) {
-      throw new Error(`Image too large: @${token} is ${formatBytes(stats.size)}; the attachment limit is ${formatBytes(IMAGE_ATTACHMENT_BYTES)} per image.`);
+      throw new Error(`Image too large: @${fileToken} is ${formatBytes(stats.size)}; the attachment limit is ${formatBytes(IMAGE_ATTACHMENT_BYTES)} per image.`);
     }
     if (attachments.length >= IMAGE_ATTACHMENTS_PER_MESSAGE) {
       throw new Error(`Too many image attachments: at most ${IMAGE_ATTACHMENTS_PER_MESSAGE} per message.`);
@@ -143,9 +168,11 @@ export async function resolveImageAttachments(text: string): Promise<ResolvedIma
   }
 
   if (strippedTokens.size === 0) return {text, attachments};
+  // Strip attached mentions, then tidy the double space a mid-line removal can
+  // leave behind. The lookbehind keeps line-leading indentation intact.
   const cleaned = text
     .replace(MENTION_PATTERN, (mention, token) => strippedTokens.has(token) ? '' : mention)
-    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/(?<=[^\n])[ \t]{2,}/g, ' ')
     .trim();
   return {text: cleaned, attachments};
 }

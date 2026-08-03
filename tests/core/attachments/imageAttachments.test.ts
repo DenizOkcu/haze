@@ -84,6 +84,20 @@ describe('image attachments (F03)', () => {
       expect(result.text).toBe('and again');
     });
 
+    it('tidies the gap left by a mid-line mention but keeps line-leading indentation', async () => {
+      await fs.writeFile(path.join(workspace, 'shot.png'), PNG_BYTES);
+      const result = await resolveImageAttachments('fix @shot.png the button\n  indented: true');
+      expect(result.text).toBe('fix the button\n  indented: true');
+    });
+
+    it('drops a sentence-ending period so the image is attached, not silently left as text', async () => {
+      await fs.writeFile(path.join(workspace, 'shot.png'), PNG_BYTES);
+      const result = await resolveImageAttachments('here is the bug: @shot.png. Please fix');
+      expect(result.attachments).toHaveLength(1);
+      expect(result.attachments[0]?.fileName).toBe('shot.png');
+      expect(result.text).toBe('here is the bug: Please fix');
+    });
+
     it('rejects existing non-image files with a clear error (AC5)', async () => {
       await fs.writeFile(path.join(workspace, 'notes.txt'), 'text');
       await expect(resolveImageAttachments('see @notes.txt')).rejects.toThrow(`Not an image: @notes.txt. Only ${IMAGE_EXTENSIONS.join(', ')} files can be attached.`);

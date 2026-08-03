@@ -14,7 +14,9 @@ User-attached images for chat prompts.
 
 - Mention parsing is conservative: only `@tokens` that resolve to an existing
   workspace file become attachments. Emails/handles and nonexistent paths stay
-  literal prompt text so ordinary prose is never mangled.
+  literal prompt text so ordinary prose is never mangled. A sentence-ending
+  period (`@shot.png.`) is dropped when the verbatim path does not exist, so
+  the image is attached rather than silently left as text.
 - Existing paths that are not allowlisted images (png, jpg, jpeg, gif, webp)
   fail loudly; nothing is silently dropped (constitution V/VII).
 - Confinement reuses `utils/path.ts` workspace + real-path helpers, so symlink
