@@ -12,6 +12,7 @@ import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
+import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
@@ -47,6 +48,8 @@ export interface TurnExecutionOptions {
   subagentOverrides?: SubagentOverrides;
   /** User-attached images for this turn (F03); only the first attempt carries them. */
   attachments?: readonly ImageAttachment[];
+  /** User-mentioned paths whose reads may escape workspace confinement this turn. */
+  blessedPaths?: readonly BlessedPath[];
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -181,7 +184,7 @@ async function runAgentAttempt(
 
     const contextFileSignatures = callbacks.contextFileSignatures ?? new Map(activeContextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
     const mutationPolicy = assembled.executionScope?.mutationPolicy ?? new WorkspaceMutationPolicy();
-    const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path), mutationPolicy};
+    const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path), mutationPolicy, blessedPaths: turnOptions.blessedPaths};
     const startedTools = new Map<string, number>();
     const latestToolCalls = new Map<string, NativeToolCall>();
     let latestAccumulatedResponseMessages: ModelMessage[] = [];

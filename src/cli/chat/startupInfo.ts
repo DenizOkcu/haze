@@ -12,6 +12,10 @@ export function startupContextInfo(contextFiles: ContextFile[]) {
   ].join('\n');
 }
 
+export function startupInputTips() {
+  return 'Input tips: type @path/to/image.png (or any path with a /) to attach png/jpg/jpeg/gif/webp images — backslash-escape spaces, e.g. @screen\\ 2026.png. Mentioning any file or directory by @path or a /-containing bare path also lets the model readFile or grep it for this turn, even outside the working directory. Edits and writes always stay workspace-confined.';
+}
+
 export function startupProviderInfo(settings: HazeSettings) {
   const selection = activeModel(settings);
   const configuredCount = configuredProviders(settings).length;

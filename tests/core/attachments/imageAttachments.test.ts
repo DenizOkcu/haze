@@ -46,6 +46,29 @@ describe('image attachments (F03)', () => {
       // matches when preceded by a non-word boundary.
       expect(extractPathMentions('mail user@example.com today').map(m => m.token)).toEqual([]);
     });
+
+    it('keeps backslash escapes inside the captured token', () => {
+      // macOS screenshots default to `Bildschirmfoto YYYY-MM-DD um HH.MM.SS.png`;
+      // users shell-escape the spaces. The escape must stay in the token so the
+      // mention can be stripped verbatim after resolution.
+      expect(extractPathMentions('see @screen\\ 2026.png here').map(m => m.token)).toEqual(['screen\\ 2026.png']);
+    });
+
+    it('extracts bare paths ending in an image extension and containing a separator', () => {
+      expect(extractPathMentions('see /abs/path/foo.jpg and ~/pics/cat.png').map(m => m.token))
+        .toEqual(['/abs/path/foo.jpg', '~/pics/cat.png']);
+    });
+
+    it('does not extract bare filenames without a separator (prose safety)', () => {
+      // "I named it cat.png" should not become an attachment just because the
+      // workspace happens to contain a `cat.png`. The separator requirement is
+      // the prose-safety gate.
+      expect(extractPathMentions('I named it cat.png and dog.jpeg')).toEqual([]);
+    });
+
+    it('does not extract the host part of an email even with an image-like TLD', () => {
+      expect(extractPathMentions('mail user@fake.png today')).toEqual([]);
+    });
   });
 
   describe('resolveImageAttachments', () => {
@@ -54,10 +77,11 @@ describe('image attachments (F03)', () => {
     });
 
     it('keeps mentions that are not existing files as literal text', async () => {
-      const result = await resolveImageAttachments('contact user@missing.example.com about @nope.png');
+      const result = await resolveImageAttachments('contact user@missing.example.com about @nope.png and @../also-missing.png');
       expect(result.attachments).toEqual([]);
       expect(result.text).toContain('@missing.example.com');
       expect(result.text).toContain('@nope.png');
+      expect(result.text).toContain('@../also-missing.png');
     });
 
     it('attaches an existing workspace image and strips the mention (AC1 prep)', async () => {
@@ -98,12 +122,79 @@ describe('image attachments (F03)', () => {
       expect(result.text).toBe('here is the bug: Please fix');
     });
 
-    it('rejects existing non-image files with a clear error (AC5)', async () => {
-      await fs.writeFile(path.join(workspace, 'notes.txt'), 'text');
-      await expect(resolveImageAttachments('see @notes.txt')).rejects.toThrow(`Not an image: @notes.txt. Only ${IMAGE_EXTENSIONS.join(', ')} files can be attached.`);
+    it('unescapes backslash-escaped spaces in the resolved path (macOS screenshots)', async () => {
+      // Default macOS screenshot filenames contain spaces; users shell-escape them.
+      const fileName = 'Bildschirmfoto 2026-08-03 um 10.14.15.png';
+      await fs.writeFile(path.join(workspace, fileName), PNG_BYTES);
+      const result = await resolveImageAttachments(`describe @Bildschirmfoto\\ 2026-08-03\\ um\\ 10.14.15.png please`);
+      expect(result.attachments).toHaveLength(1);
+      expect(result.attachments[0]?.fileName).toBe(fileName);
+      expect(result.attachments[0]?.mediaType).toBe('image/png');
+      expect(result.text).toBe('describe please');
     });
 
-    it('rejects directories', async () => {
+    it('leaves an unresolved escaped mention as literal text', async () => {
+      // The escaped form does not point at a real file, so it must not be
+      // stripped or attached — same contract as any other unresolved mention.
+      const result = await resolveImageAttachments('see @does\\ not\\ exist.png now');
+      expect(result.attachments).toEqual([]);
+      expect(result.text).toBe('see @does\\ not\\ exist.png now');
+    });
+
+    it('attaches a bare absolute path without `@` and strips it from the text', async () => {
+      // The motivating case: a user pastes a host path like
+      // `/Users/.../unnamed.jpg` without thinking about the `@` sigil.
+      const abs = path.join(os.tmpdir(), 'haze-bare-absolute.png');
+      await fs.writeFile(abs, PNG_BYTES);
+      try {
+        const result = await resolveImageAttachments(`whats on this one: ${abs} please`);
+        expect(result.attachments).toHaveLength(1);
+        expect(result.attachments[0]?.fileName).toBe(path.basename(abs));
+        expect(result.attachments[0]?.absolutePath).toBe(await fs.realpath(abs));
+        expect(result.text).toBe('whats on this one: please');
+      } finally {
+        await fs.remove(abs);
+      }
+    });
+
+    it('attaches a bare relative path that contains a separator', async () => {
+      await fs.ensureDir(path.join(workspace, 'assets'));
+      await fs.writeFile(path.join(workspace, 'assets', 'logo.png'), PNG_BYTES);
+      const result = await resolveImageAttachments('check assets/logo.png please');
+      expect(result.attachments).toHaveLength(1);
+      expect(result.attachments[0]?.displayPath).toBe(path.join('assets', 'logo.png'));
+      expect(result.text).toBe('check please');
+    });
+
+    it('does not attach a bare filename without a separator even if it exists', async () => {
+      // `cat.png` exists in the workspace, but without a `/` it must stay
+      // prose — otherwise incidental mentions hijack the prompt.
+      await fs.writeFile(path.join(workspace, 'cat.png'), PNG_BYTES);
+      const result = await resolveImageAttachments('I named it cat.png today');
+      expect(result.attachments).toEqual([]);
+      expect(result.text).toBe('I named it cat.png today');
+    });
+
+    it('dedupes a bare path and an explicit `@` mention of the same file', async () => {
+      await fs.ensureDir(path.join(workspace, 'pics'));
+      await fs.writeFile(path.join(workspace, 'pics', 'dup.png'), PNG_BYTES);
+      const result = await resolveImageAttachments(`see pics/dup.png and @pics/dup.png too`);
+      expect(result.attachments).toHaveLength(1);
+      expect(result.text).toBe('see and too');
+    });
+
+    it('leaves existing non-image files as literal text (read-blessing picks them up)', async () => {
+      // Non-image existing paths no longer throw: they stay as text so the
+      // read-blessing resolver can mark them readable by the model.
+      await fs.writeFile(path.join(workspace, 'notes.txt'), 'text');
+      const result = await resolveImageAttachments('see @notes.txt');
+      expect(result.attachments).toEqual([]);
+      expect(result.text).toBe('see @notes.txt');
+    });
+
+    it('rejects directories with an image extension as a genuine attach-intent mismatch', async () => {
+      // A directory named `imgs.png` is image-extension but not a file: the
+      // user clearly intended to attach it. Loud error stays.
       await fs.ensureDir(path.join(workspace, 'imgs.png'));
       await expect(resolveImageAttachments('see @imgs.png')).rejects.toThrow('Not an image: @imgs.png');
     });
@@ -123,16 +214,48 @@ describe('image attachments (F03)', () => {
       await expect(resolveImageAttachments(prompt)).rejects.toThrow(`Too many image attachments: at most ${IMAGE_ATTACHMENTS_PER_MESSAGE} per message.`);
     });
 
-    it('rejects paths outside the workspace', async () => {
-      await expect(resolveImageAttachments('see @../escape.png')).rejects.toThrow('outside the workspace');
+    it('attaches images outside the workspace via ../ relative mentions', async () => {
+      const parentFile = path.join(workspace, '..', 'escape.png');
+      await fs.writeFile(parentFile, PNG_BYTES);
+      try {
+        const result = await resolveImageAttachments('see @../escape.png');
+        expect(result.attachments).toHaveLength(1);
+        expect(result.attachments[0]).toMatchObject({fileName: 'escape.png', mediaType: 'image/png'});
+        expect(result.attachments[0]?.displayPath).toBe(await fs.realpath(parentFile));
+        expect(result.text).toBe('see');
+      } finally {
+        await fs.remove(parentFile);
+      }
     });
 
-    it('rejects symlink escapes from the workspace', async () => {
+    it('attaches absolute and ~ home mentions of the same file once', async () => {
+      const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-images-home-')));
+      const savedHome = process.env.HOME;
+      process.env.HOME = home;
+      try {
+        await fs.ensureDir(path.join(home, 'pics'));
+        await fs.writeFile(path.join(home, 'pics', 'shot.png'), PNG_BYTES);
+        const result = await resolveImageAttachments(`look @${path.join(home, 'pics', 'shot.png')} and @~/pics/shot.png`);
+        expect(result.attachments).toHaveLength(1);
+        expect(result.attachments[0]?.displayPath).toBe(path.join('~', 'pics', 'shot.png'));
+        expect(result.text).toBe('look and');
+      } finally {
+        process.env.HOME = savedHome;
+        await fs.remove(home);
+      }
+    });
+
+    it('follows workspace symlinks to outside targets and dedupes the alias', async () => {
       const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-images-outside-'));
       try {
-        await fs.writeFile(path.join(outside, 'secret.png'), PNG_BYTES);
-        await fs.symlink(path.join(outside, 'secret.png'), path.join(workspace, 'link.png'));
-        await expect(resolveImageAttachments('see @link.png')).rejects.toThrow('outside the workspace');
+        const target = path.join(outside, 'secret.png');
+        await fs.writeFile(target, PNG_BYTES);
+        await fs.symlink(target, path.join(workspace, 'link.png'));
+        const result = await resolveImageAttachments(`see @link.png and @${target}`);
+        expect(result.attachments).toHaveLength(1);
+        expect(result.attachments[0]?.fileName).toBe('secret.png');
+        expect(result.attachments[0]?.displayPath).toBe(await fs.realpath(target));
+        expect(result.text).toBe('see and');
       } finally {
         await fs.remove(outside);
       }

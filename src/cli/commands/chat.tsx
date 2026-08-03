@@ -20,6 +20,7 @@ import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
 import {formatElapsedTimeWhole, imageAttachmentLine} from './formatters.js';
 import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} from '../../core/attachments/imageAttachments.js';
+import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
@@ -31,7 +32,7 @@ import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecord
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
-import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
+import {startupContextInfo, startupInputTips, startupProviderInfo} from '../chat/startupInfo.js';
 import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
@@ -173,7 +174,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setBranchName(branch);
       setContextFiles(files);
       contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
+      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}\n\n${startupInputTips()}`}]);
     }).catch(() => undefined);
     sessionLifecycle.initializeSession().catch(error => {
       const text = error instanceof Error ? error.message : String(error);
@@ -441,9 +442,10 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       setMessages(m => [...m, {role: 'system', text}]);
       return undefined;
     }
-    if (resolved.attachments.length === 0) return {value, options: {}};
+    const blessed = await resolveReadBlessings(resolved.text);
+    if (resolved.attachments.length === 0 && blessed.blessedPaths.length === 0) return {value, options: {}};
     const gateError = imageCapabilityError(activeProvider(settings));
-    if (gateError) {
+    if (resolved.attachments.length > 0 && gateError) {
       setMessages(m => [...m, {role: 'system', text: gateError}]);
       return undefined;
     }
@@ -451,7 +453,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
     return {
       value: resolved.text || IMAGE_ONLY_PROMPT_TEXT,
       displayValue,
-      options: {attachments: resolved.attachments},
+      options: {attachments: resolved.attachments, blessedPaths: blessed.blessedPaths},
     };
   }
 

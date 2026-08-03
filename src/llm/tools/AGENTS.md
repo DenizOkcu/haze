@@ -10,6 +10,7 @@ Implementation helpers for haze built-in tools.
 - Respect `.gitignore` by default. Only honor ignored paths when the tool input explicitly allows it.
 - Keep path values in results workspace-relative and stable for model/UI consumption.
 - Mutating helpers must call scoped-context mutation checks before writing.
+- Read helpers (`prepareWorkspaceRead`) honour the turn-scoped bless set: paths the user mentioned in the prompt may be read outside the workspace and bypass `.gitignore`. Mutating helpers (`prepareWorkspaceMutation`, `prepareWorkspaceWritePath`) never consult the bless set — confinement is absolute for edits/writes.
 
 ## Turn-scoped tool context
 

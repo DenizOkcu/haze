@@ -38,7 +38,7 @@ export const hazeTools = {
     }),
     execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context, async () => {
       try {
-        const absolutePath = await prepareWorkspaceRead(dirPath, includeIgnored);
+        const absolutePath = await prepareWorkspaceRead(dirPath, includeIgnored, context);
         const entries: string[] = [];
         let ignoredSkipped = 0;
 
@@ -82,7 +82,7 @@ export const hazeTools = {
     }),
     execute: async ({path: filePath, offset, limit, mode, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, mode, allowIgnored}, context, async () => {
       try {
-        const absolutePath = await prepareWorkspaceRead(filePath, allowIgnored);
+        const absolutePath = await prepareWorkspaceRead(filePath, allowIgnored, context);
         const start = offset == null ? 0 : offset - 1;
         const pageLimit = limit ?? DEFAULT_READ_LINES;
         const page = await readUtf8LinesPage(absolutePath, start + 1, pageLimit);
@@ -161,7 +161,7 @@ export const hazeTools = {
     }),
     execute: async ({pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive, includeIgnored}, context) => runDedupedTool('grep', {pattern, path: searchPath, glob, contextLines, maxMatches, caseInsensitive, includeIgnored}, context, async () => {
       try {
-        const absolutePath = await prepareWorkspaceRead(searchPath, includeIgnored);
+        const absolutePath = await prepareWorkspaceRead(searchPath, includeIgnored, context);
         const args = [
           '--json', '--color=never',
           '--max-count', String(maxMatches),

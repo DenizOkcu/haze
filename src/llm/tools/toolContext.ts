@@ -4,6 +4,7 @@ import {readScopedContextFilesForPath, type ContextFile} from '../../config/cont
 import {workspaceRoot} from '../../utils/path.js';
 import {isFailedToolOutput, toolInputField} from '../../core/agent/toolResults.js';
 import {HazeToolError} from './failures.js';
+import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 
 /**
@@ -38,6 +39,8 @@ export type HazeToolContext = {
   onContextFileRead?: (path: string) => void;
   mutationPolicy?: WorkspaceMutationPolicy;
   mutationOwner?: WorkspaceMutationOwner;
+  /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
+  blessedPaths?: readonly BlessedPath[];
 };
 
 function stableJsonStringify(value: unknown): string {
