@@ -94,6 +94,19 @@ export function providerRemove(settings: HazeSettings, providerName: string | un
   };
 }
 
+export function providerSetImageCapable(settings: HazeSettings, providerName: string | undefined, enabled: boolean): WizardPatch {
+  const provider = providerName ? findProvider(settings, providerName) : undefined;
+  if (!provider) return {message: 'No provider selected.'};
+  const capabilities = {...(provider.capabilities ?? {}), images: enabled};
+  return {
+    provider,
+    settingsPatch: {providers: upsertProvider(settings, {...provider, capabilities})},
+    message: enabled
+      ? `Provider ${provider.name} marked image-capable. Attached images will be sent to it.`
+      : `Provider ${provider.name} is no longer image-capable.`,
+  };
+}
+
 export function providerSetKey(settings: HazeSettings, providerName: string | undefined, value: string): WizardPatch & {key?: string} {
   const provider = providerName ? findProvider(settings, providerName) : undefined;
   if (!provider) return {message: 'No provider selected.'};

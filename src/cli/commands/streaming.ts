@@ -11,6 +11,7 @@ import {toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds} from '
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../core/agent/errors.js';
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
+import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
@@ -44,6 +45,8 @@ export interface TurnResult {
 export interface TurnExecutionOptions {
   ephemeralControl?: string;
   subagentOverrides?: SubagentOverrides;
+  /** User-attached images for this turn (F03); only the first attempt carries them. */
+  attachments?: readonly ImageAttachment[];
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -153,7 +156,7 @@ async function runAgentAttempt(
     const durableRequestMessages = compactToolHistory(
       retryingExistingRequest
         ? stripSyntheticControls(callbacks.getConversation())
-        : [...stripSyntheticControls(callbacks.getConversation()), {role: 'user', content: value}],
+        : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])],
     ).messages;
     let requestMessages = durableRequestMessages;
     if (estimateValueTokens(requestMessages) > ACTIVE_CONTEXT_TOKEN_BUDGET) {

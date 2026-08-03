@@ -10,6 +10,11 @@ export interface HazeProviderSettings {
   url: string;
   key?: string;
   models: string[];
+  /**
+   * Explicit endpoint capabilities. Never inferred: images are only sent to
+   * providers the user marked image-capable (F03).
+   */
+  capabilities?: {images?: boolean};
 }
 
 export interface HazeLspServerSettings {
@@ -73,11 +78,16 @@ export interface HazeSettings {
 
 export const SETTINGS_FILE = path.join(HAZE_DIR, 'settings.json');
 
+const providerCapabilitiesSchema = z.object({
+  images: z.boolean().optional(),
+}).passthrough();
+
 const providerSchema = z.object({
   name: z.string(),
   url: z.string(),
   key: z.string().optional(),
   models: z.array(z.string()),
+  capabilities: providerCapabilitiesSchema.optional(),
 }).passthrough();
 
 const lspServerSchema = z.object({

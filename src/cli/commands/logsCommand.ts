@@ -1,11 +1,6 @@
 import {listLogs, summarizeLog} from '../../core/log/llmLog.js';
+import {formatBytes} from '../../utils/format.js';
 import type {CommandContext, CommandResult} from './commands.js';
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 export async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
   const id = args.trim();

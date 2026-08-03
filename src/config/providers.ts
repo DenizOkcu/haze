@@ -26,10 +26,13 @@ function normalizeProvider(provider: HazeProviderSettings, fallbackModel?: strin
   const url = provider.url?.trim();
   if (!name || !url) return undefined;
   const key = provider.key?.trim();
+  // Capabilities are explicit only: an absent/false flag means "not capable".
+  const capabilities = provider.capabilities ?? undefined;
   return {
     name,
     url,
     ...(key ? {key} : {}),
+    ...(capabilities ? {capabilities} : {}),
     models: normalizeModels(provider.models, fallbackModel),
   };
 }
@@ -97,4 +100,9 @@ export function upsertProvider(settings: HazeSettings, provider: HazeProviderSet
 
 export function providerHasKey(settings: HazeSettings, provider: HazeProviderSettings) {
   return Boolean(provider.key ?? (provider.name === 'openrouter' ? settings.apiKey : undefined));
+}
+
+/** Image input is explicit-only (F03): never inferred from URL or model name. */
+export function providerImageCapable(provider: HazeProviderSettings) {
+  return provider.capabilities?.images === true;
 }

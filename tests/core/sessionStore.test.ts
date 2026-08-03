@@ -216,6 +216,50 @@ describe('sessionStore', () => {
     expect(toolResult?.output?.originalBytes).toBeGreaterThan(32_000);
   });
 
+  it('slims image file parts to placeholders so sessions never store image bytes (F03, AC4)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const imageData = 'A'.repeat(40_000); // base64-shaped payload
+    const messages: ModelMessage[] = [{
+      role: 'user',
+      content: [
+        {type: 'text', text: 'fix this layout'},
+        {type: 'file', mediaType: 'image/png', data: imageData, filename: 'shot.png'},
+      ],
+    }];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
+
+    const disk = await fs.readFile(session.file, 'utf8');
+    expect(disk).not.toContain(imageData.slice(0, 1000));
+
+    const restored = await restoreConversation(session);
+    const parts = restored.messages[0]?.content;
+    expect(Array.isArray(parts)).toBe(true);
+    const list = parts as Array<{type?: string; text?: string}>;
+    expect(list[0]).toEqual({type: 'text', text: 'fix this layout'});
+    // The placeholder is a text part: resumed conversations stay protocol-safe.
+    expect(list[1]?.type).toBe('text');
+    expect(list[1]?.text).toContain('shot.png');
+    expect(list[1]?.text).toContain('image/png');
+    expect(list[1]?.text).toContain('omitted from session');
+  });
+
+  it('keeps snapshot lines bounded even for megabyte image parts (F03)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const messages: ModelMessage[] = [{
+      role: 'user',
+      content: [
+        {type: 'text', text: 'see screenshot'},
+        {type: 'file', mediaType: 'image/png', data: new Uint8Array(1_200_000), filename: 'big.png'},
+      ],
+    }];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
+
+    expect((await fs.stat(session.file)).size).toBeLessThan(64 * 1024);
+    const restored = await restoreConversation(session);
+    expect(restored.parseErrors).toEqual([]);
+    expect(restored.messages).toHaveLength(1);
+  });
+
   it('restores conversation and work state in one pass with parse errors reported once (regression CR-013)', async () => {
     const session = await createSession({cwd, sessionsDir});
     const messages: ModelMessage[] = [{role: 'user', content: 'hello'}];

@@ -1,5 +1,5 @@
 import type {HazeSettings} from '../../config/settings.js';
-import {configuredProviders, findProvider, modelSelector} from '../../config/providers.js';
+import {configuredProviders, findProvider, modelSelector, providerImageCapable} from '../../config/providers.js';
 import {configuredLspServers, LSP_PRESETS} from '../../config/lspSettings.js';
 import {configuredMcpServers, findMcpServer, findMcpPreset, presetIds} from '../../config/mcpSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
@@ -33,6 +33,11 @@ export function providerActionSuggestions(settings: HazeSettings, selectedProvid
     {value: PROVIDER_ACTIONS.useProvider, description: 'Set this provider and choose a model', kind: 'provider' as const},
     {value: PROVIDER_ACTIONS.addModels, description: 'Fetch the provider model list and add models', kind: 'provider' as const},
     {value: PROVIDER_ACTIONS.setApiKey, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const},
+    provider
+      ? (providerImageCapable(provider)
+        ? {value: PROVIDER_ACTIONS.clearImageCapable, description: 'Stop sending attached images to this provider', kind: 'provider' as const}
+        : {value: PROVIDER_ACTIONS.markImageCapable, description: 'Allow attached images to be sent to this provider', kind: 'provider' as const})
+      : {value: PROVIDER_ACTIONS.markImageCapable, description: 'Allow attached images to be sent to this provider', kind: 'provider' as const},
     ...(provider?.models?.length ? [{value: PROVIDER_ACTIONS.removeModels, description: 'Remove models from this provider', kind: 'provider' as const}] : []),
     {value: PROVIDER_ACTIONS.removeProvider, description: 'Delete this provider from settings', kind: 'provider' as const},
   ];

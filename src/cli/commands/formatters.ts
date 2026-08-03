@@ -1,3 +1,5 @@
+import {formatBytes} from '../../utils/format.js';
+
 export function compact(value: unknown, maxLength = 180) {
   let text: string;
   if (value instanceof Error) {
@@ -156,6 +158,11 @@ export function busyToolLabel(toolName: string, input: unknown) {
 
 export function formatSeconds(milliseconds: number) {
   return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
+/** Compact transcript row for a user-attached image (F03); never dumps bytes. */
+export function imageAttachmentLine(attachment: {fileName: string; bytes: number}) {
+  return `🖼 ${attachment.fileName} (${formatBytes(attachment.bytes)})`;
 }
 
 export function formatElapsedTime(milliseconds: number) {

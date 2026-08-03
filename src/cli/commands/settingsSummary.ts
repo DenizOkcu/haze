@@ -2,7 +2,7 @@ import {contextFileDiagnostics, summarizeContextDiagnostics} from '../../config/
 import type {ContextFile} from '../../config/contextFiles.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
-import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey} from '../../config/providers.js';
+import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey, providerImageCapable} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
@@ -32,7 +32,7 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
     `Model: ${settings.model ?? 'not set'}`,
     `Base URL: ${activeProvider?.url ?? settings.baseURL ?? 'not configured'}`,
     `API key: ${activeProvider && providerHasKey(settings, activeProvider) ? 'saved' : 'missing'}`,
-    `Configured providers: ${providers.map(provider => provider.name).join(', ') || 'none'}`,
+    `Configured providers: ${providers.map(provider => `${provider.name}${providerImageCapable(provider) ? ' (images)' : ''}`).join(', ') || 'none'}`,
     `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `MCP servers: ${configuredMcpServers(settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `Skills: ${skillNames || 'none'}`,

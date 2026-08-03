@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {activeModel, activeProvider, configuredProviders, resolveModelSelector} from '../../src/config/providers.js';
+import {activeModel, activeProvider, configuredProviders, providerImageCapable, resolveModelSelector} from '../../src/config/providers.js';
 
 describe('providers', () => {
   it('turns legacy OpenRouter settings into a provider', () => {
@@ -80,5 +80,24 @@ describe('providers', () => {
   it('returns no active model when a provider has no models', () => {
     const settings = {provider: 'remote', providers: [{name: 'remote', url: 'https://example.com/v1', models: []}]};
     expect(activeModel(settings)).toBeUndefined();
+  });
+
+  it('defaults image capability to false and honors an explicit true flag', () => {
+    const capable = {name: 'cloud', url: 'https://x/v1', models: ['m'], capabilities: {images: true}};
+    const notCapable = {name: 'local', url: 'http://localhost:1234/v1', models: ['m']};
+    const explicitFalse = {name: 'other', url: 'https://y/v1', models: ['m'], capabilities: {images: false}};
+    expect(providerImageCapable(capable)).toBe(true);
+    expect(providerImageCapable(notCapable)).toBe(false);
+    expect(providerImageCapable(explicitFalse)).toBe(false);
+  });
+
+  it('preserves capability flags through provider normalization', () => {
+    const settings = {providers: [
+      {name: 'cloud', url: 'https://x/v1', models: ['m'], capabilities: {images: true}},
+      {name: 'local', url: 'http://localhost:1234/v1', models: ['m']},
+    ]};
+    const providers = configuredProviders(settings);
+    expect(providers[0]?.capabilities).toEqual({images: true});
+    expect(providers[1]?.capabilities).toBeUndefined();
   });
 });

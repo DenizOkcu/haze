@@ -1,8 +1,17 @@
 import {z} from 'zod';
 import type {ModelMessage} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
+import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
 
 export const DEFAULT_CHARS_PER_TOKEN = 4;
+
+/**
+ * Rough vision estimate for attached images: providers bill images by
+ * resolution, not by serialized bytes. ~750 bytes per token matches common
+ * screenshot encodings closely enough for budget/display estimates. Labeled
+ * as an estimate wherever it surfaces.
+ */
+export const IMAGE_BYTES_PER_TOKEN_ESTIMATE = 750;
 
 export interface ContextBreakdown {
   logicalInputEstimate: number;
@@ -19,8 +28,25 @@ export function estimateTextTokens(text: string) {
   return Math.ceil(text.length / DEFAULT_CHARS_PER_TOKEN);
 }
 
-export function estimateValueTokens(value: unknown) {
+export function estimateImagePartTokens(part: unknown) {
+  if (!isImageFilePart(part)) return 0;
+  const bytes = imageFilePartBytes(part.data);
+  return bytes > 0 ? Math.max(1, Math.ceil(bytes / IMAGE_BYTES_PER_TOKEN_ESTIMATE)) : 1;
+}
+
+export function estimateValueTokens(value: unknown): number {
   if (typeof value === 'string') return estimateTextTokens(value);
+  // Image parts are estimated from their byte size; serializing megabytes of
+  // image data as JSON would blow up both memory and the token estimate.
+  if (isImageFilePart(value)) return estimateImagePartTokens(value);
+  if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + estimateValueTokens(item), 0);
+  if (typeof value === 'object' && value != null && Array.isArray((value as {content?: unknown}).content)) {
+    const message = value as Record<string, unknown>;
+    const envelope: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(message)) if (key !== 'content') envelope[key] = item;
+    return estimateTextTokens(JSON.stringify(envelope))
+      + (message.content as unknown[]).reduce<number>((sum, part) => sum + estimateValueTokens(part), 0);
+  }
   try {
     return estimateTextTokens(JSON.stringify(value));
   } catch {

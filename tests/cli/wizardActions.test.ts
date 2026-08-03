@@ -5,7 +5,13 @@ import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIO
 describe('wizard action constants', () => {
   it('backs provider action suggestions', () => {
     const values = providerActionSuggestions({providers: [{name: 'p', url: 'http://localhost/v1', models: ['m']}]}, 'p').map(item => item.value);
-    expect(values).toEqual([PROVIDER_ACTIONS.useProvider, PROVIDER_ACTIONS.addModels, PROVIDER_ACTIONS.setApiKey, PROVIDER_ACTIONS.removeModels, PROVIDER_ACTIONS.removeProvider]);
+    expect(values).toEqual([PROVIDER_ACTIONS.useProvider, PROVIDER_ACTIONS.addModels, PROVIDER_ACTIONS.setApiKey, PROVIDER_ACTIONS.markImageCapable, PROVIDER_ACTIONS.removeModels, PROVIDER_ACTIONS.removeProvider]);
+  });
+
+  it('offers clear image-capable once a provider is image-capable', () => {
+    const values = providerActionSuggestions({providers: [{name: 'p', url: 'http://localhost/v1', models: ['m'], capabilities: {images: true}}]}, 'p').map(item => item.value);
+    expect(values).toContain(PROVIDER_ACTIONS.clearImageCapable);
+    expect(values).not.toContain(PROVIDER_ACTIONS.markImageCapable);
   });
 
   it('backs LSP and MCP action suggestions', () => {

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from '../../src/cli/commands/providerWizard.js';
+import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../../src/cli/commands/providerWizard.js';
 
 const settings = {
   provider: 'local',
@@ -53,6 +53,24 @@ describe('provider wizard helpers', () => {
     const result = providerSetKey({providers: [{name: 'remote', url: 'http://example.com/v1', models: ['a']}]}, 'remote', 'secret');
     expect(result.settingsPatch).toBeUndefined();
     expect(result.message).toContain('plaintext HTTP');
+  });
+
+  it('marks a provider image-capable and clears the flag on toggle', () => {
+    const settingsWith = {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['m']}]};
+    const enable = providerSetImageCapable(settingsWith, 'local', true);
+    expect(enable.settingsPatch?.providers?.[0]?.capabilities).toEqual({images: true});
+    expect(enable.message).toContain('marked image-capable');
+
+    const settingsCapable = {providers: [{name: 'local', url: 'http://localhost:1234/v1', models: ['m'], capabilities: {images: true}}]};
+    const disable = providerSetImageCapable(settingsCapable, 'local', false);
+    expect(disable.settingsPatch?.providers?.[0]?.capabilities).toEqual({images: false});
+    expect(disable.message).toContain('no longer image-capable');
+  });
+
+  it('does nothing when marking image capability on a missing provider', () => {
+    const result = providerSetImageCapable({providers: []}, 'missing', true);
+    expect(result.settingsPatch).toBeUndefined();
+    expect(result.message).toBe('No provider selected.');
   });
 
   it('maps provider actions to modes and prompts', () => {

@@ -102,6 +102,26 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
+  it('persists provider image capability flags and preserves unknown capability fields', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({providers: [
+      {name: 'cloud', url: 'https://x/v1', models: ['m'], capabilities: {images: true}},
+      {name: 'local', url: 'http://localhost:1234/v1', models: ['m'], capabilities: {images: false, audio: true}},
+      {name: 'plain', url: 'https://y/v1', models: ['m']},
+    ]});
+    const settings = await readSettings();
+    expect(settings.providers?.[0]?.capabilities).toEqual({images: true});
+    // Passthrough keeps unknown capability keys intact.
+    expect(settings.providers?.[1]?.capabilities).toMatchObject({images: false, audio: true});
+    expect(settings.providers?.[2]?.capabilities).toBeUndefined();
+  });
+
+  it('rejects malformed provider capability flags loudly', async () => {
+    await fs.writeJson(settingsFile, {providers: [{name: 'p', url: 'https://x/v1', models: ['m'], capabilities: {images: 'yes'}}]});
+    const {readSettings} = await loadSettings();
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
   it('patches nested subagent/profile fields while preserving unknown fields', async () => {
     const {writeSettings, updateSubagentSettings, readSettings} = await loadSettings();
     await writeSettings({rootPlugin: true, subagents: {pluginField: 'keep', profiles: {custom: {maxConcurrency: 1, pluginProfile: 'keep'}}}});

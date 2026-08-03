@@ -15,7 +15,7 @@ import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from 
 import {captureLspName} from '../commands/wizardPrompts.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../commands/lspWizard.js';
 import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/mcpWizard.js';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetKey} from '../commands/providerWizard.js';
+import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
 import {selectSkillActionResult, selectSkillResult} from '../commands/skillWizard.js';
 import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from '../commands/skillCreation.js';
 import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillConfirmRemove.js';
@@ -173,6 +173,14 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     if (action === PROVIDER_ACTIONS.useProvider) {
       await useProvider(deps.selectedProviderName);
+      return;
+    }
+    if (action === PROVIDER_ACTIONS.markImageCapable || action === PROVIDER_ACTIONS.clearImageCapable) {
+      const result = providerSetImageCapable(deps.settings, deps.selectedProviderName, action === PROVIDER_ACTIONS.markImageCapable);
+      if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
+      deps.setSelectedProviderName(undefined);
+      setMode('chat');
+      showMessage(result.message);
       return;
     }
     if (action === PROVIDER_ACTIONS.addModels) {

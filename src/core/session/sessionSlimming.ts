@@ -1,6 +1,8 @@
 import type {ModelMessage} from 'ai';
 import type {SessionEntry} from './sessionStore.js';
 import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits/textBudgets.js';
+import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
+import {formatBytes} from '../../utils/format.js';
 
 function jsonByteLength(value: unknown) {
   try {
@@ -26,6 +28,20 @@ function slimLargeValue(value: unknown) {
   };
 }
 
+/**
+ * Image file parts become text placeholders (F03): resumed sessions must not
+ * replay megabytes of base64, and the placeholder stays a protocol-safe
+ * ModelMessage part for any provider. The model re-asks if it needs the image.
+ */
+function slimImageFilePart(part: Record<string, unknown>) {
+  const bytes = imageFilePartBytes(part.data);
+  const name = typeof part.filename === 'string' && part.filename ? ` ${part.filename}` : '';
+  return {
+    type: 'text',
+    text: `[image omitted from session:${name} ${part.mediaType}, ${formatBytes(bytes)} — ask the user to re-attach it if needed]`,
+  };
+}
+
 function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === 'string') {
     if (value.length <= LARGE_STRING_CHARS) return value;
@@ -37,6 +53,7 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) return value.map(item => slimUnknown(item, seen));
 
   const record = value as Record<string, unknown>;
+  if (isImageFilePart(record)) return slimImageFilePart(record);
   if (record.type === 'tool-result') {
     return {
       ...record,

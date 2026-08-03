@@ -10,7 +10,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel} from '../../config/providers.js';
+import {activeModel, activeProvider} from '../../config/providers.js';
 import {type HazeLspServer} from '../../config/lspSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
@@ -18,7 +18,8 @@ import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
-import {formatElapsedTimeWhole} from './formatters.js';
+import {formatElapsedTimeWhole, imageAttachmentLine} from './formatters.js';
+import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
@@ -446,6 +447,32 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
 
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
     const sessionRecorder = sessionRecorderRef.current!;
+    // F03: resolve @image mentions into attachments and gate them on the active
+    // provider's explicit capability before any model call. Resolution errors
+    // (non-image, oversize, workspace escape) and capability rejections fail
+    // loudly with an actionable message instead of starting a turn.
+    let turnValue = value;
+    let turnDisplayValue = displayValue;
+    let attachments: readonly ImageAttachment[] | undefined = turnOptions.attachments;
+    if (!attachments) {
+      try {
+        const resolved = await resolveImageAttachments(value);
+        if (resolved.attachments.length > 0) {
+          const gateError = imageCapabilityError(activeProvider(settings));
+          if (gateError) {
+            setMessages(m => [...m, {role: 'system', text: gateError}]);
+            return;
+          }
+          attachments = resolved.attachments;
+          turnValue = resolved.text || IMAGE_ONLY_PROMPT_TEXT;
+          turnDisplayValue = [resolved.text, ...resolved.attachments.map(imageAttachmentLine)].filter(Boolean).join('\n');
+        }
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        setMessages(m => [...m, {role: 'system', text}]);
+        return;
+      }
+    }
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
       const ordered = withDisplayOrder(msg);
@@ -453,7 +480,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       sessionRecorder.recordUiMessage(ordered);
     };
 
-    await runAgentTurn(value, displayValue, contextFiles, {
+    await runAgentTurn(turnValue, turnDisplayValue, contextFiles, {
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);
         if (ordered.streaming) {
@@ -501,7 +528,7 @@ function ChatScreen({debug = false, version, continueSession = false, noSession 
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
+    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, attachments ? {...turnOptions, attachments} : turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
   }
