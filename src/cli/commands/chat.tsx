@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
+import {Box, render, Text, useApp, useWindowSize} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
@@ -620,18 +620,13 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
-  const staticItems = [
-    {kind: 'header' as const, key: `header-${activeModelName}`, subtitle: headerSubtitle},
-    ...transcriptItems.map(item => ({kind: 'message' as const, ...item})),
-  ];
   const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
 
   return <Box flexDirection="column">
-    <Static items={staticItems}>
-      {item => item.kind === 'header'
-        ? <Header key={item.key} subtitle={item.subtitle} version={version} />
-        : <MessageView key={item.key} message={item.message} width={width} />}
-    </Static>
+    <Header key={`header-${activeModelName}`} subtitle={headerSubtitle} version={version} />
+    {transcriptItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {transcriptItems.map(item => <MessageView key={item.key} message={item.message} width={width} />)}
+    </Box>}
     {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
       {streamingItems.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
     </Box>}

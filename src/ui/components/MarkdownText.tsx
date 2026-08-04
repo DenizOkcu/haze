@@ -1,18 +1,17 @@
 import React from 'react';
-import {Box, Text, useWindowSize} from 'ink';
+import {Box, Text} from 'ink';
 import {marked, type Tokens} from 'marked';
 import {highlight} from 'cli-highlight';
 import stripAnsi from 'strip-ansi';
 import {theme} from '../theme.js';
 
-export function MarkdownText({content}: {content: string}) {
+export const MarkdownText = React.memo(function MarkdownText({content, width}: {content: string; width: number}) {
   const tokens = marked.lexer(content, {gfm: true, breaks: true});
-  const {columns} = useWindowSize();
-  const width = Math.max(20, columns - 2);
+  const contentWidth = Math.max(20, width - 2);
   return <Box flexDirection="column">
-    {tokens.map((token, index) => <MarkdownBlock key={index} token={token} width={width} />)}
+    {tokens.map((token, index) => <MarkdownBlock key={index} token={token} width={contentWidth} />)}
   </Box>;
-}
+});
 
 function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
   switch (token.type) {

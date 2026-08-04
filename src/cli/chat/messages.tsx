@@ -82,7 +82,7 @@ export function MessageView({message, width}: {message: Message; width: number})
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} />
       : message.role === 'assistant' && !message.streaming
-        ? <MarkdownText content={message.text} />
+        ? <MarkdownText content={message.text} width={width} />
         : <Text>{message.text}</Text>}
   </Box>;
 }
