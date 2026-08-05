@@ -91,6 +91,8 @@ export interface ProviderCapabilities {
 export interface ProviderRequestOptions {
   providerOptions?: Record<string, Record<string, JSONValue | undefined>>;
   headers?: Record<string, string>;
+  /** Codex subscription requests let the provider manage the output limit. */
+  omitMaxOutputTokens?: boolean;
 }
 
 export interface WorkerRuntime {

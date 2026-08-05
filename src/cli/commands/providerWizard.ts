@@ -39,6 +39,7 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
     name: draft.name,
     url: draft.url,
     ...(draft.key ? {key: draft.key} : {}),
+    ...(draft.kind ? {kind: draft.kind} : {}),
     models: [...new Set(models)],
   };
   return {

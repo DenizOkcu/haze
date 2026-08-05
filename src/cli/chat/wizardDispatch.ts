@@ -2,7 +2,8 @@ import fs from 'fs-extra';
 import type {HazeMcpServer, HazeProviderSettings, HazeSettings} from '../../config/settings.js';
 import type {HazeLspServer} from '../../config/lspSettings.js';
 import {updateSettings} from '../../config/settings.js';
-import {findProvider, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {removeProviderAuth, setProviderAuth} from '../../config/providerAuth.js';
+import {findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import {discoverProviderModels} from '../../config/modelDiscovery.js';
 import {removeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
@@ -23,6 +24,7 @@ import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillC
 import {isYesConfirmation} from '../commands/wizardInput.js';
 import {startupProviderInfo} from './startupInfo.js';
 import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
+import {openBrowser, startChatGptBrowserLogin} from '../../llm/openaiCodexOAuth.js';
 
 /**
  * Wizard submit dispatch (CR-006): one table-driven entry point for every
@@ -140,6 +142,41 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage(`${provider.name}: choose an action.`);
   }
 
+  async function loginWithChatGpt(input: {name: string; url: string; models: string[]; existing?: HazeProviderSettings}) {
+    deps.setBusyLabel('Waiting for ChatGPT sign-in');
+    deps.setBusy(true);
+    let login: Awaited<ReturnType<typeof startChatGptBrowserLogin>> | undefined;
+    try {
+      login = await startChatGptBrowserLogin();
+      showMessage(`Complete ChatGPT sign-in in your browser.\nIf it does not open, visit:\n${login.url}`);
+      await openBrowser(login.url);
+      const auth = await login.complete();
+      await setProviderAuth(input.name, auth);
+      if (input.existing) {
+        showMessage(`ChatGPT sign-in updated for ${input.name}.`);
+        deps.setSelectedProviderName(undefined);
+        setMode('chat');
+        return;
+      }
+      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models};
+      const next = await updateSettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
+      setSettings(next);
+      deps.setProviderDraft({});
+      deps.setSuggestedModels([]);
+      deps.setModelProviderFilter(provider.name);
+      setMode('model');
+      showMessage(`ChatGPT connected as ${provider.name}. Choose a model explicitly.`);
+    } catch (error) {
+      await login?.close().catch(() => undefined);
+      showMessage(`ChatGPT sign-in failed: ${error instanceof Error ? error.message : String(error)}`);
+      deps.setProviderDraft({});
+      setMode('chat');
+    } finally {
+      deps.setBusy(false);
+      deps.setBusyLabel(deps.idleBusyLabel);
+    }
+  }
+
   async function selectPreset(presetId: string) {
     if (presetId === PROVIDER_CHOICES.custom) {
       deps.setProviderDraft({});
@@ -164,10 +201,12 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       return;
     }
 
-    deps.setProviderDraft({name: existingName, url: preset.baseUrl});
+    deps.setProviderDraft({name: existingName, url: preset.baseUrl, ...(preset.auth === 'chatgpt-oauth' ? {kind: 'chatgpt-codex' as const} : {})});
     deps.setSuggestedModels(preset.suggestedModels ?? []);
 
-    if (preset.needsApiKey) {
+    if (preset.auth === 'chatgpt-oauth') {
+      await loginWithChatGpt({name: existingName, url: preset.baseUrl, models: preset.suggestedModels ?? []});
+    } else if (preset.needsApiKey) {
       setMode('providerAddKey');
       const keyHint = preset.apiKeyHint ?? (preset.apiKeyEnvVar ? `commonly ${preset.apiKeyEnvVar}` : undefined);
       showMessage(`${preset.name} (${preset.baseUrl})\nAPI key${keyHint ? ` (${keyHint})` : ''}?`);
@@ -220,7 +259,14 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     if (action === PROVIDER_ACTIONS.addModels) {
       deps.setSelectedProviderName(provider.name);
-      await discoverModelsFor(provider, `Comma-separated model names to add to ${provider.name}?`);
+      if (provider.kind === 'chatgpt-codex') {
+        setMode('providerAppendModels');
+        showMessage(`Comma-separated supported Codex model names to add to ${provider.name}?`);
+      } else await discoverModelsFor(provider, `Comma-separated model names to add to ${provider.name}?`);
+      return;
+    }
+    if (action === PROVIDER_ACTIONS.signInChatGpt && provider.kind === 'chatgpt-codex') {
+      await loginWithChatGpt({name: provider.name, url: provider.url, models: provider.models, existing: provider});
       return;
     }
     const actionResult = providerActionResult(action, provider);
@@ -234,10 +280,17 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
    * OpenAI-compatible /models list and let the user pick. Falls back to the
    * manual comma-separated prompt when the endpoint is unavailable.
    */
-  async function discoverModelsFor(target: {name?: string; url?: string; key?: string}, fallbackPrompt: string) {
+  async function discoverModelsFor(target: {name?: string; url?: string; key?: string; kind?: HazeProviderSettings['kind']}, fallbackPrompt: string) {
     if (!target.name || !target.url) {
       showMessage('Provider name and URL are required to discover models.');
       setMode('chat');
+      return;
+    }
+    const existing = findProvider(deps.settings, target.name);
+    if (target.kind === 'chatgpt-codex' || existing?.kind === 'chatgpt-codex') {
+      deps.setSelectedProviderName(target.name);
+      setMode(existing ? 'providerAppendModels' : 'providerAddModels');
+      showMessage(fallbackPrompt);
       return;
     }
     deps.setBusyLabel(`Discovering models on ${target.name}`);
@@ -255,7 +308,6 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'} on ${target.name}. Choose one to add, or select "${MODEL_CHOICES.enterModelNames}".`);
       return;
     }
-    const existing = findProvider(deps.settings, target.name);
     setMode(existing ? 'providerAppendModels' : 'providerAddModels');
     showMessage(`Could not list models on ${target.name} (${result.error}).\n${fallbackPrompt}`);
   }
@@ -332,7 +384,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     // Preset match by URL restores curated hints on the cloud key-step path.
     const preset = PROVIDER_PRESETS.find(candidate => draft.url === candidate.baseUrl);
     const hint = preset?.suggestedModels?.length ? ` Example: ${preset.suggestedModels.join(', ')}` : '';
-    await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key}, `Comma-separated model names?${hint}`);
+    await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key, kind: draft.kind}, `Comma-separated model names?${hint}`);
   }
 
   async function appendModelsToProvider(modelsValue: string) {
@@ -428,6 +480,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     const result = providerRemove(deps.settings, deps.selectedProviderName);
     const next = await updateSettings(result.settingsPatch ?? {});
+    await removeProviderAuth(provider.name);
     setSettings(next);
     deps.setSelectedProviderName(undefined);
     setMode('chat');

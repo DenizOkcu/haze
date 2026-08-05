@@ -162,15 +162,16 @@ export async function runSubagent(
   if (mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate') && !release) return terminalResult(task, runtime, profile, options.deadlineExpired?.() ? 'deadline_exceeded' : 'cancelled', 'Worker cancelled before workspace admission.', options.queueMs);
 
   try {
+    const {omitMaxOutputTokens, ...providerRequestOptions} = runtime.requestOptions;
     const result = await generateText({
       model: runtime.model,
       instructions: bundle.systemPrompt,
       messages: [{role: 'user', content: workerTaskMessage(task)}],
       tools: budgetedTools,
       stopWhen: isStepCount(maxSteps),
-      maxOutputTokens: profile.maxOutputTokens,
+      ...(!omitMaxOutputTokens ? {maxOutputTokens: profile.maxOutputTokens} : {}),
       maxRetries: profile.maxRetries,
-      ...runtime.requestOptions,
+      ...providerRequestOptions,
       abortSignal: options.abortSignal,
       runtimeContext: toolExecutionContext,
       toolsContext: toolsContextFor(budgetedTools, toolExecutionContext) as never,

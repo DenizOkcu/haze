@@ -91,6 +91,11 @@ describe('providers', () => {
     expect(providerImageCapable(explicitFalse)).toBe(false);
   });
 
+  it('preserves an explicit provider kind through normalization', () => {
+    const providers = configuredProviders({providers: [{name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', models: ['gpt-5.4']}]});
+    expect(providers[0]?.kind).toBe('chatgpt-codex');
+  });
+
   it('preserves capability flags through provider normalization', () => {
     const settings = {providers: [
       {name: 'cloud', url: 'https://x/v1', models: ['m'], capabilities: {images: true}},

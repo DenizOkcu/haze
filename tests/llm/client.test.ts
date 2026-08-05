@@ -66,6 +66,14 @@ describe('providerRequestSettings', () => {
     expect(providerRequestSettings(config({}))).toEqual({});
   });
 
+  it('uses stateless Responses options and provider-managed output limits for ChatGPT Codex', () => {
+    expect(providerRequestSettings({...config({}), providerKind: 'chatgpt-codex'})).toEqual({
+      omitMaxOutputTokens: true,
+      providerOptions: {openai: {store: false, include: ['reasoning.encrypted_content']}},
+      headers: {'session-id': 'stable-cache-key'},
+    });
+  });
+
   it('combines sticky-session header with OpenAI options when both supported', () => {
     expect(providerRequestSettings(config({supportsStickySessionId: true, supportsPromptCacheKey: true}))).toEqual({
       providerOptions: {openai: {promptCacheKey: 'stable-cache-key'}},
@@ -108,6 +116,24 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.providerName).toBe('openai');
     expect(runtime!.config.baseURL).toBe('https://api.openai.com/v1');
     expect(runtime!.config.modelName).toBe('gpt-4o');
+  });
+
+  it('uses the Responses model and OAuth fetch for ChatGPT Codex providers', async () => {
+    await writeSettings({
+      providers: [{name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', models: ['gpt-5.4']}],
+      provider: 'chatgpt',
+      model: 'gpt-5.4',
+    });
+    const responses = vi.fn((model: string) => ({model}));
+    const chat = vi.fn();
+    const create = vi.fn((options: unknown) => ({responses, chat, options}));
+    const {modelWithConfig} = await loadClient(create);
+    const runtime = await modelWithConfig();
+
+    expect(responses).toHaveBeenCalledWith('gpt-5.4');
+    expect(chat).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({apiKey: 'haze-oauth-placeholder', fetch: expect.any(Function)}));
+    expect(runtime?.config.providerKind).toBe('chatgpt-codex');
   });
 
   it('sends OpenRouter attribution headers for app statistics', async () => {

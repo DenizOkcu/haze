@@ -56,13 +56,16 @@ export function startupProviderInfo(settings: HazeSettings) {
   const baseURL = selection.provider.url;
   const apiKeySource = providerHasKey(settings, selection.provider) ? `provider ${selection.provider.name}` : 'missing';
   const provider = selection.provider.name;
+  const authLine = selection.provider.kind === 'chatgpt-codex'
+    ? '- Authentication: ChatGPT OAuth credentials stored separately'
+    : `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`;
 
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
     `- Base URL: ${baseURL} (settings)`,
-    `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`,
+    authLine,
     `- Configured providers: ${configuredCount}`,
     lspLine,
     mcpLine,

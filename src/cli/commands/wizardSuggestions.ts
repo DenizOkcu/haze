@@ -32,8 +32,10 @@ export function providerActionSuggestions(settings: HazeSettings, selectedProvid
   const provider = selectedProviderName ? findProvider(settings, selectedProviderName) : undefined;
   return [
     {value: PROVIDER_ACTIONS.useProvider, description: 'Set this provider and choose a model', kind: 'provider' as const},
-    {value: PROVIDER_ACTIONS.addModels, description: 'Fetch the provider model list and add models', kind: 'provider' as const},
-    {value: PROVIDER_ACTIONS.setApiKey, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const},
+    {value: PROVIDER_ACTIONS.addModels, description: provider?.kind === 'chatgpt-codex' ? 'Add a supported Codex model name' : 'Fetch the provider model list and add models', kind: 'provider' as const},
+    ...(provider?.kind === 'chatgpt-codex'
+      ? [{value: PROVIDER_ACTIONS.signInChatGpt, description: 'Sign in again or switch ChatGPT account', kind: 'provider' as const}]
+      : [{value: PROVIDER_ACTIONS.setApiKey, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const}]),
     provider
       ? (providerImageCapable(provider)
         ? {value: PROVIDER_ACTIONS.clearImageCapable, description: 'Stop sending attached images to this provider', kind: 'provider' as const}
@@ -50,7 +52,7 @@ export function presetSuggestions(): TextInputSuggestion[] {
   return [
     ...cloudPresets.map(preset => ({
       value: preset.id,
-      description: `${preset.baseUrl}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
+      description: `${preset.baseUrl}${preset.auth === 'chatgpt-oauth' ? ' · browser sign-in' : ''}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
       kind: 'provider' as const,
     })),
     ...localPresets.map(preset => ({

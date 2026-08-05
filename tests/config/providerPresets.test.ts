@@ -13,12 +13,22 @@ describe('providerPresets', () => {
     }
   });
 
-  it('cloud presets require an API key', () => {
+  it('cloud presets require an API key unless they have an explicit OAuth flow', () => {
     for (const preset of PROVIDER_PRESETS) {
       if (preset.category === 'cloud') {
-        expect(preset.needsApiKey).toBe(true);
+        expect(preset.needsApiKey || preset.auth === 'chatgpt-oauth').toBe(true);
       }
     }
+  });
+
+  it('separates OpenAI API-key and subscription provider data', () => {
+    expect(findPreset('openai-api-key')).toMatchObject({name: 'OpenAI API Key', needsApiKey: true});
+    expect(findPreset('openai-subscription')).toMatchObject({
+      name: 'OpenAI Subscription',
+      auth: 'chatgpt-oauth',
+      needsApiKey: false,
+      suggestedModels: expect.arrayContaining(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']),
+    });
   });
 
   it('local presets do not require an API key', () => {
@@ -29,13 +39,30 @@ describe('providerPresets', () => {
     }
   });
 
-  it('every preset has a unique id', () => {
+  it('every preset has a unique id and no duplicate model entries', () => {
     const ids = PROVIDER_PRESETS.map(p => p.id);
     expect(new Set(ids).size).toBe(ids.length);
+    for (const preset of PROVIDER_PRESETS) {
+      expect(new Set(preset.suggestedModels ?? []).size).toBe(preset.suggestedModels?.length ?? 0);
+    }
   });
 
-  it('finds a preset by id', () => {
+  it('finds OpenAI-compatible presets by id', () => {
     expect(findPreset('openrouter')).toMatchObject({name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1'});
+    expect(findPreset('google-gemini')).toMatchObject({baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai'});
+  });
+
+  it('excludes providers that need an unsupported native or OAuth adapter', () => {
+    const ids = PROVIDER_PRESETS.map(preset => preset.id);
+    expect(ids).not.toContain('anthropic');
+    expect(ids).not.toContain('minimax-coding');
+    expect(ids).not.toContain('github-models');
+    expect(ids).not.toContain('github-copilot');
+  });
+
+  it('keeps former OpenAI preset ids as lookup aliases without duplicate entries', () => {
+    expect(findPreset('openai')).toMatchObject({id: 'openai-api-key'});
+    expect(findPreset('chatgpt-codex')).toMatchObject({id: 'openai-subscription'});
   });
 
   it('returns undefined for unknown preset id', () => {
@@ -46,8 +73,7 @@ describe('providerPresets', () => {
     const ids = PROVIDER_PRESETS.map(p => p.id);
     // Cloud
     expect(ids).toContain('openrouter');
-    expect(ids).toContain('openai');
-    expect(ids).toContain('anthropic');
+    expect(ids).toContain('openai-api-key');
     expect(ids).toContain('google-gemini');
     expect(ids).toContain('mistral');
     expect(ids).toContain('deepseek');
@@ -56,7 +82,6 @@ describe('providerPresets', () => {
     expect(ids).toContain('z-ai-coding');
     expect(ids).toContain('kimi-code');
     expect(ids).toContain('moonshot');
-    expect(ids).toContain('minimax-coding');
     expect(ids).toContain('groq');
     expect(ids).toContain('cerebras');
     expect(ids).toContain('together');
@@ -68,9 +93,7 @@ describe('providerPresets', () => {
     expect(ids).toContain('requesty');
     expect(ids).toContain('thesean');
     expect(ids).toContain('atlas-cloud');
-    expect(ids).toContain('github-models');
-    expect(ids).toContain('github-copilot');
-    expect(ids).toContain('chatgpt-codex');
+    expect(ids).toContain('openai-subscription');
     expect(ids).toContain('poe');
     // Local
     expect(ids).toContain('ollama');

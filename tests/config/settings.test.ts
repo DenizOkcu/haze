@@ -102,6 +102,12 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
+  it('persists an explicit ChatGPT Codex provider kind', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({providers: [{name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', models: ['gpt-5.4']}]});
+    expect((await readSettings()).providers?.[0]?.kind).toBe('chatgpt-codex');
+  });
+
   it('persists provider image capability flags and preserves unknown capability fields', async () => {
     const {writeSettings, readSettings} = await loadSettings();
     await writeSettings({providers: [

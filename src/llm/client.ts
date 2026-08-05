@@ -4,6 +4,7 @@ import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
+import {createChatGptCodexFetch} from './openaiCodex.js';
 export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
 
 export interface ModelRuntimeSelection {
@@ -14,6 +15,7 @@ export interface ModelRuntimeSelection {
 
 export interface ModelRuntimeConfig {
   providerName: string;
+  providerKind?: HazeProviderSettings['kind'];
   baseURL: string;
   modelName: string;
   cacheKey: string;
@@ -35,8 +37,8 @@ function openRouterHeaders(providerName: string, baseURL: string): Record<string
   };
 }
 
-function capabilities(providerName: string, baseURL: string): ProviderCapabilities {
-  const directOpenAI = providerName === 'openai' || /api\.openai\.com/i.test(baseURL);
+function capabilities(providerName: string, baseURL: string, providerKind?: HazeProviderSettings['kind']): ProviderCapabilities {
+  const directOpenAI = providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
   const openRouter = isOpenRouter(providerName, baseURL);
   return {
     reportsCacheUsage: directOpenAI || openRouter,
@@ -50,16 +52,20 @@ function capabilities(providerName: string, baseURL: string): ProviderCapabiliti
 
 function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string): ModelRuntimeSelection {
   const baseURL = selection.provider.url;
-  const configuredKey = selection.provider.key ?? settings.apiKey;
+  const providerKind = selection.provider.kind;
+  const configuredKey = providerKind === 'chatgpt-codex' ? undefined : selection.provider.key ?? settings.apiKey;
   assertCredentialedEndpointSecure(baseURL, configuredKey);
   const apiKey = configuredKey ?? 'not-needed';
   const name = selection.model;
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
+  const openai = providerKind === 'chatgpt-codex'
+    ? createOpenAI({apiKey: 'haze-oauth-placeholder', baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
+    : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
   return {
-    model: createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)}).chat(name),
+    model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector: modelSelector(selection.provider, name),
-    config: {providerName: selection.provider.name, baseURL, modelName: name, cacheKey, capabilities: capabilities(selection.provider.name, baseURL)},
+    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: capabilities(selection.provider.name, baseURL, providerKind)},
   };
 }
 
@@ -88,6 +94,13 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
 }
 
 export function providerRequestSettings(config: ModelRuntimeConfig): ProviderRequestOptions {
+  if (config.providerKind === 'chatgpt-codex') {
+    return {
+      omitMaxOutputTokens: true,
+      providerOptions: {openai: {store: false, include: ['reasoning.encrypted_content']}},
+      headers: {'session-id': config.cacheKey},
+    };
+  }
   return {
     ...(config.capabilities.supportsPromptCacheKey || config.capabilities.supportsTextVerbosity ? {
       providerOptions: {

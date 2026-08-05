@@ -43,6 +43,13 @@ describe('providerActionSuggestions', () => {
     expect(providerActionSuggestions(empty, 'p').map(r => r.value)).not.toContain('remove models');
   });
 
+  it('offers ChatGPT sign-in instead of an API-key prompt for Codex OAuth providers', () => {
+    const codex = settings({providers: [{name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', models: ['gpt-5.4']}]});
+    const actions = providerActionSuggestions(codex, 'chatgpt').map(result => result.value);
+    expect(actions).toContain('sign in with ChatGPT');
+    expect(actions).not.toContain('set API key');
+  });
+
   it('adapts the API-key label to whether a key is saved', () => {
     const withKey = settings({providers: [{name: 'p', url: 'u', key: 'k', models: []}]});
     const noKey = settings({providers: [{name: 'p', url: 'u', models: []}]});
@@ -54,6 +61,10 @@ describe('providerActionSuggestions', () => {
 describe('presetSuggestions', () => {
   it('always includes the manual custom entry', () => {
     expect(presetSuggestions().map(r => r.value)).toContain('custom');
+  });
+
+  it('labels the ChatGPT preset as browser sign-in', () => {
+    expect(presetSuggestions().find(result => result.value === 'openai-subscription')?.description).toContain('browser sign-in');
   });
 });
 

@@ -538,6 +538,14 @@
       font-weight: 500;
     }
 
+    .provider-note a {
+      color: var(--accent-strong);
+      text-underline-offset: 0.2rem;
+      text-decoration-color: var(--rule-strong);
+    }
+
+    .provider-note a:hover { text-decoration-color: var(--accent); }
+
     .provider-note code {
       padding: 0.08rem 0.3rem;
       color: var(--command);
@@ -830,7 +838,7 @@
     <section class="section" aria-labelledby="providers-title">
       <h2 class="section-title" id="providers-title">Bring your own model</h2>
       <div class="section-box">
-        <p class="provider-note"><strong>Ollama</strong> and <strong>LM Studio</strong> run locally without an API key. For hosted inference, haze includes presets for <strong>OpenRouter</strong>, <strong>OpenAI</strong>, <strong>Mistral</strong>, <strong>DeepSeek</strong>, <strong>xAI</strong>, and other OpenAI-compatible endpoints; most need only an API key. OpenAI supports both platform API keys and browser sign-in with a supported ChatGPT subscription. You can also connect a custom OpenAI-compatible API. haze is optimized for local inference. Configure a provider with <code>/provider</code>, then select a model with <code>/model</code>.</p>
+        <p class="provider-note"><strong>Ollama</strong> and <strong>LM Studio</strong> run locally without an API key. For hosted inference, haze includes <a href="https://github.com/DenizOkcu/haze/blob/main/src/config/providerPresets.ts" target="_blank" rel="noopener">presets</a> for <strong>OpenRouter</strong>, <strong>OpenAI</strong>, <strong>Mistral</strong>, <strong>DeepSeek</strong>, <strong>xAI</strong>, and other OpenAI-compatible endpoints; most need only an API key. OpenAI supports both platform API keys and browser sign-in with a supported ChatGPT subscription. You can also connect a custom OpenAI-compatible API. haze is optimized for local inference. Configure a provider with <code>/provider</code>, then select a model with <code>/model</code>.</p>
       </div>
     </section>
 

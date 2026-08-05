@@ -7,6 +7,7 @@ export const PROVIDER_ACTIONS = {
   useProvider: 'use provider',
   addModels: 'add models',
   setApiKey: 'set API key',
+  signInChatGpt: 'sign in with ChatGPT',
   markImageCapable: 'mark image-capable',
   clearImageCapable: 'clear image-capable',
   removeModels: 'remove models',

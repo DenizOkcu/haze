@@ -139,7 +139,7 @@ async function runAgentAttempt(
 
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
-    const providerSettings = providerRequestSettings(runtime.config);
+    const {omitMaxOutputTokens, ...providerSettings} = providerRequestSettings(runtime.config);
     const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
       ? {type: 'subagent_state', id: event.id, state: 'queued', mode: event.mode, queued: event.queued, running: event.running}
       : event.type === 'started'
@@ -237,7 +237,7 @@ async function runAgentAttempt(
       model: activeModel,
       instructions: systemPrompt,
       tools: availableTools,
-      maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      ...(!omitMaxOutputTokens ? {maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS} : {}),
       ...providerSettings,
       stopWhen: isStepCount(MAIN_STEP_LIMIT),
       runtimeContext: toolExecutionContext,

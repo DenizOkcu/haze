@@ -1,10 +1,10 @@
 /**
- * Known provider presets derived from community conventions (nanocoder, OpenRouter docs, etc.),
- * enriched from Pi's built-in provider registry and generated model catalog
- * (https://github.com/earendil-works/pi, `packages/ai` — provider ids, base URLs,
- * API-key env var conventions, and current model ids).
- * Each preset carries a pre-configured OpenAI-compatible base URL so users only need to supply
- * an API key and model names. Local/keyless providers have sensible localhost defaults.
+ * Known OpenAI-compatible provider presets derived from provider documentation and
+ * community conventions. Do not copy native-provider entries from multi-adapter clients:
+ * every standard preset here must accept OpenAI Chat Completions requests at its base URL.
+ * The OpenAI Subscription preset is the explicit exception and uses its own Codex adapter.
+ * Hosted presets carry a pre-configured base URL so users only need to supply an API key
+ * and model names. Local/keyless providers have sensible localhost defaults.
  */
 
 export interface ProviderPreset {
@@ -14,8 +14,10 @@ export interface ProviderPreset {
   name: string;
   /** Pre-configured OpenAI-compatible base URL. */
   baseUrl: string;
-  /** Whether an API key is typically required. Local providers default to false. */
+  /** Whether an API key is typically required. Local and OAuth providers use false. */
   needsApiKey: boolean;
+  /** Provider-specific sign-in flow, when setup is not an API-key prompt. */
+  auth?: 'chatgpt-oauth';
   /** Hint shown when prompting for the API key. */
   apiKeyHint?: string;
   /**
@@ -56,8 +58,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     category: 'cloud',
   },
   {
-    id: 'openai',
-    name: 'OpenAI',
+    id: 'openai-api-key',
+    name: 'OpenAI API Key',
     baseUrl: 'https://api.openai.com/v1',
     needsApiKey: true,
     apiKeyEnvVar: 'OPENAI_API_KEY',
@@ -75,27 +77,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     category: 'cloud',
   },
   {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    baseUrl: 'https://api.anthropic.com/v1',
-    needsApiKey: true,
-    apiKeyEnvVar: 'ANTHROPIC_API_KEY',
-    suggestedModels: [
-      // SOTA
-      'claude-opus-5',
-      'claude-opus-4-8',
-      'claude-fable-5',
-      // Fast
-      'claude-sonnet-5',
-      'claude-sonnet-4-6',
-      'claude-haiku-4-5',
-    ],
-    category: 'cloud',
-  },
-  {
     id: 'google-gemini',
     name: 'Google Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     needsApiKey: true,
     apiKeyHint: 'API Key (from https://aistudio.google.com/apikey)',
     apiKeyEnvVar: 'GEMINI_API_KEY',
@@ -208,21 +192,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       // Fast
       'kimi-k2.6',
       'kimi-k2.5',
-    ],
-    category: 'cloud',
-  },
-  {
-    id: 'minimax-coding',
-    name: 'MiniMax Coding Plan',
-    baseUrl: 'https://api.minimax.io/anthropic/v1',
-    needsApiKey: true,
-    apiKeyEnvVar: 'MINIMAX_API_KEY',
-    suggestedModels: [
-      // SOTA
-      'MiniMax-M3',
-      // Fast
-      'MiniMax-M2.7',
-      'MiniMax-M2.7-highspeed',
     ],
     category: 'cloud',
   },
@@ -381,47 +350,18 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     category: 'cloud',
   },
   {
-    id: 'github-models',
-    name: 'GitHub Models',
-    baseUrl: 'https://models.github.ai/inference',
-    needsApiKey: true,
-    apiKeyHint: 'GitHub Token (PAT with models:read scope)',
-    apiKeyEnvVar: 'GITHUB_TOKEN',
-    suggestedModels: [
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'claude-sonnet-4-6',
-      'gemini-3.1-pro',
-    ],
-    category: 'cloud',
-  },
-  {
-    id: 'github-copilot',
-    name: 'GitHub Copilot',
-    baseUrl: 'https://api.individual.githubcopilot.com',
-    needsApiKey: true,
-    apiKeyHint: 'GitHub Copilot token (OAuth)',
-    apiKeyEnvVar: 'COPILOT_GITHUB_TOKEN',
+    id: 'openai-subscription',
+    name: 'OpenAI Subscription',
+    baseUrl: 'https://chatgpt.com/backend-api/codex',
+    needsApiKey: false,
+    auth: 'chatgpt-oauth',
     suggestedModels: [
       'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
       'gpt-5.5',
       'gpt-5.4',
-      'claude-fable-5',
-      'claude-sonnet-4-6',
-      'gemini-3.1-pro-preview',
-    ],
-    category: 'cloud',
-  },
-  {
-    id: 'chatgpt-codex',
-    name: 'ChatGPT / Codex',
-    baseUrl: 'https://chatgpt.com/backend-api/codex',
-    needsApiKey: true,
-    apiKeyHint: 'ChatGPT session token (OAuth)',
-    suggestedModels: [
-      'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.3-codex',
+      'gpt-5.4-mini',
       'gpt-5.3-codex-spark',
     ],
     category: 'cloud',
@@ -484,5 +424,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
 ];
 
 export function findPreset(id: string): ProviderPreset | undefined {
-  return PROVIDER_PRESETS.find(preset => preset.id === id);
+  // Accept the former picker ids without keeping duplicate preset records.
+  const canonicalId = id === 'openai' ? 'openai-api-key' : id === 'chatgpt-codex' ? 'openai-subscription' : id;
+  return PROVIDER_PRESETS.find(preset => preset.id === canonicalId);
 }
