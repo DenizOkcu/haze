@@ -25,24 +25,34 @@ describe('sessionStore', () => {
     await fs.remove(tmp);
   });
 
-  it('creates a session under the configured sessions directory', async () => {
+  it('keeps a new session memory-only until it contains a resumable message', async () => {
     const session = await createSession({cwd, sessionsDir, hazeVersion: 'test'});
     expect(session.cwd).toBe(cwd);
     expect(session.file.startsWith(sessionsDir)).toBe(true);
+    expect(await fs.pathExists(session.file)).toBe(false);
+    await expect(readSessionEntries(session)).resolves.toEqual({entries: [], parseErrors: []});
+
+    await appendSessionEntry(session, {type: 'event', at: '1', name: 'clear'});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: []});
+    expect(await fs.pathExists(session.file)).toBe(false);
+
+    await appendSessionEntry(session, {type: 'ui_message', at: '3', role: 'user', text: 'hello'});
     expect(await fs.pathExists(session.file)).toBe(true);
     const {entries} = await readSessionEntries(session);
     expect(entries[0]).toMatchObject({type: 'header', cwd, hazeVersion: 'test'});
+    expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'clear', 'conversation_snapshot', 'ui_message']);
   });
 
   it('creates distinct sessions even within the same millisecond (regression CR-025)', async () => {
     const [first, second] = await Promise.all([createSession({cwd, sessionsDir}), createSession({cwd, sessionsDir})]);
     expect(first.id).not.toBe(second.id);
     expect(first.file).not.toBe(second.file);
-    expect(await fs.pathExists(first.file)).toBe(true);
-    expect(await fs.pathExists(second.file)).toBe(true);
-    // Timestamp prefix still drives latestSession() ordering.
+    expect(await fs.pathExists(first.file)).toBe(false);
+    expect(await fs.pathExists(second.file)).toBe(false);
+    await appendSessionEntry(first, {type: 'ui_message', at: '2026-08-01T10:00:00.000Z', role: 'user', text: 'first'});
+    await appendSessionEntry(second, {type: 'ui_message', at: '2026-08-01T10:01:00.000Z', role: 'user', text: 'second'});
     const latest = await latestSession(cwd, sessionsDir);
-    expect([first.id, second.id]).toContain(latest?.id);
+    expect(latest?.id).toBe(second.id);
   });
 
   it('appends and reads JSONL entries', async () => {
@@ -64,6 +74,7 @@ describe('sessionStore', () => {
 
   it('restores the latest structured work-state snapshot', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'start work'});
     const first = createWorkState('old goal', 'implementation', ['old']);
     const latest = createWorkState('current goal', 'implementation', ['tests pass']);
     latest.nextAction = 'Run npm test.';
@@ -72,13 +83,16 @@ describe('sessionStore', () => {
     await expect(restoreWorkState(session)).resolves.toEqual({state: latest, parseErrors: []});
   });
 
-  it('returns the latest session for a cwd', async () => {
+  it('returns the latest non-empty session for a cwd', async () => {
     const first = await createSession({cwd, sessionsDir});
-    await new Promise(resolve => setTimeout(resolve, 2));
+    await appendSessionEntry(first, {type: 'ui_message', at: '2026-08-01T10:00:00.000Z', role: 'user', text: 'first'});
+    const empty = await createSession({cwd, sessionsDir});
     const second = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(second, {type: 'ui_message', at: '2026-08-01T10:01:00.000Z', role: 'user', text: 'second'});
     const latest = await latestSession(cwd, sessionsDir);
     expect(latest?.id).toBe(second.id);
     expect(latest?.id).not.toBe(first.id);
+    expect(await fs.pathExists(empty.file)).toBe(false);
   });
 
   it('lists workspace sessions newest-first with bounded summaries and malformed-line warnings (F02)', async () => {
@@ -97,6 +111,18 @@ describe('sessionStore', () => {
     expect(summaries[0]?.sizeBytes).toBeGreaterThan(0);
     expect(summaries[1]).toMatchObject({messageCount: 2, firstUserPreview: 'investigate the flaky test'});
     expect(summaries[1]?.parseErrors[0]).toContain('Line 4');
+  });
+
+  it('hides legacy persisted sessions that contain no messages', async () => {
+    const empty = await createSession({cwd, sessionsDir});
+    const header = empty.deferredWrite?.header;
+    expect(header).toBeDefined();
+    await fs.writeFile(empty.file, `${JSON.stringify(header)}\n${JSON.stringify({type: 'event', at: '1', name: 'clear'})}\n`);
+
+    const visible = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(visible, {type: 'ui_message', at: '2', role: 'user', text: 'real conversation'});
+
+    await expect(listSessions(cwd, sessionsDir)).resolves.toMatchObject([{id: visible.id}]);
   });
 
   it('invalidates a cached summary when a session file changes', async () => {
@@ -119,9 +145,11 @@ describe('sessionStore', () => {
     expect(performance.now() - startedAt).toBeLessThan(SESSION_LIST_LATENCY_BUDGET_MS);
   });
 
-  it('finds only exact, path-safe session ids in the current workspace (F02)', async () => {
+  it('finds only exact, path-safe persisted session ids in the current workspace (F02)', async () => {
     const session = await createSession({cwd, sessionsDir});
-    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toEqual(session);
+    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toBeUndefined();
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'persist me'});
+    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toEqual({id: session.id, file: session.file, cwd: session.cwd});
     await expect(findSession(`${session.id}.jsonl`, cwd, sessionsDir)).resolves.toBeUndefined();
     await expect(findSession('../other', cwd, sessionsDir)).resolves.toBeUndefined();
     await expect(findSession('missing', cwd, sessionsDir)).resolves.toBeUndefined();
@@ -178,11 +206,12 @@ describe('sessionStore', () => {
 
   it('rejects an oversized JSONL line and continues with later entries', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'before'});
     await fs.appendFile(session.file, `${'x'.repeat(JSONL_LINE_BYTES + 1)}\n`, 'utf8');
     await appendSessionEntry(session, {type: 'ui_message', at: '2', role: 'user', text: 'after'});
     const {entries, parseErrors} = await readSessionEntries(session);
     expect(entries.at(-1)).toMatchObject({type: 'ui_message', text: 'after'});
-    expect(parseErrors).toContain(`Line 2: exceeds ${JSONL_LINE_BYTES} byte limit`);
+    expect(parseErrors).toContain(`Line 3: exceeds ${JSONL_LINE_BYTES} byte limit`);
   });
 
   it('rejects tampered snapshot shapes and reports their line numbers', async () => {
@@ -214,20 +243,22 @@ describe('sessionStore', () => {
 
   it('does not persist streaming message_update events', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'hello'});
     await appendSessionEntry(session, {type: 'event', at: '1', name: 'message_update', text: JSON.stringify({type: 'message_update', id: 'a', text: 'partial', at: '1'})});
     await appendSessionEntry(session, {type: 'event', at: '2', name: 'message_end', text: JSON.stringify({type: 'message_end', id: 'a', text: 'done', at: '2'})});
 
     const {entries} = await readSessionEntries(session);
-    expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'message_end']);
+    expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'ui_message', 'message_end']);
   });
 
   it('slims large tool_end event outputs before writing', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'run tool'});
     const largeOutput = {content: 'x'.repeat(40_000)};
     await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_end', text: JSON.stringify({type: 'tool_end', id: 'call', name: 'readFile', success: true, output: largeOutput, durationMs: 1, at: '1'})});
 
     const {entries} = await readSessionEntries(session);
-    const eventEntry = entries[1];
+    const eventEntry = entries.find(entry => entry.type === 'event' && entry.name === 'tool_end');
     expect(eventEntry).toMatchObject({type: 'event', name: 'tool_end'});
     const event = JSON.parse(eventEntry.type === 'event' ? eventEntry.text ?? '{}' : '{}') as {output: {omitted?: boolean; originalBytes?: number; preview?: string}};
     expect(event.output.omitted).toBe(true);
@@ -237,13 +268,15 @@ describe('sessionStore', () => {
 
   it('slims tool_start inputs to byte counts so written file content never reaches the session file (regression CR-031)', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'write file'});
     const writtenContent = 'SECRET_FILE_CONTENT '.repeat(4_000);
     await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_start', text: JSON.stringify({type: 'tool_start', id: 'call', name: 'writeFile', input: {path: 'src/app.ts', content: writtenContent}, at: '1'})});
 
     const raw = await fs.readFile(session.file, 'utf-8');
     expect(raw).not.toContain('SECRET_FILE_CONTENT');
     const {entries} = await readSessionEntries(session);
-    const event = JSON.parse(entries[1]?.type === 'event' ? entries[1].text ?? '{}' : '{}') as {id: string; name: string; input: {inputBytes?: number; path?: string; content?: string}};
+    const eventEntry = entries.find(entry => entry.type === 'event' && entry.name === 'tool_start');
+    const event = JSON.parse(eventEntry?.type === 'event' ? eventEntry.text ?? '{}' : '{}') as {id: string; name: string; input: {inputBytes?: number; path?: string; content?: string}};
     expect(event.id).toBe('call');
     expect(event.name).toBe('writeFile');
     expect(event.input.content).toBeUndefined();
@@ -253,10 +286,12 @@ describe('sessionStore', () => {
 
   it('persists only subagent capsule and bounded scheduler metadata in tool events', async () => {
     const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'delegate'});
     const output = {capsule: {id: 'w', termination: 'completed', usable: true, deliverable: 'done'}, telemetry: {modelSelector: 'p:m', profile: 'local-safe', durationMs: 10, queueMs: 2, toolCallCount: 1, toolCalls: [{name: 'readFile', summary: 'private detail'}], usage: {inputTokens: 99}}};
     await appendSessionEntry(session, {type: 'event', at: '1', name: 'tool_end', text: JSON.stringify({type: 'tool_end', id: 'call', name: 'subagent', success: true, output, durationMs: 1, at: '1'})});
     const {entries} = await readSessionEntries(session);
-    const event = JSON.parse(entries[1]?.type === 'event' ? entries[1].text ?? '{}' : '{}');
+    const eventEntry = entries.find(entry => entry.type === 'event' && entry.name === 'tool_end');
+    const event = JSON.parse(eventEntry?.type === 'event' ? eventEntry.text ?? '{}' : '{}');
     expect(event.output.capsule.deliverable).toBe('done');
     expect(event.output.coordinator).toMatchObject({modelSelector: 'p:m', profile: 'local-safe', toolCallCount: 1});
     expect(JSON.stringify(event)).not.toContain('private detail');

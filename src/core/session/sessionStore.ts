@@ -17,10 +17,15 @@ export type SessionEntry =
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string};
 
+type SessionHeader = Extract<SessionEntry, {type: 'header'}>;
+type DeferredSessionWrite = {header: SessionHeader; entries: SessionEntry[]};
+
 export interface HazeSession {
   id: string;
   file: string;
   cwd: string;
+  /** New sessions stay memory-only until they contain a resumable message. */
+  deferredWrite?: DeferredSessionWrite;
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(HAZE_DIR, 'sessions');
@@ -48,8 +53,15 @@ export async function createSession(options: {cwd?: string; hazeVersion?: string
   const id = newSessionId();
   const file = sessionFile(id, cwd, options.sessionsDir);
   await ensurePrivateDir(path.dirname(file));
-  await appendSessionEntry({id, file, cwd}, {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom});
-  return {id, file, cwd};
+  return {
+    id,
+    file,
+    cwd,
+    deferredWrite: {
+      header: {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom},
+      entries: [],
+    },
+  };
 }
 
 export async function findSession(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
@@ -64,20 +76,30 @@ export async function findSession(id: string, cwd = process.cwd(), sessionsDir =
 }
 
 export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
-  const dir = sessionDir(cwd, sessionsDir);
-  await ensurePrivateDir(dir);
-  const files = (await fs.readdir(dir).catch(() => []))
-    .filter(file => file.endsWith('.jsonl'))
-    .sort();
-  const latest = files.at(-1);
+  const latest = (await listSessions(cwd, sessionsDir))[0];
   if (!latest) return undefined;
-  const id = path.basename(latest, '.jsonl');
-  return {id, file: path.join(dir, latest), cwd: path.resolve(cwd)};
+  return {id: latest.id, file: sessionFile(latest.id, cwd, sessionsDir), cwd: path.resolve(cwd)};
+}
+
+function entryMakesSessionResumable(entry: SessionEntry): boolean {
+  if (entry.type === 'ui_message') return entry.text.trim().length > 0;
+  return entry.type === 'conversation_snapshot' && entry.messages.length > 0;
 }
 
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
   const prepared = prepareSessionEntryForWrite(entry);
   if (!prepared) return;
+  const deferred = session.deferredWrite;
+  if (deferred) {
+    if (!entryMakesSessionResumable(prepared)) {
+      deferred.entries.push(prepared);
+      return;
+    }
+    const entries = [deferred.header, ...deferred.entries, prepared];
+    await appendPrivateFile(session.file, entries.map(item => JSON.stringify(item)).join('\n') + '\n');
+    session.deferredWrite = undefined;
+    return;
+  }
   await appendPrivateFile(session.file, `${JSON.stringify(prepared)}\n`);
 }
 
@@ -133,6 +155,7 @@ function parseSessionEntry(value: unknown): SessionEntry {
 }
 
 async function scanSessionEntries(session: HazeSession, onEntry: (entry: SessionEntry) => void): Promise<string[]> {
+  if (session.deferredWrite && !await fs.pathExists(session.file)) return [];
   await tightenPrivateFile(session.file);
   const parseErrors: string[] = [];
   let omittedErrors = 0;
@@ -266,7 +289,7 @@ async function summarizeSession(session: HazeSession, stat: Stats): Promise<Sess
   const parseErrors = await scanSessionEntries(session, entry => {
     if (entry.type === 'header') createdAt = entry.createdAt || createdAt;
     if ('at' in entry && entry.at) lastActivityAt = entry.at;
-    if (entry.type === 'ui_message') {
+    if (entry.type === 'ui_message' && entry.text.trim().length > 0) {
       messageCount++;
       if (!firstUserPreview && entry.role === 'user') firstUserPreview = previewText(entry.text);
     }
@@ -309,7 +332,9 @@ export async function listSessions(cwd = process.cwd(), sessionsDir = DEFAULT_SE
     cacheSessionSummary(session.file, stat, summary);
     return summary;
   }));
-  return summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
+  return summaries
+    .filter(summary => summary.messageCount > 0)
+    .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
 }
 
 export interface ForkSessionResult {
