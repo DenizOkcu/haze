@@ -12,6 +12,8 @@ export const SKILL_MARKDOWN_BYTES = 256 * 1024;
 export const EXACT_MUTATION_BYTES = 8 * 1024 * 1024;
 export const JSONL_LINE_BYTES = 4 * 1024 * 1024;
 export const TEXT_LINE_BYTES = 1024 * 1024;
+/** Maximum byte size of a prompt read from piped stdin. */
+export const STDIN_PROMPT_BYTES = 256 * 1024;
 /** Maximum size of one user-attached image (checked before the read). */
 export const IMAGE_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 /** Maximum number of image attachments in a single user message. */

@@ -17,4 +17,4 @@ Centralized byte budgets.
 
 ## Consumers
 
-bash/grep collectors, `toolOutputStore`, LSP frame/header/buffer caps, skill `SKILL.md`/reference limits, the exact-mutation size guard, the bounded JSONL/text readers, and image attachments (`IMAGE_ATTACHMENT_BYTES`, `IMAGE_ATTACHMENTS_PER_MESSAGE`).
+bash/grep collectors, `toolOutputStore`, LSP frame/header/buffer caps, skill `SKILL.md`/reference limits, the exact-mutation size guard, piped stdin prompts, the bounded JSONL/text readers, and image attachments (`IMAGE_ATTACHMENT_BYTES`, `IMAGE_ATTACHMENTS_PER_MESSAGE`).

@@ -84,6 +84,49 @@ export interface ReadSessionEntriesResult {
 }
 
 const MAX_PARSE_ERRORS = 100;
+const MODEL_MESSAGE_ROLES = new Set(['system', 'user', 'assistant', 'tool']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+function parseSessionEntry(value: unknown): SessionEntry {
+  const invalid = (detail: string): never => {
+    throw new Error(`unexpected entry shape: ${detail}`);
+  };
+  if (!isRecord(value)) return invalid('expected an object with a string type');
+  const type = value.type;
+  if (typeof type !== 'string') return invalid('expected an object with a string type');
+
+  switch (type) {
+    case 'header':
+      if (typeof value.id !== 'string' || typeof value.cwd !== 'string' || typeof value.createdAt !== 'string'
+        || !optionalString(value.hazeVersion) || !optionalString(value.forkedFrom)) return invalid('invalid header');
+      return value as SessionEntry;
+    case 'ui_message':
+      if (typeof value.at !== 'string' || typeof value.text !== 'string'
+        || !MODEL_MESSAGE_ROLES.has(typeof value.role === 'string' ? value.role : '')) return invalid('invalid ui_message');
+      return value as SessionEntry;
+    case 'conversation_snapshot':
+      if (typeof value.at !== 'string' || !Array.isArray(value.messages)) return invalid('conversation_snapshot messages must be an array');
+      if (!value.messages.every((message: unknown) => isRecord(message)
+        && typeof message.role === 'string'
+        && MODEL_MESSAGE_ROLES.has(message.role))) return invalid('conversation_snapshot contains an invalid message role');
+      return value as SessionEntry;
+    case 'work_state_snapshot':
+      if (typeof value.at !== 'string' || !isRecord(value.state)) return invalid('work_state_snapshot state must be an object');
+      return value as SessionEntry;
+    case 'event':
+      if (typeof value.at !== 'string' || typeof value.name !== 'string' || !optionalString(value.text)) return invalid('invalid event');
+      return value as SessionEntry;
+    default:
+      return invalid(`unknown entry type '${type}'`);
+  }
+}
 
 async function scanSessionEntries(session: HazeSession, onEntry: (entry: SessionEntry) => void): Promise<string[]> {
   await tightenPrivateFile(session.file);
@@ -100,7 +143,7 @@ async function scanSessionEntries(session: HazeSession, onEntry: (entry: Session
       continue;
     }
     try {
-      onEntry(JSON.parse(line) as SessionEntry);
+      onEntry(parseSessionEntry(JSON.parse(line) as unknown));
     } catch (error) {
       report(`Line ${lineNumber}: ${error instanceof Error ? error.message : String(error)}`);
     }

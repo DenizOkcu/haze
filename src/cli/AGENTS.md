@@ -6,7 +6,7 @@ CLI and terminal UI orchestration instructions.
 
 ## Responsibilities
 
-- `index.ts` is the Commander entrypoint: parse flags, load package version, and dispatch to chat or headless command mode.
+- `index.ts` is the Commander entrypoint: parse flags, load package version, enforce the piped-stdin prompt byte cap, and dispatch to chat or headless command mode.
 - `commands/chat.tsx` owns the interactive Ink screen: mode/picker state, input history, context refresh/signature tracking, tasks display, token display, abort handling, and debug logging. Session lifecycle and wizard submit dispatch are delegated to `chat/sessionLifecycle.ts` and `chat/wizardDispatch.ts` (CR-006).
 - `commands/runCommand.ts` is the non-interactive/headless path; keep behavior aligned with interactive turns where practical.
 - `commands/sessionPicker.ts` and `chat/sessionLifecycle.ts` own workspace session browsing, exact resume, and fork-from-snapshot behavior.

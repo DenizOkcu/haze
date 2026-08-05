@@ -8,6 +8,7 @@ import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 import {findSession} from '../core/session/sessionStore.js';
 import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
+import {STDIN_PROMPT_BYTES} from '../core/limits/byteBudgets.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 installBackgroundProcessSignalHandlers();
@@ -40,8 +41,9 @@ Examples:
 Print mode (-p):
   Runs a single agentic turn with the full toolset and guardrails, prints the final assistant
   text, then exits (0 = complete; non-zero = aborted/failed, so CI can gate on the exit code).
-  The prompt comes from -p, otherwise from piped stdin. With --output json the reply is wrapped
-  in a single-line { type, status, result, usage } envelope. With --output stream-json haze streams
+  The prompt comes from -p, otherwise from piped stdin. Piped prompts over 256 KiB are rejected;
+  pass a file path and ask haze to read it instead. With --output json the reply is wrapped in a
+  single-line { type, status, result, usage } envelope. With --output stream-json haze streams
   one NDJSON agent event per line (turn_start, message_*, tool_*, retry, turn_end) as the run
   progresses, then prints that same { type:'result', ... } envelope as the final line — giving
   harnesses live progress and stagnation detection. --model overrides the model for this
@@ -53,15 +55,37 @@ Print mode (-p):
 
 async function readStdinPrompt(): Promise<string | undefined> {
   // Only read stdin when it is piped (non-TTY); never hang waiting on an interactive terminal.
-  if (process.stdin.isTTY === false) {
-    return new Promise((resolve) => {
+  if (!process.stdin.isTTY) {
+    return new Promise((resolve, reject) => {
       let data = '';
-      process.stdin.setEncoding('utf8');
-      process.stdin.on('data', (chunk) => {
+      let bytes = 0;
+      const cleanup = () => {
+        process.stdin.removeListener('data', onData);
+        process.stdin.removeListener('end', onEnd);
+        process.stdin.removeListener('error', onError);
+      };
+      const onData = (chunk: string) => {
+        bytes += Buffer.byteLength(chunk, 'utf8');
+        if (bytes > STDIN_PROMPT_BYTES) {
+          cleanup();
+          process.stdin.pause();
+          reject(new Error(`stdin prompt exceeds ${STDIN_PROMPT_BYTES} bytes; pass a file path and ask haze to read it instead.`));
+          return;
+        }
         data += chunk;
-      });
-      process.stdin.on('end', () => resolve(data.trim() ? data : undefined));
-      process.stdin.on('error', () => resolve(undefined));
+      };
+      const onEnd = () => {
+        cleanup();
+        resolve(data.trim() ? data : undefined);
+      };
+      const onError = () => {
+        cleanup();
+        resolve(undefined);
+      };
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', onData);
+      process.stdin.on('end', onEnd);
+      process.stdin.on('error', onError);
     });
   }
   return undefined;

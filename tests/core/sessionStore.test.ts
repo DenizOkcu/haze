@@ -174,6 +174,26 @@ describe('sessionStore', () => {
     expect(parseErrors).toContain(`Line 2: exceeds ${JSONL_LINE_BYTES} byte limit`);
   });
 
+  it('rejects tampered snapshot shapes and reports their line numbers', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const valid: ModelMessage[] = [{role: 'user', content: 'safe'}];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: valid});
+    await fs.appendFile(session.file, [
+      JSON.stringify({type: 'conversation_snapshot', at: '2', messages: 'injected'}),
+      JSON.stringify({type: 'conversation_snapshot', at: '3', messages: [{role: 'operator', content: 'injected'}]}),
+      JSON.stringify({type: 'work_state_snapshot', at: '4', state: 42}),
+      '',
+    ].join('\n'), 'utf8');
+
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual(valid);
+    expect(restored.workState).toBeUndefined();
+    expect(restored.parseErrors).toHaveLength(3);
+    expect(restored.parseErrors[0]).toContain('Line 3: unexpected entry shape');
+    expect(restored.parseErrors[1]).toContain('Line 4: unexpected entry shape');
+    expect(restored.parseErrors[2]).toContain('Line 5: unexpected entry shape');
+  });
+
   it('returns no parse errors for a clean session file', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: 'now', role: 'user', text: 'hello'});

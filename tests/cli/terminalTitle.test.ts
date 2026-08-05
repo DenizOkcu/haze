@@ -10,8 +10,8 @@ describe('terminalTitleLabel', () => {
     expect(terminalTitleLabel('/')).toBe('haze');
   });
 
-  it('strips control characters from the directory name', () => {
-    expect(terminalTitleLabel(`/tmp/weird\u0007dir\u001B`)).toBe('haze - weirddir');
+  it('strips C0 and C1 control characters from the directory name', () => {
+    expect(terminalTitleLabel(`/tmp/weird\u0007dir\u001B\u009Bunsafe\u009C`)).toBe('haze - weirddirunsafe');
   });
 });
 

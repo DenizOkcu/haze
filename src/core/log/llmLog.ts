@@ -67,6 +67,10 @@ function logFileId(now = new Date()) {
   return now.toISOString().replace(/[:.]/g, '-');
 }
 
+function isSafeLogId(id: string): boolean {
+  return id.length > 0 && path.basename(id) === id && path.win32.basename(id) === id;
+}
+
 function logFilePath(id: string) {
   return path.join(LOGS_DIR, `${id}.jsonl`);
 }
@@ -121,6 +125,7 @@ export async function listLogs(): Promise<Array<{id: string; file: string; size:
 }
 
 export async function readLogEntries(id: string): Promise<LlmLogEntry[]> {
+  if (!isSafeLogId(id)) return [];
   const file = logFilePath(id);
   const entries: LlmLogEntry[] = [];
   try {
@@ -142,6 +147,7 @@ export interface LlmLogSummary {
 }
 
 export async function summarizeLog(id: string): Promise<LlmLogSummary | undefined> {
+  if (!isSafeLogId(id)) return undefined;
   const file = logFilePath(id);
   const summary: LlmLogSummary = {entries: 0, typeCounts: {}, totalInput: 0, totalOutput: 0, toolCallCounts: {}};
   try {

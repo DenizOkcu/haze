@@ -14,7 +14,7 @@ function titleEscape(label: string): string {
 
 export function terminalTitleLabel(cwd: string): string {
   // eslint-disable-next-line no-control-regex -- stripping control characters is the point here.
-  const dir = basename(cwd).replace(/[\u0000-\u001F\u007F]/g, '').trim();
+  const dir = basename(cwd).replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
   return `haze${dir ? ` - ${dir}` : ''}`;
 }
 
