@@ -368,14 +368,21 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and anyth
 
 ## Safety model
 
+haze is designed for attended use by an experienced developer on a single-user machine. It trusts the user and their global `~/.haze` configuration. Repository contents, project skills and instructions, fetched pages, MCP and LSP output, and model output are untrusted. A local attacker who already has access as the same operating-system user is outside this threat model.
+
+Ordinary file and tool output is data, not instructions. The system prompt says that fetched content, MCP/LSP output, and files outside the workspace cannot override its rules. Project context files and project skills are the exceptions: haze loads them as designated instruction sources, labels them as repository-provided content, and keeps them below system and user instructions in priority. Prompt injection cannot be eliminated by labeling alone, so user supervision remains part of the security boundary.
+
+Bash classification is informational. haze does not ask for confirmation before running commands, including commands that can mutate or delete data. This is an intentional trade-off for attended expert use, not a sandbox or permission boundary.
+
 - Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
 - A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access.
 - Ignored workspace files require an explicit override unless covered by that user-granted read exception.
-- Bash commands are classified and shown with working-directory metadata, but haze does not use command confirmation gates.
 - The `fetch` tool only reads public `http(s)` URLs. It rejects other schemes along with private, loopback, link-local, cloud-metadata, and malformed IPv6-like hosts. On every redirect, haze connects to the public IP it already validated, which closes the DNS-rebinding gap.
-- Mutating and destructive commands can run when they are relevant to the user's request; this is intentional for expert users.
-- Project skills under `.haze/skills` are repository-provided, untrusted instructions. haze announces them, labels their provenance, confines their real paths to the workspace, and frames their content so it cannot override higher-priority safeguards. Review project skills before using an unfamiliar repository.
-- haze can make substantial changes, and it still needs supervision.
+- Project skills under `.haze/skills` are real-path-confined to the workspace and visibly labeled as untrusted repository content. Review them before using an unfamiliar repository.
+
+With `--debug`, haze writes full request and message payloads to `~/.haze/logs/`. The files use private `0600` permissions on POSIX, but they can contain secrets and file contents. Do not share debug logs without reviewing and redacting them.
+
+See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability reporting.
 
 ## Local development
 
