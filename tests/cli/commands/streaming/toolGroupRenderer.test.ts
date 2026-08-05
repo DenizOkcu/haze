@@ -142,6 +142,26 @@ describe('createToolGroupRenderer', () => {
     expect(update?.toolDiffs?.[0]?.lines).toHaveLength(2);
   });
 
+  it('extracts writeFile previews, truncation metadata, and gap rows', () => {
+    const diff = toolDiffFromResult(call('write-1', 'writeFile', {path: 'new.ts'}), {
+      ok: true,
+      path: 'new.ts',
+      addedLines: 100,
+      removedLines: 0,
+      diffTruncated: true,
+      diffOmittedLines: 20,
+      diffHandle: 'output-full',
+      diff: [
+        {type: 'add', newLine: 1, text: 'first'},
+        {type: 'gap', omittedLines: 20},
+        {type: 'add', newLine: 100, text: 'last'},
+      ],
+    });
+
+    expect(diff).toMatchObject({path: 'new.ts', addedLines: 100, truncated: true, omittedLines: 20, handle: 'output-full'});
+    expect(diff?.lines[1]).toEqual({type: 'gap', omittedLines: 20});
+  });
+
   it('rejects malformed or non-edit diff results', () => {
     expect(toolDiffFromResult(call('read-1', 'readFile', {path: 'a.ts'}), {ok: true, diff: []})).toBeUndefined();
     expect(toolDiffFromResult(call('edit-1', 'editFile', {path: 'a.ts'}), {ok: true, diff: [{type: 'add', text: 42}]})).toBeUndefined();

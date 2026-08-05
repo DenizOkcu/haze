@@ -21,7 +21,10 @@ export type ToolFailureReasonCode =
   | 'aborted'
   | 'scoped_instructions_discovered';
 
-export type ToolDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
+export type ToolDiffLine =
+  | {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string}
+  | {type: 'gap'; omittedLines: number}
+  | {type: 'meta'; text: string};
 
 export type ValidationKind = 'test' | 'typecheck' | 'lint' | 'build' | 'generic';
 

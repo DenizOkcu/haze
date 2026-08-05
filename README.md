@@ -290,9 +290,9 @@ haze has a small built-in toolset:
 - `listFiles` handles structured discovery and recursive listings, with cursor pagination when needed.
 - `readFile` returns numbered UTF-8 lines in bounded pages, with `nextOffset` when more remain. It keeps a small, signature-checked index of line offsets so later pages do not start from the top of the file. File contents are not cached.
 - `grep` runs structured ripgrep searches with a global result cap and compacts long lines and result sets. It rejects directly named ignored roots unless `includeIgnored` is set.
-- `editFile` makes unique text replacements and tolerates accidental line-number prefixes.
-- `replaceLines` edits line ranges when exact replacements are awkward and clamps ranges that extend slightly past EOF.
-- `writeFile` creates files and parent directories.
+- `editFile` makes unique text replacements, tolerates accidental line-number prefixes, and returns a structured diff.
+- `replaceLines` edits line ranges when exact replacements are awkward, clamps ranges that extend slightly past EOF, and returns a structured diff.
+- `writeFile` creates, overwrites, or appends files and parent directories, returning a diff for each successful content change.
 - `bash` runs tests, builds, git and gh commands, scripts, installs, and other shell work. It trims output according to the command type while keeping useful failure details. A timeout or abort kills the process tree, escalates if necessary, and returns even when an escaped child keeps stdout or stderr open.
 - `readToolOutput` pages through retained raw output omitted from oversized or reduced results, subject to in-memory budgets.
 - `fetch` reads public `http(s)` URLs as Markdown, formatted JSON, or text. It rejects non-HTTP schemes, private and loopback addresses, metadata hosts, and malformed IPv6-like hosts. Bounded output remains available through `readToolOutput`.
@@ -300,7 +300,7 @@ haze has a small built-in toolset:
 - `skill` loads an installed Markdown workflow or one of its references.
 - `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, and `lspReferences` provide optional read-only navigation through configured language servers. They appear only when an enabled server command is installed.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. A small file edit shows colored additions and removals with one line of context. A large one gets a summary and a pointer to `git diff`. File-tool failures include a reason code and a recovery hint. Large bash, search, and fetch results stay behind an in-memory handle. Later model calls see a compact summary tailored to validation, git, search, diffs, JSON, logs, or the head and tail of the output.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Every successful `editFile`, `replaceLines`, and `writeFile` content change shows colored additions and removals with line numbers and context. Large diffs keep an eight-row preview—the first four and last four rows, separated by an omission marker—and expose the complete retained diff through `readToolOutput`; no-op mutations are labeled explicitly. File-tool failures include a reason code and a recovery hint. Large bash, search, and fetch results stay behind an in-memory handle. Later model calls see a compact summary tailored to validation, git, search, diffs, JSON, logs, or the head and tail of the output.
 
 ### Optional LSP navigation
 

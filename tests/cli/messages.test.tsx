@@ -94,6 +94,32 @@ describe('tool diff messages', () => {
     expect(frame).toContain('   3   export function value() {');
   });
 
+  it('renders omitted-line and full-diff retrieval details for bounded previews', () => {
+    const {lastFrame} = render(<MessageView width={70} message={{
+      role: 'tool',
+      text: '1 calls · 1 changes · 0s',
+      toolDiffs: [{
+        id: 'write-1',
+        path: 'large.ts',
+        addedLines: 100,
+        removedLines: 0,
+        truncated: true,
+        omittedLines: 98,
+        handle: 'output-full-diff',
+        complete: true,
+        lines: [
+          {type: 'add', newLine: 1, text: 'first'},
+          {type: 'gap', omittedLines: 98},
+          {type: 'add', newLine: 100, text: 'last'},
+        ],
+      }],
+    }} />);
+
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('98 diff lines omitted');
+    expect(frame).toContain('Full diff: readToolOutput with handle output-full-diff');
+  });
+
   it('clips long changed rows to the available terminal width', () => {
     const {lastFrame} = render(<MessageView width={30} message={{
       role: 'tool',

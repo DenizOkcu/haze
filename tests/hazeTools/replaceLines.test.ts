@@ -25,10 +25,16 @@ describe('replaceLines tool', () => {
     }
   }
 
-  it('replaces a single line', async () => {
+  it('replaces a single line and returns its structured diff', async () => {
     const file = path.join(tmp, 'test.txt');
     await fs.writeFile(file, 'line1\nline2\nline3\n');
-    await replaceLines({path: 'test.txt', startLine: 2, endLine: 2, content: 'replaced'});
+    const result = await replaceLines({path: 'test.txt', startLine: 2, endLine: 2, content: 'replaced'});
+    expect(result.diff).toEqual([
+      {type: 'context', oldLine: 1, newLine: 1, text: 'line1'},
+      {type: 'remove', oldLine: 2, text: 'line2'},
+      {type: 'add', newLine: 2, text: 'replaced'},
+      {type: 'context', oldLine: 3, newLine: 3, text: 'line3'},
+    ]);
     const content = await fs.readFile(file, 'utf8');
     expect(content).toBe('line1\nreplaced\nline3\n');
   });

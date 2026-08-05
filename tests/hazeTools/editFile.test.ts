@@ -48,8 +48,35 @@ describe('editFile tool', () => {
       ],
     });
     expect(result.ok).toBe(true);
+    expect(result.diff).toEqual(expect.arrayContaining([
+      expect.objectContaining({type: 'remove', text: 'foo'}),
+      expect.objectContaining({type: 'add', text: 'one'}),
+    ]));
     const content = await fs.readFile(file, 'utf8');
     expect(content).toBe('one bar three\n');
+  });
+
+  it('returns a bounded visible preview and retrieval handle for large diffs', async () => {
+    const file = path.join(tmp, 'test.txt');
+    const original = Array.from({length: 100}, (_, index) => `old-${index + 1}`).join('\n');
+    const replacement = Array.from({length: 100}, (_, index) => `new-${index + 1}`).join('\n');
+    await fs.writeFile(file, original);
+
+    const result = await editFile({path: 'test.txt', edits: [{oldText: original, newText: replacement}]});
+
+    expect(result).toMatchObject({ok: true, diffTruncated: true, diffOmittedLines: 192, diffLineCount: 200});
+    expect(result.diff).toEqual([
+      {type: 'remove', oldLine: 1, text: 'old-1'},
+      {type: 'remove', oldLine: 2, text: 'old-2'},
+      {type: 'remove', oldLine: 3, text: 'old-3'},
+      {type: 'remove', oldLine: 4, text: 'old-4'},
+      {type: 'gap', omittedLines: 192},
+      {type: 'add', newLine: 97, text: 'new-97'},
+      {type: 'add', newLine: 98, text: 'new-98'},
+      {type: 'add', newLine: 99, text: 'new-99'},
+      {type: 'add', newLine: 100, text: 'new-100'},
+    ]);
+    expect(result.diffHandle).toMatch(/^output-/);
   });
 
   it('returns structured failure when oldText is not found', async () => {
@@ -146,6 +173,13 @@ describe('editFile tool', () => {
     });
     const content = await fs.readFile(file, 'utf8');
     expect(content).toBe('no ending');
+  });
+
+  it('returns an explicit no-op result without a misleading diff', async () => {
+    const file = path.join(tmp, 'test.txt');
+    await fs.writeFile(file, 'same\n');
+    const result = await editFile({path: 'test.txt', edits: [{oldText: 'same', newText: 'same'}]});
+    expect(result).toMatchObject({ok: true, noChange: true, addedLines: 0, removedLines: 0, diff: []});
   });
 
   it('skips concurrent mutations to the same file instead of racing stale edits', async () => {

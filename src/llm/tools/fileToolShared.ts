@@ -8,8 +8,8 @@ const execFile = promisify(execFileCallback);
 
 export {MAX_OUTPUT_CHARS};
 export const DEFAULT_READ_LINES = 300;
-/** Inline diff lines beyond this count are omitted (just the count is returned). */
-export const INLINE_DIFF_LINE_LIMIT = 20;
+/** Maximum real diff rows shown inline; larger diffs retain a head/tail preview and retrieval handle. */
+export const INLINE_DIFF_LINE_LIMIT = 8;
 
 export async function isGitIgnored(absolutePath: string) {
   const relative = workspaceRelativePath(absolutePath);

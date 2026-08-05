@@ -156,6 +156,10 @@ describe('toolResultSummary', () => {
     expect(toolResultSummary({success: true, output: {ok: true}})).toBe('completed');
   });
 
+  it('reports successful no-op mutations explicitly', () => {
+    expect(toolResultSummary({success: true, output: {ok: true, noChange: true, addedLines: 0, removedLines: 0}})).toBe('No changes made');
+  });
+
   it('reports failed for ok:false output with the concise error message', () => {
     expect(toolResultSummary({success: true, output: {ok: false, error: 'oldText was not found', suggestedNextStep: 'Read again'}})).toBe('failed: oldText was not found');
   });

@@ -34,9 +34,10 @@ describe('writeFile tool', () => {
     }, {abortSignal: undefined, context});
   }
 
-  it('creates a new file and creates missing parent directories', async () => {
+  it('creates a new file and returns an addition diff', async () => {
     const result = await writeFile({path: 'nested/dir/app.txt', content: 'hello'});
-    expect(result).toMatchObject({ok: true, path: 'nested/dir/app.txt', bytes: 5, overwritten: false});
+    expect(result).toMatchObject({ok: true, path: 'nested/dir/app.txt', bytes: 5, overwritten: false, addedLines: 1, removedLines: 0});
+    expect(result.diff).toEqual([{type: 'add', newLine: 1, text: 'hello'}]);
     await expect(fs.readFile(path.join(tmp, 'nested/dir/app.txt'), 'utf8')).resolves.toBe('hello');
   });
 
@@ -50,18 +51,39 @@ describe('writeFile tool', () => {
     await expect(fs.readFile(path.join(tmp, 'existing.txt'), 'utf8')).resolves.toBe('original');
   });
 
-  it('overwrites an existing file when explicitly approved', async () => {
+  it('overwrites an existing file and returns its remove/add diff', async () => {
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'original');
     const result = await writeFile({path: 'existing.txt', content: 'replacement', overwriteExisting: true});
-    expect(result).toMatchObject({ok: true, overwritten: true, appended: false});
+    expect(result).toMatchObject({ok: true, overwritten: true, appended: false, addedLines: 1, removedLines: 1});
+    expect(result.diff).toEqual([
+      {type: 'remove', oldLine: 1, text: 'original'},
+      {type: 'add', newLine: 1, text: 'replacement'},
+    ]);
     await expect(fs.readFile(path.join(tmp, 'existing.txt'), 'utf8')).resolves.toBe('replacement');
   });
 
-  it('appends later chunks without replacing the existing content', async () => {
-    await writeFile({path: 'chunked.txt', content: 'first'});
-    const result = await writeFile({path: 'chunked.txt', content: ' second', append: true});
-    expect(result).toMatchObject({ok: true, overwritten: false, appended: true, bytes: 7});
-    await expect(fs.readFile(path.join(tmp, 'chunked.txt'), 'utf8')).resolves.toBe('first second');
+  it('appends later chunks and returns an addition diff with context', async () => {
+    await writeFile({path: 'chunked.txt', content: 'first\n'});
+    const result = await writeFile({path: 'chunked.txt', content: 'second\n', append: true});
+    expect(result).toMatchObject({ok: true, overwritten: false, appended: true, bytes: 7, addedLines: 1, removedLines: 0});
+    expect(result.diff).toEqual([
+      {type: 'context', oldLine: 1, newLine: 1, text: 'first'},
+      {type: 'add', newLine: 2, text: 'second'},
+    ]);
+    await expect(fs.readFile(path.join(tmp, 'chunked.txt'), 'utf8')).resolves.toBe('first\nsecond\n');
+  });
+
+  it('reports an intentional identical overwrite as a no-op', async () => {
+    await fs.writeFile(path.join(tmp, 'same.txt'), 'same\n');
+    const result = await writeFile({path: 'same.txt', content: 'same\n', overwriteExisting: true});
+    expect(result).toMatchObject({ok: true, noChange: true, addedLines: 0, removedLines: 0, diff: []});
+  });
+
+  it('shows trailing-newline-only changes instead of dropping the diff', async () => {
+    await fs.writeFile(path.join(tmp, 'newline.txt'), 'same\n');
+    const result = await writeFile({path: 'newline.txt', content: 'same', overwriteExisting: true});
+    expect(result).toMatchObject({ok: true, noChange: false, addedLines: 1, removedLines: 1});
+    expect(result.diff).toEqual(expect.arrayContaining([{type: 'meta', text: 'No newline at end of file'}]));
   });
 
   it('rejects append to a missing file and conflicting write modes', async () => {

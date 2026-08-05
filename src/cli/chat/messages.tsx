@@ -63,6 +63,7 @@ function SystemMessageText({text}: {text: string}) {
 }
 
 function diffLineNumber(line: ToolDisplayDiffLine) {
+  if (line.type === 'gap' || line.type === 'meta') return undefined;
   return line.type === 'remove' ? line.oldLine : line.newLine ?? line.oldLine;
 }
 
@@ -72,6 +73,12 @@ function ToolDiffView({diff, width}: {diff: ToolDisplayDiff; width: number}) {
   return <Box flexDirection="column" marginLeft={2} marginTop={1}>
     <Text color={theme.muted}>⎿ <Text color={theme.command}>{diff.path}</Text> · Added {diff.addedLines} line{diff.addedLines === 1 ? '' : 's'}, removed {diff.removedLines} line{diff.removedLines === 1 ? '' : 's'}</Text>
     {diff.lines.map((line, index) => {
+      if (line.type === 'gap') {
+        return <Text key={`${diff.id}-${index}`} color={theme.muted}>      … {line.omittedLines} diff line{line.omittedLines === 1 ? '' : 's'} omitted …</Text>;
+      }
+      if (line.type === 'meta') {
+        return <Text key={`${diff.id}-${index}`} color={theme.muted}>      \ {line.text}</Text>;
+      }
       const marker = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
       const lineNumber = `${String(diffLineNumber(line) ?? '').padStart(lineNumberWidth)} `;
       const markerPrefix = `${marker} `;
@@ -91,6 +98,8 @@ function ToolDiffView({diff, width}: {diff: ToolDisplayDiff; width: number}) {
         </Text>
       </Box>;
     })}
+    {diff.handle ? <Text color={theme.muted}>      Full diff: readToolOutput with handle <Text color={theme.command}>{diff.handle}</Text></Text> : null}
+    {diff.complete === false ? <Text color={theme.muted}>      Preview is partial; {diff.previousContentOmittedBytes ?? 0} bytes of previous content were not captured.</Text> : null}
   </Box>;
 }
 

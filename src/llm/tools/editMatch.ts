@@ -71,6 +71,7 @@ export function findEditRange(original: string, oldText: string) {
 
 /** Split text into diff lines, dropping a single trailing newline. */
 export function splitDiffLines(text: string) {
+  if (text.length === 0) return [];
   const lines = text.split(/\r?\n/);
   if (text.endsWith('\n') || text.endsWith('\r\n')) lines.pop();
   return lines;
@@ -106,4 +107,75 @@ export function replacementDiff(
   );
   if (context?.after) diff.push({type: 'context', ...context.after});
   return {diff, addedLines: newLines.length, removedLines: oldLines.length};
+}
+
+/** Build a compact whole-file diff by trimming unchanged leading/trailing lines. */
+export function fileDiff(oldText: string, newText: string): {diff: ToolDiffLine[]; addedLines: number; removedLines: number} {
+  if (oldText === newText) return {diff: [], addedLines: 0, removedLines: 0};
+  const oldLines = splitDiffLines(oldText);
+  const newLines = splitDiffLines(newText);
+  let prefixLines = 0;
+  while (prefixLines < oldLines.length && prefixLines < newLines.length && oldLines[prefixLines] === newLines[prefixLines]) prefixLines++;
+  let suffixLines = 0;
+  while (
+    suffixLines < oldLines.length - prefixLines
+    && suffixLines < newLines.length - prefixLines
+    && oldLines[oldLines.length - suffixLines - 1] === newLines[newLines.length - suffixLines - 1]
+  ) suffixLines++;
+
+  if (prefixLines === oldLines.length && prefixLines === newLines.length) {
+    const lineNumber = Math.max(1, oldLines.length);
+    const text = oldLines.at(-1) ?? '';
+    const oldHasTrailingNewline = /\r?\n$/.test(oldText);
+    const newHasTrailingNewline = /\r?\n$/.test(newText);
+    return {
+      diff: [
+        {type: 'remove', oldLine: lineNumber, text},
+        ...(!oldHasTrailingNewline ? [{type: 'meta' as const, text: 'No newline at end of file'}] : []),
+        {type: 'add', newLine: lineNumber, text},
+        ...(!newHasTrailingNewline ? [{type: 'meta' as const, text: 'No newline at end of file'}] : []),
+      ],
+      addedLines: 1,
+      removedLines: 1,
+    };
+  }
+
+  const oldChanged = oldLines.slice(prefixLines, oldLines.length - suffixLines);
+  const newChanged = newLines.slice(prefixLines, newLines.length - suffixLines);
+  const startLine = prefixLines + 1;
+  const before = prefixLines > 0
+    ? {oldLine: prefixLines, newLine: prefixLines, text: oldLines[prefixLines - 1] ?? ''}
+    : undefined;
+  const after = suffixLines > 0
+    ? {
+      oldLine: oldLines.length - suffixLines + 1,
+      newLine: newLines.length - suffixLines + 1,
+      text: oldLines[oldLines.length - suffixLines] ?? '',
+    }
+    : undefined;
+  return replacementDiff(oldChanged.join('\n'), newChanged.join('\n'), startLine, startLine, {before, after});
+}
+
+/** Keep every mutation visible while bounding the inline result size. */
+export function boundedDiff(diff: ToolDiffLine[], maxLines: number): {diff: ToolDiffLine[]; truncated: boolean; omittedLines: number} {
+  if (diff.length <= maxLines) return {diff, truncated: false, omittedLines: 0};
+  const headLines = Math.ceil(maxLines / 2);
+  const tailLines = Math.floor(maxLines / 2);
+  const omittedLines = diff.length - headLines - tailLines;
+  return {
+    diff: [...diff.slice(0, headLines), {type: 'gap', omittedLines}, ...diff.slice(diff.length - tailLines)],
+    truncated: true,
+    omittedLines,
+  };
+}
+
+/** Render a complete diff as retrievable plain unified-diff-like text. */
+export function renderToolDiff(filePath: string, diff: ToolDiffLine[]) {
+  const lines = diff.map(line => {
+    if (line.type === 'gap') return `... ${line.omittedLines} diff lines omitted ...`;
+    if (line.type === 'meta') return `\\ ${line.text}`;
+    const marker = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+    return `${marker}${line.text}`;
+  });
+  return [`--- a/${filePath}`, `+++ b/${filePath}`, ...lines].join('\n');
 }

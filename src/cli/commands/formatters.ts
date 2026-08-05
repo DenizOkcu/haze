@@ -110,6 +110,7 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       return compact(output.summary, 120);
     }
     if (output.ok) {
+      if (output.noChange === true) return 'No changes made';
       if (typeof output.addedLines === 'number' || typeof output.removedLines === 'number') {
         const added = typeof output.addedLines === 'number' ? output.addedLines : 0;
         const removed = typeof output.removedLines === 'number' ? output.removedLines : 0;

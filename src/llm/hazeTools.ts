@@ -14,7 +14,7 @@ import {reductionMetrics} from '../core/toolOutput/reduction.js';
 import {HazeToolError, structuredToolFailure} from './tools/failures.js';
 import {compactGrepMatches, renderGrepMatches} from './tools/outputCap.js';
 import {parseRipgrepJsonStream} from './tools/grepParse.js';
-import {findEditRange, splitDiffLines, lineNumberAtOffset, replacementDiff} from './tools/editMatch.js';
+import {boundedDiff, fileDiff, findEditRange, splitDiffLines, lineNumberAtOffset, renderToolDiff, replacementDiff} from './tools/editMatch.js';
 import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './tools/toolContext.js';
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
@@ -25,6 +25,18 @@ import {runRipgrepBounded} from './tools/grepRunner.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
+
+function mutationDiffFields(filePath: string, fullDiff: ToolDiffLine[]) {
+  const preview = boundedDiff(fullDiff, INLINE_DIFF_LINE_LIMIT);
+  const diffHandle = preview.truncated ? storeToolOutput(renderToolDiff(filePath, fullDiff)) : undefined;
+  return {
+    diffLineCount: fullDiff.length,
+    diff: preview.diff,
+    diffTruncated: preview.truncated,
+    diffOmittedLines: preview.omittedLines,
+    ...(diffHandle ? {diffHandle} : {}),
+  };
+}
 
 export const hazeTools = {
   listFiles: tool({
@@ -259,10 +271,23 @@ export const hazeTools = {
           lines.splice(startLine - 1, effectiveEndLine - startLine + 1, ...replacementLines);
         }
         const updated = lines.join('\n') + (hasTrailingNewline ? '\n' : '');
-        const {diff, addedLines, removedLines} = replacementDiff(removedText, content, startLine, startLine, {before: beforeContext, after: afterContext});
-        const diffLineCount = diff.length;
+        const replacement = replacementDiff(removedText, content, startLine, startLine, {before: beforeContext, after: afterContext});
+        const changed = updated !== original;
         await fs.writeFile(absolutePath, updated, 'utf8');
-        return {ok: true, path: filePath, startLine, endLine: effectiveEndLine, requestedEndLine: endLine, endLineClamped: effectiveEndLine !== endLine, replacementLines: replacementLines.length, appended: isAppend, addedLines, removedLines, diffLineCount, diff: diffLineCount <= INLINE_DIFF_LINE_LIMIT ? diff : undefined};
+        return {
+          ok: true,
+          path: filePath,
+          startLine,
+          endLine: effectiveEndLine,
+          requestedEndLine: endLine,
+          endLineClamped: effectiveEndLine !== endLine,
+          replacementLines: replacementLines.length,
+          appended: isAppend,
+          noChange: !changed,
+          addedLines: changed ? replacement.addedLines : 0,
+          removedLines: changed ? replacement.removedLines : 0,
+          ...mutationDiffFields(filePath, changed ? replacement.diff : []),
+        };
       } catch (error) {
         return structuredToolFailure('replaceLines', error, 'Read the file again for current line numbers, then retry replaceLines with a valid range.', filePath);
       }
@@ -290,12 +315,21 @@ export const hazeTools = {
         }
         const {absolutePath, scopedStop, assertExistingInsideWorkspace, assertWritableInsideWorkspace} = await prepareWorkspaceWritePath('writeFile', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
+        let targetExisted = false;
+        let previousContent = '';
+        let previousContentTruncated = false;
+        let previousContentOmittedBytes = 0;
         try {
           await fs.access(absolutePath);
+          targetExisted = true;
           await assertExistingInsideWorkspace();
           if (!overwriteExisting && !append) {
             throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, set append=true for a later chunk, or set overwriteExisting=true for an intentional rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
+          const previous = await readUtf8Prefix(absolutePath, EXACT_MUTATION_BYTES);
+          previousContent = previous.content;
+          previousContentTruncated = previous.truncated;
+          previousContentOmittedBytes = Math.max(0, previous.totalBytes - Buffer.byteLength(previous.content, 'utf8'));
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code !== 'ENOENT') throw error;
@@ -303,9 +337,23 @@ export const hazeTools = {
           await assertWritableInsideWorkspace();
         }
         await fs.mkdir(path.dirname(absolutePath), {recursive: true});
+        const updated = append ? `${previousContent}${content}` : content;
+        const writeDiff = fileDiff(previousContent, updated);
         if (append) await fs.appendFile(absolutePath, content, 'utf8');
         else await fs.writeFile(absolutePath, content, 'utf8');
-        return {ok: true, path: filePath, bytes: contentBytes, overwritten: overwriteExisting, appended: append};
+        return {
+          ok: true,
+          path: filePath,
+          bytes: contentBytes,
+          overwritten: overwriteExisting,
+          appended: append,
+          noChange: targetExisted && !previousContentTruncated && previousContent === updated,
+          addedLines: writeDiff.addedLines,
+          removedLines: writeDiff.removedLines,
+          diffComplete: !previousContentTruncated,
+          ...(previousContentTruncated ? {previousContentOmittedBytes} : {}),
+          ...mutationDiffFields(filePath, writeDiff.diff),
+        };
       } catch (error) {
         return structuredToolFailure('writeFile', error, `Keep each content chunk at or below ${WRITE_FILE_CHUNK_BYTES} UTF-8 bytes. Create or replace the first chunk, then continue with append=true.`, filePath);
       }
@@ -368,9 +416,18 @@ export const hazeTools = {
           removedLines += rangeDiff.removedLines;
           lineDelta += rangeDiff.addedLines - rangeDiff.removedLines;
         }
-        const diffLineCount = diff.length;
+        const changed = updated !== original;
         await fs.writeFile(absolutePath, updated, 'utf8');
-        return {ok: true, path: filePath, edits: edits.length, approximateMatches: ranges.filter(range => range.approximate).length, addedLines, removedLines, diffLineCount, diff: diffLineCount <= INLINE_DIFF_LINE_LIMIT ? diff : undefined};
+        return {
+          ok: true,
+          path: filePath,
+          edits: edits.length,
+          approximateMatches: ranges.filter(range => range.approximate).length,
+          noChange: !changed,
+          addedLines: changed ? addedLines : 0,
+          removedLines: changed ? removedLines : 0,
+          ...mutationDiffFields(filePath, changed ? diff : []),
+        };
       } catch (error) {
         return structuredToolFailure('editFile', error, 'Read the file again, then retry with exact current text or use replaceLines with the latest line numbers.', filePath);
       }
