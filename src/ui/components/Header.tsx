@@ -2,7 +2,7 @@ import React from 'react';
 import {Box, Text} from 'ink';
 import {theme} from '../theme.js';
 
-export function Header({subtitle, version}: {subtitle?: string; version?: string}) {
+export function Header({subtitle, version}: {subtitle?: React.ReactNode; version?: string}) {
   return <Box flexDirection="column" marginBottom={1}>
     <Box>
       <Text color={theme.purple} bold>haze</Text>

@@ -32,7 +32,7 @@ import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecord
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
-import {startupContextInfo, startupInputTips, startupProviderInfo} from '../chat/startupInfo.js';
+import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
 import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
 import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
@@ -84,9 +84,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     return {...message, displayOrder: nextDisplayOrderRef.current++};
   };
   const withDisplayOrders = (next: Message[]) => next.map(withDisplayOrder);
-  const [messages, setMessagesRaw] = useState<Message[]>([
-    {role: 'system', text: 'Welcome to haze. Use /help for commands.', displayOrder: 0}
-  ]);
+  const [messages, setMessagesRaw] = useState<Message[]>([]);
   const setMessages = (updater: React.SetStateAction<Message[]>) => {
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
   };
@@ -185,11 +183,12 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   }, [busy]);
 
   useEffect(() => {
-    Promise.all([
-      readSettings().then(value => ({value, error: undefined as string | undefined})).catch(error => ({value: {} as HazeSettings, error: error instanceof Error ? error.message : String(error)})),
-      currentBranchName().catch(() => undefined),
-      readContextFiles().catch(() => [] as ContextFile[]),
-    ]).then(([settingsResult, branch, files]) => {
+    void (async () => {
+      const [settingsResult, branch, files] = await Promise.all([
+        readSettings().then(value => ({value, error: undefined as string | undefined})).catch(error => ({value: {} as HazeSettings, error: error instanceof Error ? error.message : String(error)})),
+        currentBranchName().catch(() => undefined),
+        readContextFiles().catch(() => [] as ContextFile[]),
+      ]);
       const next = settingsResult.value;
       setSettings(next);
       setSettingsError(settingsResult.error);
@@ -197,23 +196,20 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       setContextFiles(files);
       contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
       setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
-    }).catch(() => undefined);
-    sessionLifecycle.initializeSession().catch(error => {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
-    });
+      await sessionLifecycle.initializeSession().catch(error => {
+        const text = error instanceof Error ? error.message : String(error);
+        setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
+      });
+      await refreshSkills().catch(() => undefined);
+      if (version) {
+        const result = await checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'}).catch(() => undefined);
+        if (result?.isOutdated) {
+          setMessages(m => [...m, {role: 'system', text: `A new version of haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
+        }
+      }
+    })().catch(() => undefined);
     readInputHistory().then(setInputHistory).catch(() => undefined);
-    refreshSkills().catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
-    if (version) {
-      checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'})
-        .then(result => {
-          if (result?.isOutdated) {
-            setMessages(m => [...m, {role: 'system', text: `A new version of haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
-          }
-        })
-        .catch(() => undefined);
-    }
     const branchTimer = setInterval(() => {
       currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
     }, 15_000);
@@ -603,19 +599,21 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
-  const headerSubtitle = [
-    'A minimal LLM harness for growing your own workflows while you work.',
-    '',
-    'Start with simple chat, then teach haze your habits with skills:',
-    '/skills  — add, enable/disable, validate, or remove Markdown skills.',
-    '',
-    startupInputTips(),
-    '',
-    'The most adaptive workflow is the one you shape as you go.',
-    '',
-    'Guardrails are light: haze lets the LLM work from the terminal almost like you,',
-    'while trying to stay scoped to this project.',
-  ].join('\n');
+  const headerSubtitle = (
+    <Text>
+      {'A minimal LLM harness for growing your own workflows while you work.\n\nStart with simple chat, then teach haze your habits with skills:\n'}
+      <Text color={theme.command}>/skills</Text>
+      {'  — add, enable/disable, validate, or remove Markdown skills.\n\nType '}
+      <Text color={theme.command}>@path/to/image.png</Text>
+      {' (or any path with a /) to send images to models with vision capabilities.\n\nMentioning a file or directory with '}
+      <Text color={theme.command}>@path</Text>
+      {', or any '}
+      <Text color={theme.command}>/-containing path</Text>
+      {', lets the model read it, even outside the working directory.\n\nEdits and writes stay inside the workspace.\n\nThe most adaptive workflow is the one you shape as you go.\n\nGuardrails are light: haze lets the LLM work from the terminal almost like you,\nwhile trying to stay scoped to this project.\n\nUse '}
+      <Text color={theme.command}>/help</Text>
+      {' for commands.'}
+    </Text>
+  );
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
@@ -636,14 +634,14 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     </Box>}
     {queuedFollowUps.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <Text color={theme.muted}>Queued follow-ups:</Text>
-      {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} dimColor>  {index + 1}. {item}</Text>)}
+      {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
     {busy && <Box flexDirection="column" flexShrink={0}>
       <Box>
-        <Text><Text color={theme.orange} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted} dimColor> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted} dimColor> · type to queue follow-up · esc to interrupt</Text></Text>
+        <Text><Text color={theme.command} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted}> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted}> · type to queue follow-up · esc to interrupt</Text></Text>
       </Box>
       {showingTip && (
         <Box>
@@ -693,11 +691,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     </Box>}
     <Box flexShrink={0} justifyContent="space-between">
       <Box flexDirection="column" flexShrink={1} minWidth={0}>
-        <Text color={theme.muted} dimColor wrap="truncate-end">{workspaceLabel}</Text>
-        <Text color={theme.muted} dimColor wrap="truncate-end">{metrics.statusDetailLabel}</Text>
+        <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
+        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
       </Box>
       <Box flexShrink={0} marginLeft={2}>
-        <Text color={theme.muted} dimColor wrap="truncate-start">{activeModelName}</Text>
+        <Text color={theme.muted} wrap="truncate-start">{activeModelName}</Text>
       </Box>
     </Box>
   </Box>;

@@ -17,6 +17,46 @@ function fullWidthBlankLine(width: number) {
   return ''.padEnd(Math.max(1, width));
 }
 
+/** Slash commands in system text are highlighted like `code` in the docs site. A command name never contains `/`, which keeps absolute paths like `/Users/...` plain. */
+const SLASH_COMMAND_PATTERN = /(^|(?<=\s))\/[a-zA-Z][a-zA-Z0-9-]*(?![\w/-])/g;
+
+function slashCommandParts(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(SLASH_COMMAND_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) parts.push(text.slice(lastIndex, index));
+    parts.push(<Text key={`cmd-${index}`} color={theme.command}>{match[0]}</Text>);
+    lastIndex = index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+/**
+ * Style one line of a system message: single-token list items that look like
+ * paths are orange, short leading "Key:" prefixes are bold, and slash
+ * commands are orange everywhere.
+ */
+function systemLineContent(line: string): React.ReactNode {
+  const fileItem = /^- (\S+)$/.exec(line);
+  if (fileItem && /[./]/.test(fileItem[1] ?? '')) return <Text color={theme.command}>{line}</Text>;
+  const colonIndex = line.indexOf(':');
+  if (colonIndex > 0 && colonIndex <= 30) {
+    const key = line.slice(0, colonIndex);
+    if ((key.startsWith('- ') || key.includes(' ')) && /^[A-Za-z][\w ./~-]*$/.test(key.replace(/^- /, ''))) {
+      return <React.Fragment><Text bold>{key}</Text>{slashCommandParts(line.slice(colonIndex))}</React.Fragment>;
+    }
+  }
+  return slashCommandParts(line);
+}
+
+function SystemMessageText({text}: {text: string}) {
+  return <Text>
+    {text.split('\n').map((line, index) => <React.Fragment key={index}>{index > 0 ? '\n' : null}{systemLineContent(line)}</React.Fragment>)}
+  </Text>;
+}
+
 function ToolMessageText({text, streaming}: {text: string; streaming?: boolean}) {
   const lines = text.split('\n');
   return <Box flexDirection="column">
@@ -25,14 +65,14 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
       if (diffRow) {
         const [, prefix, marker, rest] = diffRow;
         const isAdd = marker === '+';
-        return <Text key={`${index}-${line}`} color="white" backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>
+        return <Text key={`${index}-${line}`} color={theme.foreground} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>
           <Text color={isAdd ? theme.success : theme.danger} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>{prefix}{marker}</Text>{rest}
         </Text>;
       }
       const contextRow = /^(\s*\d+\s+)\s(.*)$/.exec(line);
       if (contextRow) {
         const [, prefix, rest] = contextRow;
-        return <Text key={`${index}-${line}`} color="white">
+        return <Text key={`${index}-${line}`} color={theme.foreground}>
           <Text color={theme.muted}>{prefix} </Text>{rest}
         </Text>;
       }
@@ -67,23 +107,25 @@ export function messageElapsedLabel(message: Message) {
 export function MessageView({message, width}: {message: Message; width: number}) {
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
-      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
-      <Text color={theme.success} bold backgroundColor={theme.quoteBg}>{'  You asked'.padEnd(width)}</Text>
-      {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color="white" backgroundColor={theme.quoteBg}>{line}</Text>)}
-      <Text backgroundColor={theme.quoteBg}>{fullWidthBlankLine(width)}</Text>
+      <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
+      <Text color={theme.success} bold backgroundColor={theme.surfaceBg}>{'  You asked'.padEnd(width)}</Text>
+      {fullWidthLines(message.text, width, 2).map((line, lineIndex) => <Text key={lineIndex} color={theme.foreground} backgroundColor={theme.surfaceBg}>{line}</Text>)}
+      <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
     </Box>;
   }
 
   return <Box flexDirection="column" marginBottom={1}>
     <Text>
-      <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
+      <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : message.role === 'system' ? theme.success : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text>
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} />
       : message.role === 'assistant' && !message.streaming
         ? <MarkdownText content={message.text} width={width} />
-        : <Text>{message.text}</Text>}
+        : message.role === 'system'
+          ? <SystemMessageText text={message.text} />
+          : <Text>{message.text}</Text>}
   </Box>;
 }
 

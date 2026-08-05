@@ -60,7 +60,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     return log;
   }
 
-  async function startNewSession(message = 'Started a new session.') {
+  async function startNewSession(message = 'Started a new session.', mergeWithPreviousInfo = false) {
     await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
     await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
     clearToolOutputs();
@@ -75,7 +75,14 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     deps.sessionRef.current = session;
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
-    deps.setMessages(m => [...m, {role: 'system', text: `${message}\nSession saved: ${session.file}`}]);
+    const status = `${message}\nSession saved: ${session.file}`;
+    deps.setMessages(messages => {
+      const previous = messages.at(-1);
+      if (mergeWithPreviousInfo && previous?.role === 'system') {
+        return [...messages.slice(0, -1), {...previous, text: `${previous.text}\n\n${status}`}];
+      }
+      return [...messages, {role: 'system', text: status}];
+    });
   }
 
   async function resumeSession(session: HazeSession, replaceTranscript: boolean) {
@@ -115,7 +122,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
           return;
         }
       }
-      await startNewSession(deps.continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.');
+      await startNewSession(deps.continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.', true);
     },
 
     startNewSession,

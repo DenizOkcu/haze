@@ -34,7 +34,7 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     case 'blockquote': {
       const quote = token as Tokens.Blockquote;
       return <Box flexDirection="column" marginY={1}>
-        {quote.text.split('\n').map((line, index) => <Text key={index} backgroundColor={theme.quoteBg}>{padAnsi(line || ' ', width)}</Text>)}
+        {quote.text.split('\n').map((line, index) => <Text key={index} backgroundColor={theme.surfaceBg}>{padAnsi(line || ' ', width)}</Text>)}
       </Box>;
     }
     case 'list': {
@@ -72,7 +72,7 @@ function HeadingBlock({heading, width}: {heading: Tokens.Heading; width: number}
     <Text color={theme.purple} bold>{title}</Text>
   </Box>;
   return <Box marginTop={heading.depth <= 3 ? 1 : 0}>
-    <Text color={theme.violet} bold>{title}</Text>
+    <Text color={theme.purple} bold>{title}</Text>
   </Box>;
 }
 
@@ -95,8 +95,8 @@ function CodeBlock({code, language, width}: {code: string; language?: string; wi
 
   const lines = rendered.replace(/\n$/, '').split('\n');
   return <Box flexDirection="column" marginY={1}>
-    {language ? <Text color={theme.muted} backgroundColor={theme.codeBg}>{padAnsi(language, width)}</Text> : null}
-    {lines.map((line, index) => <Text key={index} backgroundColor={theme.codeBg}>{padAnsi(line || ' ', width)}</Text>)}
+    {language ? <Text color={theme.muted} backgroundColor={theme.surfaceBg}>{padAnsi(language, width)}</Text> : null}
+    {lines.map((line, index) => <Text key={index} backgroundColor={theme.surfaceBg}>{padAnsi(line || ' ', width)}</Text>)}
   </Box>;
 }
 
@@ -107,7 +107,7 @@ function InlineMarkdown({text}: {text: string}) {
       if (part.kind === 'code') return <Text key={index} color={theme.warning}>{part.text}</Text>;
       if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
       if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
-      if (part.kind === 'link') return <Text key={index} color={theme.violet}>{part.text}</Text>;
+      if (part.kind === 'link') return <Text key={index} color={theme.purple}>{part.text}</Text>;
       return <Text key={index}>{part.text}</Text>;
     })}
   </Text>;

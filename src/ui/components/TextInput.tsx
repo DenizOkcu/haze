@@ -350,7 +350,7 @@ export function TextInput({
     {value.length === 0 ? <Text wrap="truncate-end">
       <Text color={theme.purple}>› </Text>
       <Text inverse> </Text>
-      <Text color={theme.muted} dimColor> {placeholder ?? 'Type a message...'}</Text>
+      <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
     </Text> : visibleLines.map((line, index) => {
       const absoluteLineIndex = firstVisibleLine + index;
       const isCursorLine = absoluteLineIndex === currentCursorPosition.lineIndex;

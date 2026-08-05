@@ -7,20 +7,9 @@ import type {ContextFile} from '../../config/contextFiles.js';
 export function startupContextInfo(contextFiles: ContextFile[]) {
   const lines = contextFiles.map(file => `- ${file.path}`);
   return [
-    'Context files sent with the system prompt',
+    'Context files sent with the system prompt together with the first request:',
     ...(lines.length > 0 ? lines : ['- none']),
-  ].join('\n');
-}
-
-export function startupInputTips() {
-  return [
-    'Type @path/to/image.png (or any path with a /) to send images to models with vision capabilities.',
-    '',
-    'Tab through files in your working directory after typing @',
-    '',
-    'Mentioning a file or directory with @path, or any /-containing path, lets the model read it, even outside the working directory.',
-    '',
-    'Edits and writes stay inside the workspace.',
+    'Nested AGENTS.md or CLAUDE.md files are sent along as well when haze works in those subfolders.',
   ].join('\n');
 }
 
