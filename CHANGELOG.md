@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-08-05
+
+### Added
+
+- Added `SECURITY.md` with the supported-version policy, private reporting route, response expectations, and attended-use threat model.
+- Added regression coverage for external prompt-injection framing, fetch deadlines and transport behavior, oversized stdin, tampered sessions, unsafe log ids, C1 terminal controls, Windows process-tree signaling, and shared UTF-8 boundaries.
+
+### Changed
+
+- Declared the 1.0 stability contract for CLI flags, slash commands, tool result shapes, settings and session files, Markdown skill packages, and the Node.js 22 support floor. Future incompatible changes to these surfaces require a semver-major release.
+- CI now runs typecheck, tests, lint, build, `npm audit --audit-level=high`, and `npm pack --dry-run` on Node 22 and 24. Explicit `any` is now a lint error.
+- Updated runtime and development dependencies to current compatible releases; the full dependency audit now reports zero vulnerabilities.
+- Consolidated UTF-8-safe byte truncation, package-version loading, and platform external-opening helpers. Known tool-context fields now receive light runtime type validation.
+- Refined the terminal palette, startup guidance, system-message formatting, task display, and session startup grouping.
+- Session-picker summaries are cached by file size and modification time. Windows graceful and forced termination both target the complete process tree.
+
+### Security
+
+- Main and subagent prompts now treat ordinary tool output as untrusted data rather than instructions, including fetched pages, MCP/LSP output, and file content outside the workspace.
+- Documented that bash classification is informational, command confirmation gates are intentionally absent, and haze is intended for supervised use by experienced developers.
+- Documented that `--debug` logs can contain secrets and file contents and must be reviewed before sharing.
+- Session JSONL readers reject structurally invalid entries, log readers reject traversal-shaped ids, and terminal titles strip C0 and C1 control characters.
+
+### Fixed
+
+- Fetch now cancels redirect bodies, enforces one total redirect deadline, rejects non-streamable bodies instead of buffering them without a cap, normalizes array response headers, and rejects request bodies, unsupported methods, and URL credentials in the pinned transport.
+- Piped stdin is capped at 256 KiB and oversized prompts fail with guidance to pass a file path instead. Non-TTY pipes are detected correctly.
+- Bounded process collectors continue draining discarded bytes after their retention cap so chatty children can exit without filling their pipes.
+
 ## 0.10.0 - 2026-08-03
 
 ### Added

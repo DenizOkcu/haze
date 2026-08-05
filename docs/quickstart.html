@@ -26,7 +26,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.0.0</a>
       </nav>
     </div>
   </header>
@@ -81,7 +81,7 @@
                 <button class="codeblock-copy" type="button">Copy</button>
               </div>
               <pre>npm i -g @denizokcu/haze
-haze --version   <span class="c"># 0.10.0</span></pre>
+haze --version   <span class="c"># 1.0.0</span></pre>
             </div>
             <p>The global install gives you one binary: <code>haze</code>. Run it from any project directory — sessions, skills, and instructions are stored per workspace, with shared state under <code>~/.haze/</code>.</p>
           </section>
@@ -147,6 +147,7 @@ add rate limiting to the /auth endpoints, with tests
             </div>
             <p>While it works you see compact tool blocks — files read, edits applied, commands run with exit codes and validation summaries. <strong>Esc</strong> aborts the current turn; sessions survive restarts via <code>/resume</code> or <code>haze --continue</code>.</p>
             <div class="callout"><strong>Generate project instructions.</strong> Run <code>/init</code> once and haze writes a compact <code>AGENTS.md</code> describing your repo — commands, conventions, and layout — so every future session starts informed.</div>
+            <div class="callout"><strong>Supervise consequential work.</strong> haze does not use command confirmation gates. Fetched pages and external tool output are treated as untrusted data, but prompt injection cannot be eliminated by labeling alone. Review the transcript and keep backups for important repositories.</div>
           </section>
 
           <section id="next-steps">

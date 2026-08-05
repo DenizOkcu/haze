@@ -688,7 +688,7 @@
         <a href="skills.html">Skills</a>
         <a href="workflows.html">Workflows</a>
         <a class="resource-pill" href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.10.0</a>
+        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v1.0.0</a>
       </nav>
     </header>
 
@@ -856,6 +856,10 @@
         <details>
           <summary>Will I spend the session approving tool calls?</summary>
           <p>No. haze does not pause before every file read, edit, or shell command. It keeps mutations inside the current workspace and lets the agent finish its tool loop. Watch the transcript and supervise consequential work as you would any shell session.</p>
+        </details>
+        <details>
+          <summary>What does haze trust?</summary>
+          <p>haze trusts you and your global configuration. Repository content, fetched pages, project skills, MCP/LSP output, and model output are untrusted. There are no command confirmation gates, so supervise consequential work and review debug logs before sharing them.</p>
         </details>
         <details>
           <summary>Is the useful part actually open source?</summary>

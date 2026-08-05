@@ -2,20 +2,20 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.10.0
+## What's new in 1.0.0
 
-haze 0.10.0 adds richer input, isolated parallel work, and better control over long-running sessions.
+haze 1.0.0 establishes the stable public contract for CLI flags, slash commands, tool results, settings, sessions, skills, and Node.js 22 or newer.
 
-- Attach png, jpeg, gif, or webp files by typing `@path` or a path containing `/`. Explicitly mentioned non-image files and directories can be read for that turn, including outside the workspace; mutating tools remain workspace-confined. `@` autocomplete browses workspace files.
-- `/fleet` decomposes genuinely independent work across disposable, context-isolated subagents. Explicit profiles, model selection, concurrency and mutation coordination keep parallel execution bounded and predictable.
-- `/resume` now opens a workspace session browser and can resume or fork a saved snapshot. Session IDs are collision-resistant, persisted entries stay compact, and ordered writes flush at turn and shutdown boundaries.
-- The agent can register up to five dev servers or watchers as managed background processes. Their bounded rolling output is readable by handle, and haze terminates every registered process tree when the session ends.
-- `/model` and provider setup can discover models from OpenAI-compatible `/models` endpoints. Curated models are pinned when available, and the provider wizard includes a larger preset catalog without silently selecting a default.
-- Rotating busy-state tips are controlled by `/tips`; terminal tabs identify the active workspace.
-- Follow-up hardening removes duplicated bash stream text from model context, gives grep the same process-tree teardown as bash, slims mutation inputs in saved sessions, fixes outline paging after truncation, and makes retry classification stricter.
+- External tool output is explicitly treated as untrusted data. The README and `SECURITY.md` now document the attended-use threat model, the lack of command confirmation gates, prompt-injection limits, and debug-log sensitivity.
+- Fetching has a total redirect deadline, cancels redirect bodies, rejects non-streamable responses, and keeps the pinned transport GET/HEAD-only. Piped stdin, session entries, log ids, and terminal titles now have stricter validation and bounds.
+- Windows process termination uses tree semantics in both graceful and forced phases. Session-picker summaries are cached by file signature, while capped process streams keep draining to avoid child-process deadlocks.
+- CI now runs typecheck, tests, lint, build, a full high-severity dependency audit, and a package dry run on Node 22 and 24. The dependency audit is clean.
+- Shared UTF-8 truncation, package-version loading, and external-opening helpers remove duplicate boundary code. Runtime tool-context fields are lightly validated.
+- The terminal interface has clearer startup information, system-message formatting, and a consistent shared color palette.
 
 Previous releases:
 
+- `0.10.0`: image input, read-only path blessings, isolated fleet workers, managed background processes, session browsing and forking, model discovery, project skills, and rotating tips.
 - `0.9.0`: private home-state storage, authoritative turn status, collection-time byte bounds, hardened process teardown, stronger real-path and network boundaries, and ordered persistence.
 - `0.8.0`: AI SDK v7 runtime, live status with model, elapsed time, and tool labels; bounded bash output processing; lowercase `haze` naming.
 - `0.7.0`: headless `-p`, `--output json`, and `--output stream-json`; pinned-connection `fetch` safety; scoped instruction refresh; smaller sessions; startup context visibility.
@@ -238,7 +238,7 @@ echo "what does this project do?" | haze
 
 `-p` and `--prompt` run one agentic turn with the full tool set and print the final assistant text. `--model` accepts a bare model name or `provider:name` and overrides the active model for that run without changing `~/.haze/settings.json`. The model must already be registered under a provider's `models`; add it once with `/provider`. Unknown or ambiguous selectors print a specific error to stderr and exit nonzero.
 
-If you pipe stdin without `-p`, haze reads the prompt from stdin. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. They also do not compact automatically after a context overflow, so keep large CI prompts within the model's context window. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
+If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts are limited to 256 KiB; for larger input, pass a file path and ask haze to read it. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. They also do not compact automatically after a context overflow, so keep large CI prompts within the model's context window. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
 
 `--output` controls the result format: `text` is the default, `json` prints one final envelope, and `stream-json` writes live NDJSON events followed by the same envelope.
 
@@ -408,15 +408,19 @@ The npm package ships `bin`, `dist`, README, license, changelog, and examples.
 
 ## Release
 
+The documentation site is committed as static HTML under `docs/`; there is no in-repository generator. Before a release, update the version stamps in every `docs/*.html` page and manually reconcile `index.html`, `quickstart.html`, `commands.html`, and `tools.html` with the README and changelog.
+
 ```bash
+npm ci
 npm run typecheck
 npm test
 npm run lint
 npm run build
+npm audit
 npm pack --dry-run
 git tag vX.Y.Z
 git push origin main --tags
-npm publish --access public
+npm publish --access public --provenance
 ```
 
 ## License

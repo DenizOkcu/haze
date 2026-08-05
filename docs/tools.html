@@ -26,7 +26,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.0.0</a>
       </nav>
     </div>
   </header>
@@ -103,7 +103,7 @@
             <h2><span class="em">Network</span> · 1 tool</h2>
             <table>
               <tbody>
-                <tr><td>fetch</td><td>Read public http(s) URLs as Markdown, pretty JSON, or raw text — for current docs, API references, and error lookups. haze rejects private/loopback/metadata hosts and unsafe schemes, checks redirects, and pins each connection to the public IP it validated. Oversize responses are retrievable by handle.</td></tr>
+                <tr><td>fetch</td><td>Read public http(s) URLs as Markdown, pretty JSON, or raw text. haze rejects private/loopback/metadata hosts and unsafe schemes, validates every redirect, pins each connection to the public IP it checked, and enforces one total deadline. Non-streamable responses are refused rather than buffered without a cap. Oversize responses are retrievable by handle.</td></tr>
               </tbody>
             </table>
           </section>
@@ -134,8 +134,10 @@
               <li><strong>Secrets stay local.</strong> API keys live in <code>~/.haze/settings.json</code> (0600), not in environment variables. Remote endpoints require HTTPS when credentials are sent.</li>
               <li><strong>Bounded output.</strong> Command and tool output is capped at collection time; oversize raw data stays retrievable by handle with fixed memory limits.</li>
               <li><strong>No hangs.</strong> Foreground timeouts and aborts kill process trees; subprocess teardown does not wait on escaped descendants holding stdio pipes.</li>
+              <li><strong>Untrusted output.</strong> Fetched pages, MCP/LSP output, and files outside the workspace are treated as data, not instructions.</li>
+              <li><strong>Debug logs.</strong> <code>--debug</code> logs can contain secrets and file content. Review and redact them before sharing.</li>
             </ul>
-            <div class="callout"><strong>Trust model.</strong> haze keeps guardrails light so the agent can genuinely work — it assumes you supervise the transcript, like any shell session. Project skills and repo instruction files are treated as untrusted input and labeled accordingly.</div>
+            <div class="callout"><strong>Trust model.</strong> haze is intended for attended expert use. Bash classification is informational and there are no command confirmation gates. Project skills and repository instructions are labeled as untrusted content, but user supervision remains part of the security boundary. Read the <a href="https://github.com/DenizOkcu/haze/blob/main/SECURITY.md" target="_blank" rel="noopener">security policy</a>.</div>
           </section>
         </div>
       </div>

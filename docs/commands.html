@@ -26,7 +26,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.0.0</a>
       </nav>
     </div>
   </header>
@@ -116,13 +116,13 @@
               <tbody>
                 <tr class="cmd-cat"><td colspan="2">Run <code>haze --help</code> for the authoritative list</td></tr>
                 <tr><td class="cmd-c"><code>haze</code></td><td class="cmd-d">Open the interactive chat in the current directory.</td></tr>
-                <tr><td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td><td class="cmd-d">Run one non-interactive turn with the full toolset, print the final reply, and exit. Complete turns exit 0; aborted or failed turns exit non-zero. Pipe stdin for longer prompts: <code>echo "…" | haze -p</code>. Print mode does not save sessions.</td></tr>
+                <tr><td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td><td class="cmd-d">Run one non-interactive turn with the full toolset, print the final reply, and exit. Complete turns exit 0; aborted or failed turns exit non-zero. Pipe stdin for longer prompts: <code>echo "…" | haze -p</code>. Piped prompts over 256 KiB are rejected; pass a file path for larger input. Print mode does not save sessions.</td></tr>
                 <tr><td class="cmd-c"><code>haze --output &lt;text|json|stream-json&gt;</code></td><td class="cmd-d">Choose the print-mode output. <code>json</code> writes one <code>{ type, status, result, usage }</code> envelope for scripts and CI. <code>stream-json</code> writes live NDJSON events followed by the same envelope. The final status determines the exit code.</td></tr>
                 <tr><td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td><td class="cmd-d">Override the model for this run without changing settings. Use a model <code>name</code> or <code>provider:model</code> selector for a model added through <code>/provider</code>; unknown selectors exit non-zero with a precise error.</td></tr>
                 <tr><td class="cmd-c"><code>haze -c, --continue</code></td><td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td></tr>
                 <tr><td class="cmd-c"><code>haze --resume &lt;id&gt;</code></td><td class="cmd-d">Resume an exact workspace session. Combine with <code>-p</code> to load its context for one non-durable turn. Unknown ids exit non-zero.</td></tr>
                 <tr><td class="cmd-c"><code>haze --no-session</code></td><td class="cmd-d">Run without saving or resuming a durable session.</td></tr>
-                <tr><td class="cmd-c"><code>haze --debug</code></td><td class="cmd-d">Show model/tool debug logs and write a detailed JSONL log to <code>~/.haze/logs/</code> (interactive and print mode).</td></tr>
+                <tr><td class="cmd-c"><code>haze --debug</code></td><td class="cmd-d">Show model/tool debug logs and write detailed JSONL payloads to <code>~/.haze/logs/</code> (interactive and print mode). Logs can contain secrets and file content; redact them before sharing.</td></tr>
               </tbody>
             </table>
           </section>

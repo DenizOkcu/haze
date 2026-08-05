@@ -2,22 +2,23 @@
 ==============================================================================
   Sync Impact Report
 ==============================================================================
-  Version change: 1.2.0 → 1.3.0 (MINOR: release behavior materially expands
-  the extension, path-boundary, process, configuration, and session contracts).
-  Context: Aligned governance with the complete haze 0.10.0 release on
-           2026-08-03.
+  Version change: 1.3.0 → 1.4.0 (MINOR: the 1.0 contract materially expands
+  input, fetch, process, prompt-safety, session-validation, and release gates).
+  Context: Aligned governance with the complete haze 1.0.0 release on
+           2026-08-05.
 
-  Amendment 1.3.0 (2026-08-03):
-    - Principle II adds project-local skills, provenance, precedence, and
-      untrusted repository-content handling.
-    - Principle III adds managed background-process lifetime and output rules.
-    - Principle IV records the explicit user-path read exception while keeping
-      all mutation access workspace-confined.
-    - Principle VII permits bounded model discovery without implicit selection.
-    - Principle VIII covers collision-resistant session IDs, browsing, and
-      fork provenance.
+  Amendment 1.4.0 (2026-08-05):
+    - Principle III adds piped-stdin bounds, total fetch deadlines, deliberate
+      stream draining after retention caps, and Windows tree termination.
+    - Principle IV defines external tool output as untrusted data rather than
+      an instruction source.
+    - Principle VI records bounded process-scoped caches with test resets.
+    - Principle VIII requires runtime session-entry validation and bounded
+      signature-keyed session summary caching.
+    - Tooling and release gates now enforce no-explicit-any, full dependency
+      audit, package inspection, SECURITY.md, and published provenance.
 
-  Modified principles: II, III, IV, VII, VIII.
+  Modified principles: III, IV, VI, VIII, Technology Stack, Quality Gates.
   Added principles: none.
   Removed sections: none.
 
@@ -31,9 +32,9 @@
       quality-gate phases can carry coordinator, cancellation, and persistence
       tasks.
     - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
-    - README.md / CHANGELOG.md              — ✅ aligned with the complete 0.10.0
-      feature and security contract.
-    - All AGENTS.md files                   — ✅ refreshed for the 0.10.0 release.
+    - README.md / CHANGELOG.md              — ✅ aligned with the complete 1.0.0
+      feature, stability, and security contract.
+    - All AGENTS.md files                   — ✅ refreshed for the 1.0.0 release.
 
   Follow-up TODOs: none for propagation. Code-review findings are reported
   separately and do not change the governance contract.
@@ -106,10 +107,10 @@ resource.
   constants in `src/core/limits`. Callers MUST cite a constant, never a magic
   number. UI-only display limits and scheduler counts MAY use separately named
   constants in their owning modules.
-- Bash/grep subprocess `stdout`+`stderr`, file reads, `fetch` bodies, LSP
-  frames/headers/aggregate buffers, stored tool-output handles, skill files,
-  and exact-mutation inputs MUST be bounded before their full content is
-  resident in memory.
+- Bash/grep subprocess `stdout`+`stderr`, piped stdin prompts, file reads,
+  `fetch` bodies, LSP frames/headers/aggregate buffers, stored tool-output
+  handles, skill files, and exact-mutation inputs MUST be bounded before their
+  full content is resident in memory.
 - Exact line paging MAY perform a streaming full-file scan when an exact total
   line count is part of the public result, but it MUST keep memory bounded,
   cache only a bounded sparse byte-offset index, validate the file signature,
@@ -119,12 +120,15 @@ resource.
   that stream).
 - Omitted bytes MUST be reported truthfully (`retainedBytes`/`omittedBytes`).
   Raw output MAY remain retrievable behind bounded in-memory handles with
-  per-entry and aggregate LRU budgets — never unbounded.
+  per-entry and aggregate LRU budgets — never unbounded. Process streams MUST
+  continue draining discarded bytes after a retention cap so children can exit
+  without filling their pipes.
 - Potentially blocking process, network, provider, integration, and worker
   operations MUST accept cancellation and have an explicit deadline or bounded
-  cleanup path. A timeout or abort MUST terminate owned process trees, escalate
-  when graceful shutdown fails, and settle even when a descendant retains an
-  output pipe.
+  cleanup path. Redirecting fetches MUST have one total deadline in addition to
+  per-hop limits. A timeout or abort MUST terminate owned process trees on POSIX
+  and Windows, escalate when graceful shutdown fails, and settle even when a
+  descendant retains an output pipe.
 - Registered background servers/watchers MUST have a hard count limit and a
   byte-bounded rolling output tail. They MAY survive an individual turn abort,
   but MUST be unavailable to workers and MUST be terminated on session reset or
@@ -163,8 +167,10 @@ exfiltration, traversal, and local-network reach.
   pinned to an address from that validation so DNS cannot change the target
   between policy check and connect.
 - Credentialed remote plaintext HTTP MUST be rejected (configuration and
-  runtime); loopback HTTP remains supported. Secrets, API keys, and masked
-  inputs MUST NEVER be logged at full or surfaced in UI text.
+  runtime); loopback HTTP remains supported. Ordinary fetched, MCP/LSP, and
+  outside-workspace file output MUST be framed as untrusted data, not an
+  instruction source. Secrets, API keys, and masked inputs MUST NEVER be logged
+  at full or surfaced in UI text.
 
 Rationale: with no confirmation gates, filesystem and network boundaries are
 the primary safety mechanism and MUST hold under symlinks, redirects, and
@@ -201,7 +207,8 @@ The agent loop MUST be testable, provider-portable, and resumable.
   persist via `config/`/`core/` modules — never solely in React state.
 - Serialized shapes (sessions, tasks, tool/result summaries) MUST be
   backward-tolerant across upgrades and remain protocol-safe AI SDK
-  `ModelMessage` values.
+  `ModelMessage` values. Process-scoped caches MUST be bounded, keyed by a file
+  signature where relevant, and expose test reset helpers.
 
 Rationale: a clean, effect-isolated core is what keeps multi-provider support,
 durable resume, and fast unit tests possible.
@@ -240,9 +247,11 @@ User state is private by default and crash-safe.
   MUST NOT mask it. Persistence failures MUST be surfaced as one concise
   warning, never swallowed.
 - Session JSONL is optimized for resume and audit: streaming `message_update`
-  events and large tool outputs MUST be slimmed to previews + byte counts, and
-  malformed JSONL lines MUST be reported with 1-based line numbers rather than
-  silently replaced with empty defaults.
+  events and large tool outputs MUST be slimmed to previews + byte counts.
+  Malformed JSONL and structurally invalid entries MUST be rejected and
+  reported with 1-based line numbers rather than silently replaced with empty
+  defaults. Session-picker summaries MAY be cached only in a bounded cache
+  keyed by file size and modification time.
 - Session IDs MUST preserve newest-first timestamp ordering while preventing
   same-millisecond collisions. Browsing and restoring MUST remain scoped to the
   current workspace; a fork creates a new session and records its source rather
@@ -291,13 +300,13 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
 ## Technology Stack and Conventions
 
 - **Runtime**: Node `>=22`. Package `@denizokcu/haze`, MIT-licensed, published
-  to npm (`dist`, `bin`, README, LICENSE, CHANGELOG, `examples`). The npm
-  binary shim is `bin/haze.js`.
+  to npm (`dist`, `bin`, README, SECURITY, LICENSE, CHANGELOG, `examples`). The
+  npm binary shim is `bin/haze.js`.
 - **Language**: strict TypeScript, ESM (`"type": "module"`), NodeNext module
   resolution, ES2022 target. Local TypeScript imports MUST use `.js`
   extensions. Avoid `any`; prefer `unknown`, type guards, or existing result
   types (ESLint: unused vars are errors unless prefixed `_`; `no-explicit-any`
-  is a warning).
+  is an error).
 - **AI layer**: Vercel AI SDK v7 (`ai`, `@ai-sdk/openai`, `@ai-sdk/mcp`).
   Tool schemas and generated objects MUST use Zod. MCP tools are optional per
   turn, MUST be isolated on failure, and MUST never shadow built-ins.
@@ -331,8 +340,9 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
   directories and mocks; never read real `settings.json` or print secrets.
 - **Validation gates** before PR/release:
   `npm run typecheck && npm test && npm run lint && npm run build`.
-  For packaging, also `npm pack --dry-run`. `npm run context:report` estimates
-  prompt/tool/context tokens without reading `~/.haze`.
+  For packaging, also run `npm audit` and `npm pack --dry-run`.
+  `npm run context:report` estimates prompt/tool/context tokens without reading
+  `~/.haze`.
 - **Regression-first**: add a regression test for every bug fix before or
   alongside the change; cover both success and recoverable failure paths;
   assert contract fields (handles, reduction metadata, recovery hints).
@@ -343,7 +353,7 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
   source. Never edit `dist/`, `node_modules/`, `.git/`, generated outputs, or
   secrets. Preserve local formatting; avoid broad formatting churn.
 - **Release**: tag `vX.Y.Z`, push `main --tags`, then
-  `npm publish --access public`. `prepublishOnly` runs typecheck + build.
+  `npm publish --access public --provenance`. `prepublishOnly` runs typecheck + build.
 
 ## Governance
 
@@ -369,4 +379,4 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
 - If version-bump type is ambiguous, the proposer MUST state reasoning before
   finalizing.
 
-**Version**: 1.3.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-03
+**Version**: 1.4.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-05
