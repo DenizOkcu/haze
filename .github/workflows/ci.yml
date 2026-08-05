@@ -8,12 +8,18 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so scripts/check-agents-stamps.sh can read each
+          # AGENTS.md's last-commit date.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
@@ -23,5 +29,13 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
+      - run: ./scripts/check-agents-stamps.sh
       - run: npm audit --audit-level=high
       - run: npm pack --dry-run
+      - name: Upload packed tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: haze-tarball-${{ matrix.os }}-node-${{ matrix.node-version }}
+          path: '*.tgz'
+          if-no-files-found: ignore
+          retention-days: 14

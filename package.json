@@ -1,7 +1,7 @@
 {
   "name": "@denizokcu/haze",
   "version": "1.0.0",
-  "description": "A pragmatic agentic CLI for building apps from the terminal.",
+  "description": "A minimal LLM harness for your terminal.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -42,7 +42,7 @@
     "typecheck": "tsc --noEmit",
     "context:report": "node --import tsx src/cli/contextReport.ts",
     "haze": "tsx src/cli/index.ts",
-    "prepublishOnly": "npm run typecheck && npm run build"
+    "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.25",
@@ -69,6 +69,7 @@
     "@types/node": "26.1.2",
     "@types/react": "19.2.18",
     "eslint": "^10.8.0",
+    "ink-testing-library": "^4.0.0",
     "tsx": "4.23.7",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.66.0",

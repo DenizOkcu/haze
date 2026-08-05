@@ -42,4 +42,15 @@ describe('providerAuth', () => {
     await fs.writeJson(auth.PROVIDER_AUTH_FILE, {chatgpt: {type: 'oauth', access: '', refresh: 'r', expires: 1}});
     await expect(auth.readProviderAuthStore()).rejects.toThrow('Failed to read Haze provider authentication');
   });
+
+  it('tightens loose file permissions on read', async () => {
+    if (process.platform === 'win32') return; // chmod is a no-op on Windows
+    const auth = await loadProviderAuth();
+    await fs.ensureDir(path.dirname(auth.PROVIDER_AUTH_FILE));
+    await fs.writeJson(auth.PROVIDER_AUTH_FILE, {chatgpt: {type: 'oauth', access: 'a', refresh: 'r', expires: 1}});
+    await fs.chmod(auth.PROVIDER_AUTH_FILE, 0o644);
+    expect((await fs.stat(auth.PROVIDER_AUTH_FILE)).mode & 0o777).toBe(0o644);
+    await auth.getProviderAuth('chatgpt');
+    expect((await fs.stat(auth.PROVIDER_AUTH_FILE)).mode & 0o777).toBe(0o600);
+  });
 });

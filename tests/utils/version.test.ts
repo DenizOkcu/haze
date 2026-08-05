@@ -43,6 +43,22 @@ describe('parseVersion', () => {
   it('pads missing segments with zero', () => {
     expect(parseVersion('1')).toEqual({release: [1, 0, 0], prerelease: []});
   });
+
+  it('strips non-numeric trailing characters in release segments', () => {
+    expect(parseVersion('1.2.0a')).toEqual({release: [1, 2, 0], prerelease: []});
+    expect(parseVersion('v01.02.03')).toEqual({release: [1, 2, 3], prerelease: []});
+  });
+
+  it('orders numeric prerelease segments below alphanumeric ones (semver rule)', () => {
+    // 'alpha' > '1' because numeric identifiers always have lower precedence.
+    expect(compareVersions('1.0.0-1', '1.0.0-alpha')).toBe(-1);
+    expect(compareVersions('1.0.0-alpha', '1.0.0-1')).toBe(1);
+  });
+
+  it('compares mixed-case alphanumeric prereleases lexicographically', () => {
+    expect(compareVersions('1.0.0-BETA', '1.0.0-alpha')).toBe(-1); // uppercase < lowercase in ASCII
+    expect(compareVersions('1.0.0-beta', '1.0.0-rc')).toBe(-1);
+  });
 });
 
 describe('compareVersions', () => {

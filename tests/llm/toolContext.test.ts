@@ -66,6 +66,13 @@ describe('toolContext', () => {
     expect(order).toEqual(['edit-start', 'edit-end', 'bash']);
   });
 
+  it('rejects circular tool input instead of infinite-looping the dedup key builder', async () => {
+    const context: HazeToolContext = {};
+    const circular: Record<string, unknown> = {path: 'a.ts'};
+    circular.self = circular;
+    await expect(runDedupedTool('readFile', circular, {context}, async () => ({ok: true}))).rejects.toThrow('Circular tool input');
+  });
+
   it('serializes concurrent scoped context discovery so an unchanged file is read once', async () => {
     originalCwd = process.cwd();
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-tool-context-'));

@@ -44,7 +44,10 @@ function systemLineContent(line: string): React.ReactNode {
   const colonIndex = line.indexOf(':');
   if (colonIndex > 0 && colonIndex <= 30) {
     const key = line.slice(0, colonIndex);
-    if ((key.startsWith('- ') || key.includes(' ')) && /^[A-Za-z][\w ./~-]*$/.test(key.replace(/^- /, ''))) {
+    // Exclude `/` and `.` from the key body so URLs like `https://example.com:443`
+    // don't match as a "Key:" prefix and get bolded as one span (which would
+    // bypass the slash-command highlighter for anything that follows).
+    if ((key.startsWith('- ') || key.includes(' ')) && /^[A-Za-z][\w ~-]*$/.test(key.replace(/^- /, ''))) {
       return <React.Fragment><Text bold>{key}</Text>{slashCommandParts(line.slice(colonIndex))}</React.Fragment>;
     }
   }
@@ -104,7 +107,7 @@ export function messageElapsedLabel(message: Message) {
   return message.streaming ? formatElapsedTimeWhole(elapsed) : formatElapsedTime(elapsed);
 }
 
-export function MessageView({message, width}: {message: Message; width: number}) {
+export const MessageView = React.memo(function MessageView({message, width}: {message: Message; width: number}) {
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
       <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
@@ -122,12 +125,15 @@ export function MessageView({message, width}: {message: Message; width: number})
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} />
       : message.role === 'assistant' && !message.streaming
+        // Only settled assistant messages get Markdown rendering. Streaming
+        // text re-tokenizes on every delta (expensive) and the partial Markdown
+        // would flicker; user text stays plain to keep pasted Markdown literal.
         ? <MarkdownText content={message.text} width={width} />
         : message.role === 'system'
           ? <SystemMessageText text={message.text} />
           : <Text>{message.text}</Text>}
   </Box>;
-}
+});
 
 export function messageKey(message: Message, index: number) {
   return message.id ?? `${index}-${message.role}-${message.text}`;

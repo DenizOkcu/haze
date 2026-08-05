@@ -23,7 +23,7 @@ const oauthProviderAuthSchema = z.object({
   refresh: z.string().min(1),
   expires: z.number().int().nonnegative(),
   accountId: z.string().min(1).optional(),
-}).passthrough();
+});
 
 const providerAuthStoreSchema = z.record(z.string().min(1), oauthProviderAuthSchema);
 

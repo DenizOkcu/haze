@@ -51,6 +51,12 @@ describe('OpenAI Codex browser OAuth', () => {
     expect(extractChatGptAccountId({access_token: jwt({organizations: [{id: 'org'}]})})).toBe('org');
   });
 
+  it('returns undefined when no account claim is present in any token', () => {
+    expect(extractChatGptAccountId({})).toBeUndefined();
+    expect(extractChatGptAccountId({id_token: jwt({sub: 'user-1'})})).toBeUndefined();
+    expect(extractChatGptAccountId({access_token: 'opaque-not-a-jwt'})).toBeUndefined();
+  });
+
   it('accepts the localhost callback, exchanges the code, and returns credentials', async () => {
     const port = await freePort();
     const tokenFetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {

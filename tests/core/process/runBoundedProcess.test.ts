@@ -20,6 +20,14 @@ describe('signalProcessTree', () => {
     expect(unref).toHaveBeenCalledTimes(2);
     expect(child.kill).not.toHaveBeenCalled();
   });
+
+  it.runIf(process.platform !== 'win32')('falls back to child.kill when the POSIX group signal fails', () => {
+    const kill = vi.fn();
+    // Use a pid that does not exist as a process group; process.kill(-pid) will throw.
+    const fakeChild = {pid: 2147483647, kill} as unknown as import('node:child_process').ChildProcess;
+    signalProcessTree(fakeChild, 'SIGTERM');
+    expect(kill).toHaveBeenCalledWith('SIGTERM');
+  });
 });
 
 describe('runBoundedProcess', () => {
@@ -69,6 +77,17 @@ describe('runBoundedProcess', () => {
     const result = await runBoundedProcess({command: process.execPath, args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)}, 'x')`], cwd: dir, timeoutMs: 5000, signal: controller.signal, maxStdoutBytes: 100, maxStderrBytes: 100});
     expect(result.aborted).toBe(true);
     await expect(fs.stat(marker)).rejects.toMatchObject({code: 'ENOENT'});
+  });
+
+  it('aborts an in-flight child when the abort signal fires mid-execution', async () => {
+    const controller = new AbortController();
+    // Long-running child; abort after 20ms.
+    const result = await new Promise<{aborted: boolean}>(resolve => {
+      const promise = runBoundedProcess({command: process.execPath, args: ['-e', 'setInterval(()=>{}, 1000)'], cwd: process.cwd(), timeoutMs: 5000, signal: controller.signal, maxStdoutBytes: 100, maxStderrBytes: 100});
+      setTimeout(() => controller.abort(), 20);
+      void promise.then(resolve);
+    });
+    expect(result.aborted).toBe(true);
   });
 
   it('preserves valid UTF-8 when a retained stream ends mid-character', async () => {

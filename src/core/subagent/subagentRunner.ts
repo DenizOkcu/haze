@@ -48,7 +48,10 @@ function withToolExecutionBudget(tools: ToolSet, maxToolCalls: number, state: {s
       execute: (...args: unknown[]) => {
         // This check is at the actual execute boundary. Concurrent calls from
         // one emitted batch enter synchronously, so no more than the remaining
-        // budget can reach an underlying tool implementation.
+        // budget can reach an underlying tool implementation. Relies on JS's
+        // single-threaded event loop keeping the check-and-increment atomic.
+        // Revisit if the AI SDK ever yields between queueing a tool batch and
+        // invoking execute.
         if (state.started >= maxToolCalls) {
           state.exceeded = true;
           return {ok: false, [TOOL_BUDGET_BLOCKED]: true, error: `Subagent tool-call budget of ${maxToolCalls} exhausted; execution was blocked.`};

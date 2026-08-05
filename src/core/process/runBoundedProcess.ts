@@ -12,6 +12,9 @@ export interface ProcessTreeSignalOptions {
 }
 
 export function signalProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, signal: NodeJS.Signals, options: ProcessTreeSignalOptions = {}) {
+  // When pid is null, child.kill is a no-op against a real Node child (returns
+  // false). Tests still rely on the call going through so they can observe
+  // which signal was used via their fake child's kill implementation.
   if (child.pid == null) {
     child.kill(signal);
     return;
@@ -84,6 +87,12 @@ export async function runBoundedProcess(input: {command: string; args: string[];
       resolve({code, signal, stdout: stdoutResult, stderr: stderrResult, timedOut, aborted, forced, durationMs: Date.now() - startedAt, ...(error ? {error} : {})});
     };
     const scheduleCloseFallback = () => {
+      // Only call after SIGKILL — running this after SIGTERM would resolve the
+      // promise before the forced-kill escalation, leaking processes that ignore
+      // SIGTERM. 50ms is enough for the kernel to deliver the signal and for an
+      // 'exit' event to fire; if 'close' still doesn't fire, the descendant is
+      // holding stdio (escaped grandchild) and we settle with whatever exit
+      // info we already captured.
       closeTimer ??= setTimeout(() => settle(exitCode, exitSignal), 50);
       closeTimer.unref?.();
     };

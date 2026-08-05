@@ -45,13 +45,15 @@ export type HazeToolContext = {
   blessedPaths?: readonly BlessedPath[];
 };
 
-function stableJsonStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(',')}]`;
+function stableJsonStringify(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
+  if (Array.isArray(value)) return `[${value.map(item => stableJsonStringify(item, seen)).join(',')}]`;
   if (value && typeof value === 'object') {
+    if (seen.has(value as object)) throw new Error('Circular tool input');
+    seen.add(value as object);
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, entryValue]) => entryValue !== undefined)
       .sort(([a], [b]) => a.localeCompare(b));
-    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJsonStringify(entryValue)}`).join(',')}}`;
+    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJsonStringify(entryValue, seen)}`).join(',')}}`;
   }
   return JSON.stringify(value) ?? 'undefined';
 }
@@ -87,7 +89,7 @@ function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('mutationPolicy', isMutationPolicy)
     && validOptional('mutationOwner', field => typeof field === 'symbol')
     && validOptional('isSubagent', field => typeof field === 'boolean')
-    && validOptional('blessedPaths', field => Array.isArray(field));
+    && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'));
 }
 
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');

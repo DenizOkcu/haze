@@ -136,7 +136,12 @@ export function startBackgroundProcess(input: {command: string; cwd: string}): B
   child.stderr?.on('data', (chunk: Buffer) => ring.add(chunk));
   child.once('error', error => {
     summary.status = 'failed';
-    summary.error = error.message;
+    const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
+    // bash is required on Windows (via WSL or Git Bash). Without it, spawn
+    // fails with ENOENT; surface a clearer message than the raw syscall error.
+    summary.error = code === 'ENOENT' && process.platform === 'win32'
+      ? `bash was not found on PATH. Install WSL or Git Bash, or run haze on a POSIX shell. Underlying error: ${error.message}`
+      : error.message;
     notify();
   });
   child.once('close', (code, signal) => {

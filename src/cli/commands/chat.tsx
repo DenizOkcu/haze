@@ -75,6 +75,26 @@ function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
 }
 
+/**
+ * Busy indicator isolated in its own component. The Spinner animates on its own
+ * internal state (~10 fps) which triggers re-renders inside this subtree; keeping
+ * the spinner out of ChatScreen's render scope means those ticks don't propagate
+ * to the transcript tree above (where React.memo on MessageView already prevents
+ * deep re-renders, but avoiding the reconciliation walk entirely is still cheaper).
+ */
+function BusyBar({label, elapsed, tip}: {label: string; elapsed: string; tip?: string}) {
+  return <Box flexDirection="column" flexShrink={0}>
+    <Box>
+      <Text><Text color={theme.command} bold><Spinner type="dots" /> {label}{elapsed ? <Text color={theme.muted}> · {elapsed}</Text> : null}</Text><Text color={theme.muted}> · type to queue follow-up · esc to interrupt</Text></Text>
+    </Box>
+    {tip && (
+      <Box>
+        <Text color={theme.muted}><Text bold>Tip:</Text> {tip}</Text>
+      </Box>
+    )}
+  </Box>;
+}
+
 function ChatScreen({debug = false, version, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {columns: width} = useWindowSize();
@@ -603,13 +623,13 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     <Text>
       {'A minimal LLM harness for growing your own workflows while you work.\n\nStart with simple chat, then teach haze your habits with skills:\n'}
       <Text color={theme.command}>/skills</Text>
-      {'  — add, enable/disable, validate, or remove Markdown skills.\n\nType '}
-      <Text color={theme.command}>@path/to/image.png</Text>
-      {' (or any path with a /) to send images to models with vision capabilities.\n\nMentioning a file or directory with '}
-      <Text color={theme.command}>@path</Text>
-      {', or any '}
+      {'  — add, enable/disable, validate, or remove Markdown skills.\n\nMention a path with '}
+      <Text color={theme.command}>/</Text>
+      {' (e.g. '}
+      <Text color={theme.command}>@path/to/file</Text>
+      {' or any '}
       <Text color={theme.command}>/-containing path</Text>
-      {', lets the model read it, even outside the working directory.\n\nEdits and writes stay inside the workspace.\n\nThe most adaptive workflow is the one you shape as you go.\n\nGuardrails are light: haze lets the LLM work from the terminal almost like you,\nwhile trying to stay scoped to this project.\n\nUse '}
+      {') to let the model read that file or directory this turn, even outside the working directory. Image mentions additionally require a vision-capable model.\n\nEdits and writes stay inside the workspace.\n\nThe most adaptive workflow is the one you shape as you go.\n\nGuardrails are light: haze lets the LLM work from the terminal almost like you,\nwhile trying to stay scoped to this project.\n\nUse '}
       <Text color={theme.command}>/help</Text>
       {' for commands.'}
     </Text>
@@ -639,16 +659,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
-    {busy && <Box flexDirection="column" flexShrink={0}>
-      <Box>
-        <Text><Text color={theme.command} bold><Spinner type="dots" /> {busyLabel}{busyElapsed ? <Text color={theme.muted}> · {busyElapsed}</Text> : null}</Text><Text color={theme.muted}> · type to queue follow-up · esc to interrupt</Text></Text>
-      </Box>
-      {showingTip && (
-        <Box>
-          <Text color={theme.muted}><Text bold>Tip:</Text> {TIPS[tipIndex] ?? ''}</Text>
-        </Box>
-      )}
-    </Box>}
+    {busy && <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput

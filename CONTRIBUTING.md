@@ -8,6 +8,10 @@ cd haze
 npm install
 ```
 
+The `allowScripts` field in `package.json` is a pnpm-specific allowlist for the
+optional native install scripts emitted by `esbuild` and `fsevents`. npm ignores
+it and runs those scripts by default; both dependencies are widely trusted.
+
 ## Development
 
 ```bash
@@ -17,6 +21,16 @@ npm run build        # Clean + compile to dist/
 npm test             # Run unit tests
 npm run lint         # Check code style
 ```
+
+## AGENTS.md stamps
+
+Every nested `AGENTS.md` carries a `Last updated: YYYY-MM-DD` line. CI runs
+`scripts/check-agents-stamps.sh`, which compares the stamp against the date of
+the most recent commit touching that file. If you edit an `AGENTS.md`, refresh
+the stamp in the same commit — the check fails on drift.
+
+For uncommitted WIP, run `./scripts/check-agents-stamps.sh` locally before
+pushing.
 
 ## Project Structure
 

@@ -203,6 +203,8 @@ async function runAgentAttempt(
     let completedToolOnlySteps = 0;
     let pendingMalformedToolName: string | undefined;
     let unresolvedMalformedToolName: string | undefined;
+    // Per-attempt (not per-turn) recovery counter: a transient retry gets a
+    // fresh map. Bounded across the whole turn by MAIN_TOOL_CALL_LIMIT.
     const malformedRecoveryAttempts = new Map<string, number>();
     let toolResultState = initialToolResultState();
     const resetAssistantSegment = () => {

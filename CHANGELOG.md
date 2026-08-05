@@ -6,17 +6,20 @@
 
 ### Added
 
+- Added OpenAI Subscription provider preset with browser OAuth against the ChatGPT Codex Responses endpoint. Credentials live in `~/.haze/auth.json` with private permissions and are refreshed transparently near expiry; the chatgpt-codex provider kind routes all requests to the canonical Codex URL with the account-id header attached.
 - Added `SECURITY.md` with the supported-version policy, private reporting route, response expectations, and attended-use threat model.
 - Added regression coverage for external prompt-injection framing, fetch deadlines and transport behavior, oversized stdin, tampered sessions, unsafe log ids, C1 terminal controls, Windows process-tree signaling, and shared UTF-8 boundaries.
 
 ### Changed
 
+- Replaced the single-page docs site with a multi-page redesign (landing, quickstart, commands, tools, skills, workflows) backed by shared CSS/JS.
 - Declared the 1.0 stability contract for CLI flags, slash commands, tool result shapes, settings and session files, Markdown skill packages, and the Node.js 22 support floor. Future incompatible changes to these surfaces require a semver-major release.
 - CI now runs typecheck, tests, lint, build, `npm audit --audit-level=high`, and `npm pack --dry-run` on Node 22 and 24. Explicit `any` is now a lint error.
 - Updated runtime and development dependencies to current compatible releases; the full dependency audit now reports zero vulnerabilities.
 - Consolidated UTF-8-safe byte truncation, package-version loading, and platform external-opening helpers. Known tool-context fields now receive light runtime type validation.
 - Refined the terminal palette, startup guidance, system-message formatting, task display, and session startup grouping.
 - Session-picker summaries are cached by file size and modification time. Windows graceful and forced termination both target the complete process tree.
+- `writeFile` now enforces a `${WRITE_FILE_CHUNK_BYTES}` per-call cap at both the Zod schema and the runtime body. Malformed tool input triggers up to two smaller retries before the turn is reported as blocked with an unresolved-tool-input marker.
 
 ### Security
 

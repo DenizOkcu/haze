@@ -32,7 +32,14 @@ export function truncateUtf8BufferAtBytes(input: Buffer, maxBytes: number): Utf8
   return {buffer, bytes: buffer.byteLength, truncated: buffer.byteLength < input.byteLength};
 }
 
-/** Retain at most `maxBytes` from the end without starting inside a UTF-8 character. */
+/**
+ * Retain at most `maxBytes` from the end without starting inside a UTF-8 character.
+ *
+ * Best-effort for malformed UTF-8 input: if the buffer contains stray bytes that
+ * are not part of a valid sequence, the result may begin with a replacement
+ * character when decoded. Callers that need strict UTF-8 validation should
+ * validate before truncating.
+ */
 export function truncateUtf8TailBufferAtBytes(input: Buffer, maxBytes: number): Utf8BufferTruncation {
   const limit = Math.max(0, Math.floor(maxBytes));
   if (input.byteLength <= limit) return {buffer: input, bytes: input.byteLength, truncated: false};

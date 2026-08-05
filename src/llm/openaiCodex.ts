@@ -13,6 +13,11 @@ async function currentAuth(providerName: string): Promise<OAuthProviderAuth> {
   if (!pending) {
     pending = refreshChatGptAuth(stored)
       .then(async auth => {
+        // Re-read the store before writing back so a concurrent sign-out on
+        // another haze instance (or this one) wins. Without this, an in-flight
+        // refresh would resurrect credentials the user just removed.
+        const current = await getProviderAuth(providerName);
+        if (!current || current.type !== 'oauth') return auth;
         await setProviderAuth(providerName, auth);
         return auth;
       })
@@ -32,11 +37,7 @@ function authenticatedHeaders(init: RequestInit | undefined, auth: OAuthProvider
 }
 
 export function createChatGptCodexFetch(providerName: string, fetchImpl: typeof fetch = fetch): typeof fetch {
-  return async (input, init) => {
-    const requestedUrl = input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url);
-    if (!requestedUrl.pathname.endsWith('/responses')) {
-      throw new Error(`ChatGPT OAuth credentials may only be used with the Codex Responses endpoint, not ${requestedUrl.pathname}.`);
-    }
+  return async (_input, init) => {
     const auth = await currentAuth(providerName);
     return fetchImpl(CHATGPT_CODEX_RESPONSES_URL, {...init, headers: authenticatedHeaders(init, auth)});
   };

@@ -7,6 +7,9 @@ export const CHATGPT_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 export const CHATGPT_OAUTH_ISSUER = 'https://auth.openai.com';
 export const CHATGPT_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CHATGPT_CODEX_RESPONSES_URL = `${CHATGPT_CODEX_BASE_URL}/responses`;
+// Fixed by the registered ChatGPT OAuth client: the redirect_uri must match
+// exactly. Do not switch to an ephemeral port — the auth server would reject
+// the callback.
 export const CHATGPT_OAUTH_CALLBACK_PORT = 1455;
 
 const CALLBACK_PATH = '/auth/callback';
@@ -59,7 +62,7 @@ export function buildChatGptAuthorizeUrl(input: {issuer?: string; redirectUri: s
     response_type: 'code',
     client_id: CHATGPT_OAUTH_CLIENT_ID,
     redirect_uri: input.redirectUri,
-    scope: 'openid profile email offline_access api.connectors.read api.connectors.invoke',
+    scope: 'openid profile email offline_access',
     code_challenge: input.pkce.challenge,
     code_challenge_method: 'S256',
     id_token_add_organizations: 'true',
@@ -107,7 +110,12 @@ function credentialsFromTokens(tokens: TokenResponse, previous?: OAuthProviderAu
   const access = tokens.access_token;
   const refresh = tokens.refresh_token ?? previous?.refresh;
   if (!access || !refresh) throw new Error('ChatGPT authorization returned incomplete credentials. Sign in again.');
-  const accountId = extractChatGptAccountId(tokens) ?? previous?.accountId;
+  const extracted = extractChatGptAccountId(tokens);
+  // When the new tokens carry no account claim (e.g., an opaque access token
+  // without JWT claims), fall back to the previous accountId so refresh keeps
+  // the same account context. Theoretically stale if the user switched account
+  // since the original login; requires a fresh sign-in to correct.
+  const accountId = extracted ?? previous?.accountId;
   return {
     type: 'oauth',
     access,
@@ -134,6 +142,9 @@ function callbackHtml(success: boolean): string {
 
 async function closeServer(server: Server): Promise<void> {
   if (!server.listening) return;
+  // Force-close idle keep-alive connections so the event loop can settle
+  // promptly (server.close alone only stops listening).
+  server.closeAllConnections?.();
   await new Promise<void>(resolve => server.close(() => resolve()));
 }
 

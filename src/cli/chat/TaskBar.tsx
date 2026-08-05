@@ -35,7 +35,7 @@ export function TaskBar({tasks, width, expanded, padding}: {tasks: Task[]; width
   return (
     <Box flexDirection="column" flexShrink={0}>
       {padding > 0 && Array.from({length: padding}, (_, i) => <Text key={`pad-${i}`}>{' '}</Text>)}
-      <Text><Text color={theme.purple} bold>Tasks</Text>{counts ? <Text color={theme.muted}> ({counts})</Text> : null}{tasks.length > MAX_VISIBLE_TASKS ? <Text color={theme.muted}> · ctrl+o {expanded ? 'collapse' : 'expand'}</Text> : null}</Text>
+      <Text><Text color={theme.purple} bold>Tasks</Text>{counts ? <Text color={theme.muted}> ({counts})</Text> : null}{tasks.length > MAX_VISIBLE_TASKS ? <Text color={theme.muted} dimColor> · ctrl+o {expanded ? 'collapse' : 'expand'}</Text> : null}</Text>
       {ordered.map(task => {
         const title = task.title.length > maxTitleWidth ? task.title.slice(0, maxTitleWidth - 1) + '\u2026' : task.title;
         return (

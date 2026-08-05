@@ -7,11 +7,14 @@ A minimal LLM harness for your terminal.
 haze 1.0.0 establishes the stable public contract for CLI flags, slash commands, tool results, settings, sessions, skills, and Node.js 22 or newer.
 
 - External tool output is explicitly treated as untrusted data. The README and `SECURITY.md` now document the attended-use threat model, the lack of command confirmation gates, prompt-injection limits, and debug-log sensitivity.
+- OpenAI Subscription provider preset with browser OAuth against the ChatGPT Codex Responses endpoint. Credentials live in `~/.haze/auth.json` and are refreshed transparently near expiry.
 - Fetching has a total redirect deadline, cancels redirect bodies, rejects non-streamable responses, and keeps the pinned transport GET/HEAD-only. Piped stdin, session entries, log ids, and terminal titles now have stricter validation and bounds.
 - Windows process termination uses tree semantics in both graceful and forced phases. Session-picker summaries are cached by file signature, while capped process streams keep draining to avoid child-process deadlocks.
+- `writeFile` enforces a per-call byte cap at both schema and body; malformed tool input triggers up to two smaller retries before the turn reports blocked.
 - CI now runs typecheck, tests, lint, build, a full high-severity dependency audit, and a package dry run on Node 22 and 24. The dependency audit is clean.
 - Shared UTF-8 truncation, package-version loading, and external-opening helpers remove duplicate boundary code. Runtime tool-context fields are lightly validated.
 - The terminal interface has clearer startup information, system-message formatting, and a consistent shared color palette.
+- The docs site is now a multi-page redesign (landing, quickstart, commands, tools, skills, workflows) backed by shared CSS/JS.
 
 Previous releases:
 

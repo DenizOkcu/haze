@@ -64,12 +64,9 @@ const DEFAULT_MAX_REDIRECTS = 5;
 
 // Derive the version from package.json so the user agent never goes stale;
 // fall back to an unversioned agent if package metadata is unavailable.
-let cachedUserAgent: string | undefined;
 function userAgent(): string {
-  if (cachedUserAgent) return cachedUserAgent;
   const version = readPackageVersion();
-  cachedUserAgent = version ? `haze/${version} (+https://github.com/DenizOkcu/haze)` : 'haze (+https://github.com/DenizOkcu/haze)';
-  return cachedUserAgent;
+  return version ? `haze/${version} (+https://github.com/DenizOkcu/haze)` : 'haze (+https://github.com/DenizOkcu/haze)';
 }
 
 /** Error thrown when a URL is rejected by the SSRF guard. */
@@ -184,23 +181,6 @@ async function readBodyCapped(
 }
 
 /**
- * Perform an HTTP(S) request with the TCP connection pinned to `pinnedIp`.
- *
- * This closes the DNS-rebinding TOCTOU: `validateUrl` resolved the hostname and
- * verified every address is public, but the global `fetch` would re-resolve the
- * hostname at connect time — an attacker-controlled DNS server can return a
- * public IP for the validation lookup and a private/internal IP for the connect
- * lookup. By connecting directly to the already-validated IP (`hostname:
- * pinnedIp`) while keeping the original `Host` header and TLS `servername`
- * (`url.hostname`), the connection target is fixed to what we validated, with no
- * second DNS lookup. TLS certificate verification still runs against the original
- * hostname via `servername`, so pinning does not weaken identity checks.
- *
- * Literal-IP URLs carry no DNS-rebinding surface (`pinnedIp` is undefined), so
- * they fall through to the global `fetch` — which also keeps the test mocks that
- * stub `globalThis.fetch` working for that path.
- */
-/**
  * Coerce a RequestInit headers value into a plain string record. Keeps the
  * transport defensive against `Headers`/tuple/array inputs instead of blindly
  * casting (the fetch tool only ever passes a plain object, but be safe).
@@ -235,6 +215,23 @@ function normalizeResponseHeaders(input: Record<string, string | string[] | unde
   return headers;
 }
 
+/**
+ * Perform an HTTP(S) request with the TCP connection pinned to `pinnedIp`.
+ *
+ * This closes the DNS-rebinding TOCTOU: `validateUrl` resolved the hostname and
+ * verified every address is public, but the global `fetch` would re-resolve the
+ * hostname at connect time — an attacker-controlled DNS server can return a
+ * public IP for the validation lookup and a private/internal IP for the connect
+ * lookup. By connecting directly to the already-validated IP (`hostname:
+ * pinnedIp`) while keeping the original `Host` header and TLS `servername`
+ * (`url.hostname`), the connection target is fixed to what we validated, with no
+ * second DNS lookup. TLS certificate verification still runs against the original
+ * hostname via `servername`, so pinning does not weaken identity checks.
+ *
+ * Literal-IP URLs carry no DNS-rebinding surface (`pinnedIp` is undefined), so
+ * they fall through to the global `fetch` — which also keeps the test mocks that
+ * stub `globalThis.fetch` working for that path.
+ */
 export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: RequestInit): Promise<Response> {
   const method = (init.method ?? 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {

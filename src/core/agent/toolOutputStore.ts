@@ -31,6 +31,14 @@ export function unregisterDynamicToolOutput(handle: string) {
   dynamicOutputs.delete(handle);
 }
 
+/**
+ * Store a tool output and return a handle for later retrieval.
+ *
+ * Two eviction pressures apply: count (`MAX_STORED_OUTPUTS`) and total bytes
+ * (`TOOL_OUTPUT_TOTAL_BYTES`). A single entry that alone exceeds the byte
+ * budget is evicted on the next `storeToolOutput` call, so callers should not
+ * assume a freshly-stored handle survives beyond the next store.
+ */
 export function storeToolOutput(content: string) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
   const originalBytes = Buffer.byteLength(content, 'utf8');

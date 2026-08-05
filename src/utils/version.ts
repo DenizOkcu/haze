@@ -24,9 +24,13 @@ export function readPackageVersion(): string | undefined {
  *
  * Handles npm package versions like `0.6.0`, `1.2.3`, with optional leading
  * `v` and optional pre-release suffix (`1.0.0-beta.1`). Numeric release
- * segments are compared numerically; pre-release sorts *below* its release
- * (so `1.0.0-beta.1` is older than `1.0.0`). Malformed input is treated as
- * `0.0.0` so the check degrades to "no update" rather than throwing.
+ * segments are compared numerically; non-numeric trailing chars in a release
+ * segment are silently stripped (`1.2.0a` → `1.2.0`), since semver does not
+ * define them. Pre-release sorts *below* its release (so `1.0.0-beta.1` is
+ * older than `1.0.0`), and within a pre-release, numeric identifiers always
+ * have lower precedence than alphanumeric ones (semver rule). Malformed input
+ * is treated as `0.0.0` so the check degrades to "no update" rather than
+ * throwing.
  *
  * Kept small on purpose: no `semver` dependency for a single comparison.
  */
@@ -47,6 +51,7 @@ export function parseVersion(input: string): ParsedVersion {
   const segments = releasePart.split('.');
   const nums: [number, number, number] = [0, 0, 0];
   for (let index = 0; index < 3; index++) {
+    // Non-numeric trailing chars (e.g., `1.2.0a`) are dropped, not rejected.
     const parsed = Number.parseInt((segments[index] ?? '').replace(/[^0-9]/g, ''), 10);
     nums[index] = Number.isFinite(parsed) ? parsed : 0;
   }
@@ -65,10 +70,14 @@ function comparePrerelease(a: string[], b: string[]): number {
     const bb = b[index]!;
     const anum = Number(aa);
     const bnum = Number(bb);
-    const bothNumeric = Number.isFinite(anum) && Number.isFinite(bnum);
-    if (bothNumeric) {
+    const aNumeric = Number.isFinite(anum);
+    const bNumeric = Number.isFinite(bnum);
+    // Semver: numeric identifiers always have lower precedence than alphanumeric.
+    if (aNumeric && bNumeric) {
       if (anum < bnum) return -1;
       if (anum > bnum) return 1;
+    } else if (aNumeric !== bNumeric) {
+      return aNumeric ? -1 : 1;
     } else {
       if (aa < bb) return -1;
       if (aa > bb) return 1;

@@ -54,7 +54,10 @@ export async function createSession(options: {cwd?: string; hazeVersion?: string
 
 export async function findSession(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
   const normalizedId = id.trim();
-  if (!normalizedId || path.basename(normalizedId) !== normalizedId || normalizedId.endsWith('.jsonl')) return undefined;
+  // basename equality is the actual invariant: it rejects any id containing a
+  // path separator (POSIX or Windows), which is what prevents escaping the
+  // workspace's sessions/<hash>/ directory via `..` or absolute paths.
+  if (!normalizedId || path.basename(normalizedId) !== normalizedId) return undefined;
   const file = sessionFile(normalizedId, cwd, sessionsDir);
   if (!await fs.pathExists(file)) return undefined;
   return {id: normalizedId, file, cwd: path.resolve(cwd)};

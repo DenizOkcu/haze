@@ -58,7 +58,7 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 - YAML parsing/writing uses the `yaml` package.
 - Avoid `any`; prefer `unknown`, type guards, or existing result types.
 - Preserve local formatting style; avoid broad formatting churn.
-- ESLint: unused vars are errors unless args start with `_`; `no-explicit-any` is a warning.
+- ESLint: unused vars are errors unless args start with `_`; `no-explicit-any` is an error.
 
 ## Editing rules
 

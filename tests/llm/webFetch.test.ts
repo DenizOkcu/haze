@@ -283,6 +283,30 @@ describe('webFetch DNS-rebinding pinning', () => {
     expect(seen[0]).toEqual({url: 'http://start.example/', pinnedIp: '1.1.1.1'});
     expect(seen[1]).toEqual({url: 'http://dest.example/d', pinnedIp: '2.2.2.2'});
   });
+
+  it('breaks redirect cycles instead of looping forever', async () => {
+    const fetcher = vi.fn(async (url: URL) => {
+      // A → B → A → B → ...
+      const target = url.href.endsWith('/a') ? 'http://cycle.example/b' : 'http://cycle.example/a';
+      return new Response(null, {status: 302, headers: {location: target}});
+    });
+    const lookup = vi.fn(async () => ['93.184.216.34']);
+    await expect(fetchUrlContent('http://cycle.example/a', {lookup, fetcher, timeoutMs: 1000}))
+      .rejects.toThrow(/Redirect loop detected/);
+  });
+
+  it('pins to a valid public IPv6 address without dropping the brackets', async () => {
+    let capturedPinnedIp: string | undefined;
+    const fetcher = vi.fn(async (url: URL, pinnedIp: string | undefined, init: RequestInit) => {
+      capturedPinnedIp = pinnedIp;
+      void init;
+      return textResponse('v6-ok');
+    });
+    const lookup = vi.fn(async () => ['2606:4700:4700::1111']);
+    const result = await fetchUrlContent('http://v6.example/x', {lookup, fetcher, timeoutMs: 1000});
+    expect(capturedPinnedIp).toBe('2606:4700:4700::1111');
+    expect(result.content).toBe('v6-ok');
+  });
 });
 
 describe('webFetch pinnedFetch transport', () => {
