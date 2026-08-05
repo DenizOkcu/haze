@@ -12,9 +12,9 @@ Bounded subprocess execution shared by `bash` and `grep`.
 
 ## Contracts
 
-- Collect stdout and stderr into bounded head buffers during the run; never let the full output become resident before capping. Report `retainedBytes`/`omittedBytes` truthfully.
+- Collect stdout and stderr into bounded head buffers during the run; never let the full output become resident before capping. After the retention cap, continue draining and discarding stream data so children can exit instead of blocking on full pipes. Report `retainedBytes`/`omittedBytes` truthfully.
 - Preserve valid UTF-8 at truncation boundaries (flush the `StringDecoder` tail only when nothing was omitted from that stream).
-- On POSIX, spawn owned commands `detached` and signal the process group (`-pid`), falling back to direct child signaling when the group is unavailable; escalate `SIGTERM` -> `SIGKILL` after `killGraceMs`. On Windows use `taskkill /pid <pid> /T /F` on the force phase.
+- On POSIX, spawn owned commands `detached` and signal the process group (`-pid`), falling back to direct child signaling when the group is unavailable; escalate `SIGTERM` -> `SIGKILL` after `killGraceMs`. On Windows use `taskkill /pid <pid> /T` for graceful tree termination and add `/F` for the force phase.
 - Resolve exactly once across `close`, `error`, timeout, and abort. After forced termination, use a short close fallback and destroy owned stdio streams so an escaped descendant retaining a pipe cannot hang the caller. Report `code`, `signal`, `timedOut`, `aborted`, `forced`, and `durationMs`.
 - Do not spawn work when the abort signal is already aborted.
 - Background processes never survive haze exit and are unavailable to fleet workers. Turn abort does not kill an already-registered process; `/new`, explicit kill, SIGINT/SIGTERM, and normal app exit do.

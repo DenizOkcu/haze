@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import type {Stats} from 'node:fs';
 import fs from 'fs-extra';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
@@ -221,9 +222,68 @@ export interface SessionSummary {
   parseErrors: string[];
 }
 
+type CachedSessionSummary = {mtimeMs: number; size: number; summary: SessionSummary};
+const SESSION_SUMMARY_CACHE_MAX = 500;
+const sessionSummaryCache = new Map<string, CachedSessionSummary>();
+
+function cachedSessionSummary(file: string, stat: Stats): SessionSummary | undefined {
+  const cached = sessionSummaryCache.get(file);
+  if (!cached || cached.mtimeMs !== stat.mtimeMs || cached.size !== stat.size) return undefined;
+  sessionSummaryCache.delete(file);
+  sessionSummaryCache.set(file, cached);
+  return cached.summary;
+}
+
+function cacheSessionSummary(file: string, stat: Stats, summary: SessionSummary): void {
+  sessionSummaryCache.delete(file);
+  sessionSummaryCache.set(file, {mtimeMs: stat.mtimeMs, size: stat.size, summary});
+  while (sessionSummaryCache.size > SESSION_SUMMARY_CACHE_MAX) {
+    const oldest = sessionSummaryCache.keys().next().value;
+    if (oldest === undefined) break;
+    sessionSummaryCache.delete(oldest);
+  }
+}
+
+/** Test-only reset for the process-scoped session-summary cache. */
+export function clearSessionSummaryCacheForTests(): void {
+  sessionSummaryCache.clear();
+}
+
 function previewText(text: string): string {
   const compact = text.replace(/\s+/g, ' ').trim();
   return compact.length > SESSION_PREVIEW_CHARS ? `${compact.slice(0, SESSION_PREVIEW_CHARS - 1)}…` : compact;
+}
+
+async function summarizeSession(session: HazeSession, stat: Stats): Promise<SessionSummary> {
+  let createdAt = stat.birthtime.toISOString();
+  let lastActivityAt = stat.mtime.toISOString();
+  let messageCount = 0;
+  let firstUserPreview = '';
+  let lastStatus: string | undefined;
+  const parseErrors = await scanSessionEntries(session, entry => {
+    if (entry.type === 'header') createdAt = entry.createdAt || createdAt;
+    if ('at' in entry && entry.at) lastActivityAt = entry.at;
+    if (entry.type === 'ui_message') {
+      messageCount++;
+      if (!firstUserPreview && entry.role === 'user') firstUserPreview = previewText(entry.text);
+    }
+    if (entry.type === 'conversation_snapshot') {
+      if (messageCount === 0) messageCount = entry.messages.length;
+      if (!firstUserPreview) {
+        const firstUser = entry.messages.find(message => message.role === 'user');
+        if (firstUser) firstUserPreview = previewText(typeof firstUser.content === 'string' ? firstUser.content : JSON.stringify(firstUser.content));
+      }
+    }
+    if (entry.type === 'event' && entry.name === 'turn_end' && entry.text) {
+      try {
+        const event = JSON.parse(entry.text) as {status?: unknown};
+        if (typeof event.status === 'string') lastStatus = event.status;
+      } catch {
+        // The outer entry remains valid; malformed optional event metadata is ignored.
+      }
+    }
+  });
+  return {id: session.id, createdAt, lastActivityAt, messageCount, firstUserPreview, sizeBytes: stat.size, lastStatus, parseErrors};
 }
 
 /** List this workspace's sessions newest-first while retaining only summary state per file. */
@@ -231,39 +291,20 @@ export async function listSessions(cwd = process.cwd(), sessionsDir = DEFAULT_SE
   const dir = sessionDir(cwd, sessionsDir);
   await ensurePrivateDir(dir);
   const files = (await fs.readdir(dir).catch(() => [])).filter(file => file.endsWith('.jsonl'));
+  const present = new Set(files.map(file => path.join(dir, file)));
+  for (const cachedFile of sessionSummaryCache.keys()) {
+    if (path.dirname(cachedFile) === dir && !present.has(cachedFile)) sessionSummaryCache.delete(cachedFile);
+  }
   const summaries = await Promise.all(files.map(async fileName => {
     const id = path.basename(fileName, '.jsonl');
     const session: HazeSession = {id, file: path.join(dir, fileName), cwd: path.resolve(cwd)};
+    await tightenPrivateFile(session.file);
     const stat = await fs.stat(session.file);
-    let createdAt = stat.birthtime.toISOString();
-    let lastActivityAt = stat.mtime.toISOString();
-    let messageCount = 0;
-    let firstUserPreview = '';
-    let lastStatus: string | undefined;
-    const parseErrors = await scanSessionEntries(session, entry => {
-      if (entry.type === 'header') createdAt = entry.createdAt || createdAt;
-      if ('at' in entry && entry.at) lastActivityAt = entry.at;
-      if (entry.type === 'ui_message') {
-        messageCount++;
-        if (!firstUserPreview && entry.role === 'user') firstUserPreview = previewText(entry.text);
-      }
-      if (entry.type === 'conversation_snapshot') {
-        if (messageCount === 0) messageCount = entry.messages.length;
-        if (!firstUserPreview) {
-          const firstUser = entry.messages.find(message => message.role === 'user');
-          if (firstUser) firstUserPreview = previewText(typeof firstUser.content === 'string' ? firstUser.content : JSON.stringify(firstUser.content));
-        }
-      }
-      if (entry.type === 'event' && entry.name === 'turn_end' && entry.text) {
-        try {
-          const event = JSON.parse(entry.text) as {status?: unknown};
-          if (typeof event.status === 'string') lastStatus = event.status;
-        } catch {
-          // The outer entry remains valid; malformed optional event metadata is ignored.
-        }
-      }
-    });
-    return {id, createdAt, lastActivityAt, messageCount, firstUserPreview, sizeBytes: stat.size, lastStatus, parseErrors};
+    const cached = cachedSessionSummary(session.file, stat);
+    if (cached) return cached;
+    const summary = await summarizeSession(session, stat);
+    cacheSessionSummary(session.file, stat, summary);
+    return summary;
   }));
   return summaries.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt) || b.id.localeCompare(a.id));
 }

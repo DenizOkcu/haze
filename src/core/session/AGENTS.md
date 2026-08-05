@@ -41,7 +41,7 @@ Maintainability focus:
 - `restoreConversation` and `restoreWorkState` return the latest snapshot of their type.
 - Malformed JSONL and structurally invalid session entries are rejected and reported in `parseErrors` with 1-based line numbers; do not silently discard corruption.
 - UI/headless callers decide how to surface parse errors.
-- `listSessions` scans workspace sessions into bounded summaries for the `/resume` picker. Resuming in place keeps the original session; forking restores its latest snapshot into a newly created session whose header records `forkedFrom`.
+- `listSessions` scans workspace sessions into bounded summaries for the `/resume` picker and caches summaries by file size and modification time. The process-scoped cache is bounded and invalidates changed or removed files. Resuming in place keeps the original session; forking restores its latest snapshot into a newly created session whose header records `forkedFrom`.
 
 ## Tests
 

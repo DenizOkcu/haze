@@ -4,14 +4,21 @@ import {StringDecoder} from 'node:string_decoder';
 export interface BoundedStream {text: string; totalBytes: number; retainedBytes: number; omittedBytes: number}
 export interface BoundedProcessResult {code: number | null; signal: NodeJS.Signals | null; stdout: BoundedStream; stderr: BoundedStream; timedOut: boolean; aborted: boolean; forced: boolean; durationMs: number; error?: string}
 
-export function signalProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, signal: NodeJS.Signals) {
+export interface ProcessTreeSignalOptions {
+  /** @internal testing seam. */
+  platform?: NodeJS.Platform;
+  /** @internal testing seam. */
+  spawnProcess?: typeof spawn;
+}
+
+export function signalProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, signal: NodeJS.Signals, options: ProcessTreeSignalOptions = {}) {
   if (child.pid == null) {
     child.kill(signal);
     return;
   }
-  if (process.platform === 'win32') {
-    if (signal === 'SIGKILL') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {stdio: 'ignore'}).unref();
-    else child.kill('SIGTERM');
+  if ((options.platform ?? process.platform) === 'win32') {
+    const args = ['/pid', String(child.pid), '/T', ...(signal === 'SIGKILL' ? ['/F'] : [])];
+    (options.spawnProcess ?? spawn)('taskkill', args, {stdio: 'ignore'}).unref();
     return;
   }
   try { process.kill(-child.pid, signal); } catch { child.kill(signal); }
@@ -25,6 +32,8 @@ function collector(limit: number) {
     add(chunk: Buffer) {
       totalBytes += chunk.length;
       const remaining = limit - retainedBytes;
+      // Keep consuming data after the retention cap so the child does not
+      // block on a full pipe; only allocation and retained output are capped.
       if (remaining > 0) {
         const kept = chunk.subarray(0, remaining);
         chunks.push(kept);

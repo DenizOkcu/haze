@@ -1,11 +1,26 @@
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {runBoundedProcess} from '../../../src/core/process/runBoundedProcess.js';
+import {runBoundedProcess, signalProcessTree} from '../../../src/core/process/runBoundedProcess.js';
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, {recursive: true, force: true}))); });
+
+describe('signalProcessTree', () => {
+  it('uses taskkill tree semantics for graceful and forced Windows termination', () => {
+    const unref = vi.fn();
+    const spawnProcess = vi.fn(() => ({unref})) as unknown as typeof import('node:child_process').spawn;
+    const child = {pid: 42, kill: vi.fn()};
+
+    signalProcessTree(child, 'SIGTERM', {platform: 'win32', spawnProcess});
+    expect(spawnProcess).toHaveBeenNthCalledWith(1, 'taskkill', ['/pid', '42', '/T'], {stdio: 'ignore'});
+    signalProcessTree(child, 'SIGKILL', {platform: 'win32', spawnProcess});
+    expect(spawnProcess).toHaveBeenNthCalledWith(2, 'taskkill', ['/pid', '42', '/T', '/F'], {stdio: 'ignore'});
+    expect(unref).toHaveBeenCalledTimes(2);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+});
 
 describe('runBoundedProcess', () => {
   it('bounds each stream while retaining byte metadata', async () => {
@@ -14,6 +29,14 @@ describe('runBoundedProcess', () => {
     expect(result.stdout.retainedBytes).toBe(100);
     expect(result.stdout.omittedBytes).toBe(9900);
     expect(result.stderr.retainedBytes).toBe(80);
+  });
+
+  it('keeps draining omitted output so a chatty child can exit without blocking on a full pipe', async () => {
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', "process.stdout.write('x'.repeat(2_000_000))"], cwd: process.cwd(), timeoutMs: 2000, maxStdoutBytes: 100, maxStderrBytes: 100});
+    expect(result.code).toBe(0);
+    expect(result.timedOut).toBe(false);
+    expect(result.stdout.retainedBytes).toBe(100);
+    expect(result.stdout.omittedBytes).toBe(1_999_900);
   });
 
   it('distinguishes timeout termination', async () => {

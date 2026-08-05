@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
 
 describe('sessionStore', () => {
@@ -13,6 +13,7 @@ describe('sessionStore', () => {
   let cwd: string;
 
   beforeEach(async () => {
+    clearSessionSummaryCacheForTests();
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-session-test-'));
     sessionsDir = path.join(tmp, 'sessions');
     cwd = path.join(tmp, 'workspace');
@@ -20,6 +21,7 @@ describe('sessionStore', () => {
   });
 
   afterEach(async () => {
+    clearSessionSummaryCacheForTests();
     await fs.remove(tmp);
   });
 
@@ -95,6 +97,15 @@ describe('sessionStore', () => {
     expect(summaries[0]?.sizeBytes).toBeGreaterThan(0);
     expect(summaries[1]).toMatchObject({messageCount: 2, firstUserPreview: 'investigate the flaky test'});
     expect(summaries[1]?.parseErrors[0]).toContain('Line 4');
+  });
+
+  it('invalidates a cached summary when a session file changes', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '2026-08-01T10:00:00.000Z', role: 'user', text: 'first'});
+    await expect(listSessions(cwd, sessionsDir)).resolves.toMatchObject([{messageCount: 1, firstUserPreview: 'first'}]);
+
+    await appendSessionEntry(session, {type: 'ui_message', at: '2026-08-01T10:01:00.000Z', role: 'assistant', text: 'second'});
+    await expect(listSessions(cwd, sessionsDir)).resolves.toMatchObject([{messageCount: 2, firstUserPreview: 'first'}]);
   });
 
   it('lists 50 ordinary sessions within the explicit picker latency budget (F02 AC4)', async () => {
