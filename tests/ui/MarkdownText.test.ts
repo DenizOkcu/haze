@@ -1,6 +1,38 @@
 import {describe, expect, it} from 'vitest';
 import {marked, type Tokens} from 'marked';
-import {renderMarkdownTable} from '../../src/ui/components/MarkdownText.js';
+import {markdownRootChunks, renderMarkdownTable} from '../../src/ui/components/MarkdownText.js';
+
+describe('streaming Markdown root chunks', () => {
+  it('keeps the active root block live and commits earlier blocks exactly', () => {
+    const content = 'First **complete** paragraph.\n\nSecond partial paragraph';
+
+    expect(markdownRootChunks(content)).toEqual([
+      'First **complete** paragraph.\n\n',
+      'Second partial paragraph',
+    ]);
+  });
+
+  it('does not commit a block until a following root block has started', () => {
+    expect(markdownRootChunks('Still streaming one paragraph')).toEqual(['Still streaming one paragraph']);
+    expect(markdownRootChunks('- first\n- second')).toEqual(['- first\n- second']);
+    expect(markdownRootChunks('- first\n- second\n\nNext')).toEqual(['- first\n- second\n\n', 'Next']);
+  });
+
+  it('keeps a source-path lead attached to its fenced code block', () => {
+    const leadAndFence = '**Implementation** — `src/App.tsx:105`\n\n```tsx\nconst app = true;\n```';
+    expect(markdownRootChunks(leadAndFence)).toEqual([leadAndFence]);
+    expect(markdownRootChunks(`${leadAndFence}\n\nNext block`)).toEqual([
+      `${leadAndFence}\n\n`,
+      'Next block',
+    ]);
+  });
+
+  it('withholds roots that Marked may reclassify while more text arrives', () => {
+    expect(markdownRootChunks('Title')).toEqual(['Title']);
+    expect(markdownRootChunks('Title\n---')).toEqual(['Title\n---']);
+    expect(markdownRootChunks('Name | Count\n--- | ---')).toEqual(['Name | Count\n--- | ---']);
+  });
+});
 
 describe('MarkdownText table rendering', () => {
   it('renders GFM tables as bordered terminal tables', () => {

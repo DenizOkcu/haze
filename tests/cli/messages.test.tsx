@@ -2,7 +2,71 @@ import React from 'react';
 import {describe, expect, it} from 'vitest';
 import {render} from 'ink-testing-library';
 import stripAnsi from 'strip-ansi';
-import {MessageView} from '../../src/cli/chat/messages.js';
+import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages} from '../../src/cli/chat/messages.js';
+
+describe('streaming assistant Markdown messages', () => {
+  it('moves only completed root blocks into the append-only transcript', () => {
+    const first = partitionDisplayMessages([{
+      id: 'assistant-1',
+      role: 'assistant',
+      text: 'First paragraph.\n\nSecond paragraph is active',
+      streaming: true,
+    }]);
+    expect(first.staticItems).toHaveLength(1);
+    expect(first.staticItems[0]).toMatchObject({kind: 'assistant-markdown', key: 'assistant-1-markdown-0', content: 'First paragraph.\n\n', first: true, final: false});
+    expect(first.streamingItems[0]).toMatchObject({key: 'assistant-1', showHeader: false, message: {text: 'Second paragraph is active'}});
+
+    const next = partitionDisplayMessages([{
+      id: 'assistant-1',
+      role: 'assistant',
+      text: 'First paragraph.\n\nSecond paragraph is complete.\n\nThird is active',
+      streaming: true,
+    }]);
+    expect(next.staticItems.map(item => item.key)).toEqual(['assistant-1-markdown-0', 'assistant-1-markdown-1']);
+    expect(next.staticItems[0]).toMatchObject({content: 'First paragraph.\n\n'});
+    expect(next.streamingItems[0]).toMatchObject({showHeader: false, message: {text: 'Third is active'}});
+  });
+
+  it('keeps settled messages after the active tail dynamic to preserve terminal order', () => {
+    const result = partitionDisplayMessages([
+      {id: 'assistant-1', role: 'assistant', text: 'Completed root.\n\nActive root', streaming: true, displayOrder: 1},
+      {id: 'notice-1', role: 'system', text: 'Queued follow-up', streaming: false, displayOrder: 2},
+    ]);
+
+    expect(result.staticItems.map(item => item.key)).toEqual(['assistant-1-markdown-0']);
+    expect(result.streamingItems.map(item => item.key)).toEqual(['assistant-1', 'notice-1']);
+  });
+
+  it('commits the final active block with completion metadata when streaming ends', () => {
+    const result = partitionDisplayMessages([{
+      id: 'assistant-1',
+      role: 'assistant',
+      text: '# Result\n\nDone.',
+      streaming: false,
+      startedAt: 100,
+      finishedAt: 1_100,
+    }]);
+
+    expect(result.streamingItems).toEqual([]);
+    expect(result.staticItems).toHaveLength(2);
+    expect(result.staticItems[1]).toMatchObject({kind: 'assistant-markdown', content: 'Done.', first: false, final: true});
+  });
+
+  it('renders completed chunks as Markdown and places the completion below the final chunk', () => {
+    const {lastFrame} = render(<AssistantMarkdownChunkView
+      message={{role: 'assistant', text: '# Result\n\nThe result is complete.', streaming: false, startedAt: 100, finishedAt: 1_100}}
+      content="# Result"
+      width={50}
+      first
+      final
+    />);
+
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('haze');
+    expect(frame).toContain('RESULT');
+    expect(frame).toContain('1.0s');
+  });
+});
 
 describe('tool diff messages', () => {
   it('renders an edit summary and numbered remove/add code rows', () => {

@@ -4,7 +4,7 @@ import Spinner from 'ink-spinner';
 import type {Message} from '../commands/streaming.js';
 import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../commands/formatters.js';
-import {MarkdownText} from '../../ui/components/MarkdownText.js';
+import {MarkdownText, markdownRootChunks} from '../../ui/components/MarkdownText.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
 import {highlightedCodeLine, languageForPath} from '../../ui/codeHighlight.js';
@@ -127,7 +127,22 @@ export function messageElapsedLabel(message: Message) {
   return message.streaming ? formatElapsedTimeWhole(elapsed) : formatElapsedTime(elapsed);
 }
 
-export const MessageView = React.memo(function MessageView({message, width}: {message: Message; width: number}) {
+export const AssistantMarkdownChunkView = React.memo(function AssistantMarkdownChunkView({message, content, width, first, final}: {
+  message: Message;
+  content: string;
+  width: number;
+  first: boolean;
+  final: boolean;
+}) {
+  const completion = final ? messageElapsedLabel(message) : '';
+  return <Box flexDirection="column" marginBottom={final ? 1 : 0}>
+    {first ? <Text color={theme.purple} bold>haze</Text> : null}
+    <MarkdownText content={content} width={width} />
+    {completion ? <Text color={theme.muted}>{completion}</Text> : null}
+  </Box>;
+});
+
+export const MessageView = React.memo(function MessageView({message, width, showHeader = true}: {message: Message; width: number; showHeader?: boolean}) {
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
       <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
@@ -138,10 +153,10 @@ export const MessageView = React.memo(function MessageView({message, width}: {me
   }
 
   return <Box flexDirection="column" marginBottom={1}>
-    <Text>
+    {showHeader ? <Text>
       <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : message.role === 'system' ? theme.success : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
-    </Text>
+    </Text> : null}
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} />
       : message.role === 'assistant' && !message.streaming
@@ -157,6 +172,71 @@ export const MessageView = React.memo(function MessageView({message, width}: {me
 
 export function messageKey(message: Message, index: number) {
   return message.id ?? `${index}-${message.role}-${message.text}`;
+}
+
+export type TranscriptStaticItem =
+  | {kind: 'message'; key: string; message: Message}
+  | {kind: 'assistant-markdown'; key: string; message: Message; content: string; first: boolean; final: boolean};
+
+export type TranscriptStreamingItem = {key: string; message: Message; showHeader?: boolean};
+
+/** Partition display messages into append-only static Markdown roots and the active streaming tail. */
+export function partitionDisplayMessages(messages: Message[]): {staticItems: TranscriptStaticItem[]; streamingItems: TranscriptStreamingItem[]} {
+  const staticItems: TranscriptStaticItem[] = [];
+  const streamingItems: TranscriptStreamingItem[] = [];
+  let reachedDynamicTail = false;
+  orderedDisplayMessages(messages).forEach((message, index) => {
+    const key = messageKey(message, index);
+    // Static output must remain an ordered prefix. A settled notification that
+    // follows live text stays in the dynamic frame until that text is complete.
+    if (reachedDynamicTail) {
+      streamingItems.push({key, message});
+      return;
+    }
+    if (message.role !== 'assistant') {
+      if (message.streaming) {
+        reachedDynamicTail = true;
+        streamingItems.push({key, message});
+      } else {
+        staticItems.push({kind: 'message', key, message});
+      }
+      return;
+    }
+
+    const chunks = markdownRootChunks(message.text);
+    if (chunks.length === 0) {
+      if (message.streaming) {
+        reachedDynamicTail = true;
+        streamingItems.push({key, message});
+      } else {
+        staticItems.push({kind: 'message', key, message});
+      }
+      return;
+    }
+
+    // Marked may still reclassify the final root while the stream grows. Keep
+    // only that root dynamic; every preceding root is now safe to append once.
+    const staticChunkCount = message.streaming ? Math.max(0, chunks.length - 1) : chunks.length;
+    for (let chunkIndex = 0; chunkIndex < staticChunkCount; chunkIndex++) {
+      staticItems.push({
+        kind: 'assistant-markdown',
+        key: `${key}-markdown-${chunkIndex}`,
+        message,
+        content: chunks[chunkIndex] ?? '',
+        first: chunkIndex === 0,
+        final: !message.streaming && chunkIndex === chunks.length - 1,
+      });
+    }
+    if (message.streaming) {
+      reachedDynamicTail = true;
+      streamingItems.push({
+        key,
+        message: {...message, text: chunks.at(-1) ?? message.text},
+        showHeader: staticChunkCount === 0,
+      });
+    }
+  });
+  return {staticItems, streamingItems};
 }
 
 export function orderedDisplayMessages(messages: Message[]) {

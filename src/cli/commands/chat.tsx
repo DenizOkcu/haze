@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import {Box, render, Text, useApp, useWindowSize} from 'ink';
+import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
@@ -27,7 +27,7 @@ import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
-import {MessageView, messageKey, orderedDisplayMessages} from '../chat/messages.js';
+import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages, type TranscriptStaticItem} from '../chat/messages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch} from '../chat/wizardDispatch.js';
@@ -52,6 +52,8 @@ interface ChatOptions {
   resumeSessionId?: string;
   noSession?: boolean;
 }
+
+type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
 
 const execFile = promisify(execFileCallback);
 
@@ -613,9 +615,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
 
   const visible = messages.filter(message => !message.hidden);
   const activeLiveMessages = liveMessages.filter(message => !message.hidden);
-  const orderedVisibleMessages = orderedDisplayMessages([...visible, ...activeLiveMessages]);
-  const transcriptItems = orderedVisibleMessages.filter(message => !message.streaming).map((message, index) => ({key: messageKey(message, index), message}));
-  const streamingItems = orderedVisibleMessages.filter(message => message.streaming);
+  const {staticItems: staticTranscriptItems, streamingItems} = partitionDisplayMessages([...visible, ...activeLiveMessages]);
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
@@ -640,16 +640,23 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
+  const staticItems: ChatStaticItem[] = [
+    {kind: 'header', key: 'header', subtitle: headerSubtitle},
+    ...staticTranscriptItems,
+  ];
   const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
   const contentWidth = Math.max(1, width - 2);
 
   return <Box flexDirection="column" paddingX={1}>
-    <Header key={`header-${activeModelName}`} subtitle={headerSubtitle} version={version} />
-    {transcriptItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {transcriptItems.map(item => <MessageView key={item.key} message={item.message} width={contentWidth} />)}
-    </Box>}
+    <Static items={staticItems}>
+      {item => item.kind === 'header'
+        ? <Header key={item.key} subtitle={item.subtitle} version={version} />
+        : item.kind === 'assistant-markdown'
+          ? <AssistantMarkdownChunkView key={item.key} message={item.message} content={item.content} width={contentWidth} first={item.first} final={item.final} />
+          : <MessageView key={item.key} message={item.message} width={contentWidth} />}
+    </Static>
     {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {streamingItems.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={contentWidth} />)}
+      {streamingItems.map(item => <MessageView key={item.key} message={item.message} width={contentWidth} showHeader={item.showHeader} />)}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>

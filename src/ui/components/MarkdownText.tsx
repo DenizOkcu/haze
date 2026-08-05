@@ -5,8 +5,10 @@ import stripAnsi from 'strip-ansi';
 import {theme} from '../theme.js';
 import {highlightedCodeLine} from '../codeHighlight.js';
 
+const MARKED_OPTIONS = {gfm: true, breaks: true} as const;
+
 export const MarkdownText = React.memo(function MarkdownText({content, width}: {content: string; width: number}) {
-  const tokens = marked.lexer(content, {gfm: true, breaks: true});
+  const tokens = marked.lexer(content, MARKED_OPTIONS);
   const contentWidth = Math.max(20, width - 2);
   return <Box flexDirection="column">
     {tokens.map((token, index) => {
@@ -25,6 +27,45 @@ export const MarkdownText = React.memo(function MarkdownText({content, width}: {
 });
 
 type CodeSource = {path: string; startLine: number};
+
+/**
+ * Split Markdown into stable root-level chunks. The final chunk is deliberately
+ * considered active: Marked may still reclassify it as more text arrives (for
+ * example, a paragraph can become a setext heading or a GFM table). Once a
+ * following root block exists, the preceding chunk is safe to render once in
+ * Ink's <Static> transcript.
+ *
+ * A source-path lead and its following fenced code block stay in one chunk so
+ * MarkdownText can preserve their shared filename and starting line metadata.
+ */
+export function markdownRootChunks(content: string): string[] {
+  const tokens = marked.lexer(content, MARKED_OPTIONS);
+  if (tokens.length === 0) return content ? [content] : [];
+
+  const chunks: string[] = [];
+  let chunkStart = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index];
+    if (!token || token.type === 'space') continue;
+
+    let nextIndex = index + 1;
+    while (tokens[nextIndex]?.type === 'space') nextIndex++;
+    if (nextIndex >= tokens.length) continue;
+
+    const linkedCodeBlock = (token.type === 'paragraph' || token.type === 'text')
+      && tokens[nextIndex]?.type === 'code'
+      && codeLeadForFollowingFence(tokens, index) != null;
+    if (linkedCodeBlock) continue;
+
+    const chunk = tokens.slice(chunkStart, nextIndex).map(item => item.raw).join('');
+    if (chunk) chunks.push(chunk);
+    chunkStart = nextIndex;
+  }
+
+  const activeChunk = tokens.slice(chunkStart).map(token => token.raw).join('');
+  if (activeChunk) chunks.push(activeChunk);
+  return chunks;
+}
 
 function MarkdownBlock({token, width, source, textOverride, compactAfter}: {
   token: Tokens.Generic;
