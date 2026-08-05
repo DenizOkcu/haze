@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../limits/byteBudgets.js';
+import {truncateUtf8AtBytes} from '../../utils/utf8.js';
 
 export interface StoredToolOutputPage {
   handle: string;
@@ -20,14 +21,6 @@ const dynamicOutputs = new Map<string, () => {content: string; totalBytes: numbe
 const MAX_STORED_OUTPUTS = 100;
 let storedBytes = 0;
 
-function utf8Prefix(content: string, maxBytes: number) {
-  const bytes = Buffer.from(content, 'utf8');
-  if (bytes.length <= maxBytes) return content;
-  let end = maxBytes;
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
-  return bytes.subarray(0, end).toString('utf8');
-}
-
 export function registerDynamicToolOutput(read: () => {content: string; totalBytes: number}) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
   dynamicOutputs.set(handle, read);
@@ -41,7 +34,7 @@ export function unregisterDynamicToolOutput(handle: string) {
 export function storeToolOutput(content: string) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
   const originalBytes = Buffer.byteLength(content, 'utf8');
-  const retained = utf8Prefix(content, TOOL_OUTPUT_ENTRY_BYTES);
+  const retained = truncateUtf8AtBytes(content, TOOL_OUTPUT_ENTRY_BYTES).text;
   const bytes = Buffer.byteLength(retained, 'utf8');
   outputs.set(handle, {content: retained, bytes, originalBytes});
   storedBytes += bytes;

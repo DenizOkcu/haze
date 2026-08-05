@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
-import {discoverScopedContext, runDedupedTool, type HazeToolContext} from '../../src/llm/tools/toolContext.js';
+import {discoverScopedContext, hazeToolContextSchema, runDedupedTool, type HazeToolContext} from '../../src/llm/tools/toolContext.js';
 import {WorkspaceMutationPolicy} from '../../src/core/subagent/workspaceMutationPolicy.js';
 
 let originalCwd: string | undefined;
@@ -16,6 +16,23 @@ afterEach(async () => {
 });
 
 describe('toolContext', () => {
+  it('validates known execution-context field types', () => {
+    expect(hazeToolContextSchema.safeParse({
+      inFlightToolCalls: new Map(),
+      completedToolCalls: new Map(),
+      failedMutationPaths: new Set(),
+      mutationEpoch: 0,
+      isSubagent: true,
+      blessedPaths: [],
+    }).success).toBe(true);
+    expect(hazeToolContextSchema.safeParse({futureField: 'allowed'}).success).toBe(true);
+    expect(hazeToolContextSchema.safeParse([]).success).toBe(false);
+    expect(hazeToolContextSchema.safeParse({inFlightToolCalls: {}}).success).toBe(false);
+    expect(hazeToolContextSchema.safeParse({failedMutationPaths: []}).success).toBe(false);
+    expect(hazeToolContextSchema.safeParse({mutationEpoch: '0'}).success).toBe(false);
+    expect(hazeToolContextSchema.safeParse({onContextFileRead: 'callback'}).success).toBe(false);
+  });
+
   it('deduplicates read-only inputs regardless of object key insertion order', async () => {
     const context = {};
     let executions = 0;

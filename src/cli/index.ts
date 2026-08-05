@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
-import {dirname, join} from 'node:path';
 import {Command, Option} from 'commander';
 import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
@@ -9,16 +6,16 @@ import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 import {findSession} from '../core/session/sessionStore.js';
 import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
 import {STDIN_PROMPT_BYTES} from '../core/limits/byteBudgets.js';
+import {readPackageVersion} from '../utils/version.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 installBackgroundProcessSignalHandlers();
-const pkg = JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'));
+const version = readPackageVersion() ?? '0.0.0';
 
 const program = new Command();
 program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
-  .version(pkg.version)
+  .version(version)
   .option('--debug', 'show model/tool debug logs and write a detailed JSONL log to ~/.haze/logs/')
   .option('-c, --continue', 'resume the latest saved session for this workspace')
   .addOption(new Option('--resume <id>', 'resume an exact saved session id for this workspace').conflicts(['continue', 'session']))
@@ -116,7 +113,7 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
-  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version: pkg.version});
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version});
 });
 
 program.parseAsync().catch(async (error) => {

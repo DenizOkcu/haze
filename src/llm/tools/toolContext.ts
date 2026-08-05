@@ -60,15 +60,43 @@ function toolCallKey(toolName: string, input: unknown) {
   return `${toolName}:${stableJsonStringify(input)}`;
 }
 
-export const hazeToolContextSchema = z.custom<HazeToolContext>(value => typeof value === 'object' && value !== null);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMutationPolicy(value: unknown): boolean {
+  return isRecord(value) && typeof value.acquire === 'function' && typeof value.createOwner === 'function';
+}
+
+function isHazeToolContext(value: unknown): value is HazeToolContext {
+  if (!isRecord(value)) return false;
+  const validOptional = (key: string, predicate: (field: unknown) => boolean) =>
+    value[key] === undefined || predicate(value[key]);
+  return validOptional('inFlightToolCalls', field => field instanceof Map)
+    && validOptional('completedToolCalls', field => field instanceof Map)
+    && validOptional('mutationEpoch', field => typeof field === 'number' && Number.isSafeInteger(field) && field >= 0)
+    && validOptional('failedMutationPaths', field => field instanceof Set)
+    && validOptional('failedMutationReasons', field => field instanceof Map)
+    && validOptional('pathsReadAfterFailedMutation', field => field instanceof Set)
+    && validOptional('inFlightMutationPaths', field => field instanceof Set)
+    && validOptional('loadedContextFilePaths', field => field instanceof Set)
+    && validOptional('loadedContextFileSignatures', field => field instanceof Map)
+    && validOptional('pendingContextFiles', field => Array.isArray(field))
+    && validOptional('scopedContextDiscovery', field => field instanceof Promise)
+    && validOptional('onContextFileRead', field => typeof field === 'function')
+    && validOptional('mutationPolicy', isMutationPolicy)
+    && validOptional('mutationOwner', field => typeof field === 'symbol')
+    && validOptional('isSubagent', field => typeof field === 'boolean')
+    && validOptional('blessedPaths', field => Array.isArray(field));
+}
+
+export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');
 
 export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
   const value = typeof context.context === 'object' && context.context != null
     ? context.context
     : context.experimental_context;
-  return typeof value === 'object' && value != null
-    ? value as HazeToolContext
-    : undefined;
+  return isHazeToolContext(value) ? value : undefined;
 }
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {

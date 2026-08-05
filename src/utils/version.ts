@@ -1,3 +1,24 @@
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
+
+const PACKAGE_JSON_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
+let packageVersionLoaded = false;
+let cachedPackageVersion: string | undefined;
+
+/** Read the installed package version once, returning undefined if metadata is unavailable. */
+export function readPackageVersion(): string | undefined {
+  if (packageVersionLoaded) return cachedPackageVersion;
+  packageVersionLoaded = true;
+  try {
+    const parsed = JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf8')) as {version?: unknown};
+    cachedPackageVersion = typeof parsed.version === 'string' ? parsed.version : undefined;
+  } catch {
+    cachedPackageVersion = undefined;
+  }
+  return cachedPackageVersion;
+}
+
 /**
  * Minimal, dependency-free version comparison for the update check.
  *

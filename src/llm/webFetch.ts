@@ -1,10 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
 import {Readable} from 'node:stream';
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
-import {dirname, join} from 'node:path';
 import {validateUrl, type UrlValidation, type DnsLookupFn} from '../core/safety/urlGuard.js';
+import {truncateUtf8AtBytes} from '../utils/utf8.js';
+import {readPackageVersion} from '../utils/version.js';
 
 /**
  * Bounded HTTP fetch + content extraction for the `fetch` tool.
@@ -63,20 +62,12 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 
-// Derive the version from package.json (as cli/index.ts does) so the user
-// agent never goes stale; fall back to an unversioned agent if the read fails
-// (CR-017).
+// Derive the version from package.json so the user agent never goes stale;
+// fall back to an unversioned agent if package metadata is unavailable.
 let cachedUserAgent: string | undefined;
 function userAgent(): string {
   if (cachedUserAgent) return cachedUserAgent;
-  let version: string | undefined;
-  try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const pkg = JSON.parse(readFileSync(join(here, '..', '..', 'package.json'), 'utf8')) as {version?: string};
-    version = pkg.version;
-  } catch {
-    version = undefined;
-  }
+  const version = readPackageVersion();
   cachedUserAgent = version ? `haze/${version} (+https://github.com/DenizOkcu/haze)` : 'haze (+https://github.com/DenizOkcu/haze)';
   return cachedUserAgent;
 }
@@ -147,17 +138,6 @@ function classifyContentType(contentType: string): 'json' | 'html' | 'text' {
   return 'text';
 }
 
-function decodeValidUtf8Prefix(buffer: Buffer): string {
-  for (let end = buffer.byteLength; end >= 0; end--) {
-    try {
-      return new TextDecoder('utf-8', {fatal: true}).decode(buffer.subarray(0, end));
-    } catch {
-      // Back up until we land on a UTF-8 character boundary.
-    }
-  }
-  return '';
-}
-
 async function readBodyCapped(
   response: Response,
   maxBytes: number,
@@ -200,7 +180,7 @@ async function readBodyCapped(
     if (truncated && !abortController.signal.aborted) abortController.abort();
   }
 
-  return {text: decodeValidUtf8Prefix(Buffer.concat(chunks)), bytes: Math.min(received, maxBytes), truncated};
+  return {text: truncateUtf8AtBytes(Buffer.concat(chunks), maxBytes).text, bytes: Math.min(received, maxBytes), truncated};
 }
 
 /**

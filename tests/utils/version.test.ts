@@ -1,5 +1,23 @@
-import {describe, it, expect} from 'vitest';
-import {compareVersions, isNewer, parseVersion} from '../../src/utils/version.js';
+import {describe, it, expect, vi} from 'vitest';
+import {compareVersions, isNewer, parseVersion, readPackageVersion} from '../../src/utils/version.js';
+
+describe('readPackageVersion', () => {
+  it('reads the repository package version', () => {
+    expect(readPackageVersion()).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('fails softly when package.json cannot be read', async () => {
+    vi.resetModules();
+    vi.doMock('node:fs', () => ({readFileSync: () => { throw new Error('unavailable'); }}));
+    try {
+      const isolated = await import('../../src/utils/version.js');
+      expect(isolated.readPackageVersion()).toBeUndefined();
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+  });
+});
 
 describe('parseVersion', () => {
   it('parses a simple release', () => {

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
-import {spawn} from 'node:child_process';
 import {createServer, type Server} from 'node:http';
 import type {OAuthProviderAuth} from '../config/providerAuth.js';
+import {openPath} from '../utils/openPath.js';
 
 export const CHATGPT_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 export const CHATGPT_OAUTH_ISSUER = 'https://auth.openai.com';
@@ -239,14 +239,5 @@ export async function startChatGptBrowserLogin(options: StartChatGptBrowserLogin
 }
 
 export async function openBrowser(url: string): Promise<boolean> {
-  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  return new Promise(resolve => {
-    const child = spawn(command, args, {detached: true, stdio: 'ignore', windowsHide: true});
-    child.once('error', () => resolve(false));
-    child.once('spawn', () => {
-      child.unref();
-      resolve(true);
-    });
-  });
+  return openPath(url);
 }

@@ -21,7 +21,9 @@ Maintainability focus:
 - `path.ts` — workspace root/path resolution and confinement helpers. `assertRealPathInsideRoot(root, candidate)` and `assertPathInsideRoot` are the shared real-path confinement primitives reused by file tools, skills, LSP, and the skills registry; keep them generic and add domain wrappers in callers rather than duplicating prefix logic.
 - `fs.ts` — directory walking and filesystem helpers used by tools.
 - `collections.ts` — small collection operations such as name-based upsert/find.
-- `version.ts` — version loading/parsing helpers.
+- `version.ts` — cached package-version loading and dependency-free version comparison helpers.
+- `utf8.ts` — shared UTF-8-safe prefix and rolling-tail byte truncation.
+- `openPath.ts` — one platform opener for local paths and browser URLs.
 - `yaml.ts` — YAML read/write utilities.
 
 ## Tests

@@ -63,7 +63,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exactOrArgs('/logs'), run: async (args, ctx) => await handleLogsCommand(args, ctx)},
   {match: exactOrArgs('/lsp'), run: (_args, ctx) => { ctx.setMode('lsp'); ctx.addSystemMessage('Choose an LSP server to enable, disable, or remove it. Choose "add server" to add one from presets (e.g. typescript) or enter a custom command.'); return HANDLED; }},
   {match: exactOrArgs('/mcp'), run: (_args, ctx) => { ctx.setMode('mcp'); ctx.addSystemMessage('Choose an MCP server to enable, disable, remove, or set a key for it. Choose "add server" to add one from presets (e.g. context7) or enter custom details.'); return HANDLED; }},
-  {match: value => value === '/settings open' || value === '/settings edit' ? {args: ''} : false, run: async (_args, ctx) => { const file = await ensureSettingsFile(ctx.settings); openPath(file); ctx.addSystemMessage(`Opened settings file: ${file}`); return HANDLED; }},
+  {match: value => value === '/settings open' || value === '/settings edit' ? {args: ''} : false, run: async (_args, ctx) => { const file = await ensureSettingsFile(ctx.settings); await openPath(file); ctx.addSystemMessage(`Opened settings file: ${file}`); return HANDLED; }},
   {match: exact('/settings'), run: async (_args, ctx) => { ctx.addSystemMessage(await formatSettingsSummary(ctx.settings, ctx.contextFiles)); return HANDLED; }},
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},

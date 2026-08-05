@@ -4,6 +4,7 @@ import {BACKGROUND_PROCESS_HISTORY_LIMIT, BACKGROUND_PROCESS_MAX_CONCURRENCY} fr
 import {registerDynamicToolOutput, unregisterDynamicToolOutput} from '../agent/toolOutputStore.js';
 import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits/byteBudgets.js';
 import {signalProcessTree} from './runBoundedProcess.js';
+import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
 export type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
 
@@ -23,18 +24,14 @@ export interface BackgroundProcessSummary {
 
 class OutputRing {
   private readonly decoder = new StringDecoder('utf8');
-  private retained = Buffer.alloc(0);
+  private retained: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   private totalBytes = 0;
 
   private appendText(completeText: string) {
     if (!completeText) return;
     const bytes = Buffer.from(completeText, 'utf8');
     this.retained = this.retained.length === 0 ? bytes : Buffer.concat([this.retained, bytes]);
-    if (this.retained.length > BACKGROUND_PROCESS_OUTPUT_BYTES) {
-      let start = this.retained.length - BACKGROUND_PROCESS_OUTPUT_BYTES;
-      while (start < this.retained.length && (this.retained[start]! & 0xc0) === 0x80) start++;
-      this.retained = this.retained.subarray(start);
-    }
+    this.retained = truncateUtf8TailBufferAtBytes(this.retained, BACKGROUND_PROCESS_OUTPUT_BYTES).buffer;
   }
 
   add(chunk: Buffer) {

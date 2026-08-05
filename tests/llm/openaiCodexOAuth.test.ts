@@ -1,9 +1,14 @@
 import net from 'node:net';
 import {describe, expect, it, vi} from 'vitest';
+
+const {openPathMock} = vi.hoisted(() => ({openPathMock: vi.fn()}));
+vi.mock('../../src/utils/openPath.js', () => ({openPath: openPathMock}));
+
 import {
   buildChatGptAuthorizeUrl,
   extractChatGptAccountId,
   generatePkce,
+  openBrowser,
   parseJwtClaims,
   refreshChatGptAuth,
   startChatGptBrowserLogin,
@@ -23,6 +28,12 @@ async function freePort(): Promise<number> {
 }
 
 describe('OpenAI Codex browser OAuth', () => {
+  it('delegates browser opening to the shared external opener', async () => {
+    openPathMock.mockResolvedValueOnce(true);
+    await expect(openBrowser('https://example.com/login')).resolves.toBe(true);
+    expect(openPathMock).toHaveBeenCalledWith('https://example.com/login');
+  });
+
   it('builds a PKCE authorization URL with state and the registered callback', async () => {
     const pkce = await generatePkce();
     const url = new URL(buildChatGptAuthorizeUrl({redirectUri: 'http://localhost:1455/auth/callback', pkce, state: 'state'}));

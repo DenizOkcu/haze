@@ -24,7 +24,7 @@ Instructions for haze source code.
 Maintainability focus:
 
 - Prefer DRY/KISS/YAGNI refactors that reduce future agent context load without changing UX.
-- Split growing orchestration files behind small pure helpers before adding new branches or modes.
+- Split growing orchestration files behind small pure helpers before adding new branches or modes. Treat any orchestration file over 900 lines as an automatic split discussion in review.
 
 - Treat anything surfaced through slash commands, tool result shapes, session files, settings files, skill format, or README as public contract.
 - When changing public result objects, update formatters and tests that snapshot/inspect those fields.

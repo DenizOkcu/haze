@@ -23,6 +23,7 @@ Implementation helpers for haze built-in tools.
 - Lazily discovers nested `CLAUDE.md`/`AGENTS.md` instructions for touched subtrees.
 - Tracks loaded context-file signatures, serializes concurrent scoped discovery, queues newly discovered scoped files in `pendingContextFiles`, and notifies the UI when instruction files are read.
 - Carries the turn-scoped workspace mutation policy/owner. File mutations and bash acquire it; worker owners are reentrant so a whole-worker lease cannot deadlock its internal tools. Bash coordination is conservative and is not a sandbox.
+- Validates the runtime types of every known optional context field while allowing unknown future fields for compatibility.
 
 Do not persist this state; it is valid only for one agent turn. If scoped context behavior changes, keep `config/contextFiles.ts`, `streaming.ts`, and tool-result tests aligned.
 

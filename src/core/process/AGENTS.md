@@ -18,7 +18,7 @@ Bounded subprocess execution shared by `bash` and `grep`.
 - Resolve exactly once across `close`, `error`, timeout, and abort. After forced termination, use a short close fallback and destroy owned stdio streams so an escaped descendant retaining a pipe cannot hang the caller. Report `code`, `signal`, `timedOut`, `aborted`, `forced`, and `durationMs`.
 - Do not spawn work when the abort signal is already aborted.
 - Background processes never survive haze exit and are unavailable to fleet workers. Turn abort does not kill an already-registered process; `/new`, explicit kill, SIGINT/SIGTERM, and normal app exit do.
-- Keep rolling background output tail-bounded by `BACKGROUND_PROCESS_OUTPUT_BYTES`, with truthful total/retained/omitted byte counts.
+- Keep rolling background output tail-bounded by `BACKGROUND_PROCESS_OUTPUT_BYTES`, using the shared UTF-8 boundary utility and truthful total/retained/omitted byte counts.
 
 ## Tests
 
