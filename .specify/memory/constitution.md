@@ -2,23 +2,22 @@
 ==============================================================================
   Sync Impact Report
 ==============================================================================
-  Version change: 1.3.0 → 1.4.0 (MINOR: the 1.0 contract materially expands
-  input, fetch, process, prompt-safety, session-validation, and release gates).
-  Context: Aligned governance with the complete haze 1.0.0 release on
-           2026-08-05.
+  Version change: 1.4.0 → 1.5.0 (MINOR: durable-session and interactive
+  transcript governance now covers lazy materialization, empty-session
+  filtering, append-only static output, and stable streamed Markdown roots).
+  Context: Aligned governance with the terminal stability and empty-session
+           behavior added on 2026-08-05.
 
-  Amendment 1.4.0 (2026-08-05):
-    - Principle III adds piped-stdin bounds, total fetch deadlines, deliberate
-      stream draining after retention caps, and Windows tree termination.
-    - Principle IV defines external tool output as untrusted data rather than
-      an instruction source.
-    - Principle VI records bounded process-scoped caches with test resets.
-    - Principle VIII requires runtime session-entry validation and bounded
-      signature-keyed session summary caching.
-    - Tooling and release gates now enforce no-explicit-any, full dependency
-      audit, package inspection, SECURITY.md, and published provenance.
+  Amendment 1.5.0 (2026-08-05):
+    - Principle VI distinguishes durable resumable state from an empty session
+      placeholder that has not earned a file yet.
+    - Principle VIII requires lazy session materialization and excludes
+      zero-message files from resume and latest-session selection.
+    - The UI stack requires an append-only static transcript prefix and keeps
+      the active Markdown root dynamic until its parser classification is
+      stable.
 
-  Modified principles: III, IV, VI, VIII, Technology Stack, Quality Gates.
+  Modified principles: VI, VIII, Technology Stack.
   Added principles: none.
   Removed sections: none.
 
@@ -32,12 +31,12 @@
       quality-gate phases can carry coordinator, cancellation, and persistence
       tasks.
     - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
-    - README.md / CHANGELOG.md              — ✅ aligned with the complete 1.0.0
-      feature, stability, and security contract.
-    - All AGENTS.md files                   — ✅ refreshed for the 1.0.0 release.
+    - README.md / CHANGELOG.md              — ✅ aligned with static streamed
+      Markdown and lazy empty-session persistence.
+    - Relevant AGENTS.md files              — ✅ updated with transcript and
+      session contracts and regression mapping.
 
-  Follow-up TODOs: none for propagation. Code-review findings are reported
-  separately and do not change the governance contract.
+  Follow-up TODOs: none.
 ==============================================================================
 -->
 
@@ -204,7 +203,10 @@ The agent loop MUST be testable, provider-portable, and resumable.
   child-process, and terminal effects in explicit modules. Avoid process-global
   mutable state; if unavoidable, expose reset/clear helpers and cover them.
 - Durable business state (sessions, settings, history, tasks, logs) MUST
-  persist via `config/`/`core/` modules — never solely in React state.
+  persist via `config/`/`core/` modules, never solely in React state. A newly
+  allocated session MAY remain transient until it contains a resumable message;
+  this placeholder is not durable business state and MUST NOT create an empty
+  file.
 - Serialized shapes (sessions, tasks, tool/result summaries) MUST be
   backward-tolerant across upgrades and remain protocol-safe AI SDK
   `ModelMessage` values. Process-scoped caches MUST be bounded, keyed by a file
@@ -248,6 +250,11 @@ User state is private by default and crash-safe.
   warning, never swallowed.
 - Session JSONL is optimized for resume and audit: streaming `message_update`
   events and large tool outputs MUST be slimmed to previews + byte counts.
+  New sessions MUST stay memory-only until a non-empty UI message or non-empty
+  conversation snapshot makes them resumable; queued metadata MUST retain
+  invocation order when that first message materializes the file. Empty
+  sessions MUST NOT create JSONL files, and persisted zero-message files from
+  older versions MUST be omitted from picker and latest-session results.
   Malformed JSONL and structurally invalid entries MUST be rejected and
   reported with 1-based line numbers rather than silently replaced with empty
   defaults. Session-picker summaries MAY be cached only in a bounded cache
@@ -317,8 +324,12 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
   `skill` catalog tool — peers to native tools, not subordinate to them.
 - **UI layer**: React 19 + Ink 7. Presentation lives in `src/ui/**`;
   orchestration lives in `src/cli/**`. Theme values (`theme.ts`) MUST be used
-  instead of hardcoded colors. No new Markdown-rendering dependencies without
-  clear justification.
+  instead of hardcoded colors. The terminal transcript MUST keep completed
+  output as an append-only `<Static>` prefix above one ordered dynamic tail.
+  Streamed Markdown MAY enter that prefix only as parser-stable root blocks;
+  the final root stays plain and dynamic until another root begins or the
+  response finishes. No new Markdown-rendering dependencies without clear
+  justification.
 - **Tooling**: YAML via the `yaml` package; ripgrep via `@vscode/ripgrep`;
   Vitest for tests; ESLint + `typescript-eslint` for linting.
 - **Naming**: standardized lowercase `haze` across CLI, package, and docs.
@@ -379,4 +390,4 @@ parallel work from becoming hidden cost, stale mutation, or unsafe overlap.
 - If version-bump type is ambiguous, the proposer MUST state reasoning before
   finalizing.
 
-**Version**: 1.4.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-05
+**Version**: 1.5.0 | **Ratified**: 2026-07-25 | **Last Amended**: 2026-08-05

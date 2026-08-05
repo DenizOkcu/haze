@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-05 for lazy empty-session persistence.
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 
@@ -17,7 +17,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `goal/` — user-request classification, session-goal state, completion/continuation prompts.
 - `attachments/` — user-typed image attachment resolution and turn-scoped read blessings for explicit paths.
 - `safety/` — bash command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
-- `session/` — durable JSONL session store, restore helpers, and disk-size slimming for streaming events/large tool outputs.
+- `session/` — lazy durable JSONL session storage, resumable-session summaries/restore helpers, and disk-size slimming for streaming events/large tool outputs.
 - `subagent/` — independent tool-loop runner, execution profiles, coordination, and mutation policy used by the `subagent` tool and `/fleet`.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.
@@ -35,7 +35,7 @@ Maintainability focus:
 - Prefer metadata/reporting for safety classifiers unless a caller explicitly documents enforcement.
 
 - Core should not require configured provider settings except where explicitly passed in.
-- Keep serialized shapes backward-tolerant: sessions and tasks may be read after upgrades.
+- Keep serialized shapes backward-tolerant: sessions and tasks may be read after upgrades. Session creation is deferred until resumable content exists, and old zero-message files remain readable but must be omitted from resume/latest listings.
 - Tool/result summaries must remain protocol-safe AI SDK `ModelMessage` values.
 - Safety classifiers provide metadata and blocking helpers where documented; bash classification is not a confirmation gate.
 - Output reduction should reduce context size without hiding actionable failures.

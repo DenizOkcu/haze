@@ -1,6 +1,6 @@
 # src/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-05 for static streamed Markdown and lazy empty-session persistence.
 
 Instructions for haze source code.
 
@@ -26,7 +26,7 @@ Maintainability focus:
 - Prefer DRY/KISS/YAGNI refactors that reduce future agent context load without changing UX.
 - Split growing orchestration files behind small pure helpers before adding new branches or modes. Treat any orchestration file over 900 lines as an automatic split discussion in review.
 
-- Treat anything surfaced through slash commands, tool result shapes, session files, settings files, skill format, or README as public contract.
+- Treat anything surfaced through slash commands, terminal transcript ordering, tool result shapes, session files/listings, settings files, skill format, or README as public contract.
 - When changing public result objects, update formatters and tests that snapshot/inspect those fields.
 - Keep error messages actionable: include recovery suggestions when the model can retry safely.
 

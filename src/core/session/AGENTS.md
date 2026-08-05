@@ -1,13 +1,14 @@
 # src/core/session/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-05 for lazy empty-session persistence.
 
 Durable session storage.
 
 ## Storage contract
 
-- Sessions are JSONL files under `~/.haze/sessions/<cwd-hash>/<session-id>.jsonl` unless tests/CLI options pass another directory.
+- Sessions are JSONL files under `~/.haze/sessions/<cwd-hash>/<session-id>.jsonl` unless tests/CLI options pass another directory. New sessions stay in memory until the first resumable message; empty sessions must not create files or appear in resume listings.
 - Session files and their parent directories use private POSIX permissions (`0600`/`0700`) via `config/privateStorage.ts`. Writes are ordered and flushable: callers preserve append invocation order and `flush()` at turn end, session switch, and shutdown, surfacing one concise persistence warning on failure rather than swallowing it.
+- Before the first non-empty UI message or non-empty conversation snapshot, prepared metadata may remain queued on the in-memory session object. Materialization writes the header, queued entries, and triggering message in invocation order. If the session stays empty, the queue is discarded with the process and no file is created.
 - Each non-empty line is one `SessionEntry` JSON object.
 - Session IDs use a lexicographically sortable timestamp plus a short random suffix so same-millisecond creation cannot collide; filenames end with `.jsonl`.
 - Workspace separation uses a hash of resolved cwd.
@@ -41,8 +42,8 @@ Maintainability focus:
 - `restoreConversation` and `restoreWorkState` return the latest snapshot of their type.
 - Malformed JSONL and structurally invalid session entries are rejected and reported in `parseErrors` with 1-based line numbers; do not silently discard corruption.
 - UI/headless callers decide how to surface parse errors.
-- `listSessions` scans workspace sessions into bounded summaries for the `/resume` picker and caches summaries by file size and modification time. The process-scoped cache is bounded and invalidates changed or removed files. Resuming in place keeps the original session; forking restores its latest snapshot into a newly created session whose header records `forkedFrom`.
+- `listSessions` scans workspace sessions into bounded summaries for the `/resume` picker, omits summaries with no non-empty messages, and caches summaries by file size and modification time. `latestSession` uses the same filtered summaries. The process-scoped cache is bounded and invalidates changed or removed files. Resuming in place keeps the original session; forking restores its latest snapshot into a newly created session whose header records `forkedFrom`.
 
 ## Tests
 
-Update `tests/core/sessionStore.test.ts` for persistence, restore, malformed-line, cwd hashing, session slimming, and formatting changes.
+Update `tests/core/sessionStore.test.ts` for deferred materialization, empty-session filtering, persistence, restore, malformed-line, cwd hashing, session slimming, and formatting changes.

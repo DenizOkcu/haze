@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-05 for root-level streamed Markdown chunking.
 
 Reusable Ink components, theme, and input-buffer logic.
 
@@ -19,12 +19,13 @@ Maintainability focus:
 
 - `Header.tsx` renders current app/session/model/status summary. Do not expose secrets.
 - `TextInput.tsx` handles terminal input/editing interactions and cursor-aware slash/`@path` suggestions; preserve keyboard, Tab, arrow, and Enter completion behavior covered by tests.
-- `MarkdownText.tsx` renders Markdown-like assistant/tool text in terminal width constraints. Keep rendering robust for malformed/partial Markdown from streaming models.
+- `MarkdownText.tsx` renders Markdown-like assistant/tool text in terminal width constraints and exposes root-level chunking for streamed assistant output. Keep rendering robust for malformed/partial Markdown from streaming models.
 - `ErrorView.tsx` should present errors compactly without stack spam unless intentionally surfaced.
 
 ## Markdown rendering
 
 - Preserve support for headings, lists, blockquotes, code fences with syntax highlighting, inline emphasis/links/code, horizontal rules, and width-aware tables.
+- Treat the final parsed root as unstable while streaming because later text may reclassify it as a setext heading, table, list, or fenced block. Commit only preceding roots; keep source-path leads grouped with their following code fence.
 - Do not assume browser CSS/layout; Ink layout and terminal widths are the source of truth.
 - Avoid adding dependencies for small Markdown features unless clearly justified.
 
@@ -33,5 +34,5 @@ Maintainability focus:
 Update:
 
 - `tests/ui/inputBuffer.test.ts` for editing behavior.
-- `tests/ui/MarkdownText.test.ts` for Markdown rendering.
+- `tests/ui/MarkdownText.test.ts` for Markdown rendering and stable root-level streaming chunks.
 - CLI snapshot/formatter tests if component output changes user-visible messages.

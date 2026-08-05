@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- The interactive transcript uses Ink static output for the header, completed messages, and parser-stable root-level Markdown blocks from an active response. Only the unfinished root block and live controls rerender, reducing terminal flicker and scroll jumps without rendering incomplete Markdown as if it were finished.
+- New interactive sessions stay in memory until the first non-empty UI message or conversation snapshot. Empty sessions no longer create JSONL files, and zero-message files from earlier versions are omitted from `/resume`, `--continue`, and latest-session selection.
+
 ## 1.0.0 - 2026-08-05
 
 ### Added

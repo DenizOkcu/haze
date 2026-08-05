@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-05 for static streamed Markdown and lazy empty-session persistence.
 
 CLI and terminal UI orchestration instructions.
 
@@ -13,7 +13,7 @@ CLI and terminal UI orchestration instructions.
 - `chat/fileMentionSuggestions.ts` provides bounded, gitignore-aware `@` completion; `chat/tips.ts` is the data registry for busy-state tips.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
 - `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, `wizardSuggestions.ts`, and `wizardTransition.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests. `wizardTransition.ts` holds the pure typed field-transition/effect functions for provider and MCP flows; prefer extending it over adding more inline branching in `chat.tsx`.
-- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (table-driven picker/wizard submit dispatch with one shared settings-patch applier), and `chatMetrics.ts` (token/status-bar math). Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
+- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (table-driven picker/wizard submit dispatch with one shared settings-patch applier), `chatMetrics.ts` (token/status-bar math), and `messages.tsx` (ordered static/dynamic transcript partitioning and message views). Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
 
 ## UI state rules
 
@@ -25,7 +25,8 @@ Maintainability focus:
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.
 - Keep refs for mutable turn/session machinery (`conversationRef`, abort controllers, logs, work state) when React rerenders must not reset them.
 - `messages` and `liveMessages` are display state. Durable model conversation is `ModelMessage[]` in the conversation ref/session snapshots; session persistence may slim large values for disk without changing active in-memory turn state.
-- Preserve display ordering when adding/updating messages; tests rely on stable ordering.
+- Preserve display ordering when adding/updating messages; tests rely on stable ordering. Ink `<Static>` items must remain an append-only ordered prefix. Once a live tail appears, later settled notices stay dynamic until that earlier tail finishes.
+- Assistant streaming keeps the active root Markdown block plain and dynamic. Only parser-stable preceding roots enter `<Static>`; finalization commits the last root and completion metadata.
 - Do not expose provider keys or secret settings in UI text.
 
 ## Slash command contracts
@@ -34,6 +35,7 @@ Maintainability focus:
 - `/skills` displays every valid candidate, including shadowed global skills, with `project`/`global` provenance. Selection identity must remain unambiguous when names collide.
 - Skill creation asks for scope explicitly after the name. `this project` writes under `<cwd>/.haze/skills`; `global` writes under `~/.haze/skills`. Never infer the target silently.
 - `/clear` clears conversation display/conversation state and tasks.
+- `/resume` and latest-session flows must omit sessions with no resumable messages. Starting or abandoning an empty session must not create a session JSONL file.
 - `/fleet` persists its original invocation only; orchestration control and per-run profile/model/concurrency/review overrides are ephemeral and must be reapplied on retries without entering snapshots/events.
 - `/compact [instructions]` compacts model messages but should not persist synthetic control messages.
 - `/logs` reads historical debug logs, but file LLM logging is only started when `--debug` is active.
@@ -55,3 +57,4 @@ Maintainability focus:
 - Update wizard tests for picker prompt/action changes.
 - Update `tests/cli/formatters.test.ts` for display text changes.
 - Update streaming tests for turn orchestration, token usage, tool grouping, assistant text filtering, and abort behavior.
+- Update `tests/cli/messages.test.tsx` when static/dynamic transcript partitioning, streamed Markdown promotion, or completion rendering changes.
