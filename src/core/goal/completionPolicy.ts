@@ -6,3 +6,10 @@ export function repeatedToolCallPrompt(toolNames: string[]) {
   const names = [...new Set(toolNames)].join(', ');
   return `You already called ${names || 'a tool'} with identical input in this turn. Do not call the same tool again with the same arguments. Use the existing tool result already in the conversation, choose a different concrete tool/input if genuinely needed, or give the final/blocked status now.`;
 }
+
+export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
+  const chunkGuidance = toolName === 'writeFile'
+    ? ` Keep content below ${chunkBytes} UTF-8 bytes per call: write the first chunk normally, then continue the same file with append=true.`
+    : '';
+  return `The ${toolName} call had invalid, malformed, or truncated JSON input and did not execute. Retry it now with valid smaller arguments; do not merely announce that you will retry.${chunkGuidance}`;
+}

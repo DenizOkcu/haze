@@ -1,4 +1,6 @@
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
+/** Keep generated file payloads comfortably below a model's output-token ceiling. */
+export const WRITE_FILE_CHUNK_BYTES = 16 * 1024;
 export const IDLE_TIMEOUT_MS = 5 * 60_000;
 export const MAIN_STEP_LIMIT = 64;
 export const MAIN_TOOL_CALL_LIMIT = 120;

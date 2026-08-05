@@ -23,6 +23,7 @@ import {processTool} from './tools/processTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 import {runRipgrepBounded} from './tools/grepRunner.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
+import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
 
 export const hazeTools = {
@@ -269,34 +270,44 @@ export const hazeTools = {
   }),
 
   writeFile: tool({
-    description: 'Create a UTF-8 file. Existing files require explicit full-rewrite approval.',
+    description: `Create, rewrite, or append a UTF-8 file in chunks of at most ${WRITE_FILE_CHUNK_BYTES} bytes. Existing files require explicit rewrite or append approval.`,
     contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
-      content: z.string().describe('Complete file contents to write'),
-      overwriteExisting: z.boolean().default(false).describe('Approve intentional full rewrite of an existing file'),
+      content: z.string().max(WRITE_FILE_CHUNK_BYTES).describe(`File content chunk, at most ${WRITE_FILE_CHUNK_BYTES} UTF-8 bytes`),
+      overwriteExisting: z.boolean().default(false).describe('Approve replacing an existing file with the first chunk of an intentional full rewrite'),
+      append: z.boolean().default(false).describe('Append this chunk to an existing file; use after creating or replacing the file with the first chunk'),
       allowIgnored: z.boolean().default(false).describe('Write a .gitignored file only when needed'),
     }),
-    execute: async ({path: filePath, content, overwriteExisting, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, allowIgnored}, context, async () => {
+    execute: async ({path: filePath, content, overwriteExisting, append, allowIgnored}, context) => runDedupedTool('writeFile', {path: filePath, content, overwriteExisting, append, allowIgnored}, context, async () => {
       try {
+        const contentBytes = Buffer.byteLength(content, 'utf8');
+        if (contentBytes > WRITE_FILE_CHUNK_BYTES) {
+          throw new HazeToolError(`Content is ${contentBytes} UTF-8 bytes; writeFile accepts at most ${WRITE_FILE_CHUNK_BYTES} bytes per call. Write the first chunk normally, then use append=true for later chunks.`, 'write_chunk_too_large');
+        }
+        if (append && overwriteExisting) {
+          throw new HazeToolError('append=true and overwriteExisting=true are mutually exclusive', 'conflicting_write_modes');
+        }
         const {absolutePath, scopedStop, assertExistingInsideWorkspace, assertWritableInsideWorkspace} = await prepareWorkspaceWritePath('writeFile', filePath, allowIgnored, context);
         if (scopedStop) return scopedStop;
         try {
           await fs.access(absolutePath);
           await assertExistingInsideWorkspace();
-          if (!overwriteExisting) {
-            throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, or set overwriteExisting=true for an intentional complete rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
+          if (!overwriteExisting && !append) {
+            throw new HazeToolError(`Refusing to overwrite existing file: ${filePath}. Use editFile/replaceLines for targeted edits, set append=true for a later chunk, or set overwriteExisting=true for an intentional rewrite.`, 'existing_file_requires_overwrite', {recoveryTool: 'readFile', recoveryInput: {path: filePath}});
           }
         } catch (error) {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code !== 'ENOENT') throw error;
+          if (append) throw new HazeToolError(`Cannot append to missing file: ${filePath}. Create its first chunk with append=false.`, 'append_target_missing');
           await assertWritableInsideWorkspace();
         }
         await fs.mkdir(path.dirname(absolutePath), {recursive: true});
-        await fs.writeFile(absolutePath, content, 'utf8');
-        return {ok: true, path: filePath, bytes: Buffer.byteLength(content, 'utf8'), overwritten: overwriteExisting};
+        if (append) await fs.appendFile(absolutePath, content, 'utf8');
+        else await fs.writeFile(absolutePath, content, 'utf8');
+        return {ok: true, path: filePath, bytes: contentBytes, overwritten: overwriteExisting, appended: append};
       } catch (error) {
-        return structuredToolFailure('writeFile', error, 'Use editFile/replaceLines for existing files, set overwriteExisting=true only for an intentional rewrite, or check the path/ignored-file setting.', filePath);
+        return structuredToolFailure('writeFile', error, `Keep each content chunk at or below ${WRITE_FILE_CHUNK_BYTES} UTF-8 bytes. Create or replace the first chunk, then continue with append=true.`, filePath);
       }
     }),
   }),

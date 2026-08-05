@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => {
   return {
     assembledCalls: [] as unknown[],
     streamedMessages: [] as unknown[][],
+    agentOptions: [] as Array<Record<string, unknown>>,
     closeMcpCalls: [] as unknown[],
     assembleContextResult: null as null | {
       systemPrompt: string;
@@ -108,6 +109,7 @@ async function loadStreaming(config: MocksConfig) {
       _fake: FakeAgent;
       constructor(options: Record<string, unknown>) {
         this.options = options;
+        mocks.agentOptions.push(options);
         this.prepareStep = options.prepareStep as never;
         this.onStepEnd = options.onStepEnd as never;
         this.onEnd = options.onEnd as never;
@@ -175,7 +177,10 @@ async function loadStreaming(config: MocksConfig) {
           ...this._fake,
           stream: (async function* () {
             for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: []}});
-            for (const part of parts) yield part;
+            for (const part of parts) {
+              if (typeof part.testNow === 'number') vi.setSystemTime(part.testNow);
+              yield part;
+            }
           })(),
           response: this._fake.response,
           responseMessages: this._fake.responseMessages,
@@ -238,6 +243,7 @@ function makeCallbacks() {
 beforeEach(() => {
   mocks.assembledCalls.length = 0;
   mocks.streamedMessages.length = 0;
+  mocks.agentOptions.length = 0;
   mocks.closeMcpCalls.length = 0;
   mocks.assembleContextResult = null;
 });
@@ -263,6 +269,32 @@ describe('runAgentTurn: setup', () => {
     expect(cb.messages[0]).toEqual({role: 'user', text: 'hello'});
     expect(cb.events.at(-1)?.type).toBe('turn_end');
     expect(outcome).toEqual({status: 'complete'});
+  });
+
+  it('steers malformed write input into a forced smaller retry', async () => {
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {writeFile: {description: 'write'}},
+      toolCategories: new Map([['writeFile', 'builtin']]),
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await runAgentTurn('write a large file', undefined, [], makeCallbacks());
+    const options = mocks.agentOptions.at(-1)!;
+    const repair = options.experimental_repairToolCall as (input: unknown) => Promise<unknown>;
+    const error = new Error('JSON parsing failed');
+    error.name = 'AI_InvalidToolInputError';
+    await expect(repair({toolCall: {toolName: 'writeFile'}, error})).resolves.toBeNull();
+    const prepare = options.prepareStep as (input: unknown) => {toolChoice: {type: string; toolName: string}; messages: unknown[]};
+    const prepared = prepare({steps: [], messages: []});
+    expect(prepared.toolChoice).toEqual({type: 'tool', toolName: 'writeFile'});
+    expect(JSON.stringify(prepared.messages)).toMatch(/append=true/);
+    await repair({toolCall: {toolName: 'writeFile'}, error});
+    expect(prepare({steps: [], messages: []}).toolChoice).toEqual({type: 'tool', toolName: 'writeFile'});
+    await repair({toolCall: {toolName: 'writeFile'}, error});
+    expect(prepare({steps: [], messages: []}).toolChoice).toBe('none');
   });
 
   it('uses displayValue when provided instead of the raw value', async () => {
@@ -417,6 +449,24 @@ describe('runAgentTurn: stream handling', () => {
     await runAgentTurn('run', undefined, [], cb);
     expect(cb.events.find((e) => e.type === 'tool_start')).toBeDefined();
     expect(cb.events.filter((e) => e.type === 'tool_end')).toHaveLength(1);
+  });
+
+  it('measures only execution time, not streamed tool-input generation time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [
+        {type: 'tool-input-start', id: 't1', toolName: 'bash', testNow: 1_000},
+        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, testNow: 101_000},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true}, testNow: 101_025},
+        {type: 'text-delta', text: 'Done.'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('run', undefined, [], cb);
+    expect(cb.events.find(event => event.type === 'tool_end')).toMatchObject({durationMs: 25});
   });
 
   it('publishes structured tool failure consistently to events, logs, work state, and status', async () => {

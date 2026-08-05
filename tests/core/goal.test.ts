@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {classifyRequestIntent, isPlanOnlyRequest} from '../../src/core/goal/requestClassifier.js';
-import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
+import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
 
 describe('requestClassifier', () => {
@@ -58,5 +58,12 @@ describe('completionPrompts', () => {
     expect(prompt).toMatch(/already called readFile/i);
     expect(prompt).toMatch(/Do not call the same tool again/i);
     expect(prompt).toMatch(/existing tool result/i);
+  });
+
+  it('requires malformed writes to retry in bounded chunks', () => {
+    const prompt = malformedToolCallPrompt('writeFile', 16_384);
+    expect(prompt).toMatch(/retry it now/i);
+    expect(prompt).toMatch(/append=true/i);
+    expect(prompt).toContain('16384');
   });
 });

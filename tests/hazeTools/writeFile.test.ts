@@ -24,11 +24,12 @@ describe('writeFile tool', () => {
     await fs.remove(tmp);
   });
 
-  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean; allowIgnored?: boolean}, context?: unknown) {
+  async function writeFile(params: {path: string; content: string; overwriteExisting?: boolean; append?: boolean; allowIgnored?: boolean}, context?: unknown) {
     return await hazeTools.writeFile.execute({
       path: params.path,
       content: params.content,
       overwriteExisting: params.overwriteExisting ?? false,
+      append: params.append ?? false,
       allowIgnored: params.allowIgnored ?? false,
     }, {abortSignal: undefined, context});
   }
@@ -52,8 +53,27 @@ describe('writeFile tool', () => {
   it('overwrites an existing file when explicitly approved', async () => {
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'original');
     const result = await writeFile({path: 'existing.txt', content: 'replacement', overwriteExisting: true});
-    expect(result).toMatchObject({ok: true, overwritten: true});
+    expect(result).toMatchObject({ok: true, overwritten: true, appended: false});
     await expect(fs.readFile(path.join(tmp, 'existing.txt'), 'utf8')).resolves.toBe('replacement');
+  });
+
+  it('appends later chunks without replacing the existing content', async () => {
+    await writeFile({path: 'chunked.txt', content: 'first'});
+    const result = await writeFile({path: 'chunked.txt', content: ' second', append: true});
+    expect(result).toMatchObject({ok: true, overwritten: false, appended: true, bytes: 7});
+    await expect(fs.readFile(path.join(tmp, 'chunked.txt'), 'utf8')).resolves.toBe('first second');
+  });
+
+  it('rejects append to a missing file and conflicting write modes', async () => {
+    await expect(writeFile({path: 'missing.txt', content: 'later', append: true})).resolves.toMatchObject({ok: false, reasonCode: 'append_target_missing'});
+    await fs.writeFile(path.join(tmp, 'existing.txt'), 'first');
+    await expect(writeFile({path: 'existing.txt', content: 'later', append: true, overwriteExisting: true})).resolves.toMatchObject({ok: false, reasonCode: 'conflicting_write_modes'});
+  });
+
+  it('enforces the UTF-8 byte limit for each chunk', async () => {
+    const result = await writeFile({path: 'large.txt', content: 'ü'.repeat(9_000)});
+    expect(result).toMatchObject({ok: false, reasonCode: 'write_chunk_too_large'});
+    await expect(fs.pathExists(path.join(tmp, 'large.txt'))).resolves.toBe(false);
   });
 
   it('rejects ignored paths by default and writes them with allowIgnored', async () => {

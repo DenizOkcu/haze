@@ -13,14 +13,14 @@ import {isContextOverflowError, isRetryableModelError} from '../../core/agent/er
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
-import {repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
+import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
 import {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
-import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT} from '../../core/agent/budgets.js';
+import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
@@ -31,6 +31,7 @@ import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {terminalTurnStatus} from './streaming/turnOutcome.js';
 import {createIdleTimer} from './streaming/idleTimer.js';
+import {isMalformedToolInputError} from './streaming/toolCallRecovery.js';
 import {WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
@@ -200,6 +201,9 @@ async function runAgentAttempt(
     let completedSteps = 0;
     let completedToolCalls = 0;
     let completedToolOnlySteps = 0;
+    let pendingMalformedToolName: string | undefined;
+    let unresolvedMalformedToolName: string | undefined;
+    const malformedRecoveryAttempts = new Map<string, number>();
     let toolResultState = initialToolResultState();
     const resetAssistantSegment = () => {
       currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -238,12 +242,33 @@ async function runAgentAttempt(
       stopWhen: isStepCount(MAIN_STEP_LIMIT),
       runtimeContext: toolExecutionContext,
       toolsContext: toolsContextFor(availableTools, toolExecutionContext) as never,
+      experimental_repairToolCall: async ({toolCall, error}) => {
+        if (isMalformedToolInputError(error)) {
+          pendingMalformedToolName = toolCall.toolName;
+          unresolvedMalformedToolName = toolCall.toolName;
+        }
+        // Truncated generated file content cannot be reconstructed safely here;
+        // let the next agent step retry under the bounded tool-choice constraint.
+        return null;
+      },
       prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
         const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
         const scopedMessages = withScopedContextControl(messages, toolExecutionContext);
         const messagesChanged = scopedMessages !== messages;
         if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
+        if (pendingMalformedToolName && pendingMalformedToolName in availableTools) {
+          const toolName = pendingMalformedToolName as keyof typeof availableTools;
+          const attempt = malformedRecoveryAttempts.get(String(toolName)) ?? 0;
+          pendingMalformedToolName = undefined;
+          if (attempt >= 2) {
+            callbacks.debugLog(`malformed ${String(toolName)} recovery exhausted`);
+            return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, `The ${String(toolName)} input remained invalid after two smaller retries. Report this as blocked; do not promise another retry or claim completion.`)};
+          }
+          malformedRecoveryAttempts.set(String(toolName), attempt + 1);
+          callbacks.debugLog(`forcing smaller retry after malformed ${String(toolName)} input`);
+          return {toolChoice: {type: 'tool' as const, toolName}, messages: withSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
+        }
         if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof availableTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof availableTools>};
         if (repeatedToolNames.length > 0) {
           const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as string));
@@ -323,7 +348,6 @@ async function runAgentAttempt(
           }
           const toolCall = {toolCallId: part.id, toolName: part.toolName, input: {}};
           latestToolCalls.set(part.id, toolCall);
-          startedTools.set(part.id, Date.now());
           inFlightTools.add(part.id);
           callbacks.setBusyLabel?.(busyToolLabel(part.toolName, {}));
           toolDisplay.ensureToolItem(toolCall);
@@ -337,7 +361,8 @@ async function runAgentAttempt(
           }
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input};
           latestToolCalls.set(part.toolCallId, toolCall);
-          if (!startedTools.has(part.toolCallId)) startedTools.set(part.toolCallId, Date.now());
+          // Tool execution begins only after its complete input has parsed and validated.
+          startedTools.set(part.toolCallId, Date.now());
           callbacks.setBusyLabel?.(busyToolLabel(part.toolName, part.input));
           toolDisplay.ensureToolItem(toolCall).summary = toolCallSummary(part.toolName, part.input);
           toolDisplay.updateToolGroup(true);
@@ -350,6 +375,7 @@ async function runAgentAttempt(
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
           const ok = toolOutputOk(part.output, true);
           lastToolOk = ok;
+          if (ok && part.toolName === unresolvedMalformedToolName) unresolvedMalformedToolName = undefined;
           const finish: NativeToolFinish = {toolCall, success: ok, output: part.output, durationMs: Date.now() - startedAt};
           const item = toolDisplay.ensureToolItem(toolCall);
           item.status = ok ? 'success' : 'error';
@@ -375,6 +401,10 @@ async function runAgentAttempt(
           const toolCall = {toolCallId: part.toolCallId, toolName: part.toolName, input: part.input ?? existing?.input};
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
           lastToolOk = false;
+          if (isMalformedToolInputError(part.error)) {
+            pendingMalformedToolName = part.toolName;
+            unresolvedMalformedToolName = part.toolName;
+          }
           const finish: NativeToolFinish = {toolCall, success: false, error: part.error, durationMs: Date.now() - startedAt};
           const item = toolDisplay.ensureToolItem(toolCall);
           item.status = 'error';
@@ -435,7 +465,8 @@ async function runAgentAttempt(
       || completedSteps >= MAIN_STEP_LIMIT
       || completedToolCalls >= MAIN_TOOL_CALL_LIMIT
       || completedToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT;
-    turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached});
+    turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached, unresolvedToolInputError: unresolvedMalformedToolName != null});
+    if (unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
     goal.phase = 'done';
     goal.status = turnStatus === 'complete' ? 'complete' : 'blocked';
     callbacks.setWorkState?.(goal);
