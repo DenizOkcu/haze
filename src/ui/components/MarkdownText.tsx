@@ -40,10 +40,9 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     case 'list': {
       const list = token as Tokens.List;
       return <Box flexDirection="column" marginBottom={1}>
-        {list.items.map((item, index) => <Box key={index}>
-          <Text color={theme.purple}>{list.ordered ? `${index + 1}. ` : '• '}</Text>
-          <InlineMarkdown text={item.text.replace(/\n/g, ' ')} />
-        </Box>)}
+        {list.items.map((item, index) => (
+          <ListItemView key={index} item={item} ordered={list.ordered} index={index} width={width} />
+        ))}
       </Box>;
     }
     case 'code': {
@@ -60,6 +59,55 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     default:
       return <Text>{'raw' in token ? String(token.raw) : ''}</Text>;
   }
+}
+
+function ListItemView({item, ordered, index, width}: {
+  item: Tokens.ListItem;
+  ordered: boolean | undefined;
+  index: number;
+  width: number;
+}) {
+  const marker = ordered ? `${index + 1}. ` : '• ';
+  const markerWidth = visibleLength(marker);
+  const blocks = (item.tokens ?? []).filter(child => child.type !== 'space');
+  if (blocks.length === 0) {
+    return <Box><Text color={theme.purple}>{marker}</Text></Box>;
+  }
+  return <Box flexDirection="column">
+    {blocks.map((block, blockIndex) => (
+      <ListItemBlock
+        key={blockIndex}
+        token={block}
+        marker={blockIndex === 0 ? marker : null}
+        markerWidth={markerWidth}
+        width={width}
+      />
+    ))}
+  </Box>;
+}
+
+function ListItemBlock({token, marker, markerWidth, width}: {
+  token: Tokens.Generic;
+  marker: string | null;
+  markerWidth: number;
+  width: number;
+}) {
+  if (token.type === 'paragraph' || token.type === 'text') {
+    const text = (token as Tokens.Paragraph | Tokens.Text).text;
+    return <Box>
+      <Text color={theme.purple}>{marker ?? ' '.repeat(markerWidth)}</Text>
+      <InlineMarkdown text={text} />
+    </Box>;
+  }
+  // Block-level content (code, nested list, blockquote, table). The marker
+  // sits on its own line when this is the first block; the block then renders
+  // indented to align with the marker.
+  return <Box flexDirection="column">
+    {marker ? <Text color={theme.purple}>{marker}</Text> : null}
+    <Box flexDirection="column" marginLeft={markerWidth}>
+      <MarkdownBlock token={token} width={Math.max(20, width - markerWidth)} />
+    </Box>
+  </Box>;
 }
 
 function HeadingBlock({heading, width}: {heading: Tokens.Heading; width: number}) {
