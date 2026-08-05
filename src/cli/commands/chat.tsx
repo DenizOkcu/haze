@@ -641,14 +641,15 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
   const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
   const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
+  const contentWidth = Math.max(1, width - 2);
 
-  return <Box flexDirection="column">
+  return <Box flexDirection="column" paddingX={1}>
     <Header key={`header-${activeModelName}`} subtitle={headerSubtitle} version={version} />
     {transcriptItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {transcriptItems.map(item => <MessageView key={item.key} message={item.message} width={width} />)}
+      {transcriptItems.map(item => <MessageView key={item.key} message={item.message} width={contentWidth} />)}
     </Box>}
     {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {streamingItems.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={width} />)}
+      {streamingItems.map((message, index) => <MessageView key={messageKey(message, index)} message={message} width={contentWidth} />)}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
@@ -659,7 +660,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-      <TaskBar tasks={visibleTasks} width={width} expanded={tasksExpanded} padding={taskBarPadding} />
+      <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
     {busy && <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
@@ -673,7 +674,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
           suggestions={inputSuggestions}
           suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
           submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
-          width={Math.max(20, width - 4)}
+          width={Math.max(20, contentWidth - 4)}
           getMentionSuggestions={fileMentionSuggestions}
           onHistoryAdd={persistInputHistory}
           onToggleTasks={() => {

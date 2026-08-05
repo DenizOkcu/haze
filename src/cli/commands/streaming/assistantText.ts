@@ -66,8 +66,14 @@ function isIncompleteAssistantFragment(text: string) {
 function isLikelyUnfinishedMarkdownFragment(text: string) {
   const trimmed = text.trim();
   if (!trimmed.includes('\n')) return false;
-  const last = trimmed.at(-1) ?? '';
-  return last === '-' || last === '*' || last === '#' || last === '`' || last === '>';
+  // A dangling structural marker alone on the last line ("- ", "#", ">") means
+  // the model just opened a list/heading/blockquote and is about to continue.
+  const lastLine = trimmed.split('\n').pop()?.trim() ?? '';
+  if (lastLine.length === 1 && '-*#>'.includes(lastLine)) return true;
+  // An odd number of fence-open lines means a code block was opened but never
+  // closed. An even count (including a trailing closing fence) is balanced.
+  const fenceCount = (trimmed.match(/^`{3,}/gm) ?? []).length;
+  return fenceCount % 2 === 1;
 }
 
 // Procedural pre-tool lead-ins (e.g. "Confirmed:", "Files written.", "Now let me",

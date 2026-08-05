@@ -69,4 +69,34 @@ describe('MarkdownText list rendering', () => {
     expect(frame).toContain('const x = 1;');
     expect(frame).not.toContain('`');
   });
+
+  it('keeps the bullet gap consistent and wraps with a 2-space hanging indent', () => {
+    // Regression: Ink's auto-wrap injected a stray leading space at certain
+    // widths, producing a 3-space indent on a wrapped line. We now pre-wrap
+    // manually so every wrapped line aligns under the text after the bullet.
+    const content = [
+      '- Implemented card metadata UI: create/toggle labels, set/clear priority and size, metadata badges on cards, plus label and minimum-priority filters.',
+      '- Updated `App.tsx`, `types.ts`, `TaskDetail.tsx`, `Column.tsx`, `Card.tsx`, `i18n.ts`, and `styles.css`, reusing existing domain mutators and shared ordering constants.',
+      '- Validation passed.',
+    ].join('\n');
+
+    const {lastFrame} = render(<MarkdownText content={content} width={60} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    const lines = frame.split('\n');
+
+    // Every bullet line starts with '• ' (bullet + single space).
+    const bulletLines = lines.filter(line => line.startsWith('• '));
+    expect(bulletLines).toHaveLength(3);
+
+    // Every wrapped line is indented by exactly two spaces (no 3-space lines).
+    const wrappedLines = lines.filter(line => line.length > 0 && !line.startsWith('• ') && line.startsWith(' '));
+    for (const line of wrappedLines) {
+      expect(line.startsWith('  ')).toBe(true);
+      expect(line.startsWith('   ')).toBe(false);
+    }
+
+    // Original spacing preserved (no inserted space before the comma).
+    expect(frame).toContain('App.tsx, types.ts');
+    expect(frame).not.toContain('App.tsx , types.ts');
+  });
 });

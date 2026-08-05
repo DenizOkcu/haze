@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn, shouldStartAssistantStream} from '../../src/cli/commands/streaming/assistantText.js';
+import {isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn, shouldStartAssistantStream} from '../../src/cli/commands/streaming/assistantText.js';
 
 describe('assistant streaming fragment gating', () => {
   it('keeps incomplete markdown fragments hidden even after debounce', () => {
@@ -54,5 +54,44 @@ describe('assistant streaming fragment gating', () => {
     expect(isShortUnfinishedLeadIn('This is really great')).toBe(false);
     // Kept: markdown fragment handled by the other gate.
     expect(isShortUnfinishedLeadIn('## Summary\n-')).toBe(false);
+  });
+
+  it('does not hide substantive answers that end with a balanced code fence', () => {
+    // Regression: a long explanation whose final line is a closing fence was
+    // misclassified as an unfinished fragment and vanished on finalize.
+    const endsWithClosingFence = `# Repository overview
+
+Here is the bootstrap:
+
+\`\`\`tsx
+createRoot(root).render(<App />);
+\`\`\``;
+    expect(isHiddenAssistantFragment(endsWithClosingFence)).toBe(false);
+    expect(isHiddenUnstartedFinalText(endsWithClosingFence)).toBe(false);
+
+    // Genuine open fence is still unfinished.
+    const openFence = `Here is a snippet:
+
+\`\`\`tsx
+createRoot(root).render(<App />);`;
+    expect(isHiddenAssistantFragment(openFence)).toBe(true);
+    expect(isHiddenUnstartedFinalText(openFence)).toBe(true);
+  });
+
+  it('keeps completed bullet items but drops a dangling bullet', () => {
+    // "- item" on the last line is a complete bullet, not unfinished.
+    const endsWithBulletItem = `Plan:
+
+- React
+- TypeScript`;
+    expect(isHiddenAssistantFragment(endsWithBulletItem)).toBe(false);
+    expect(isHiddenUnstartedFinalText(endsWithBulletItem)).toBe(false);
+
+    // A bare "-" on its own line means a list item is about to be written.
+    const danglingBullet = `Plan:
+
+-`;
+    expect(isHiddenAssistantFragment(danglingBullet)).toBe(true);
+    expect(isHiddenUnstartedFinalText(danglingBullet)).toBe(true);
   });
 });

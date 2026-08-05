@@ -94,9 +94,21 @@ function ListItemBlock({token, marker, markerWidth, width}: {
 }) {
   if (token.type === 'paragraph' || token.type === 'text') {
     const text = (token as Tokens.Paragraph | Tokens.Text).text;
-    return <Box>
-      <Text color={theme.purple}>{marker ?? ' '.repeat(markerWidth)}</Text>
-      <InlineMarkdown text={text} />
+    // Pre-wrap manually. Ink's auto-wrap algorithm injects a stray leading
+    // space on wrapped lines at certain widths (the wrap-point whitespace gets
+    // preserved on top of the marker indent), so we hand-pack atoms into lines
+    // and render each line as its own row. Whitespace is preserved as separate
+    // "space" atoms so the original spacing (e.g. "code, code") survives.
+    const contentWidth = Math.max(1, width - markerWidth);
+    const lines = wrapInlineAtoms(splitInlineIntoAtoms(tokenizeInline(text)), contentWidth);
+    const prefix = (lineIndex: number) => lineIndex === 0 ? (marker ?? ' '.repeat(markerWidth)) : ' '.repeat(markerWidth);
+    return <Box flexDirection="column">
+      {lines.map((line, lineIndex) => (
+        <Box key={lineIndex} flexDirection="row">
+          <Box flexShrink={0}><Text color={theme.purple}>{prefix(lineIndex)}</Text></Box>
+          <Text>{line.map((atom, atomIndex) => atom.type === 'space' ? <Text key={atomIndex}>{' '}</Text> : renderInlinePart(atom, atomIndex))}</Text>
+        </Box>
+      ))}
     </Box>;
   }
   // Block-level content (code, nested list, blockquote, table). The marker
@@ -150,15 +162,65 @@ function CodeBlock({code, language, width}: {code: string; language?: string; wi
 
 function InlineMarkdown({text}: {text: string}) {
   const parts = tokenizeInline(text);
-  return <Text>
-    {parts.map((part, index) => {
-      if (part.kind === 'code') return <Text key={index} color={theme.warning}>{part.text}</Text>;
-      if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
-      if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
-      if (part.kind === 'link') return <Text key={index} color={theme.purple}>{part.text}</Text>;
-      return <Text key={index}>{part.text}</Text>;
-    })}
-  </Text>;
+  return <Text>{parts.map((part, index) => renderInlinePart(part, index))}</Text>;
+}
+
+function renderInlinePart(part: {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}, index: number | string) {
+  if (part.kind === 'code') return <Text key={index} color={theme.warning}>{part.text}</Text>;
+  if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
+  if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
+  if (part.kind === 'link') return <Text key={index} color={theme.purple}>{part.text}</Text>;
+  return <Text key={index}>{part.text}</Text>;
+}
+
+type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'link';
+type InlineAtom = {type: 'word'; kind: InlineKind; text: string} | {type: 'space'};
+
+function splitInlineIntoAtoms(parts: {kind: InlineKind; text: string}[]): InlineAtom[] {
+  const atoms: InlineAtom[] = [];
+  for (const part of parts) {
+    for (const piece of part.text.split(/(\s+)/)) {
+      if (piece === '') continue;
+      if (/^\s+$/.test(piece)) atoms.push({type: 'space'});
+      else atoms.push({type: 'word', kind: part.kind, text: piece});
+    }
+  }
+  return atoms;
+}
+
+function wrapInlineAtoms(atoms: InlineAtom[], maxWidth: number): InlineAtom[][] {
+  const lines: InlineAtom[][] = [];
+  let line: InlineAtom[] = [];
+  let width = 0;
+  const flushLine = () => {
+    while (line.length > 0 && line[line.length - 1].type === 'space') line.pop();
+    if (line.length > 0) lines.push(line);
+    line = [];
+    width = 0;
+  };
+  for (const atom of atoms) {
+    if (atom.type === 'space') {
+      if (width > 0) {
+        line.push(atom);
+        width += 1;
+      }
+      continue;
+    }
+    const wordWidth = visibleLength(atom.text);
+    if (wordWidth > maxWidth && width === 0) {
+      // Overlong word on its own line: keep it whole so we don't pretend to
+      // have wrap behavior we can't actually render.
+      lines.push([atom]);
+      line = [];
+      width = 0;
+      continue;
+    }
+    if (width > 0 && width + wordWidth > maxWidth) flushLine();
+    line.push(atom);
+    width += wordWidth;
+  }
+  flushLine();
+  return lines.length > 0 ? lines : [[]];
 }
 
 function tokenizeInline(text: string): {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}[] {
