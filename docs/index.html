@@ -111,10 +111,28 @@
       text-decoration: none;
     }
 
-    .wordmark span { color: var(--accent); }
+    .resource-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.7rem;
+      padding: 0.2rem 0.55rem;
+      color: var(--ink-2);
+      background: var(--panel);
+      border: 1px solid var(--rule-strong);
+      border-radius: 999px;
+      font-size: 0.7rem;
+      text-decoration: none;
+      transition: color 160ms ease, border-color 160ms ease;
+    }
+
+    .resource-pill:hover {
+      color: var(--accent-strong);
+      border-color: var(--accent);
+    }
 
     .top-links {
       display: flex;
+      align-items: center;
       gap: 1.25rem;
       color: var(--ink-2);
       font-size: 0.78rem;
@@ -144,7 +162,6 @@
     .hero {
       padding: clamp(2.25rem, 5vw, 3.75rem) clamp(1.25rem, 5vw, 4rem);
       text-align: center;
-      border-bottom: 1px solid var(--rule);
     }
 
     .hero h1 {
@@ -217,48 +234,12 @@
       background: var(--page);
     }
 
-    .facts,
     .capability-grid,
-    .provider-grid {
+    .principle-grid {
       display: grid;
       margin: 0;
       padding: 0;
       list-style: none;
-    }
-
-    .facts {
-      grid-template-columns: repeat(4, 1fr);
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .facts li {
-      padding: 1.35rem 0.75rem;
-      color: var(--ink-2);
-      font-size: 0.72rem;
-      text-align: center;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      border-right: 1px solid var(--rule);
-    }
-
-    .facts li:last-child { border-right: 0; }
-
-    .link-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 2rem;
-      min-height: 5rem;
-      padding: 1.25rem 2rem;
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .link-row > span {
-      flex: 0 0 auto;
-      color: var(--ink-2);
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
     }
 
     .copy-command {
@@ -304,15 +285,6 @@
       outline-offset: 4px;
     }
 
-    .link-row:last-child { border-bottom: 0; }
-
-    .link-row a {
-      color: var(--ink);
-      font-size: 0.82rem;
-      text-align: right;
-      word-break: break-word;
-    }
-
     .section {
       margin-top: 2.4rem;
     }
@@ -331,20 +303,6 @@
       background: var(--panel);
     }
 
-    .workflow {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-    }
-
-    .workflow article {
-      min-width: 0;
-      padding: 1.7rem;
-      border-right: 1px solid var(--rule);
-    }
-
-    .workflow article:last-child { border-right: 0; }
-
-    .workflow h3,
     .capability-grid h3 {
       margin: 0 0 0.7rem;
       color: var(--accent-strong);
@@ -352,7 +310,6 @@
       font-weight: 500;
     }
 
-    .workflow p,
     .capability-grid p {
       margin: 0;
       color: var(--ink-2);
@@ -501,9 +458,54 @@
     .capability-grid li:nth-child(3n) { background: var(--panel-soft); }
 
     .capability-grid code,
+    .principle-grid code,
     .faq code {
       color: var(--accent-strong);
       font-family: var(--mono);
+    }
+
+    .principle-grid code.command-code {
+      padding: 0.08rem 0.3rem;
+      color: var(--command);
+      background: #2b211b;
+      border: 1px solid #5c402c;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .principle-grid a {
+      color: var(--accent-strong);
+      text-underline-offset: 0.2rem;
+      text-decoration-color: var(--rule-strong);
+    }
+
+    .principle-grid a:hover { text-decoration-color: var(--accent); }
+
+    .principle-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .principle-grid article {
+      min-width: 0;
+      padding: 1.75rem;
+      border-right: 1px solid var(--rule);
+    }
+
+    .principle-grid article:last-child { border-right: 0; }
+
+    .principle-grid h3 {
+      margin: 0 0 0.7rem;
+      color: var(--accent-strong);
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+
+    .principle-grid p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 0.76rem;
+      line-height: 1.65;
+      text-wrap: pretty;
     }
 
     .mini-terminal {
@@ -522,29 +524,28 @@
     .mini-terminal .success { color: var(--ok); }
     .mini-terminal .muted { color: var(--ink-3); }
 
-    .provider-grid {
-      grid-template-columns: repeat(4, 1fr);
-    }
-
-    .provider-grid li {
-      padding: 1.4rem 0.75rem;
-      color: var(--ink-2);
-      font-size: 0.76rem;
-      text-align: center;
-      border-right: 1px solid var(--rule);
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .provider-grid li:nth-child(4n) { border-right: 0; }
-    .provider-grid li:nth-last-child(-n + 4) { border-bottom: 0; }
-
     .provider-note {
       margin: 0;
       padding: 1.25rem 1.5rem;
       color: var(--ink-2);
       background: var(--accent-soft);
-      border-top: 1px solid var(--rule-strong);
       font-size: 0.76rem;
+      line-height: 1.7;
+    }
+
+    .provider-note strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    .provider-note code {
+      padding: 0.08rem 0.3rem;
+      color: var(--command);
+      background: #2b211b;
+      border: 1px solid #5c402c;
+      border-radius: 3px;
+      font-family: var(--mono);
+      white-space: nowrap;
     }
 
     .faq details {
@@ -637,24 +638,15 @@
       .brand { align-items: flex-start; }
       .top-links { flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem 1rem; }
       .hero { padding-block: 2.5rem; }
-      .facts { grid-template-columns: repeat(2, 1fr); }
-      .facts li:nth-child(2) { border-right: 0; }
-      .facts li:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
-      .link-row { align-items: flex-start; flex-direction: column; gap: 0.8rem; padding: 1.25rem; }
       .copy-command { justify-content: space-between; width: 100%; }
-      .link-row a { text-align: left; }
-      .workflow { grid-template-columns: 1fr; }
-      .workflow article { border-right: 0; border-bottom: 1px solid var(--rule); }
-      .workflow article:last-child { border-bottom: 0; }
-      .capability-grid { grid-template-columns: 1fr; }
+      .capability-grid,
+      .principle-grid { grid-template-columns: 1fr; }
       .capability-grid li,
       .capability-grid li:nth-child(even),
       .capability-grid li:nth-last-child(-n + 2) { min-height: 0; border-right: 0; border-bottom: 1px solid var(--rule); }
       .capability-grid li:last-child { border-bottom: 0; }
-      .provider-grid { grid-template-columns: repeat(2, 1fr); }
-      .provider-grid li:nth-child(2n) { border-right: 0; }
-      .provider-grid li:nth-last-child(-n + 4) { border-bottom: 1px solid var(--rule); }
-      .provider-grid li:nth-last-child(-n + 2) { border-bottom: 0; }
+      .principle-grid article { border-right: 0; border-bottom: 1px solid var(--rule); }
+      .principle-grid article:last-child { border-bottom: 0; }
       .final-action { grid-template-columns: 1fr; }
       .button { width: 100%; }
     }
@@ -666,11 +658,6 @@
       .hero h1 { font-size: 1.35rem; }
       .copy-command { align-items: flex-start; flex-direction: column; }
       .copy-label { text-align: left; }
-      .provider-grid { grid-template-columns: 1fr; }
-      .provider-grid li,
-      .provider-grid li:nth-child(2n),
-      .provider-grid li:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid var(--rule); }
-      .provider-grid li:last-child { border-bottom: 0; }
       .footer { align-items: flex-start; flex-direction: column; }
     }
 
@@ -692,6 +679,8 @@
         <a href="tools.html">Tools</a>
         <a href="skills.html">Skills</a>
         <a href="workflows.html">Workflows</a>
+        <a class="resource-pill" href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.10.0</a>
       </nav>
     </header>
 
@@ -755,51 +744,43 @@
         </div>
       </div>
 
-      <ul class="facts" aria-label="Product facts">
-        <li>Minimal terminal UI</li>
-        <li>Your choice of model</li>
-        <li>No per-call approvals</li>
-        <li>MIT licensed</li>
-      </ul>
-
-      <div class="link-row">
-        <span>GitHub</span>
-        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">github.com/DenizOkcu/haze ↗</a>
-      </div>
-      <div class="link-row">
-        <span>npm</span>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">@denizokcu/haze ↗</a>
-      </div>
-    </section>
-
-    <section class="section" aria-labelledby="workflow-title">
-      <h2 class="section-title" id="workflow-title">From prompt to verified change</h2>
-      <div class="section-box workflow">
-        <article>
-          <h3>Set the target</h3>
-          <p>Describe the result you want. Point to a file, attach a screenshot, or let haze find the relevant code and repository instructions.</p>
-        </article>
-        <article>
-          <h3>Let it work</h3>
-          <p>haze investigates, plans substantial work, edits files, runs commands, and delegates independent tasks. It does not stop at a code suggestion.</p>
-        </article>
-        <article>
-          <h3>Check the evidence</h3>
-          <p>Follow compact tool activity, then review the changed files, validation commands, test results, and any unresolved failure.</p>
-        </article>
-      </div>
     </section>
 
     <section class="section" aria-labelledby="capabilities-title">
-      <h2 class="section-title" id="capabilities-title">Built for real repository work</h2>
+      <h2 class="section-title" id="capabilities-title">Built for autonomous workflows</h2>
       <div class="section-box">
         <ul class="capability-grid">
+          <li>
+            <h3>Skills are plain Markdown</h3>
+            <p>Skills are haze's most powerful extension point. Describe a workflow, refine the LLM-generated draft, and store it globally or with a repository. The model loads matching skills from user intent, or you can invoke one as a slash command.</p>
+            <pre class="mini-terminal" aria-label="Skills picker example"><span class="prompt">/skills</span>
+<span class="prompt">›</span> code-review    <span class="muted">project</span>
+  deploy-check   <span class="muted">project</span>
+  add skill      <span class="muted">describe a new skill for haze to generate</span></pre>
+          </li>
           <li>
             <h3>Repository-native tools</h3>
             <p>Discover, read, search, edit, and write code with explicit workspace boundaries. Add LSP navigation or MCP tools when the built-ins are not enough.</p>
             <pre class="mini-terminal" aria-label="File tool example"><span class="success">✓</span> grep      createSession  <span class="muted">12 matches</span>
 <span class="success">✓</span> readFile  src/session.ts <span class="muted">184 lines</span>
 <span class="success">✓</span> editFile  src/session.ts <span class="muted">+8 -3</span></pre>
+          </li>
+          <li>
+            <h3>Work you can resume</h3>
+            <p>Resume or fork a workspace session with its goal, touched files, validation evidence, blockers, and next action intact.</p>
+            <pre class="mini-terminal" aria-label="Session resume example"><span class="prompt">/resume</span>
+<span class="prompt">›</span> auth-refactor    <span class="muted">18 messages · 2m ago</span>
+  dashboard-fix   <span class="muted">12 messages · yesterday</span>
+  release-prep    <span class="muted">9 messages · 3d ago</span></pre>
+          </li>
+          <li>
+            <h3>Parallel, isolated workers</h3>
+            <p>Split independent work across fresh subagent contexts. Concurrency is bounded, file writes are serialized, and the main conversation stays focused.</p>
+            <pre class="mini-terminal" aria-label="Parallel worker example"><span class="prompt">/fleet</span> migrate four packages
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/web     <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/admin   <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/mobile  <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/cli     <span class="muted">migrated</span></pre>
           </li>
           <li>
             <h3>Commands that stay alive</h3>
@@ -809,50 +790,47 @@
 <span class="success">✓</span> process  output background-1</pre>
           </li>
           <li>
-            <h3>Work you can resume</h3>
-            <p>Resume or fork a workspace session with its goal, touched files, validation evidence, blockers, and next action intact.</p>
-            <pre class="mini-terminal" aria-label="Session resume example"><span class="prompt">$</span> haze --continue
-<span class="success">✓</span> resumed  api-service
-  <span class="muted">18 messages, context restored</span></pre>
-          </li>
-          <li>
-            <h3>Skills are plain Markdown</h3>
-            <p>Turn a review, release, or deploy routine into a project or personal skill. Read it, edit it, version it, and invoke it as <code>/code-review</code>.</p>
-            <pre class="mini-terminal" aria-label="Skill creation example"><span class="prompt">/skills</span>  add deploy-check
-<span class="success">✓</span> created
-  <span class="muted">.haze/skills/deploy-check/SKILL.md</span></pre>
-          </li>
-          <li>
-            <h3>Parallel, isolated workers</h3>
-            <p>Split independent work across fresh subagent contexts. Concurrency is bounded, file writes are serialized, and the main conversation stays focused.</p>
-            <pre class="mini-terminal" aria-label="Parallel worker example"><span class="prompt">/fleet</span> migrate four packages
-<span class="success">✓</span> web     <span class="success">✓</span> admin
-<span class="success">✓</span> mobile  <span class="success">✓</span> cli</pre>
-          </li>
-          <li>
             <h3>Automation without the TUI</h3>
             <p>Run <code>haze -p</code> from scripts and CI with text, JSON, or streaming JSON output plus a reliable process exit status.</p>
-            <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" --output json
+            <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" \
+  --model ollama:qwen3.6:35b-a3b \
+  --output json
 { "status": <span class="success">"complete"</span>, "findings": 2 }</pre>
           </li>
         </ul>
       </div>
     </section>
 
+    <section class="section" aria-labelledby="principles-title">
+      <h2 class="section-title" id="principles-title">Minimal guardrails and context</h2>
+      <div class="section-box principle-grid">
+        <article>
+          <h3>Workspace boundaries without approval loops</h3>
+          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision.</p>
+          <pre class="mini-terminal" aria-label="Workspace guardrail example"><span class="prompt">workspace</span>   current directory
+<span class="prompt">.gitignore</span>  respected by default
+<span class="prompt">@ui.png</span>    attached for vision</pre>
+        </article>
+        <article>
+          <h3>A small model-facing footprint</h3>
+          <p>haze's <a href="https://github.com/DenizOkcu/haze/blob/main/src/llm/systemPrompt.ts" target="_blank" rel="noopener">base system prompt</a> is about 1.1k tokens, compared with 20k+ for Claude Code. Request context and tool responses are aggressively bounded or compacted, while large raw outputs remain retrievable by handle. Local models get a tractable context, and cloud providers receive fewer input tokens.</p>
+          <pre class="mini-terminal" aria-label="Context footprint example"><span class="prompt">system prompt</span>  ~1.1k tokens
+<span class="prompt">tool output</span>    bounded · retrievable
+<span class="prompt">sessions</span>       compactable</pre>
+        </article>
+        <article>
+          <h3>Instructions at every scope</h3>
+          <p>haze reads user-level guidance from <code>~/.haze/AGENTS.md</code> or <code>~/.claude/CLAUDE.md</code>, then discovers root and nested repository instructions as it works. Create a root <code>AGENTS.md</code> with <code class="command-code">/init</code>. Clear the current conversation and task list with <code class="command-code">/clear</code>.</p>
+          <pre class="mini-terminal" aria-label="Project instruction commands"><span class="prompt">/init</span>   create root AGENTS.md
+<span class="prompt">/clear</span>  clear conversation and tasks</pre>
+        </article>
+      </div>
+    </section>
+
     <section class="section" aria-labelledby="providers-title">
-      <h2 class="section-title" id="providers-title">Bring the model you trust</h2>
+      <h2 class="section-title" id="providers-title">Bring your own model</h2>
       <div class="section-box">
-        <ul class="provider-grid">
-          <li>OpenAI</li>
-          <li>OpenRouter</li>
-          <li>Ollama</li>
-          <li>LM Studio</li>
-          <li>Local proxies</li>
-          <li>Hosted gateways</li>
-          <li>Custom endpoints</li>
-          <li>Compatible APIs</li>
-        </ul>
-        <p class="provider-note">You choose where inference runs and which model sees your code. haze has no default provider and never swaps or selects a model behind your back. Configure one with <code>/provider</code>, then choose it with <code>/model</code>.</p>
+        <p class="provider-note"><strong>Ollama</strong> and <strong>LM Studio</strong> run locally without an API key. For hosted inference, haze includes presets for <strong>OpenRouter</strong>, <strong>OpenAI</strong>, <strong>Mistral</strong>, <strong>DeepSeek</strong>, <strong>xAI</strong>, and other OpenAI-compatible endpoints; most need only an API key. OpenAI supports both platform API keys and browser sign-in with a supported ChatGPT subscription. You can also connect a custom OpenAI-compatible API. haze is optimized for local inference. Configure a provider with <code>/provider</code>, then select a model with <code>/model</code>.</p>
       </div>
     </section>
 
