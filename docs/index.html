@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>haze | terminal coding agent</title>
-  <meta name="description" content="haze is an open-source terminal coding agent for OpenAI-compatible providers. It edits files, runs commands, verifies work, and keeps durable sessions.">
-  <meta property="og:title" content="haze | terminal coding agent">
-  <meta property="og:description" content="Connect an OpenAI-compatible provider. Give haze a task. Review the result and its evidence.">
+  <title>haze | open-source coding agent for your terminal</title>
+  <meta name="description" content="Install haze, connect any OpenAI-compatible model, and hand it a complete coding task. It reads, edits, runs commands, delegates work, and verifies the result.">
+  <meta property="og:title" content="haze | open-source coding agent for your terminal">
+  <meta property="og:description" content="Your model. Your terminal. One autonomous coding loop, without an approval prompt before every tool call.">
   <meta property="og:type" content="website">
   <meta name="theme-color" content="#181823">
   <meta name="color-scheme" content="dark">
@@ -27,6 +27,13 @@
       --rule-strong: #4a455d;
       --ok: #91e69b;
       --bad: #ff9d9d;
+      --command: #ffb86c;
+      --terminal-purple: #a78bfa;
+      --terminal-blue: #60a5fa;
+      --terminal-muted: #9ca3af;
+      --terminal-success: #39ff14;
+      --terminal-warning: #fbbf24;
+      --terminal-quote: #171127;
       --max: 1080px;
       --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
@@ -84,7 +91,7 @@
     .shell {
       width: min(var(--max), calc(100% - 2rem));
       margin: 0 auto;
-      padding: 7rem 0 2rem;
+      padding: 2.5rem 0 2rem;
     }
 
     .brand {
@@ -92,14 +99,15 @@
       align-items: center;
       justify-content: space-between;
       gap: 1rem;
-      margin-bottom: 1.25rem;
+      margin-bottom: 1rem;
     }
 
     .wordmark {
       color: var(--ink);
+      font-family: var(--mono);
       font-size: 1.55rem;
       font-weight: 700;
-      letter-spacing: -0.08em;
+      letter-spacing: -0.055em;
       text-decoration: none;
     }
 
@@ -134,7 +142,7 @@
     }
 
     .hero {
-      padding: clamp(3.5rem, 9vw, 6.5rem) clamp(1.25rem, 5vw, 4rem);
+      padding: clamp(2.25rem, 5vw, 3.75rem) clamp(1.25rem, 5vw, 4rem);
       text-align: center;
       border-bottom: 1px solid var(--rule);
     }
@@ -155,6 +163,15 @@
       font-weight: 500;
     }
 
+    .hero h1 code.product-name {
+      padding: 0.08em 0.25em;
+      color: var(--accent-strong);
+      background: #241f33;
+      border: 1px solid #4a3f6d;
+      border-radius: 4px;
+      font: inherit;
+    }
+
     .hero p {
       max-width: 54ch;
       margin: 1.25rem auto 0;
@@ -163,9 +180,38 @@
       text-wrap: pretty;
     }
 
+    .hero p code {
+      padding: 0.08rem 0.3rem;
+      color: var(--command);
+      background: #2b211b;
+      border: 1px solid #5c402c;
+      border-radius: 3px;
+      font-family: var(--mono);
+      white-space: nowrap;
+    }
+
+    .hero p code.product-name {
+      color: var(--accent-strong);
+      background: #241f33;
+      border-color: #4a3f6d;
+    }
+
+    .hero-install {
+      max-width: 52rem;
+      margin: 2rem auto 0;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--rule-strong);
+      background: var(--page);
+    }
+
+    .hero-install .copy-command {
+      justify-content: space-between;
+      width: 100%;
+    }
+
     .hero .session {
       max-width: 52rem;
-      margin: 2.5rem auto 0;
+      margin: 1rem auto 0;
       text-align: left;
       border: 1px solid var(--rule-strong);
       background: var(--page);
@@ -197,7 +243,6 @@
 
     .facts li:last-child { border-right: 0; }
 
-    .action-row,
     .link-row {
       display: flex;
       align-items: center;
@@ -208,7 +253,6 @@
       border-bottom: 1px solid var(--rule);
     }
 
-    .action-row > span,
     .link-row > span {
       flex: 0 0 auto;
       color: var(--ink-2);
@@ -337,19 +381,109 @@
       font-weight: 500;
     }
 
-    .session pre {
-      margin: 0;
+    .session-body {
       padding: clamp(1.15rem, 4vw, 2rem);
       overflow-x: auto;
-      color: var(--ink-2);
+      color: var(--ink);
       font: 0.77rem/1.75 var(--mono);
-      tab-size: 2;
+      text-align: left;
+      scrollbar-width: thin;
     }
 
-    .session .prompt { color: var(--ink); }
-    .session .accent { color: var(--accent-strong); }
-    .session .success { color: var(--ok); }
-    .session .muted { color: var(--ink-3); }
+    .terminal-user {
+      min-width: max-content;
+      margin-bottom: 1.25rem;
+      padding: 0.65rem 1rem;
+      color: var(--ink);
+      background: var(--terminal-quote);
+    }
+
+    .terminal-user strong {
+      display: block;
+      color: var(--terminal-success);
+    }
+
+    .terminal-message + .terminal-message { margin-top: 1.25rem; }
+
+    .terminal-role {
+      color: var(--terminal-purple);
+      font-weight: 700;
+    }
+
+    .terminal-role.tool { color: var(--terminal-blue); }
+    .terminal-meta,
+    .terminal-tool-summary,
+    .terminal-tool-row { color: var(--terminal-muted); }
+    .terminal-tool-row { min-width: max-content; white-space: nowrap; }
+    .terminal-tool-row .status { color: var(--terminal-success); }
+    .terminal-tool-row .tool-name { color: var(--terminal-purple); }
+
+    .terminal-answer-list {
+      margin: 0.35rem 0 1rem;
+      padding: 0;
+      color: var(--ink);
+      list-style: none;
+    }
+
+    .terminal-answer-list li {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0.55rem;
+    }
+
+    .terminal-answer-list .bullet { color: var(--terminal-purple); }
+    .terminal-answer-list strong { color: var(--ink); }
+    .terminal-answer-list code {
+      color: var(--terminal-warning);
+      font: inherit;
+    }
+
+    .hero p.terminal-answer {
+      max-width: none;
+      margin: 0;
+      color: var(--ink);
+      font: inherit;
+      text-wrap: wrap;
+    }
+
+    .terminal-input {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      min-width: max-content;
+      margin-top: 2rem;
+      padding: 0.7rem 0.9rem;
+      border: 1px solid var(--terminal-purple);
+      border-radius: 3px;
+    }
+
+    .terminal-input .chevron { color: var(--terminal-purple); }
+    .terminal-input .cursor {
+      width: 0.55rem;
+      height: 1.15rem;
+      background: var(--ink);
+    }
+    .terminal-input .placeholder { color: #5e626c; }
+
+    .terminal-status {
+      display: flex;
+      justify-content: space-between;
+      gap: 2rem;
+      min-width: max-content;
+      padding-top: 0.65rem;
+      color: #5e626c;
+      line-height: 1.5;
+    }
+
+    .terminal-status-left {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .terminal-model {
+      align-self: flex-start;
+      text-align: right;
+    }
 
     .capability-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -499,14 +633,13 @@
     .footer nav { display: flex; gap: 1rem; }
 
     @media (max-width: 760px) {
-      .shell { padding-top: 3.5rem; }
+      .shell { padding-top: 1.5rem; }
       .brand { align-items: flex-start; }
       .top-links { flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem 1rem; }
-      .hero { padding-block: 3.5rem; }
+      .hero { padding-block: 2.5rem; }
       .facts { grid-template-columns: repeat(2, 1fr); }
       .facts li:nth-child(2) { border-right: 0; }
       .facts li:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
-      .action-row,
       .link-row { align-items: flex-start; flex-direction: column; gap: 0.8rem; padding: 1.25rem; }
       .copy-command { justify-content: space-between; width: 100%; }
       .link-row a { text-align: left; }
@@ -552,7 +685,7 @@
 
   <main class="shell" id="main">
     <header class="brand">
-      <a class="wordmark" href="index.html" aria-label="haze home">haze<span>.</span></a>
+      <a class="wordmark" href="index.html" aria-label="haze home">haze</a>
       <nav class="top-links" aria-label="Main navigation">
         <a href="quickstart.html">Quickstart</a>
         <a href="commands.html">Commands</a>
@@ -564,41 +697,70 @@
 
     <section class="frame" aria-labelledby="hero-title">
       <div class="hero">
-        <h1 id="hero-title">A terminal coding agent that <strong>finishes the job.</strong></h1>
-        <p>Connect an OpenAI-compatible provider and choose a model. haze edits files, runs commands, and verifies the result.</p>
+        <h1 id="hero-title"><code class="product-name">haze</code> a minimal coding agent for your terminal</h1>
+        <p>Install <code class="product-name">haze</code> and run it in a project.<br>
+        Use <code>/provider</code> for setup, then start chatting.<br>
+        Build workflows with <code>/skills</code>.<br><br>
+        Optimized context for local LLMs.<br>
+        Minimal guard rails, no permission hell.</p>
+
+        <div class="hero-install">
+          <button class="copy-command" type="button" data-copy="npm i -g @denizokcu/haze && haze" aria-label="Copy npm install and run command">
+            <code>npm i -g <strong>@denizokcu/haze</strong> &amp;&amp; haze</code>
+            <span class="copy-label" aria-live="polite">Copy</span>
+          </button>
+        </div>
 
         <div class="session">
           <div class="session-head"><strong>haze</strong><span>~/api-service</span></div>
-          <pre aria-label="Example haze session"><span class="prompt">You asked</span>
-find the session leak, fix it, and add a regression test
+          <div class="session-body" aria-label="Example haze session">
+            <div class="terminal-user">
+              <strong>You asked</strong>
+              <span>find the session leak, fix it, and add a regression test</span>
+            </div>
 
-<span class="accent">Tool</span>  5 calls  2 changes
-<span class="success">✓</span> grep       sessionStore                       <span class="muted">38 matches</span>
-<span class="success">✓</span> readFile   src/middleware/session.ts          <span class="muted">142 lines</span>
-<span class="success">✓</span> editFile   src/middleware/session.ts          <span class="muted">+6 -2</span>
-<span class="success">✓</span> writeFile  tests/session-eviction.test.ts     <span class="muted">new file</span>
-<span class="success">✓</span> bash       npm test                           <span class="muted">128 passed</span>
+            <div class="terminal-message">
+              <div><span class="terminal-role tool">Tool</span></div>
+              <div class="terminal-tool-summary">5 calls · 2 changes · 0.3s</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">grep</span> sessionStore · 38 matches</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">readFile</span> src/middleware/session.ts · 142 lines</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">editFile</span> src/middleware/session.ts · +6 -2</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">writeFile</span> tests/session-eviction.test.ts · new file</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">bash</span> npm test · 128 passed</div>
+            </div>
 
-<span class="accent">haze</span>
-The store never evicted expired sessions. Added bounded TTL
-cleanup and a regression test. The full suite passes.</pre>
+            <div class="terminal-message">
+              <div><span class="terminal-role">haze</span><span class="terminal-meta"> · ✓ Done in 0.4s · 22 tok/s</span></div>
+              <ul class="terminal-answer-list">
+                <li><span class="bullet">•</span><span><strong>Root cause:</strong> expired sessions remained in <code>sessionStore</code> after their TTL.</span></li>
+                <li><span class="bullet">•</span><span><strong>Fix:</strong> added bounded cleanup in <code>src/middleware/session.ts</code>.</span></li>
+                <li><span class="bullet">•</span><span><strong>Regression test:</strong> verifies expired sessions are evicted.</span></li>
+              </ul>
+              <p class="terminal-answer">The full test suite passes.</p>
+            </div>
+
+            <div class="terminal-input" aria-hidden="true">
+              <span class="chevron">›</span>
+              <span class="cursor"></span>
+              <span class="placeholder">Ask haze to help build your app</span>
+            </div>
+            <div class="terminal-status" aria-hidden="true">
+              <div class="terminal-status-left">
+                <span>~/api-service (main)</span>
+                <span>3 haze messages / 5 tool calls / LLM ↑2.1k ↓180 / 1 skill</span>
+              </div>
+              <span class="terminal-model">ollama:qwen3.6:35b-a3b</span>
+            </div>
+          </div>
         </div>
       </div>
 
       <ul class="facts" aria-label="Product facts">
-        <li>Open source</li>
-        <li>OpenAI-compatible</li>
-        <li>Local tools</li>
-        <li>Node 22+</li>
+        <li>Minimal terminal UI</li>
+        <li>Your choice of model</li>
+        <li>No per-call approvals</li>
+        <li>MIT licensed</li>
       </ul>
-
-      <div class="action-row">
-        <span>Install</span>
-        <button class="copy-command" type="button" data-copy="npm i -g @denizokcu/haze" aria-label="Copy npm install command">
-          <code>npm i -g <strong>@denizokcu/haze</strong></code>
-          <span class="copy-label" aria-live="polite">Copy</span>
-        </button>
-      </div>
 
       <div class="link-row">
         <span>GitHub</span>
@@ -611,65 +773,65 @@ cleanup and a regression test. The full suite passes.</pre>
     </section>
 
     <section class="section" aria-labelledby="workflow-title">
-      <h2 class="section-title" id="workflow-title">How it works</h2>
+      <h2 class="section-title" id="workflow-title">From prompt to verified change</h2>
       <div class="section-box workflow">
         <article>
-          <h3>Ask</h3>
-          <p>Describe the outcome in plain language. Attach a screenshot or mention the files that matter.</p>
+          <h3>Set the target</h3>
+          <p>Describe the result you want. Point to a file, attach a screenshot, or let haze find the relevant code and repository instructions.</p>
         </article>
         <article>
-          <h3>Watch</h3>
-          <p>haze inspects the project, edits files, runs commands, and streams compact tool activity.</p>
+          <h3>Let it work</h3>
+          <p>haze investigates, plans substantial work, edits files, runs commands, and delegates independent tasks. It does not stop at a code suggestion.</p>
         </article>
         <article>
-          <h3>Review</h3>
-          <p>Get a concise summary with changed files, validation commands, and honest failure status.</p>
+          <h3>Check the evidence</h3>
+          <p>Follow compact tool activity, then review the changed files, validation commands, test results, and any unresolved failure.</p>
         </article>
       </div>
     </section>
 
     <section class="section" aria-labelledby="capabilities-title">
-      <h2 class="section-title" id="capabilities-title">What is included</h2>
+      <h2 class="section-title" id="capabilities-title">Built for real repository work</h2>
       <div class="section-box">
         <ul class="capability-grid">
           <li>
-            <h3>File and code tools</h3>
-            <p>Discover, read, search, edit, and write files. Workspace boundaries and ignored files stay explicit.</p>
+            <h3>Repository-native tools</h3>
+            <p>Discover, read, search, edit, and write code with explicit workspace boundaries. Add LSP navigation or MCP tools when the built-ins are not enough.</p>
             <pre class="mini-terminal" aria-label="File tool example"><span class="success">✓</span> grep      createSession  <span class="muted">12 matches</span>
 <span class="success">✓</span> readFile  src/session.ts <span class="muted">184 lines</span>
 <span class="success">✓</span> editFile  src/session.ts <span class="muted">+8 -3</span></pre>
           </li>
           <li>
-            <h3>Commands and dev servers</h3>
-            <p>Run foreground commands or keep up to five managed background processes with bounded logs.</p>
+            <h3>Commands that stay alive</h3>
+            <p>Run tests and builds in the foreground, or keep up to five managed dev servers and watchers alive while the agent works.</p>
             <pre class="mini-terminal" aria-label="Background process example"><span class="success">✓</span> bash     npm run dev
   <span class="prompt">background-1</span> <span class="muted">running on :3000</span>
 <span class="success">✓</span> process  output background-1</pre>
           </li>
           <li>
-            <h3>Durable sessions</h3>
-            <p>Resume a workspace conversation, fork an earlier session, or compact long-running context.</p>
+            <h3>Work you can resume</h3>
+            <p>Resume or fork a workspace session with its goal, touched files, validation evidence, blockers, and next action intact.</p>
             <pre class="mini-terminal" aria-label="Session resume example"><span class="prompt">$</span> haze --continue
 <span class="success">✓</span> resumed  api-service
   <span class="muted">18 messages, context restored</span></pre>
           </li>
           <li>
-            <h3>Reusable skills</h3>
-            <p>Save project or personal workflows as Markdown and invoke them with commands like <code>/code-review</code>.</p>
+            <h3>Skills are plain Markdown</h3>
+            <p>Turn a review, release, or deploy routine into a project or personal skill. Read it, edit it, version it, and invoke it as <code>/code-review</code>.</p>
             <pre class="mini-terminal" aria-label="Skill creation example"><span class="prompt">/skills</span>  add deploy-check
 <span class="success">✓</span> created
   <span class="muted">.haze/skills/deploy-check/SKILL.md</span></pre>
           </li>
           <li>
-            <h3>Parallel workers</h3>
-            <p>Delegate independent work to isolated subagents with bounded concurrency and serialized writes.</p>
+            <h3>Parallel, isolated workers</h3>
+            <p>Split independent work across fresh subagent contexts. Concurrency is bounded, file writes are serialized, and the main conversation stays focused.</p>
             <pre class="mini-terminal" aria-label="Parallel worker example"><span class="prompt">/fleet</span> migrate four packages
 <span class="success">✓</span> web     <span class="success">✓</span> admin
 <span class="success">✓</span> mobile  <span class="success">✓</span> cli</pre>
           </li>
           <li>
-            <h3>Headless operation</h3>
-            <p>Use <code>haze -p</code> in scripts with text, JSON, or streaming JSON output and reliable exit status.</p>
+            <h3>Automation without the TUI</h3>
+            <p>Run <code>haze -p</code> from scripts and CI with text, JSON, or streaming JSON output plus a reliable process exit status.</p>
             <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" --output json
 { "status": <span class="success">"complete"</span>, "findings": 2 }</pre>
           </li>
@@ -678,7 +840,7 @@ cleanup and a regression test. The full suite passes.</pre>
     </section>
 
     <section class="section" aria-labelledby="providers-title">
-      <h2 class="section-title" id="providers-title">OpenAI-compatible providers</h2>
+      <h2 class="section-title" id="providers-title">Bring the model you trust</h2>
       <div class="section-box">
         <ul class="provider-grid">
           <li>OpenAI</li>
@@ -690,7 +852,7 @@ cleanup and a regression test. The full suite passes.</pre>
           <li>Custom endpoints</li>
           <li>Compatible APIs</li>
         </ul>
-        <p class="provider-note">haze never silently picks a provider or model. Configure one with <code>/provider</code>, then choose with <code>/model</code>.</p>
+        <p class="provider-note">You choose where inference runs and which model sees your code. haze has no default provider and never swaps or selects a model behind your back. Configure one with <code>/provider</code>, then choose it with <code>/model</code>.</p>
       </div>
     </section>
 
@@ -698,30 +860,30 @@ cleanup and a regression test. The full suite passes.</pre>
       <h2 class="section-title" id="faq-title">Common questions</h2>
       <div class="section-box faq">
         <details>
-          <summary>Does haze require a hosted account?</summary>
-          <p>No. Install the CLI, add an OpenAI-compatible endpoint, and choose a model. Local endpoints can run without an API key.</p>
+          <summary>Do I need a haze account or subscription?</summary>
+          <p>No. Install the CLI and connect an OpenAI-compatible endpoint. Use a hosted API with your own key or a local endpoint without one.</p>
         </details>
         <details>
-          <summary>Can it work on an existing project?</summary>
-          <p>Yes. haze reads your repository instructions, respects nested context files, and uses the current workspace as its mutation boundary.</p>
+          <summary>Will it follow an existing repository's conventions?</summary>
+          <p>Yes. haze reads ancestor and nested <code>AGENTS.md</code> or <code>CLAUDE.md</code> instructions as it enters each subtree. The current workspace remains the mutation boundary.</p>
         </details>
         <details>
-          <summary>Does it ask before every tool call?</summary>
-          <p>No. haze keeps guardrails light and lets the model work through a task without repeated permission dialogs. You should still supervise consequential changes.</p>
+          <summary>Will I spend the session approving tool calls?</summary>
+          <p>No. haze does not pause before every file read, edit, or shell command. It keeps mutations inside the current workspace and lets the agent finish its tool loop. Watch the transcript and supervise consequential work as you would any shell session.</p>
         </details>
         <details>
-          <summary>Where are sessions and settings stored?</summary>
-          <p>Settings live in <code>~/.haze/settings.json</code>. Durable sessions live under <code>~/.haze/sessions</code>, with private file permissions.</p>
+          <summary>Is the useful part actually open source?</summary>
+          <p>Yes. The CLI is MIT licensed, with its agent loop, local tools, sessions, skills, subagents, LSP, MCP, and headless mode in the public repository.</p>
         </details>
       </div>
     </section>
 
     <section class="final-action" aria-labelledby="start-title">
       <div>
-        <h2 id="start-title">Run haze in your project.</h2>
-        <p>Install the CLI, open a project directory, and type <code>haze</code>.</p>
+        <h2 id="start-title">Give haze a real task.</h2>
+        <p>Install once, open any project directory, run <code>haze</code>, and choose your provider and model.</p>
       </div>
-      <a class="button" href="quickstart.html">Read quickstart</a>
+      <a class="button" href="quickstart.html">Start in under five minutes</a>
     </section>
 
     <footer class="footer">
