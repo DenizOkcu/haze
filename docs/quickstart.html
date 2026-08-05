@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quickstart — haze docs</title>
+  <meta name="description" content="Install haze, configure an OpenAI-compatible provider, choose a model, and run your first coding task from the terminal.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site-2.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link active">Quickstart</a>
+        <a href="commands.html" class="head-link">Commands</a>
+        <a href="tools.html" class="head-link">Tools</a>
+        <a href="skills.html" class="head-link">Skills</a>
+        <a href="workflows.html" class="head-link">Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Getting started</div>
+        <h1 class="doc-h1">Quick<span class="em">start.</span></h1>
+        <p class="doc-lede">Install haze, connect an OpenAI-compatible provider, choose a model, and give it real work in under five minutes.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#requirements">Requirements</a>
+              <a href="#install">Install</a>
+              <a href="#providers">Configure a provider</a>
+              <a href="#model">Pick a model</a>
+              <a href="#first-task">Your first task</a>
+              <a href="#next-steps">Next steps</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="commands.html">Command reference</a>
+            <a href="tools.html">Tool reference</a>
+            <a href="skills.html">Skills guide</a>
+            <a href="workflows.html">Workflows</a>
+          </div>
+        </aside>
+
+        <div class="doc-main">
+          <section id="requirements">
+            <h2>Requi<span class="em">rements</span></h2>
+            <ul>
+              <li><strong>Node 22 or newer.</strong> Check with <code>node -v</code>. haze is an ESM TypeScript CLI and does not ship prebuilt binaries.</li>
+              <li><strong>An OpenAI-compatible provider.</strong> Use a hosted provider, a local server, or your own proxy. You bring the API key; haze has no default model and never picks one silently.</li>
+              <li><strong>macOS or Linux</strong> are the primary targets; Windows works through WSL.</li>
+            </ul>
+          </section>
+
+          <section id="install">
+            <h2>In<span class="em">stall</span></h2>
+            <div class="codeblock">
+              <div class="codeblock-head">
+                <span class="cb-left"><span class="dot-accent"></span>terminal</span>
+                <button class="codeblock-copy" type="button">Copy</button>
+              </div>
+              <pre>npm i -g @denizokcu/haze
+haze --version   <span class="c"># 0.10.0</span></pre>
+            </div>
+            <p>The global install gives you one binary: <code>haze</code>. Run it from any project directory — sessions, skills, and instructions are stored per workspace, with shared state under <code>~/.haze/</code>.</p>
+          </section>
+
+          <section id="providers">
+            <h2>Configure a <span class="em">provider</span></h2>
+            <p>On first run, haze opens the provider picker. You can also run <code class="cmd">/provider</code> any time to add, edit, or remove providers.</p>
+
+            <h3>Hosted, via OpenRouter (recommended to start)</h3>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/provider</span>
+<span class="c"># add provider → openrouter (preset)</span>
+<span class="c"># paste your API key from openrouter.ai/keys</span></pre>
+            </div>
+            <p>OpenRouter fronts Anthropic, Google, Meta, DeepSeek, and hundreds more behind one key. Provider presets also exist for OpenAI, Mistral, Groq, DeepSeek, xAI, Cerebras, Together, Fireworks, Hugging Face, Moonshot, NVIDIA, and Qwen.</p>
+
+            <h3>Fully local, via Ollama</h3>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/provider</span>
+<span class="c"># add provider → ollama (preset) — base URL http://localhost:11434/v1, no key needed</span>
+<span class="k">/model</span> local:qwen2.5-coder:32b</pre>
+            </div>
+            <p>LM Studio works the same way (<code>http://localhost:1234/v1</code>). Loopback HTTP is allowed without TLS; any remote endpoint must use HTTPS when you send credentials.</p>
+
+            <h3>Any OpenAI-compatible proxy</h3>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/provider</span>
+<span class="c"># add provider → custom → name: gateway</span>
+<span class="c"># base URL: https://llm.internal.example.com/v1</span>
+<span class="c"># API key: (optional)</span></pre>
+            </div>
+
+            <div class="callout"><strong>No environment variables.</strong> Provider settings and keys live in <code>~/.haze/settings.json</code> with private POSIX permissions (0600). Malformed settings fail loudly at startup instead of being treated as empty.</div>
+          </section>
+
+          <section id="model">
+            <h2>Pick a <span class="em">model</span></h2>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/model</span>
+<span class="c"># picker → add models: fetches the provider's OpenAI-compatible /models list</span>
+
+<span class="c"># or set one directly — also switches the provider:</span>
+<span class="k">/model</span> openrouter:anthropic/claude-sonnet-4.6
+<span class="k">/model</span> local:llama3.1
+<span class="k">/model list</span>   <span class="c"># show all configured models</span></pre>
+            </div>
+            <p>If model discovery fails, type names manually. Per-run overrides exist for scripts: <code>haze -m provider:model</code> never touches your saved settings.</p>
+          </section>
+
+          <section id="first-task">
+            <h2>Your first <span class="em">task</span></h2>
+            <p>Ask for work the way you would describe it to a teammate. haze explores first, edits precisely, and validates before reporting.</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>prompts that work well</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre>fix the failing test in tests/parser and explain the root cause
+add rate limiting to the /auth endpoints, with tests
+@src/legacy/date.ts rewrite this module to use the Intl API, keep the public API
+@design/empty-state.png implement this empty state in the orders view</pre>
+            </div>
+            <p>While it works you see compact tool blocks — files read, edits applied, commands run with exit codes and validation summaries. <strong>Esc</strong> aborts the current turn; sessions survive restarts via <code>/resume</code> or <code>haze --continue</code>.</p>
+            <div class="callout"><strong>Generate project instructions.</strong> Run <code>/init</code> once and haze writes a compact <code>AGENTS.md</code> describing your repo — commands, conventions, and layout — so every future session starts informed.</div>
+          </section>
+
+          <section id="next-steps">
+            <h2>Next <span class="em">steps</span></h2>
+            <ul>
+              <li><a href="commands.html">Command reference</a> — every slash command and CLI flag, including headless CI mode.</li>
+              <li><a href="skills.html">Skills</a> — turn your repeated workflows into slash commands with <code>/skills</code>.</li>
+              <li><a href="tools.html">Tools</a> — what the model can call, including LSP and MCP integration.</li>
+              <li><a href="workflows.html">Workflows</a> — sessions, fleet, images, and context files in practice.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

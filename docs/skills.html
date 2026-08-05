@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skills guide — haze docs</title>
+  <meta name="description" content="Create Markdown skills inside haze with /skills: turn repeated workflows like code review, release prep, and deploy checks into slash commands.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site-2.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link">Quickstart</a>
+        <a href="commands.html" class="head-link">Commands</a>
+        <a href="tools.html" class="head-link">Tools</a>
+        <a href="skills.html" class="head-link active">Skills</a>
+        <a href="workflows.html" class="head-link">Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Guide</div>
+        <h1 class="doc-h1">Skills <span class="em">guide.</span></h1>
+        <p class="doc-lede">If you do something for the second time, make it a skill. Skills are Markdown workflows that become slash commands — created inside haze, stored as plain files, versioned with your repo.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#create">Create a skill</a>
+              <a href="#anatomy">Anatomy of a skill</a>
+              <a href="#scope">Scope &amp; precedence</a>
+              <a href="#invoke">Invoking skills</a>
+              <a href="#recipes">Starter recipes</a>
+              <a href="#manage">Manage skills</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="quickstart.html">Quickstart</a>
+            <a href="commands.html">Command reference</a>
+            <a href="tools.html">Tool reference</a>
+            <a href="workflows.html">Workflows</a>
+          </div>
+        </aside>
+
+        <div class="doc-main">
+          <section id="create">
+            <h2>Create a <span class="em">skill</span></h2>
+            <p>Run <code class="cmd">/skills</code>, choose <strong>add skill</strong>, and answer three prompts. haze uses the model to draft the SKILL.md for you.</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze · the wizard</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/skills</span>
+<span class="c"># picker → add skill</span>
+
+step 1/3 · name      <span class="c">›</span> deploy-check
+step 2/3 · scope     <span class="c">›</span> this project
+step 3/3 · description <span class="c">›</span> Run lint, typecheck, tests, and build in one call.
+                        Report each step pass/fail with the exact failing
+                        output; do not stop at the first failure.
+
+<span class="ok">✓ created .haze/skills/deploy-check/SKILL.md — invoke with /deploy-check</span></pre>
+            </div>
+            <p>Edit the generated Markdown freely afterwards — it is the source of truth, and haze rereads it whenever its content changes.</p>
+          </section>
+
+          <section id="anatomy">
+            <h2>Anatomy of a <span class="em">skill</span></h2>
+            <p>A skill is Markdown with YAML frontmatter: a name, a description that doubles as the match condition, and the instructions the model follows.</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>.haze/skills/code-review/SKILL.md</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre>---
+name: code-review
+description: Use when the user asks for a review of their branch or diff.
+---
+
+You are a focused senior code reviewer.
+
+Workflow:
+1. Diff the current branch against main.
+2. Review for bugs, missing tests, and unclear naming.
+3. Prefer DRY and KISS; flag duplication worth extracting.
+4. Cite every finding as file:line with a severity.
+5. End with a three-bullet summary: risks, test gaps, suggested next step.</pre>
+            </div>
+            <p>Skills never execute code themselves — they are instructions that shape what the agent does with its normal tools. They can also list reference files the model reads on demand.</p>
+          </section>
+
+          <section id="scope">
+            <h2>Scope &amp; <span class="em">precedence</span></h2>
+            <ul>
+              <li><strong>Project skills</strong> live in <code>.haze/skills/&lt;name&gt;/SKILL.md</code> — commit them and share the team's workflows with the repo.</li>
+              <li><strong>Global skills</strong> live in <code>~/.haze/skills/&lt;name&gt;/SKILL.md</code> — personal workflows that follow you across projects.</li>
+              <li>A project skill <strong>overrides</strong> a same-named global skill in that workspace unless you disable the project scope.</li>
+              <li>Project skills are repository content: haze labels their provenance visibly and treats them as untrusted input.</li>
+            </ul>
+          </section>
+
+          <section id="invoke">
+            <h2>Invoking <span class="em">skills</span></h2>
+            <ul>
+              <li><strong>Directly:</strong> type the skill name as a slash command — <code>/code-review</code>, <code>/deploy-check</code>. Tab completion works.</li>
+              <li><strong>Automatically:</strong> the model can load a matching skill on its own when your request matches its description.</li>
+              <li><strong>From the picker:</strong> <code>/skills</code> lists every skill with its source (project/global) and state.</li>
+            </ul>
+          </section>
+
+          <section id="recipes">
+            <h2>Starter <span class="em">recipes</span></h2>
+            <p>Run <code class="cmd">/skills</code> → add skill, and paste these descriptions:</p>
+            <div class="recipe-grid">
+              <article class="recipe-card">
+                <div class="recipe-name">/code-review</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are a focused code reviewer.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS. Cite file:line for every finding.</span></div>
+              </article>
+              <article class="recipe-card">
+                <div class="recipe-name">/deploy-check</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are a release-readiness verifier.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Run lint, typecheck, tests, and build in one call. Report each step pass/fail with the exact failing output; do not stop at the first failure.</span></div>
+              </article>
+              <article class="recipe-card">
+                <div class="recipe-name">/release-prep</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are a commit-crafting assistant.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Inspect uncommitted changes, group them into clean conventional commits, and write the commit messages. Do not commit; show me the proposed commands.</span></div>
+              </article>
+              <article class="recipe-card">
+                <div class="recipe-name">/security-review</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are an application security auditor.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Audit auth flows, secret handling, and injection surface (SQL, command, XSS, SSRF) in the current branch diff. Cite file:line for every finding with severity.</span></div>
+              </article>
+              <article class="recipe-card">
+                <div class="recipe-name">/bugfix</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are a methodical debugger.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Reproduce the reported bug with a failing test first, then fix the root cause, and rerun the affected suites. Summarize the root cause in one paragraph.</span></div>
+              </article>
+              <article class="recipe-card">
+                <div class="recipe-name">/ship-feature</div>
+                <div class="recipe-row"><span class="k">role</span><span class="v">You are a pragmatic feature engineer.</span></div>
+                <div class="recipe-row"><span class="k">description</span><span class="v">Implement the requested feature with tests and no speculative abstraction. Run typecheck, tests, and lint; end with a concise summary of changed files.</span></div>
+              </article>
+            </div>
+          </section>
+
+          <section id="manage">
+            <h2>Manage <span class="em">skills</span></h2>
+            <p>The <code class="cmd">/skills</code> picker shows each skill's scope and lets you enable, disable, validate, or remove it. Disabled skills disappear from slash completion and model loading, without deleting the file.</p>
+            <div class="callout"><strong>Tip.</strong> Keep skills small and single-purpose — compose larger routines by calling several skills or by giving one skill a clear step list. Packaged examples live under <code>examples/skills/</code> in the repository.</div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

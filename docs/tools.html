@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tool reference — haze docs</title>
+  <meta name="description" content="Every tool the haze model can call: file discovery, editing, shell, background processes, fetch, tasks, skills, subagents, plus LSP and MCP integration.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site-2.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link">Quickstart</a>
+        <a href="commands.html" class="head-link">Commands</a>
+        <a href="tools.html" class="head-link active">Tools</a>
+        <a href="skills.html" class="head-link">Skills</a>
+        <a href="workflows.html" class="head-link">Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Reference</div>
+        <h1 class="doc-h1">Tool <span class="em">reference.</span></h1>
+        <p class="doc-lede">Fourteen built-in tools across five groups, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#read">Read</a>
+              <a href="#write">Write</a>
+              <a href="#shell">Shell</a>
+              <a href="#network">Network</a>
+              <a href="#agent">Agent state</a>
+              <a href="#lsp">LSP &amp; MCP</a>
+              <a href="#boundaries">Safety boundaries</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="quickstart.html">Quickstart</a>
+            <a href="commands.html">Command reference</a>
+            <a href="skills.html">Skills guide</a>
+            <a href="workflows.html">Workflows</a>
+          </div>
+        </aside>
+
+        <div class="doc-main">
+          <section id="read">
+            <h2><span class="em">Read</span> · 5 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>listFiles</td><td>Browse project files with cursor pagination. Skips <code>.git</code> and <code>node_modules</code>; respects <code>.gitignore</code> by default. A directory path typed by the user can also be listed for that turn.</td></tr>
+                <tr><td>readFile</td><td>Read numbered UTF-8 lines in bounded pages (exact or outline mode). A small signature-checked sparse index makes later pages cheap. User-typed paths may open files outside the workspace, read-only, for that turn.</td></tr>
+                <tr><td>grep</td><td>Regex search over the workspace using a bundled ripgrep binary. Results carry a global cap; ignored paths require an explicit override.</td></tr>
+                <tr><td>readToolOutput</td><td>Re-page raw output that was too large for the original tool result, by offset or substring query. Retained data has fixed per-entry and total memory limits.</td></tr>
+                <tr><td>lsp*</td><td>Optional symbol, definition, and reference lookup through a language server you configure with <code>/lsp</code>. Read-only; see below.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="write">
+            <h2><span class="em">Write</span> · 3 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>editFile</td><td>Batched unique text replacements with line-prefix tolerance and recovery hints on failure. Small edits render as inline diffs; large ones as summaries.</td></tr>
+                <tr><td>replaceLines</td><td>1-based inclusive line-range replacement with EOF clamping for slightly-oversized ranges. The fallback when exact text matching is ambiguous.</td></tr>
+                <tr><td>writeFile</td><td>Create files and parent directories. Overwriting an existing file requires an explicit flag.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="shell">
+            <h2><span class="em">Shell</span> · 2 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>bash</td><td>Run commands with capped, classification-aware output. Each result reports cwd, duration, and exit status; validation output (tests, typecheck, lint) is parsed into pass/fail summaries. Set <code>background=true</code> to register a dev server or watcher. On timeout or abort, haze kills the full process tree and never waits on orphaned pipes.</td></tr>
+                <tr><td>process</td><td>List registered background processes, read their rolling output (256 KB each, up to five processes), or kill them. A session reset or haze exit stops every registered process tree. Background processes are unavailable inside fleet workers.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="network">
+            <h2><span class="em">Network</span> · 1 tool</h2>
+            <table>
+              <tbody>
+                <tr><td>fetch</td><td>Read public http(s) URLs as Markdown, pretty JSON, or raw text — for current docs, API references, and error lookups. haze rejects private/loopback/metadata hosts and unsafe schemes, checks redirects, and pins each connection to the public IP it validated. Oversize responses are retrievable by handle.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="agent">
+            <h2>Agent <span class="em">state</span> · 3 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>writeTasks</td><td>Maintain a visible task list for substantial work; haze clears completed lists automatically. There is deliberately no user-facing task command — the model owns this.</td></tr>
+                <tr><td>skill</td><td>Load one global or project Markdown skill by name, then read its references as needed. Results show the skill's provenance; project skills are labeled as untrusted repository content.</td></tr>
+                <tr><td>subagent</td><td>Send self-contained work to disposable, context-isolated workers with a fixed mode (inspect / research / implement / validate) and tool budget. Workers start from project instructions; the parent conversation receives only the compact deliverable. <code>/fleet</code> orchestrates several at once.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="lsp">
+            <h2>LSP &amp; <span class="em">MCP</span></h2>
+            <h3>Language servers — <code class="cmd">/lsp</code></h3>
+            <p>Configure read-only language-server navigation interactively. Presets exist for <strong>TypeScript</strong>, <strong>Rust</strong>, <strong>Python</strong>, <strong>Go</strong>, and <strong>PHP</strong>, or add any custom command. haze does not install servers: LSP tools appear only when an enabled server binary is on <code>PATH</code>. Otherwise the model navigates with grep, listFiles, and readFile. On shutdown failure or malformed protocol data, haze terminates the server's process tree.</p>
+            <h3>MCP servers — <code class="cmd">/mcp</code></h3>
+            <p>Connect <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a> servers to extend the toolset: presets (Context7 for live library docs), or custom <code>http</code> / <code>sse</code> / <code>stdio</code> servers. HTTP API keys are entered masked and sent as bearer tokens; discovery has bounded deadlines, failures are isolated, and MCP tools never shadow built-ins. Servers persist in <code>~/.haze/settings.json</code> under <code>mcpServers</code>.</p>
+          </section>
+
+          <section id="boundaries">
+            <h2>Safety <span class="em">boundaries</span></h2>
+            <ul>
+              <li><strong>Workspace confinement.</strong> Mutating tools never leave <code>process.cwd()</code>. User-typed paths can bless host locations for read-only tools for one turn; that never expands write access.</li>
+              <li><strong>Secrets stay local.</strong> API keys live in <code>~/.haze/settings.json</code> (0600), not in environment variables. Remote endpoints require HTTPS when credentials are sent.</li>
+              <li><strong>Bounded output.</strong> Command and tool output is capped at collection time; oversize raw data stays retrievable by handle with fixed memory limits.</li>
+              <li><strong>No hangs.</strong> Foreground timeouts and aborts kill process trees; subprocess teardown does not wait on escaped descendants holding stdio pipes.</li>
+            </ul>
+            <div class="callout"><strong>Trust model.</strong> haze keeps guardrails light so the agent can genuinely work — it assumes you supervise the transcript, like any shell session. Project skills and repo instruction files are treated as untrusted input and labeled accordingly.</div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

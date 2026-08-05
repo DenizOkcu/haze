@@ -3,1951 +3,751 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>haze: direct access to your AI model</title>
-  <meta name="description" content="A terminal coding agent for your model, with file and image input, managed processes, durable sessions, Markdown skills, and context-isolated subagents.">
-  <meta property="og:title" content="haze">
-  <meta property="og:description" content="Bring your own model to the terminal. haze edits files, runs managed processes, attaches images, resumes sessions, and delegates independent work without a web UI, permission prompts, or telemetry.">
+  <title>haze | terminal coding agent</title>
+  <meta name="description" content="haze is an open-source terminal coding agent for OpenAI-compatible providers. It edits files, runs commands, verifies work, and keeps durable sessions.">
+  <meta property="og:title" content="haze | terminal coding agent">
+  <meta property="og:description" content="Connect an OpenAI-compatible provider. Give haze a task. Review the result and its evidence.">
   <meta property="og:type" content="website">
-  <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#181823">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.84em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23b39afa'>h</text></svg>">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Big+Shoulders+Display:wght@500;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap');
-
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
     :root {
-      /* haze CLI palette: purple-tinted dark */
-      --bg: oklch(0.165 0.010 295);
-      --bg-ruled: oklch(0.135 0.012 295);
-      --bg-surface: oklch(0.205 0.015 295);
-      --bg-elevated: oklch(0.240 0.018 295);
-      --bg-quote: oklch(0.17 0.038 295);
-
-      /* Ink + neutrals on dark (slight purple tint) */
-      --ink: oklch(0.945 0.005 295);
-      --ink-2: oklch(0.780 0.008 295);
-      --ink-3: oklch(0.665 0.012 295);
-      --ink-on-invert: oklch(0.165 0.010 295);
-
-      /* haze purple accent: #a78bfa translated to OKLCH */
-      --accent: oklch(0.70 0.140 295);          /* decoration: corners, glows */
-      --accent-ink: oklch(0.735 0.135 295);     /* text on dark bg */
-      --accent-ink-deep: oklch(0.82 0.105 295); /* hover state (brighter) */
-      --accent-tint: oklch(0.275 0.060 295);
-
-      /* Validation: haze neon (#39ff14 / #fb7185) */
-      --ok: oklch(0.83 0.220 145);
-      --bad: oklch(0.74 0.170 15);
-      --tool: oklch(0.70 0.150 250);        /* tool role label (#60a5fa) */
-
-      /* Lines on dark (purple-tinted) */
-      --rule: oklch(0.320 0.018 295);
-      --rule-strong: oklch(0.420 0.024 295);
-      --rule-ink: oklch(0.510 0.028 295);
-
-      /* Soft glow material for accent emphasis */
-      --glow-accent: 0 0 0 1px oklch(0.70 0.140 295 / 0.30), 0 0 32px oklch(0.70 0.140 295 / 0.20);
-      --glow-soft: 0 1px 0 0 oklch(1 0 0 / 0.04), 0 8px 24px oklch(0 0 0 / 0.35);
-
-      /* Type */
-      --font-display: 'Big Shoulders Display', 'Archivo Narrow', 'Impact', sans-serif;
-      --font-sans: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
-      --font-courier: 'Courier Prime', 'Courier New', 'Courier', monospace;
-
-      /* Softer radii for the terminal-app register */
-      --radius-sm: 5px;
-      --radius-md: 9px;
-      --radius-lg: 13px;
-      --radius-pill: 999px;
-
-      /* Modular scale ~1.25 */
-      --t-hero: clamp(3rem, 7vw, 5.5rem);
-      --t-section: clamp(2.25rem, 4.4vw, 3.5rem);
-      --t-prose-head: clamp(1.6rem, 2.2vw, 2rem);
-      --t-lead: clamp(1.05rem, 1.15vw, 1.18rem);
-      --t-body: 1rem;
-      --t-small: 0.875rem;
-      --t-tiny: 0.75rem;
+      --page: oklch(0.165 0.010 295);
+      --panel: #181823;
+      --panel-raised: #1e1e2b;
+      --panel-soft: #201c31;
+      --ink: #f0eef6;
+      --ink-2: #bbb7c7;
+      --ink-3: #817c8d;
+      --accent: #b39afa;
+      --accent-strong: #c4b2ff;
+      --accent-soft: #2b2343;
+      --rule: #353244;
+      --rule-strong: #4a455d;
+      --ok: #91e69b;
+      --bad: #ff9d9d;
+      --max: 1080px;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
 
-    html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+    * { box-sizing: border-box; }
 
-    section[id], main[id] { scroll-margin-top: 80px; }
+    html {
+      scroll-behavior: smooth;
+      background: var(--page);
+    }
 
     body {
-      background: var(--bg);
+      margin: 0;
+      min-width: 320px;
+      background: var(--page);
       color: var(--ink);
-      font-family: var(--font-sans);
-      font-weight: 450;
+      font-family: var(--mono);
       font-size: 16px;
-      line-height: 1.6;
-      letter-spacing: 0.005em;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-      overflow-x: hidden;
-      font-feature-settings: 'kern' 1, 'liga' 1, 'ss01' 1;
+      line-height: 1.55;
     }
 
-    ::selection { background: var(--accent); color: var(--bg); }
-
-    :focus-visible {
-      outline: 2px solid var(--accent-ink);
-      outline-offset: 3px;
-      border-radius: 2px;
-    }
-
-    a { color: inherit; }
-
-    /* ===== Layout primitives ===== */
-    .container {
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 0 32px;
-      position: relative;
-    }
-    .container-prose {
-      max-width: 760px;
-      margin: 0 auto;
-      padding: 0 32px;
-      position: relative;
-    }
-
-    section { padding: clamp(72px, 9vw, 120px) 0; position: relative; }
-
-    /* Graph paper grid overlay (subtle purple-tinted grid on dark) */
     body::before {
-      content: '';
+      content: "";
       position: fixed;
       inset: 0;
-      pointer-events: none;
       z-index: 0;
+      pointer-events: none;
       background-image:
         linear-gradient(to right, oklch(0.62 0.020 295 / 0.06) 1px, transparent 1px),
         linear-gradient(to bottom, oklch(0.62 0.020 295 / 0.06) 1px, transparent 1px);
       background-size: 32px 32px;
     }
-    body > * { position: relative; z-index: 1; }
 
-    /* ===== Skip link ===== */
+    body > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    button, a { font: inherit; }
+    a { color: inherit; }
+
     .skip-link {
-      position: absolute;
-      top: -100px;
-      left: 16px;
-      background: var(--accent-ink);
-      color: var(--bg-surface);
-      padding: 10px 16px;
-      font-family: var(--font-mono);
-      font-weight: 600;
-      font-size: 13px;
-      text-decoration: none;
-      z-index: 1000;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-    .skip-link:focus { top: 16px; }
-
-    /* ===== Header ===== */
-    .head {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: var(--bg);
-      border-bottom: 2px solid var(--rule-ink);
-    }
-    .head::after {
-      content: '';
-      position: absolute;
-      left: 0; right: 0; bottom: -7px;
-      height: 1px;
-      background: var(--rule-ink);
-    }
-    .head-inner {
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      align-items: center;
-      gap: 32px;
-      height: 64px;
-    }
-    .head-brand {
-      font-family: var(--font-courier);
-      font-weight: 700;
-      font-size: 26px;
-      letter-spacing: 0.04em;
-      color: var(--ink);
-      text-decoration: none;
-      line-height: 1;
-      display: inline-flex;
-      align-items: baseline;
-      gap: 4px;
-    }
-    .head-brand .dot { color: var(--accent-ink); font-size: 1.1em; line-height: 1; transform: translateY(1px); }
-    .head-meta {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--ink-3);
-      text-transform: uppercase;
-      letter-spacing: 0.10em;
-      display: flex;
-      gap: 18px;
-      flex-wrap: wrap;
-    }
-    .head-meta span { display: inline-flex; align-items: baseline; gap: 6px; }
-    .head-meta span::before {
-      content: '';
-      width: 4px; height: 4px;
+      position: fixed;
+      left: 1rem;
+      top: 1rem;
+      z-index: 2;
+      padding: 0.65rem 0.85rem;
       background: var(--accent);
-      display: inline-block;
-      transform: translateY(-1px);
+      color: var(--page);
+      transform: translateY(-180%);
     }
-    .head-nav {
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .shell {
+      width: min(var(--max), calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 7rem 0 2rem;
+    }
+
+    .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
     }
-    .head-stamp {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      padding: 7px 13px;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-sm);
+
+    .wordmark {
       color: var(--ink);
+      font-size: 1.55rem;
+      font-weight: 700;
+      letter-spacing: -0.08em;
       text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     }
-    .head-stamp:hover {
-      background: var(--bg-elevated);
-      color: var(--ink);
-      border-color: var(--ink-3);
-    }
-    .head-stamp.accent { border-color: var(--accent-ink); color: var(--accent-ink); }
-    .head-stamp.accent:hover { background: var(--accent-ink); color: var(--bg); border-color: var(--accent-ink); }
 
-    /* ===== Section primitives ===== */
-    .sec-marker {
+    .wordmark span { color: var(--accent); }
+
+    .top-links {
       display: flex;
-      align-items: baseline;
-      gap: 16px;
-      margin-bottom: 28px;
-      padding-top: 16px;
-      border-top: 2px solid var(--rule-ink);
-    }
-    .sec-marker .code {
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: 1.1rem;
-      letter-spacing: 0.04em;
-      color: var(--accent-ink);
-      text-transform: uppercase;
-      line-height: 1;
-    }
-    .sec-marker .label {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--ink-3);
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-    }
-    .sec-marker .spacer {
-      flex: 1;
-      height: 1px;
-      background: var(--rule);
-      transform: translateY(-3px);
-    }
-
-    .sec-headline {
-      font-family: var(--font-display);
-      font-weight: 800;
-      font-size: var(--t-section);
-      line-height: 0.95;
-      letter-spacing: 0.005em;
-      text-transform: uppercase;
-      color: var(--ink);
-      margin-bottom: 20px;
-      max-width: 18ch;
-      text-wrap: balance;
-    }
-    .sec-headline .em { color: var(--accent-ink); }
-    .sec-headline .soft { color: var(--ink-3); font-weight: 700; }
-
-    .sec-sub {
-      font-size: var(--t-lead);
-      line-height: 1.5;
+      gap: 1.25rem;
       color: var(--ink-2);
-      max-width: 56ch;
-      margin-bottom: 56px;
-      font-weight: 500;
-    }
-    .sec-sub code, p code {
-      font-family: var(--font-mono);
-      font-size: 0.92em;
-      color: var(--ink);
-      font-weight: 500;
-      background: var(--bg-elevated);
-      padding: 2px 7px;
-      border: 1px solid var(--rule);
-      border-radius: var(--radius-sm);
-      letter-spacing: -0.005em;
-      white-space: nowrap;
-    }
-    .sec-sub code.cmd {
-      color: var(--accent-ink);
-      font-weight: 700;
-      background: var(--accent-tint);
-      border-color: oklch(0.38 0.060 295);
-    }
-    .install .eyebrow-stamp { justify-content: center; }
-
-    .eyebrow-stamp {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--accent-ink);
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .eyebrow-stamp::before {
-      content: '';
-      width: 24px;
-      height: 2px;
-      background: var(--accent);
-      display: inline-block;
+      font-size: 0.78rem;
     }
 
-    /* ===== Hero / Title block ===== */
+    .top-links a,
+    .text-link,
+    .footer a {
+      text-underline-offset: 0.28rem;
+      text-decoration-color: var(--rule-strong);
+      transition: color 160ms ease, text-decoration-color 160ms ease;
+    }
+
+    .top-links a:hover,
+    .text-link:hover,
+    .footer a:hover {
+      color: var(--accent-strong);
+      text-decoration-color: var(--accent);
+    }
+
+    .frame {
+      border: 1px solid var(--rule-strong);
+      background: var(--panel);
+      box-shadow: 0 18px 60px rgba(10, 8, 18, 0.28);
+    }
+
     .hero {
-      padding-top: clamp(56px, 7vw, 96px);
-      padding-bottom: clamp(72px, 9vw, 120px);
-      border-bottom: 2px solid var(--rule-ink);
+      padding: clamp(3.5rem, 9vw, 6.5rem) clamp(1.25rem, 5vw, 4rem);
+      text-align: center;
+      border-bottom: 1px solid var(--rule);
     }
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-      gap: 56px;
-      align-items: start;
-    }
-    .hero-eyebrow {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: var(--accent-ink);
-      margin-bottom: 28px;
-      display: inline-flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .hero-eyebrow::before,
-    .hero-eyebrow::after {
-      content: '';
-      height: 2px;
-      background: var(--accent);
-      width: 40px;
-      display: inline-block;
-    }
-    .hero-eyebrow::after { flex: 1; max-width: 200px; }
 
-    .hero-h1 {
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: clamp(2.75rem, 6vw, 4.75rem);
-      line-height: 0.88;
-      letter-spacing: 0.005em;
-      text-transform: uppercase;
+    .hero h1 {
+      max-width: 17ch;
+      margin: 0 auto;
       color: var(--ink);
-      margin-bottom: 28px;
+      font-size: clamp(1.45rem, 3.2vw, 2.45rem);
+      font-weight: 500;
+      letter-spacing: -0.055em;
+      line-height: 1.22;
       text-wrap: balance;
     }
-    .hero-h1 .em { color: var(--accent-ink); display: block; }
-    .hero-h1 .em-fill { color: var(--ink-on-invert); background: var(--accent-ink); }
-    .hero-h1 .punct { color: var(--accent-ink); }
 
-    .hero-sub {
-      font-size: var(--t-lead);
-      line-height: 1.55;
+    .hero h1 strong {
+      color: var(--accent-strong);
+      font-weight: 500;
+    }
+
+    .hero p {
+      max-width: 54ch;
+      margin: 1.25rem auto 0;
       color: var(--ink-2);
-      max-width: 44ch;
-      margin-bottom: 36px;
-      font-weight: 500;
+      font-size: 0.9rem;
+      text-wrap: pretty;
     }
 
-    .hero-install {
-      display: flex;
-      align-items: stretch;
-      gap: 0;
-      max-width: 460px;
-      margin-bottom: 32px;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-md);
-      background: var(--bg-surface);
-      box-shadow: var(--glow-soft);
-      overflow: hidden;
-    }
-    .hero-install-code {
-      flex: 1;
-      font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--ink);
-      background: transparent;
-      padding: 14px 18px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      white-space: nowrap;
-      overflow-x: auto;
-      letter-spacing: -0.005em;
-    }
-    .hero-install-code .dollar { color: var(--accent-ink); font-weight: 700; }
-    .hero-copy {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--ink);
-      background: var(--bg-elevated);
-      border: none;
-      border-left: 1px solid var(--rule-ink);
-      padding: 0 18px;
-      cursor: pointer;
-      transition: background 0.15s ease, color 0.15s ease;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    .hero-copy:hover { background: var(--accent-ink); color: var(--bg); }
-    .hero-copy.copied { background: var(--accent-ink); color: var(--bg); }
-
-    .hero-ctas {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      align-items: center;
+    .hero .session {
+      max-width: 52rem;
+      margin: 2.5rem auto 0;
+      text-align: left;
+      border: 1px solid var(--rule-strong);
+      background: var(--page);
     }
 
-    .btn {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      padding: 13px 22px;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-md);
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-    }
-    .btn:active { transform: translateY(1px); }
-    .btn-primary {
-      background: var(--accent-ink);
-      color: var(--bg);
-      border-color: var(--accent-ink);
-    }
-    .btn-primary:hover {
-      background: var(--accent-ink-deep);
-      border-color: var(--accent-ink-deep);
-      color: var(--bg);
-      box-shadow: 0 0 0 1px oklch(0.70 0.140 295 / 0.40), 0 0 28px oklch(0.70 0.140 295 / 0.22);
-    }
-    .btn-ghost {
-      background: transparent;
-      color: var(--ink);
-    }
-    .btn-ghost:hover { background: var(--bg-elevated); color: var(--ink); border-color: var(--ink-3); }
-
-    /* Hero terminal title: wordmark above the terminal */
-    .hero-term-title {
-      font-family: var(--font-courier);
-      font-weight: 700;
-      font-size: var(--t-hero);
-      line-height: 0.88;
-      letter-spacing: 0.005em;
-      color: var(--ink);
-      text-align: right;
-      margin-top: calc(11px * 1.6 + 28px);
-      margin-bottom: 14px;
-    }
-
-    /* Hero terminal with a real haze session preview */
-    .term {
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      box-shadow: var(--glow-soft);
-      font-family: var(--font-courier);
-      overflow: hidden;
-    }
-    .term-head {
-      background: var(--bg-elevated);
-      color: var(--ink-2);
-      padding: 11px 16px;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      border-bottom: 1px solid var(--rule-ink);
-    }
-    .term-dots {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      flex-shrink: 0;
-    }
-    .term-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--ink-3);
-      display: inline-block;
-    }
-    .term-dot.accent { background: var(--accent); }
-    .term-head-title {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-      flex: 1;
-      margin-left: 4px;
-    }
-    .term-head-title .path {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--ink-2);
-    }
-    .term-head-title .path .brand { color: var(--accent-ink); }
-    .term-head-title .path .cwd { color: var(--ink-2); }
-    .term-head-branch {
-      color: var(--accent-ink);
-      flex-shrink: 0;
-      font-weight: 700;
-    }
-    .term-body {
-      padding: 22px 24px 20px;
-      font-size: 12.5px;
-      line-height: 1.7;
-    }
-    .term-label {
-      font-family: var(--font-courier);
-      font-weight: 700;
-      font-size: 0.90rem;
-      color: var(--ink);
-      line-height: 1;
-      margin-top: 14px;
-    }
-    .term-label.haze { color: var(--accent-ink); }
-    .term-label-meta { color: var(--ink-3); font-weight: 500; }
-
-    .term-user {
-      background: var(--bg-quote);
-      padding: 10px 14px 12px;
-      border-radius: var(--radius-sm);
-      margin-top: 14px;
-    }
-    .term > .term-body > .term-user:first-child { margin-top: 0; }
-    .term-user-label {
-      display: block;
-      color: var(--ok);
-      font-weight: 700;
-      font-size: 11.5px;
-    }
-    .term-prompt {
-      color: var(--ink);
-      margin-top: 5px;
-      font-weight: 500;
-      font-size: 13px;
-      line-height: 1.5;
-    }
-    .term-tool-head {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--ink-3);
-      border-bottom: 1px solid var(--rule);
-      padding-bottom: 7px;
-      margin-top: 16px;
-      margin-bottom: 6px;
-    }
-    .term-tool-head .term-tool-label { color: var(--tool); font-weight: 700; font-size: 13px; }
-    .term-tool {
-      display: flex;
-      gap: 10px;
-      align-items: baseline;
-      font-size: 11.5px;
-      padding: 2px 0;
-      flex-wrap: wrap;
-    }
-    .term-tool .check {
-      color: var(--ok);
-      font-weight: 700;
-      width: 12px;
-      flex-shrink: 0;
-    }
-    .term-tool .name { color: var(--accent-ink); font-weight: 600; }
-    .term-tool .args { color: var(--ink-2); }
-    .term-tool .detail {
-      color: var(--ink-3);
-      margin-left: auto;
-      font-size: 11px;
-      font-weight: 500;
-    }
-    .term-validation {
-      color: var(--ok);
-      font-size: 11.5px;
-      font-weight: 500;
-      margin-top: 6px;
-      padding-left: 22px;
-    }
-    .term-response {
-      color: var(--ink);
-      margin-top: 5px;
-      line-height: 1.55;
-      font-size: 12.5px;
-      font-weight: 500;
-    }
-    .term-status {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
-      background: var(--bg-elevated);
-      border-top: 1px solid var(--rule-ink);
-      font-size: 10.5px;
-      color: var(--ink-2);
-      letter-spacing: 0.04em;
-      flex-wrap: wrap;
-    }
-    .term-status .model { color: var(--ink-2); font-weight: 500; }
-    .term-status .stat { color: var(--ink-2); }
-
-    /* ===== §01 Operation (quickstart) ===== */
-    .op-list {
+    .facts,
+    .capability-grid,
+    .provider-grid {
+      display: grid;
+      margin: 0;
+      padding: 0;
       list-style: none;
-      max-width: 760px;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      overflow: hidden;
-      box-shadow: var(--glow-soft);
     }
-    .op-list li {
-      display: grid;
-      grid-template-columns: 72px minmax(220px, 280px) 1fr;
-      gap: 24px;
-      align-items: center;
-      padding: 20px 24px;
-      border-top: 1px solid var(--rule);
-    }
-    .op-list li:first-child { border-top: none; }
-    .op-num {
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: 1.7rem;
-      color: var(--accent-ink);
-      letter-spacing: 0.02em;
-      line-height: 1;
-    }
-    .op-cmd {
-      font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--ink);
-      word-break: break-all;
-    }
-    .op-cmd .dollar { color: var(--accent-ink); margin-right: 6px; }
-    .op-cmd .dim { color: var(--ink-3); }
-    .op-text {
-      color: var(--ink-2);
-      font-size: 15px;
-      font-weight: 500;
-      line-height: 1.45;
-    }
-    .op-note {
-      margin-top: 32px;
-      padding: 18px 22px;
-      background: var(--accent-tint);
-      border: 1px solid oklch(0.38 0.060 295);
-      border-radius: var(--radius-md);
-      font-family: var(--font-mono);
-      font-size: 13px;
-      color: var(--ink);
-      max-width: 760px;
-      line-height: 1.6;
-      font-weight: 500;
-    }
-    .op-note::before {
-      content: 'NOTE / ';
-      color: var(--accent-ink);
-      font-weight: 700;
-      letter-spacing: 0.10em;
-    }
-    .op-note strong { color: var(--accent-ink); font-weight: 700; }
 
-    /* ===== §02 Native skill creation (superpower) ===== */
-    .skill-create {
-      background: var(--bg-ruled);
-      border-top: 2px solid var(--rule-ink);
-      border-bottom: 2px solid var(--rule-ink);
-    }
-    .skill-create .sec-sub code.cmd,
-    .skill-create code.cmd {
-      font-family: var(--font-mono);
-      font-size: 0.94em;
-      color: var(--accent-ink);
-      font-weight: 600;
-    }
-    .skill-create .sec-sub { max-width: 760px; }
-    .skill-create-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-      gap: 0;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      overflow: hidden;
-      box-shadow: var(--glow-soft);
-      margin-bottom: 36px;
-    }
-    .skill-wizard { border-right: 1px solid var(--rule); }
-    .skill-wizard-head {
-      background: var(--bg-elevated);
-      color: var(--ink-2);
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      padding: 11px 18px;
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--rule-ink);
-    }
-    .skill-wizard-head .corner { width: 8px; height: 8px; background: var(--accent); display: inline-block; }
-    .skill-wizard-body { padding: 18px 22px; }
-    .wiz-row {
-      display: grid;
-      grid-template-columns: 170px 1fr;
-      gap: 16px;
-      padding: 10px 0;
-      border-bottom: 1px dashed var(--rule);
-      font-family: var(--font-mono);
-      font-size: 13px;
-      align-items: baseline;
-    }
-    .wiz-row:last-of-type { border-bottom: none; }
-    .wiz-cmd { color: var(--accent-ink); font-weight: 700; }
-    .wiz-note { color: var(--ink-3); font-size: 12px; }
-    .wiz-step {
-      color: var(--ink-3);
-      text-transform: uppercase;
-      letter-spacing: 0.10em;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .wiz-in { color: var(--ink); font-weight: 500; word-break: break-word; }
-    .wiz-in .prompt { color: var(--accent-ink); margin-right: 6px; font-weight: 700; }
-    .wiz-result {
-      margin-top: 14px;
-      padding: 12px 14px;
-      background: var(--accent-tint);
-      border: 1px solid oklch(0.38 0.060 295);
-      border-radius: var(--radius-md);
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink);
-      line-height: 1.55;
-    }
-    .wiz-result .path { color: var(--ink-2); }
-    .wiz-result .cmd { color: var(--accent-ink); font-weight: 700; }
-    .superpower { padding: 28px 28px; }
-    .superpower p {
-      color: var(--ink-2);
-      font-size: var(--t-lead);
-      line-height: 1.55;
-      margin-bottom: 18px;
-      font-weight: 500;
-    }
-    .superpower p:last-child { margin-bottom: 0; }
-    .superpower strong { color: var(--accent-ink); font-weight: 700; }
-    .recipes-head {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-      margin-bottom: 18px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid var(--rule);
-      display: flex;
-      justify-content: space-between;
-    }
-    .recipe-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px;
-    }
-    .recipe-card {
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-md);
-      background: var(--bg-surface);
-      padding: 22px 22px 20px;
-      box-shadow: var(--glow-soft);
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .recipe-name {
-      font-family: var(--font-mono);
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--accent-ink);
-      padding-bottom: 10px;
+    .facts {
+      grid-template-columns: repeat(4, 1fr);
       border-bottom: 1px solid var(--rule);
     }
-    .recipe-row {
-      display: grid;
-      grid-template-columns: 96px 1fr;
-      gap: 14px;
-      font-size: 13.5px;
-      line-height: 1.5;
-    }
-    .recipe-row .k {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-      padding-top: 2px;
-    }
-    .recipe-row .v { color: var(--ink); font-weight: 500; }
 
-    /* ===== §03 Field behavior (terminal specimen) ===== */
-    .field {
-      background: var(--bg-ruled);
-      border-top: 2px solid var(--rule-ink);
-      border-bottom: 2px solid var(--rule-ink);
-    }
-    .field-prose {
-      max-width: 660px;
-      margin-bottom: 44px;
-    }
-    .field-prose p {
+    .facts li {
+      padding: 1.35rem 0.75rem;
       color: var(--ink-2);
-      font-size: var(--t-lead);
-      line-height: 1.55;
-      margin-bottom: 16px;
-      font-weight: 500;
-    }
-    .field-prose strong { color: var(--ink); font-weight: 700; }
-
-    .specimen {
-      background: var(--bg-surface);
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--glow-soft);
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.7;
-      overflow: hidden;
-    }
-    .specimen-head {
-      background: var(--bg-elevated);
-      color: var(--ink-2);
-      padding: 11px 18px;
-      font-size: 11px;
-      border-bottom: 1px solid var(--rule-ink);
-      font-weight: 700;
-      letter-spacing: 0.16em;
+      font-size: 0.72rem;
+      text-align: center;
       text-transform: uppercase;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .specimen-head .corner {
-      width: 8px; height: 8px;
-      background: var(--accent);
-      display: inline-block;
-    }
-    .specimen-body { padding: 22px 24px 18px; overflow-x: auto; }
-    .spec-row {
-      display: flex;
-      gap: 14px;
-      align-items: baseline;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-    .spec-row:first-child { margin-top: 0; }
-    .spec-row .check { color: var(--ok); font-weight: 700; }
-    .spec-row .name { color: var(--ink); font-weight: 600; }
-    .spec-row .args { color: var(--ink-2); }
-    .spec-row .detail {
-      color: var(--ink-3);
-      margin-left: auto;
-      font-size: 11.5px;
-      font-weight: 500;
-    }
-    .spec-diff {
-      padding-left: 28px;
-      font-size: 12px;
-      line-height: 1.7;
-      margin: 6px 0;
-    }
-    .spec-diff .add { color: var(--ok); display: block; }
-    .spec-diff .rem { color: var(--bad); display: block; }
-    .spec-validation {
-      padding-left: 28px;
-      color: var(--ok);
-      font-size: 12px;
-      font-weight: 500;
-      margin-bottom: 6px;
-    }
-    .spec-footer {
-      margin-top: 18px;
-      padding-top: 14px;
-      border-top: 1px dashed var(--rule);
-      color: var(--ink-3);
-      font-size: 11.5px;
-      font-weight: 500;
-    }
-
-    /* ===== §04 Components (parts diagram) ===== */
-    .components {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      overflow: hidden;
-      box-shadow: var(--glow-soft);
-    }
-    .comp-group {
-      padding: 24px 28px;
+      letter-spacing: 0.06em;
       border-right: 1px solid var(--rule);
     }
-    .comp-group:last-child { border-right: none; }
-    .comp-group-head {
+
+    .facts li:last-child { border-right: 0; }
+
+    .action-row,
+    .link-row {
       display: flex;
-      align-items: baseline;
-      gap: 12px;
-      margin-bottom: 18px;
-      padding-bottom: 10px;
-      border-bottom: 2px solid var(--rule-ink);
+      align-items: center;
+      justify-content: space-between;
+      gap: 2rem;
+      min-height: 5rem;
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--rule);
     }
-    .comp-group-name {
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: 1.35rem;
+
+    .action-row > span,
+    .link-row > span {
+      flex: 0 0 auto;
+      color: var(--ink-2);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .copy-command {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 1rem;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
       color: var(--ink);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      line-height: 1;
+      cursor: pointer;
     }
-    .comp-group-code {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 700;
-      color: var(--accent-ink);
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      margin-left: auto;
+
+    .copy-command code {
+      overflow-x: auto;
+      color: var(--ink);
+      font-size: 0.84rem;
+      white-space: nowrap;
+      scrollbar-width: thin;
     }
-    .comp-item {
-      display: grid;
-      grid-template-columns: minmax(0, auto) minmax(0, 1fr);
-      gap: 8px 16px;
-      padding: 11px 0;
-      border-top: 1px dashed var(--rule);
-      align-items: baseline;
+
+    .copy-command code strong {
+      color: var(--accent-strong);
+      font-weight: 500;
     }
-    .comp-item:first-of-type { border-top: none; padding-top: 4px; }
-    .comp-item-head {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      grid-column: 1 / -1;
-      flex-wrap: wrap;
-    }
-    .comp-name {
-      font-family: var(--font-mono);
-      font-size: 13.5px;
-      font-weight: 600;
-      color: var(--accent-ink);
-    }
-    .comp-part {
-      font-family: var(--font-mono);
-      font-size: 10.5px;
-      font-weight: 600;
+
+    .copy-label {
+      min-width: 3.8rem;
       color: var(--ink-3);
+      font-size: 0.7rem;
+      text-align: right;
+      text-transform: uppercase;
+    }
+
+    .copy-command:hover .copy-label { color: var(--accent-strong); }
+
+    .copy-command:focus-visible,
+    a:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 4px;
+    }
+
+    .link-row:last-child { border-bottom: 0; }
+
+    .link-row a {
+      color: var(--ink);
+      font-size: 0.82rem;
+      text-align: right;
+      word-break: break-word;
+    }
+
+    .section {
+      margin-top: 2.4rem;
+    }
+
+    .section-title {
+      margin: 0 0 1rem;
+      color: var(--ink-2);
+      font-size: 0.78rem;
+      font-weight: 500;
       letter-spacing: 0.06em;
       text-transform: uppercase;
     }
-    .comp-desc {
-      grid-column: 1 / -1;
-      color: var(--ink-2);
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.45;
-      margin-top: 2px;
+
+    .section-box {
+      border: 1px solid var(--rule-strong);
+      background: var(--panel);
     }
 
-    /* ===== §05 Compatibility (spec table) ===== */
-    .compat-table {
-      width: 100%;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      border-collapse: separate;
-      border-spacing: 0;
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .workflow article {
+      min-width: 0;
+      padding: 1.7rem;
+      border-right: 1px solid var(--rule);
+    }
+
+    .workflow article:last-child { border-right: 0; }
+
+    .workflow h3,
+    .capability-grid h3 {
+      margin: 0 0 0.7rem;
+      color: var(--accent-strong);
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+
+    .workflow p,
+    .capability-grid p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 0.76rem;
+      line-height: 1.65;
+      text-wrap: pretty;
+    }
+
+    .session {
       overflow: hidden;
-      box-shadow: var(--glow-soft);
-      font-family: var(--font-mono);
-      font-size: 13.5px;
     }
-    .compat-table thead th {
-      background: var(--bg-elevated);
-      color: var(--ink-2);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      padding: 12px 18px;
-      text-align: left;
-      border: none;
-      border-bottom: 1px solid var(--rule-ink);
+
+    .session-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      color: var(--ink-3);
+      background: var(--panel-raised);
+      border-bottom: 1px solid var(--rule);
+      font-size: 0.7rem;
     }
-    .compat-table thead th:last-child { text-align: right; }
-    .compat-table tbody td {
-      padding: 13px 18px;
-      border-top: 1px solid var(--rule);
-      color: var(--ink);
+
+    .session-head strong {
+      color: var(--accent-strong);
       font-weight: 500;
     }
-    .compat-table tbody tr:nth-child(even) { background: var(--bg); }
-    .compat-table tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-lg); }
-    .compat-table tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-lg); }
-    .compat-table tbody td:first-child { font-weight: 600; }
-    .compat-table tbody td:nth-child(2) { color: var(--ink-3); font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; }
-    .compat-table tbody td:last-child { text-align: right; color: var(--ok); font-weight: 600; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
 
-    /* ===== §06 Install CTA ===== */
-    .install {
-      padding: clamp(96px, 11vw, 144px) 0;
+    .session pre {
+      margin: 0;
+      padding: clamp(1.15rem, 4vw, 2rem);
+      overflow-x: auto;
+      color: var(--ink-2);
+      font: 0.77rem/1.75 var(--mono);
+      tab-size: 2;
+    }
+
+    .session .prompt { color: var(--ink); }
+    .session .accent { color: var(--accent-strong); }
+    .session .success { color: var(--ok); }
+    .session .muted { color: var(--ink-3); }
+
+    .capability-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .capability-grid li {
+      min-height: 10rem;
+      padding: 1.75rem;
+      border-right: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .capability-grid li:nth-child(even) { border-right: 0; }
+    .capability-grid li:nth-last-child(-n + 2) { border-bottom: 0; }
+    .capability-grid li:nth-child(3n) { background: var(--panel-soft); }
+
+    .capability-grid code,
+    .faq code {
+      color: var(--accent-strong);
+      font-family: var(--mono);
+    }
+
+    .mini-terminal {
+      margin: 1.25rem 0 0;
+      padding: 0.9rem 1rem;
+      overflow-x: auto;
+      color: var(--ink-2);
+      background: var(--page);
+      border: 1px solid var(--rule);
+      font: 0.68rem/1.7 var(--mono);
+      white-space: pre;
+      scrollbar-width: thin;
+    }
+
+    .mini-terminal .prompt { color: var(--accent-strong); }
+    .mini-terminal .success { color: var(--ok); }
+    .mini-terminal .muted { color: var(--ink-3); }
+
+    .provider-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    .provider-grid li {
+      padding: 1.4rem 0.75rem;
+      color: var(--ink-2);
+      font-size: 0.76rem;
       text-align: center;
+      border-right: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
     }
-    .install-mark {
-      font-family: var(--font-display);
-      font-weight: 900;
-      font-size: var(--t-section);
-      line-height: 0.92;
-      letter-spacing: 0.01em;
-      text-transform: uppercase;
-      color: var(--ink);
-      margin-bottom: 14px;
-    }
-    .install-mark .em { color: var(--accent-ink); }
-    .install-sub {
+
+    .provider-grid li:nth-child(4n) { border-right: 0; }
+    .provider-grid li:nth-last-child(-n + 4) { border-bottom: 0; }
+
+    .provider-note {
+      margin: 0;
+      padding: 1.25rem 1.5rem;
       color: var(--ink-2);
-      font-size: var(--t-lead);
-      font-weight: 500;
-      margin-bottom: 36px;
+      background: var(--accent-soft);
+      border-top: 1px solid var(--rule-strong);
+      font-size: 0.76rem;
     }
-    .install-cmd {
-      display: inline-flex;
-      align-items: stretch;
-      max-width: 100%;
-      margin: 0 auto 32px;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-md);
-      background: var(--bg-surface);
-      box-shadow: var(--glow-soft);
-      overflow: hidden;
+
+    .faq details {
+      border-bottom: 1px solid var(--rule);
     }
-    .install-cmd code {
-      font-family: var(--font-mono);
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--ink);
-      background: transparent;
-      padding: 14px 20px;
+
+    .faq details:last-child { border-bottom: 0; }
+
+    .faq summary {
       display: flex;
       align-items: center;
-      gap: 10px;
-      white-space: nowrap;
-      overflow-x: auto;
-      letter-spacing: -0.005em;
-    }
-    .install-cmd code .dollar { color: var(--accent-ink); font-weight: 700; }
-    .install-cmd button {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.3rem 1.5rem;
       color: var(--ink);
-      background: var(--bg-elevated);
-      border: none;
-      border-left: 1px solid var(--rule-ink);
-      padding: 0 18px;
+      font-size: 0.78rem;
       cursor: pointer;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-    .install-cmd button:hover { background: var(--accent-ink); color: var(--bg); }
-    .install-cmd button.copied { background: var(--accent-ink); color: var(--bg); }
-    .install-btns {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
+      list-style: none;
     }
 
-    /* ===== §07 Commands index ===== */
-    .cmd-table {
-      width: 100%;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-lg);
-      background: var(--bg-surface);
-      border-collapse: separate;
-      border-spacing: 0;
-      overflow: hidden;
-      box-shadow: var(--glow-soft);
-      font-family: var(--font-mono);
-      font-size: 13.5px;
-    }
-    .cmd-table tr.cmd-cat td {
-      background: var(--bg-elevated);
-      color: var(--accent-ink);
-      font-size: 10.5px;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      padding: 11px 18px;
-      border-top: 1px solid var(--rule-ink);
-      border-bottom: 1px solid var(--rule-ink);
-    }
-    .cmd-table tr.cmd-cat:first-child td { border-top: none; }
-    .cmd-table tbody td {
-      padding: 11px 18px;
-      border-top: 1px solid var(--rule);
-      color: var(--ink);
-      font-weight: 500;
-      vertical-align: top;
-    }
-    .cmd-table .cmd-c {
-      width: 290px;
-      color: var(--accent-ink);
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    .cmd-table .cmd-c code {
-      font-family: var(--font-mono);
-      color: inherit;
-      background: none;
-      border: none;
-      padding: 0;
-      font-size: inherit;
-      letter-spacing: 0;
-      white-space: nowrap;
-    }
-    .cmd-table .cmd-d {
+    .faq summary::-webkit-details-marker { display: none; }
+    .faq summary::after { content: "+"; color: var(--accent-strong); }
+    .faq details[open] summary::after { content: "-"; }
+
+    .faq p {
+      max-width: 72ch;
+      margin: -0.25rem 0 0;
+      padding: 0 3rem 1.4rem 1.5rem;
       color: var(--ink-2);
-      font-family: var(--font-sans);
-      font-size: 13.5px;
-      font-weight: 500;
-      line-height: 1.45;
+      font-size: 0.76rem;
     }
-    .cmd-footnote {
-      margin-top: 22px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-3);
-      line-height: 1.55;
-    }
-    .cmd-footnote strong { color: var(--accent-ink); font-weight: 700; }
 
-    /* ===== Footer ===== */
-    footer {
-      border-top: 2px solid var(--rule-ink);
-      background: var(--bg-surface);
-      padding: 36px 0;
-    }
-    .footer-grid {
+    .final-action {
       display: grid;
       grid-template-columns: 1fr auto;
-      align-items: start;
-      gap: 32px;
+      align-items: center;
+      gap: 2rem;
+      margin-top: 2.4rem;
+      padding: 2rem;
+      border: 1px solid var(--accent);
+      background: var(--accent-soft);
     }
-    .footer-colophon {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-2);
-      line-height: 1.7;
+
+    .final-action h2 {
+      margin: 0 0 0.35rem;
+      color: var(--ink);
+      font-size: 1rem;
       font-weight: 500;
     }
-    .footer-colophon .label {
-      color: var(--ink-3);
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      font-size: 10.5px;
-      font-weight: 700;
-    }
-    .footer-colophon .accent { color: var(--accent-ink); font-weight: 700; }
-    .footer-colophon a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
-    .footer-colophon a:hover { color: var(--accent-ink); text-decoration-color: var(--accent-ink); }
-    .footer-set { margin-top: 6px; }
-    .footer-links {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .footer-links a {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      padding: 7px 13px;
-      border: 1px solid var(--rule-ink);
-      border-radius: var(--radius-sm);
-      color: var(--ink);
-      text-decoration: none;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-    .footer-links a:hover { background: var(--bg-elevated); color: var(--ink); border-color: var(--ink-3); }
 
-    /* ===== Motion ===== */
-    .js .reveal {
-      opacity: 0;
-      transform: translateY(14px);
-      transition: opacity 0.55s cubic-bezier(0.16, 1, 0.3, 1), transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+    .final-action p {
+      margin: 0;
+      color: var(--ink-2);
+      font-size: 0.76rem;
     }
-    .js .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.75rem;
+      padding: 0.7rem 1.1rem;
+      color: #181320;
+      background: var(--accent-strong);
+      border: 1px solid var(--accent-strong);
+      font-size: 0.76rem;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: background 160ms ease, transform 160ms ease;
+    }
+
+    .button:hover { background: var(--ink); }
+    .button:active { transform: translateY(1px); }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 2rem 0 0;
+      color: var(--ink-3);
+      font-size: 0.7rem;
+    }
+
+    .footer nav { display: flex; gap: 1rem; }
+
+    @media (max-width: 760px) {
+      .shell { padding-top: 3.5rem; }
+      .brand { align-items: flex-start; }
+      .top-links { flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem 1rem; }
+      .hero { padding-block: 3.5rem; }
+      .facts { grid-template-columns: repeat(2, 1fr); }
+      .facts li:nth-child(2) { border-right: 0; }
+      .facts li:nth-child(-n + 2) { border-bottom: 1px solid var(--rule); }
+      .action-row,
+      .link-row { align-items: flex-start; flex-direction: column; gap: 0.8rem; padding: 1.25rem; }
+      .copy-command { justify-content: space-between; width: 100%; }
+      .link-row a { text-align: left; }
+      .workflow { grid-template-columns: 1fr; }
+      .workflow article { border-right: 0; border-bottom: 1px solid var(--rule); }
+      .workflow article:last-child { border-bottom: 0; }
+      .capability-grid { grid-template-columns: 1fr; }
+      .capability-grid li,
+      .capability-grid li:nth-child(even),
+      .capability-grid li:nth-last-child(-n + 2) { min-height: 0; border-right: 0; border-bottom: 1px solid var(--rule); }
+      .capability-grid li:last-child { border-bottom: 0; }
+      .provider-grid { grid-template-columns: repeat(2, 1fr); }
+      .provider-grid li:nth-child(2n) { border-right: 0; }
+      .provider-grid li:nth-last-child(-n + 4) { border-bottom: 1px solid var(--rule); }
+      .provider-grid li:nth-last-child(-n + 2) { border-bottom: 0; }
+      .final-action { grid-template-columns: 1fr; }
+      .button { width: 100%; }
+    }
+
+    @media (max-width: 460px) {
+      .shell { width: min(100% - 1rem, var(--max)); }
+      .brand { display: block; }
+      .top-links { justify-content: flex-start; margin-top: 0.75rem; }
+      .hero h1 { font-size: 1.35rem; }
+      .copy-command { align-items: flex-start; flex-direction: column; }
+      .copy-label { text-align: left; }
+      .provider-grid { grid-template-columns: 1fr; }
+      .provider-grid li,
+      .provider-grid li:nth-child(2n),
+      .provider-grid li:nth-last-child(-n + 2) { border-right: 0; border-bottom: 1px solid var(--rule); }
+      .provider-grid li:last-child { border-bottom: 0; }
+      .footer { align-items: flex-start; flex-direction: column; }
+    }
 
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      .js .reveal { opacity: 1; transform: none; transition: none; }
-      .btn, .head-stamp, .hero-copy, .install-cmd button, .footer-links a { transition: none; }
-    }
-
-    /* ===== Responsive ===== */
-    @media (max-width: 980px) {
-      .hero-grid { grid-template-columns: 1fr; gap: 40px; }
-      .hero-term { max-width: 560px; }
-      .components { grid-template-columns: 1fr; }
-      .comp-group { border-right: none; border-bottom: 1px solid var(--rule); }
-      .comp-group:last-child { border-bottom: none; }
-      .skill-create-grid { grid-template-columns: 1fr; }
-      .skill-wizard { border-right: none; border-bottom: 1px solid var(--rule); }
-      .recipe-grid { grid-template-columns: 1fr; }
-      .head-meta { display: none; }
-    }
-
-    @media (max-width: 640px) {
-      section { padding: clamp(56px, 12vw, 80px) 0; }
-      .container, .container-prose { padding: 0 20px; }
-      .hero { padding-top: 48px; padding-bottom: 64px; }
-      .hero-install { margin-left: auto; margin-right: auto; }
-      .head-inner { gap: 12px; }
-      .head-stamp { padding: 6px 10px; font-size: 10.5px; }
-      .op-list li {
-        grid-template-columns: 52px 1fr;
-        gap: 12px 16px;
-        padding: 18px 18px;
-      }
-      .op-list li .op-text { grid-column: 1 / -1; padding-top: 4px; }
-      .op-num { font-size: 1.4rem; }
-      .wiz-row { grid-template-columns: 1fr; gap: 4px; }
-      .recipe-row { grid-template-columns: 1fr; gap: 4px; }
-      .cmd-table .cmd-c { width: auto; white-space: normal; }
-      .cmd-table .cmd-c,
-      .cmd-table .cmd-d { display: block; padding: 2px 18px; }
-      .cmd-table .cmd-c { padding-top: 10px; }
-      .cmd-table .cmd-d { padding-bottom: 10px; }
-      .compat-table tbody td,
-      .compat-table thead th { padding: 11px 12px; font-size: 12px; }
-      .compat-table tbody td:nth-child(2) { font-size: 11px; }
-      .install-cmd { flex-direction: column; width: 100%; max-width: 360px; }
-      .install-cmd button { padding: 12px 18px; border-left: none; border-top: 2px solid var(--rule-ink); }
-      .footer-grid { grid-template-columns: 1fr; }
-      .footer-links { justify-content: flex-start; }
-      .spec-row .detail { margin-left: 0; flex-basis: 100%; padding-left: 14px; }
-    }
-
-    /* Print: keep the datasheet aesthetic on paper */
-    @media print {
-      body::before { display: none; }
-      .head, footer { break-inside: avoid; }
-      section { break-inside: avoid; padding: 24px 0; }
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
     }
   </style>
 </head>
 <body>
-  <a href="#main" class="skip-link">Skip to content</a>
+  <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="head">
-    <div class="container head-inner">
-      <a href="/" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
-      <div class="head-meta" aria-hidden="true">
-        <span>HAZE-CLI-001</span>
-        <span>REV 0.10.0</span>
-        <span>MIT</span>
-      </div>
-      <nav class="head-nav" aria-label="Primary">
-        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+  <main class="shell" id="main">
+    <header class="brand">
+      <a class="wordmark" href="index.html" aria-label="haze home">haze<span>.</span></a>
+      <nav class="top-links" aria-label="Main navigation">
+        <a href="quickstart.html">Quickstart</a>
+        <a href="commands.html">Commands</a>
+        <a href="tools.html">Tools</a>
+        <a href="skills.html">Skills</a>
+        <a href="workflows.html">Workflows</a>
       </nav>
-    </div>
-  </header>
+    </header>
 
-  <main id="main">
+    <section class="frame" aria-labelledby="hero-title">
+      <div class="hero">
+        <h1 id="hero-title">A terminal coding agent that <strong>finishes the job.</strong></h1>
+        <p>Connect an OpenAI-compatible provider and choose a model. haze edits files, runs commands, and verifies the result.</p>
 
-    <!-- ===== TITLE BLOCK / HERO ===== -->
-    <section class="hero" id="start">
-      <div class="container">
-        <div class="hero-grid">
-          <div class="hero-text reveal">
-            <div class="hero-eyebrow">HAZE · CODING AGENT · REV 0.10.0</div>
-            <h1 class="hero-h1">
-              A CLI agent
-              <span class="em em-fill">close to<br>the model</span><span class="em">No guardrails</span>
-            </h1>
-            <p class="hero-sub">
-              Bring your own model. haze can read and edit files, attach images, run commands and dev servers, fetch URLs, manage tasks, delegate work, and follow Markdown skills. LSP navigation is optional.
-            </p>
-            <div class="hero-install">
-              <code class="hero-install-code"><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
-              <button class="hero-copy" id="copy-btn" type="button" aria-label="Copy install command">Copy</button>
-            </div>
-            <div class="hero-ctas">
-              <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">GitHub</a>
-              <a href="#operation" class="btn btn-ghost">Operation</a>
-            </div>
-          </div>
+        <div class="session">
+          <div class="session-head"><strong>haze</strong><span>~/api-service</span></div>
+          <pre aria-label="Example haze session"><span class="prompt">You asked</span>
+find the session leak, fix it, and add a regression test
 
-          <aside class="hero-term reveal" aria-label="haze session preview">
-            <div class="hero-term-title" aria-hidden="true">haze</div>
-            <div class="term">
-              <div class="term-head">
-                <span class="term-dots" aria-hidden="true">
-                  <span class="term-dot"></span>
-                  <span class="term-dot"></span>
-                  <span class="term-dot accent"></span>
-                </span>
-                <span class="term-head-title"><span class="path"><span class="brand">haze</span><span class="cwd"> · ~/calc-app</span></span></span>
-                <span class="term-head-branch">main</span>
-              </div>
-              <div class="term-body">
-                <div class="term-user">
-                  <span class="term-user-label">You asked</span>
-                  <div class="term-prompt">stop hand-rolling the pad helper</div>
-                </div>
+<span class="accent">Tool</span>  5 calls  2 changes
+<span class="success">✓</span> grep       sessionStore                       <span class="muted">38 matches</span>
+<span class="success">✓</span> readFile   src/middleware/session.ts          <span class="muted">142 lines</span>
+<span class="success">✓</span> editFile   src/middleware/session.ts          <span class="muted">+6 -2</span>
+<span class="success">✓</span> writeFile  tests/session-eviction.test.ts     <span class="muted">new file</span>
+<span class="success">✓</span> bash       npm test                           <span class="muted">128 passed</span>
 
-                <div class="term-tool-head"><span class="term-tool-label">Tool</span> · 4 calls · 1 change · 4.8s</div>
-                <div class="term-tool">
-                  <span class="check">✓</span><span class="name">listFiles</span><span class="args">.</span><span class="detail">0.6s</span>
-                </div>
-                <div class="term-tool">
-                  <span class="check">✓</span><span class="name">readFile</span><span class="args">package.json</span><span class="detail">0.05s</span>
-                </div>
-                <div class="term-tool">
-                  <span class="check">✓</span><span class="name">editFile</span><span class="args">package.json</span><span class="detail">+1 −0 in 0.04s</span>
-                </div>
-                <div class="term-tool">
-                  <span class="check">✓</span><span class="name">bash</span><span class="args">npm install &amp;&amp; npm test</span><span class="detail">exited 0 in 4.1s</span>
-                </div>
-                <div class="term-validation">validation: 4 passed, 0 failed</div>
-
-                <div class="term-label haze">haze<span class="term-label-meta"> · 4.8s</span></div>
-                <div class="term-response">Added left-pad@1.3.0 to dependencies. npm install pulled 1,247 transitive packages. Tests still pass. We've learned nothing as an industry.</div>
-              </div>
-              <div class="term-status">
-                <span class="model">anthropic/claude-sonnet-4.6</span>
-                <span class="stat">3 files · 4.8s</span>
-              </div>
-            </div>
-          </aside>
+<span class="accent">haze</span>
+The store never evicted expired sessions. Added bounded TTL
+cleanup and a regression test. The full suite passes.</pre>
         </div>
+      </div>
+
+      <ul class="facts" aria-label="Product facts">
+        <li>Open source</li>
+        <li>OpenAI-compatible</li>
+        <li>Local tools</li>
+        <li>Node 22+</li>
+      </ul>
+
+      <div class="action-row">
+        <span>Install</span>
+        <button class="copy-command" type="button" data-copy="npm i -g @denizokcu/haze" aria-label="Copy npm install command">
+          <code>npm i -g <strong>@denizokcu/haze</strong></code>
+          <span class="copy-label" aria-live="polite">Copy</span>
+        </button>
+      </div>
+
+      <div class="link-row">
+        <span>GitHub</span>
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">github.com/DenizOkcu/haze ↗</a>
+      </div>
+      <div class="link-row">
+        <span>npm</span>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">@denizokcu/haze ↗</a>
       </div>
     </section>
 
-    <!-- ===== §01 OPERATION ===== -->
-    <section id="operation">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§01</span>
-            <span class="label">Operation</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Three commands.</h2>
-          <p class="sec-sub">Install haze, add an OpenAI-compatible endpoint, and pick a model.</p>
-        </div>
-        <ol class="op-list reveal">
+    <section class="section" aria-labelledby="workflow-title">
+      <h2 class="section-title" id="workflow-title">How it works</h2>
+      <div class="section-box workflow">
+        <article>
+          <h3>Ask</h3>
+          <p>Describe the outcome in plain language. Attach a screenshot or mention the files that matter.</p>
+        </article>
+        <article>
+          <h3>Watch</h3>
+          <p>haze inspects the project, edits files, runs commands, and streams compact tool activity.</p>
+        </article>
+        <article>
+          <h3>Review</h3>
+          <p>Get a concise summary with changed files, validation commands, and honest failure status.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="capabilities-title">
+      <h2 class="section-title" id="capabilities-title">What is included</h2>
+      <div class="section-box">
+        <ul class="capability-grid">
           <li>
-            <span class="op-num">01</span>
-            <span class="op-cmd"><span class="dollar">$</span>npm i -g @denizokcu/haze</span>
-            <span class="op-text">Install globally from npm.</span>
+            <h3>File and code tools</h3>
+            <p>Discover, read, search, edit, and write files. Workspace boundaries and ignored files stay explicit.</p>
+            <pre class="mini-terminal" aria-label="File tool example"><span class="success">✓</span> grep      createSession  <span class="muted">12 matches</span>
+<span class="success">✓</span> readFile  src/session.ts <span class="muted">184 lines</span>
+<span class="success">✓</span> editFile  src/session.ts <span class="muted">+8 -3</span></pre>
           </li>
           <li>
-            <span class="op-num">02</span>
-            <span class="op-cmd">haze</span>
-            <span class="op-text">Open haze from a project directory.</span>
+            <h3>Commands and dev servers</h3>
+            <p>Run foreground commands or keep up to five managed background processes with bounded logs.</p>
+            <pre class="mini-terminal" aria-label="Background process example"><span class="success">✓</span> bash     npm run dev
+  <span class="prompt">background-1</span> <span class="muted">running on :3000</span>
+<span class="success">✓</span> process  output background-1</pre>
           </li>
           <li>
-            <span class="op-num">03</span>
-            <span class="op-cmd">/provider<span class="dim"> then </span>/model</span>
-            <span class="op-text">Add any OpenAI-compatible endpoint and pick a model. OpenRouter, OpenAI, LM Studio, Ollama, or a proxy.</span>
+            <h3>Durable sessions</h3>
+            <p>Resume a workspace conversation, fork an earlier session, or compact long-running context.</p>
+            <pre class="mini-terminal" aria-label="Session resume example"><span class="prompt">$</span> haze --continue
+<span class="success">✓</span> resumed  api-service
+  <span class="muted">18 messages, context restored</span></pre>
           </li>
-        </ol>
-        <p class="op-note reveal">That's the core. There is no Pro plan. To save a workflow, open <strong>/skills</strong>, choose add skill, and use the wizard below.</p>
+          <li>
+            <h3>Reusable skills</h3>
+            <p>Save project or personal workflows as Markdown and invoke them with commands like <code>/code-review</code>.</p>
+            <pre class="mini-terminal" aria-label="Skill creation example"><span class="prompt">/skills</span>  add deploy-check
+<span class="success">✓</span> created
+  <span class="muted">.haze/skills/deploy-check/SKILL.md</span></pre>
+          </li>
+          <li>
+            <h3>Parallel workers</h3>
+            <p>Delegate independent work to isolated subagents with bounded concurrency and serialized writes.</p>
+            <pre class="mini-terminal" aria-label="Parallel worker example"><span class="prompt">/fleet</span> migrate four packages
+<span class="success">✓</span> web     <span class="success">✓</span> admin
+<span class="success">✓</span> mobile  <span class="success">✓</span> cli</pre>
+          </li>
+          <li>
+            <h3>Headless operation</h3>
+            <p>Use <code>haze -p</code> in scripts with text, JSON, or streaming JSON output and reliable exit status.</p>
+            <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" --output json
+{ "status": <span class="success">"complete"</span>, "findings": 2 }</pre>
+          </li>
+        </ul>
       </div>
     </section>
 
-    <!-- ===== §02 NATIVE SKILL CREATION ===== -->
-    <section id="skill-creation" class="skill-create">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§02</span>
-            <span class="label">Native skill creation</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Create skills<br><span class="em">inside haze.</span></h2>
-          <p class="sec-sub">Open <code class="cmd">/skills</code>, choose add skill, and describe the job. You decide whether the Markdown file belongs to this project or in your global haze directory. Once it exists, call it like any other slash command.</p>
-        </div>
-
-        <div class="skill-create-grid reveal">
-          <div class="skill-wizard">
-            <div class="skill-wizard-head">
-              <span>skill wizard · live in the chat</span>
-              <span class="corner" aria-hidden="true"></span>
-            </div>
-            <div class="skill-wizard-body">
-              <div class="wiz-row">
-                <span class="wiz-cmd">/skills → add skill</span>
-                <span class="wiz-note">starts the wizard from any haze session</span>
-              </div>
-              <div class="wiz-row">
-                <span class="wiz-step">step 1/3 · name</span>
-                <span class="wiz-in"><span class="prompt">›</span> code-review</span>
-              </div>
-              <div class="wiz-row">
-                <span class="wiz-step">step 2/3 · scope</span>
-                <span class="wiz-in"><span class="prompt">›</span> this project</span>
-              </div>
-              <div class="wiz-row">
-                <span class="wiz-step">step 3/3 · description</span>
-                <span class="wiz-in"><span class="prompt">›</span> Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS.</span>
-              </div>
-              <div class="wiz-result">created at <span class="path">.haze/skills/code-review/SKILL.md</span> · project · invoke with <span class="cmd">/code-review</span></div>
-            </div>
-          </div>
-          <div class="superpower">
-            <p>Skills are ordinary Markdown files. Put a team workflow in <strong>.haze/skills</strong> or keep a personal one in <strong>~/.haze/skills</strong>.</p>
-            <p>haze labels project skills as repository content. A project skill takes priority over a global skill with the same name unless you disable it.</p>
-            <p>The model can load a matching skill on its own, or you can call the skill by name.</p>
-          </div>
-        </div>
-
-        <div class="recipes reveal">
-          <div class="recipes-head">
-            <span>Try these: run /skills, choose add skill, and type them in</span>
-            <span>· /skills</span>
-          </div>
-          <div class="recipe-grid">
-            <article class="recipe-card">
-              <div class="recipe-name">/code-review</div>
-              <div class="recipe-row"><span class="k">role</span><span class="v">You are a focused code reviewer.</span></div>
-              <div class="recipe-row"><span class="k">description</span><span class="v">Review the diff between the current branch and main, focusing on bugs, tests, DRY and KISS.</span></div>
-            </article>
-            <article class="recipe-card">
-              <div class="recipe-name">/deploy-check</div>
-              <div class="recipe-row"><span class="k">role</span><span class="v">You are a release-readiness verifier.</span></div>
-              <div class="recipe-row"><span class="k">description</span><span class="v">Run lint, typecheck, tests, and build in one call. Report each step pass/fail with the exact failing output; do not stop at the first failure.</span></div>
-            </article>
-            <article class="recipe-card">
-              <div class="recipe-name">/release-prep</div>
-              <div class="recipe-row"><span class="k">role</span><span class="v">You are a commit-crafting assistant.</span></div>
-              <div class="recipe-row"><span class="k">description</span><span class="v">Inspect uncommitted changes, group them into clean conventional commits, and write the commit messages. Do not commit; show me the proposed commands.</span></div>
-            </article>
-            <article class="recipe-card">
-              <div class="recipe-name">/security-review</div>
-              <div class="recipe-row"><span class="k">role</span><span class="v">You are an application security auditor.</span></div>
-              <div class="recipe-row"><span class="k">description</span><span class="v">Audit auth flows, secret handling, and injection surface (SQL, command, XSS, SSRF) in the current branch diff. Cite file:line for every finding with severity.</span></div>
-            </article>
-          </div>
-        </div>
-
-        <p class="op-note reveal">You can also load a skill directly. Type <strong>/code-review</strong> in the chat to run it as a slash command.</p>
+    <section class="section" aria-labelledby="providers-title">
+      <h2 class="section-title" id="providers-title">OpenAI-compatible providers</h2>
+      <div class="section-box">
+        <ul class="provider-grid">
+          <li>OpenAI</li>
+          <li>OpenRouter</li>
+          <li>Ollama</li>
+          <li>LM Studio</li>
+          <li>Local proxies</li>
+          <li>Hosted gateways</li>
+          <li>Custom endpoints</li>
+          <li>Compatible APIs</li>
+        </ul>
+        <p class="provider-note">haze never silently picks a provider or model. Configure one with <code>/provider</code>, then choose with <code>/model</code>.</p>
       </div>
     </section>
 
-    <!-- ===== §03 FIELD BEHAVIOR ===== -->
-    <section class="field" id="field-behavior">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§03</span>
-            <span class="label">Field behavior</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Watch it work.</h2>
-          <div class="field-prose">
-            <p>Tool calls appear in compact activity blocks while they run. haze shows the work but does not pause for approval.</p>
-            <p>Type <strong>@</strong> to browse files in the workspace. If you type a file or directory path yourself, haze can read it for that turn even when it sits outside the workspace. Edits still stay inside the project. Images only go to providers you have marked as image-capable.</p>
-            <p>haze can keep up to five dev servers or watchers running in the background. Each process has a capped output log. Aborting a turn leaves it running; starting a new session or leaving haze stops it.</p>
-            <p>If a job splits into separate pieces, <strong>/fleet</strong> can hand them to disposable workers. Each worker starts with fresh project instructions and fixed limits. The main conversation only receives the short result.</p>
-            <p>Failed and repeated tool calls include a recovery hint. File pages use a sparse line index, and a timed-out command cannot hang haze just because one of its children kept an output pipe open.</p>
-            <p>haze reads global guidance and the project's root instructions at startup. It picks up nested instructions when it reaches that part of the tree and reads them again if they change.</p>
-            <p>Session files skip streaming chatter and bulky raw output. Use <strong>/resume</strong> to browse old workspace sessions, continue one, or fork a copy.</p>
-          </div>
-        </div>
-        <div class="specimen reveal" aria-label="Example tool block">
-          <div class="specimen-head">
-            <span>Calibration printout · one turn</span>
-            <span class="corner" aria-hidden="true"></span>
-          </div>
-          <div class="specimen-body">
-            <div class="spec-row">
-              <span class="check">+</span><span class="name">editFile</span><span class="args">src/config.ts</span><span class="detail">+3 −1 in 0.08s</span>
-            </div>
-            <div class="spec-diff">
-              <span class="add">+ if (!process.env.DATABASE_URL) throw new Error('required');</span>
-              <span class="rem">− // TODO: validate environment</span>
-            </div>
-            <div class="spec-row">
-              <span class="check">+</span><span class="name">bash</span><span class="args">npm run typecheck</span><span class="detail">validation, exited 0 in 1.8s</span>
-            </div>
-            <div class="spec-validation">validation: 0 diagnostics, 12 files checked</div>
-            <div class="spec-row">
-              <span class="check">+</span><span class="name">bash</span><span class="args">npm test</span><span class="detail">validation, exited 0 in 2.4s</span>
-            </div>
-            <div class="spec-validation">validation: 38 passed, 0 failed</div>
-            <div class="spec-footer">3 tool calls, all succeeded. Large output stays retrievable when haze summarizes it.</div>
-          </div>
-        </div>
+    <section class="section" aria-labelledby="faq-title">
+      <h2 class="section-title" id="faq-title">Common questions</h2>
+      <div class="section-box faq">
+        <details>
+          <summary>Does haze require a hosted account?</summary>
+          <p>No. Install the CLI, add an OpenAI-compatible endpoint, and choose a model. Local endpoints can run without an API key.</p>
+        </details>
+        <details>
+          <summary>Can it work on an existing project?</summary>
+          <p>Yes. haze reads your repository instructions, respects nested context files, and uses the current workspace as its mutation boundary.</p>
+        </details>
+        <details>
+          <summary>Does it ask before every tool call?</summary>
+          <p>No. haze keeps guardrails light and lets the model work through a task without repeated permission dialogs. You should still supervise consequential changes.</p>
+        </details>
+        <details>
+          <summary>Where are sessions and settings stored?</summary>
+          <p>Settings live in <code>~/.haze/settings.json</code>. Durable sessions live under <code>~/.haze/sessions</code>, with private file permissions.</p>
+        </details>
       </div>
     </section>
 
-    <!-- ===== §04 COMPONENTS ===== -->
-    <section id="components">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§04</span>
-            <span class="label">Components</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">What the model can use.</h2>
-          <p class="sec-sub">haze ships with the tools below and collects no telemetry. The <code class="cmd">fetch</code> tool handles network reads and only accepts public URLs.</p>
-        </div>
-        <div class="components reveal">
-          <div class="comp-group">
-            <div class="comp-group-head">
-              <span class="comp-group-name">Read</span>
-              <span class="comp-group-code">HAZE-R · 5</span>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">listFiles</span>
-                <span class="comp-part">HAZE-R-001</span>
-              </div>
-              <p class="comp-desc">Browse project files with cursor pagination. A directory path typed by the user can also open that directory for reading during the turn.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">readFile</span>
-                <span class="comp-part">HAZE-R-002</span>
-              </div>
-              <p class="comp-desc">Read numbered UTF-8 lines in bounded pages. A small, signature-checked index speeds up later pages. User-typed paths can open files outside the workspace for reading during that turn.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">grep</span>
-                <span class="comp-part">HAZE-R-003</span>
-              </div>
-              <p class="comp-desc">Search with the bundled ripgrep binary. Results have one global cap, and ignored paths require an explicit override.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">readToolOutput</span>
-                <span class="comp-part">HAZE-R-004</span>
-              </div>
-              <p class="comp-desc">Page through raw output that was too large for the original result. The retained data has fixed memory limits.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">lsp*</span>
-                <span class="comp-part">HAZE-R-005</span>
-              </div>
-              <p class="comp-desc">Look up symbols, definitions, and references through a language server you configure. haze kills the server process tree if normal shutdown fails.</p>
-            </div>
-          </div>
-
-          <div class="comp-group">
-            <div class="comp-group-head">
-              <span class="comp-group-name">Write</span>
-              <span class="comp-group-code">HAZE-W · 3</span>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">editFile</span>
-                <span class="comp-part">HAZE-W-001</span>
-              </div>
-              <p class="comp-desc">Unique text replacements with line-prefix tolerance and recovery hints.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">replaceLines</span>
-                <span class="comp-part">HAZE-W-002</span>
-              </div>
-              <p class="comp-desc">Line-range edits with EOF clamping for slightly-oversized ranges.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">writeFile</span>
-                <span class="comp-part">HAZE-W-003</span>
-              </div>
-              <p class="comp-desc">Create files and parent directories.</p>
-            </div>
-          </div>
-
-          <div class="comp-group">
-            <div class="comp-group-head">
-              <span class="comp-group-name">Shell</span>
-              <span class="comp-group-code">HAZE-S · 2</span>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">bash</span>
-                <span class="comp-part">HAZE-S-001</span>
-              </div>
-              <p class="comp-desc">Run commands with capped output and report the cwd, duration, classification, and validation result. Set <code>background=true</code> to register a dev server or watcher. If a foreground command times out or is aborted, haze kills its process tree and does not wait forever on an open pipe.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">process</span>
-                <span class="comp-part">HAZE-S-002</span>
-              </div>
-              <p class="comp-desc">List background work, read its output, or stop it. haze allows five registered processes, each with a 256 KB rolling output window. The status bar shows how many are running. A session reset or haze exit stops them all.</p>
-            </div>
-          </div>
-
-          <div class="comp-group">
-            <div class="comp-group-head">
-              <span class="comp-group-name">Network</span>
-              <span class="comp-group-code">HAZE-N · 1</span>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">fetch</span>
-                <span class="comp-part">HAZE-N-001</span>
-              </div>
-              <p class="comp-desc">Read public http(s) URLs as Markdown, formatted JSON, or text. haze rejects unsafe schemes, private addresses, and malformed IPv6-like hosts. It checks redirects and pins each connection to the public IP it validated.</p>
-            </div>
-          </div>
-
-          <div class="comp-group">
-            <div class="comp-group-head">
-              <span class="comp-group-name">Agent state</span>
-              <span class="comp-group-code">HAZE-A · 3</span>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">writeTasks</span>
-                <span class="comp-part">HAZE-A-001</span>
-              </div>
-              <p class="comp-desc">Replace the workspace task list when the work enters a new phase. haze assigns the IDs and clears a completed list on the next user turn.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">skill</span>
-                <span class="comp-part">HAZE-A-002</span>
-              </div>
-              <p class="comp-desc">Load a global or project Markdown workflow, then read its references as needed. Results show where the skill came from, and haze marks project skills as untrusted repository content.</p>
-            </div>
-            <div class="comp-item">
-              <div class="comp-item-head">
-                <span class="comp-name">subagent</span>
-                <span class="comp-part">HAZE-A-003</span>
-              </div>
-              <p class="comp-desc">Send separate tasks to disposable workers. A worker starts with the project instructions for its scope and only the tools allowed by its mode. Its private context stays private; the parent gets a short result. If a worker ignores an abort, haze keeps its concurrency or mutation slot occupied until it actually stops.</p>
-            </div>
-          </div>
-        </div>
-        <div class="reveal" style="margin-top: 24px; border: 1px solid var(--rule); padding: 18px 20px; background: rgba(0,0,0,.16);">
-          <div class="eyebrow-stamp">OPTIONAL · LSP</div>
-          <p class="sec-sub" style="margin: 10px 0 0; max-width: 900px;">Use <code class="cmd">/lsp</code> to configure read-only language-server navigation. Presets are included for TypeScript, Rust, Python, Go, and PHP, but haze does not install the servers. LSP tools only appear when an enabled server command is on <code class="cmd">PATH</code>. Otherwise the model uses <code class="cmd">grep</code>, <code class="cmd">listFiles</code>, and <code class="cmd">readFile</code>. When haze closes a server or receives bad protocol data, it terminates the server's process tree and forces it to exit if needed.</p>
-        </div>
+    <section class="final-action" aria-labelledby="start-title">
+      <div>
+        <h2 id="start-title">Run haze in your project.</h2>
+        <p>Install the CLI, open a project directory, and type <code>haze</code>.</p>
       </div>
+      <a class="button" href="quickstart.html">Read quickstart</a>
     </section>
 
-    <!-- ===== §05 COMPATIBILITY ===== -->
-    <section id="compatibility">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§05</span>
-            <span class="label">Compatibility</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Bring your<br>own model.</h2>
-          <p class="sec-sub">Use any OpenAI-compatible endpoint. Add its URL and key with <code class="cmd">/provider</code>. Then let <code class="cmd">/model</code> fetch the available models, or type them yourself if discovery fails. haze never picks one for you. A remote endpoint needs HTTPS when you send credentials, but loopback HTTP still works. To send png, jpeg, gif, or webp files, mark the provider as image-capable. A path you type may point outside the workspace, though haze will only read it.</p>
-        </div>
-        <table class="compat-table reveal" aria-label="Supported providers">
-          <thead>
-            <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Type</th>
-              <th scope="col">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>OpenAI</td><td>Hosted</td><td>Supported</td></tr>
-            <tr><td>Anthropic</td><td>via OpenRouter</td><td>Supported</td></tr>
-            <tr><td>Google</td><td>via OpenRouter</td><td>Supported</td></tr>
-            <tr><td>Mistral AI</td><td>Hosted</td><td>Supported</td></tr>
-            <tr><td>Meta</td><td>via OpenRouter</td><td>Supported</td></tr>
-            <tr><td>Ollama</td><td>Local</td><td>Supported</td></tr>
-            <tr><td>LM Studio</td><td>Local</td><td>Supported</td></tr>
-            <tr><td>OpenRouter</td><td>Aggregator</td><td>Supported</td></tr>
-            <tr><td>Groq</td><td>Hosted</td><td>Preset</td></tr>
-            <tr><td>DeepSeek, xAI, Cerebras</td><td>Hosted</td><td>Presets</td></tr>
-            <tr><td>Together, Fireworks, Hugging Face</td><td>Hosted</td><td>Presets</td></tr>
-            <tr><td>Moonshot, NVIDIA, Qwen</td><td>Hosted</td><td>Presets</td></tr>
-            <tr><td>Any OpenAI-compatible proxy</td><td>Custom</td><td>Supported</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- ===== §06 INSTALL ===== -->
-    <section class="install" id="install">
-      <div class="container reveal">
-        <div class="eyebrow-stamp">§06 · INSTALL</div>
-        <h2 class="install-mark">Install <span class="em">haze</span>.</h2>
-        <p class="install-sub">haze is MIT licensed. It writes detailed LLM logs only when you start it with <code class="cmd">haze --debug</code>. Provider settings live in <code class="cmd">~/.haze/settings.json</code> with private POSIX permissions; haze does not read them from environment variables.</p>
-        <div class="install-cmd">
-          <code><span class="dollar">$</span>npm i -g @denizokcu/haze</code>
-          <button id="copy-btn-cta" type="button" aria-label="Copy install command">Copy</button>
-        </div>
-        <div class="install-btns">
-          <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="btn btn-primary">GitHub</a>
-          <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="btn btn-ghost">npm</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===== §07 COMMANDS INDEX ===== -->
-    <section id="commands" class="commands-index">
-      <div class="container">
-        <div class="reveal">
-          <div class="sec-marker">
-            <span class="code">§07</span>
-            <span class="label">Commands index</span>
-            <span class="spacer"></span>
-          </div>
-          <h2 class="sec-headline">Command<br><span class="em">reference.</span></h2>
-          <p class="sec-sub">The core commands, aliases, model options, log options, and installed skills are listed here. The model uses <code class="cmd">writeTasks</code> directly, so haze has no task command.</p>
-        </div>
-
-        <table class="cmd-table reveal" aria-label="haze slash commands">
-          <tbody>
-            <tr class="cmd-cat"><td colspan="2">Agent &amp; Session</td></tr>
-            <tr>
-              <td class="cmd-c"><code>/help</code></td>
-              <td class="cmd-d">Show all slash commands.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/exit</code>, <code>/quit</code></td>
-              <td class="cmd-d">Exit haze.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/clear</code></td>
-              <td class="cmd-d">Clear conversation history and the task list.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/new</code></td>
-              <td class="cmd-d">Start a fresh durable session for this workspace.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/resume [id]</code></td>
-              <td class="cmd-d">Browse this workspace's sessions and either continue one or fork a copy. Pass an exact id to resume it directly.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/session</code></td>
-              <td class="cmd-d">Show the current durable session file.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/compact [instructions]</code></td>
-              <td class="cmd-d">Keep recent messages and condense older context into a size-limited excerpt, starting with the newest entries. The result says what it omitted.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/init</code></td>
-              <td class="cmd-d">Create or update compact, budget-aware <code>AGENTS.md</code> project instructions.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/context</code></td>
-              <td class="cmd-d">Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/tips</code></td>
-              <td class="cmd-d">Toggle rotating keyboard and workflow tips beneath the busy label.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/fleet [--review] [--profile name] [--workers provider:model] [--concurrency n] &lt;prompt&gt;</code></td>
-              <td class="cmd-d">Split independent work across disposable workers. The profile controls concurrency and deadlines, and each run has a tool limit. haze serializes file changes across retries. If a worker ignores an abort, its slot stays occupied until it stops. These options apply to one run, and haze declines work that cannot run in parallel.</td>
-            </tr>
-
-            <tr class="cmd-cat"><td colspan="2">Configuration</td></tr>
-            <tr>
-              <td class="cmd-c"><code>/provider</code></td>
-              <td class="cmd-d">Choose or add a provider. From there you can manage its models, set the API key, toggle image input, or remove the provider.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/model</code></td>
-              <td class="cmd-d">Choose a configured model or fetch a provider's model list from its OpenAI-compatible <code>/models</code> endpoint.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/model &lt;name-or-provider:name&gt;</code></td>
-              <td class="cmd-d">Set a model directly. Also sets its provider.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/model list</code></td>
-              <td class="cmd-d">List all configured models.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/settings</code></td>
-              <td class="cmd-d">Show provider, model, API key and image-capability status, LSP/MCP servers, skills, and loaded context files.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/settings open</code></td>
-              <td class="cmd-d">Open <code>~/.haze/settings.json</code> with the OS default app.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/logs [id]</code></td>
-              <td class="cmd-d">List recent LLM logs, or summarize one by id. New detailed logs are written only when haze starts with <code>--debug</code>.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/lsp</code></td>
-              <td class="cmd-d">Configure language-server navigation tools. Interactive picker: add a preset (<code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, <code>php</code>) or a custom command, then enable/disable/remove. LSP tools appear only when an enabled server command is on <code>PATH</code>.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>/mcp</code></td>
-              <td class="cmd-d">Configure Model Context Protocol servers like Context7. Interactive picker: add a preset or custom <code>http</code>/<code>sse</code>/<code>stdio</code> server, then enable/disable/remove it or set a masked API key. MCP tools never shadow built-ins.</td>
-            </tr>
-
-            <tr class="cmd-cat"><td colspan="2">Skills</td></tr>
-            <tr>
-              <td class="cmd-c"><code>/skills</code></td>
-              <td class="cmd-d">Create and manage global or project Markdown skills. The picker shows each skill's source and lets you enable, disable, validate, or remove it.</td>
-            </tr>
-
-            <tr class="cmd-cat"><td colspan="2">Dynamic</td></tr>
-            <tr>
-              <td class="cmd-c"><code>/&lt;skill-name&gt;</code></td>
-              <td class="cmd-d">Invoke any installed skill directly, such as <code>/code-review</code>. The model can also invoke skills when they match a request.</td>
-            </tr>
-
-            <tr class="cmd-cat"><td colspan="2">Terminal flags (run <code>haze --help</code>)</td></tr>
-            <tr>
-              <td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td>
-              <td class="cmd-d">Run one non-interactive turn with the full toolset, print the final reply, and exit. Complete turns exit with <code>0</code>; aborted or failed turns exit non-zero. Pass the prompt with <code>-p</code> or pipe it through stdin, for example <code>echo "..." | haze</code>. Print mode does not save sessions and ignores <code>--continue</code>. You can use <code>--resume &lt;id&gt;</code> to load context without changing the original session.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze --output &lt;text|json|stream-json&gt;</code></td>
-              <td class="cmd-d">Choose the print-mode output. <code>json</code> writes one <code>{ type, status, result, usage }</code> envelope for scripts and CI. <code>stream-json</code> writes live NDJSON events, followed by the same result envelope. The final <code>status</code> determines the exit code.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td>
-              <td class="cmd-d">Override the model for this run without changing settings. Use the <code>name</code> or <code>provider:name</code> of a model already added through <code>/provider</code>. An unknown or ambiguous selector exits non-zero with a precise error.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze -c, --continue</code></td>
-              <td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze --resume &lt;id&gt;</code></td>
-              <td class="cmd-d">Resume an exact workspace session. Combine with <code>-p</code> to load its context for one non-durable turn. Unknown ids exit non-zero.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze --no-session</code></td>
-              <td class="cmd-d">Run without saving or resuming a durable session.</td>
-            </tr>
-            <tr>
-              <td class="cmd-c"><code>haze --debug</code></td>
-              <td class="cmd-d">Show model/tool debug logs and write a detailed JSONL log to <code>~/.haze/logs/</code> (works in both interactive and print mode).</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <p class="cmd-footnote reveal">
-          <strong>NOTE /</strong> The model can load a skill when your request matches it. You can also load one directly with <code>/&lt;skill-name&gt;</code>.
-        </p>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <div class="container footer-grid">
-      <div class="footer-colophon">
-        <div><span class="label">Part</span> &nbsp;HAZE-CLI-001 &nbsp;·&nbsp; <span class="label">Rev</span> &nbsp;<span class="accent">0.10.0</span> &nbsp;·&nbsp; <span class="label">License</span> &nbsp;MIT &nbsp;·&nbsp; <span class="label">Stack</span> &nbsp;Node ≥ 22</div>
-        <div class="footer-set">Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>. Set in Big Shoulders Display, Archivo, and JetBrains Mono.</div>
-      </div>
-      <nav class="footer-links" aria-label="Footer">
+    <footer class="footer">
+      <span>MIT licensed. Built by Deniz Okcu.</span>
+      <nav aria-label="Footer navigation">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
         <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
         <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
-        <a href="https://github.com/DenizOkcu/haze/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
       </nav>
-    </div>
-  </footer>
+    </footer>
+  </main>
 
   <script>
-    document.documentElement.classList.add('js');
-
-    function copyInstall(btn) {
-      navigator.clipboard.writeText('npm i -g @denizokcu/haze').then(function () {
-        var prev = btn.textContent;
-        btn.textContent = 'Copied';
-        btn.classList.add('copied');
-        setTimeout(function () { btn.textContent = prev; btn.classList.remove('copied'); }, 1800);
-      }).catch(function () {});
-    }
-    document.getElementById('copy-btn').addEventListener('click', function () { copyInstall(this); });
-    document.getElementById('copy-btn-cta').addEventListener('click', function () { copyInstall(this); });
-
-    var observer = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) {
-          e.target.classList.add('visible');
-          observer.unobserve(e.target);
-        }
+    document.querySelectorAll('[data-copy]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var value = button.getAttribute('data-copy') || '';
+        var label = button.querySelector('.copy-label');
+        navigator.clipboard.writeText(value).then(function () {
+          if (!label) return;
+          label.textContent = 'Copied';
+          window.setTimeout(function () { label.textContent = 'Copy'; }, 1600);
+        }).catch(function () {
+          if (label) label.textContent = 'Select text';
+        });
       });
-    }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
-
-    document.querySelectorAll('.reveal').forEach(function (el) { observer.observe(el); });
+    });
   </script>
 </body>
 </html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workflows — haze docs</title>
+  <meta name="description" content="Practical haze workflows: durable sessions, parallel fleet runs, image attachments, AGENTS.md context files, background dev servers, and headless CI runs.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site-2.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link">Quickstart</a>
+        <a href="commands.html" class="head-link">Commands</a>
+        <a href="tools.html" class="head-link">Tools</a>
+        <a href="skills.html" class="head-link">Skills</a>
+        <a href="workflows.html" class="head-link active">Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Guide</div>
+        <h1 class="doc-h1">Work<span class="em">flows.</span></h1>
+        <p class="doc-lede">How haze behaves across longer jobs: durable sessions, parallel fleet runs, image attachments, instruction files, managed processes, and headless pipelines.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#sessions">Sessions</a>
+              <a href="#fleet">Fleet &amp; subagents</a>
+              <a href="#images">Images</a>
+              <a href="#context">Context files</a>
+              <a href="#processes">Background processes</a>
+              <a href="#ci">Headless &amp; CI</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="quickstart.html">Quickstart</a>
+            <a href="commands.html">Command reference</a>
+            <a href="tools.html">Tool reference</a>
+            <a href="skills.html">Skills guide</a>
+          </div>
+        </aside>
+
+        <div class="doc-main">
+          <section id="sessions">
+            <h2>Durable <span class="em">sessions</span></h2>
+            <p>Every interactive conversation is saved as compact JSONL under <code>~/.haze/sessions</code>. Streaming chatter is skipped and bulky tool output is slimmed, so files stay small.</p>
+            <ul>
+              <li><code>/resume</code> — browse this workspace's sessions, continue one, or <strong>fork</strong> a copy to explore an alternate approach without touching the original.</li>
+              <li><code>haze --continue</code> — pick up the latest workspace session immediately.</li>
+              <li><code>/compact [instructions]</code> — condense older context into a size-limited summary instead of starting over. The result says what was omitted.</li>
+              <li><code>/session</code> — show the current session file; <code>/new</code> starts fresh.</li>
+            </ul>
+            <div class="callout"><strong>Aborting is safe.</strong> <strong>Esc</strong> stops the current turn without losing the session; registered background processes keep running until the session ends or you kill them.</div>
+          </section>
+
+          <section id="fleet">
+            <h2>Fleet &amp; <span class="em">subagents</span></h2>
+            <p>When work splits into genuinely independent pieces, <code class="cmd">/fleet</code> hands them to disposable workers. Each worker starts with fresh project instructions for its scope, a fixed tool budget and deadline, and its own context — the main conversation receives only a compact result, keeping your window clean.</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>inside haze</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="k">/fleet</span> migrate packages/web, packages/admin, packages/mobile, packages/cli from sdk v1 to v2
+
+<span class="c"># control one run explicitly:</span>
+<span class="k">/fleet</span> --profile review --workers openrouter/anthropic/claude-sonnet-4.6 --concurrency 2 \
+  review the auth, billing, and notifications services for security issues</pre>
+            </div>
+            <ul>
+              <li>Profiles control concurrency and deadlines; file mutations are serialized across retries.</li>
+              <li>If a worker ignores an abort, its concurrency/mutation slot stays occupied until it actually stops.</li>
+              <li>haze declines work that cannot run in parallel rather than faking it.</li>
+              <li>The model can also spawn single subagents on its own for context isolation.</li>
+            </ul>
+          </section>
+
+          <section id="images">
+            <h2>Image <span class="em">input</span></h2>
+            <p>Reference an image in your prompt and haze sends it alongside your text:</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>prompts with images</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre>@design/reports-tab.png this tab overflows on narrow screens — fix the spacing
+@screenshots/error.png reproduce this crash and fix it
+recreate the chart in @mockups/analytics.png with recharts</pre>
+            </div>
+            <ul>
+              <li><strong>Formats:</strong> png, jpeg, gif, webp — up to 5 MB and 4 per message.</li>
+              <li><strong>Opt-in:</strong> mark the provider image-capable in <code>/provider</code>; images are only sent to capable providers. <code>/settings</code> shows which are.</li>
+              <li>Invalid paths or oversized files fail with a clear message before any model call; resumed sessions keep a placeholder instead of image bytes.</li>
+            </ul>
+          </section>
+
+          <section id="context">
+            <h2>Context <span class="em">files</span></h2>
+            <p>haze builds project understanding from Markdown instruction files, loaded in a defined order:</p>
+            <ul>
+              <li><strong>Global:</strong> <code>~/.haze/AGENTS.md</code> wins over <code>~/.claude/CLAUDE.md</code>.</li>
+              <li><strong>Ancestors:</strong> root <code>AGENTS.md</code> / <code>CLAUDE.md</code> load at startup.</li>
+              <li><strong>Nested:</strong> subtree instruction files load lazily when tools touch that directory, and reload when their signature changes.</li>
+            </ul>
+            <p>Run <code class="cmd">/init</code> to generate a compact, budget-aware <code>AGENTS.md</code> for the current repo. Check context cost any time with <code class="cmd">/context</code>.</p>
+            <p>Type <code class="cmd">@</code> to browse workspace files, or mention a path containing <code>/</code> to bless an outside file for read-only access during that turn. Mutating tools always stay inside the workspace.</p>
+          </section>
+
+          <section id="processes">
+            <h2>Background <span class="em">processes</span></h2>
+            <p>The agent can register up to <strong>five</strong> dev servers or watchers with <code>bash background=true</code>, then inspect them with the <code>process</code> tool:</p>
+            <ul>
+              <li>Each process has a <strong>256 KB rolling output log</strong>, readable by handle even after summarization.</li>
+              <li>The status bar shows the live count; aborting a turn leaves processes running.</li>
+              <li>Starting a new session or exiting haze terminates every registered process tree.</li>
+              <li>Background processes are unavailable inside fleet workers and never outlive haze itself.</li>
+            </ul>
+          </section>
+
+          <section id="ci">
+            <h2>Headless &amp; <span class="em">CI</span></h2>
+            <p><code class="cmd">haze -p</code> runs one non-interactive turn with the full toolset and exits with a meaningful code, which makes haze a building block for pipelines:</p>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>github actions example</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre>pr-review:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+      with: { fetch-depth: 0 }
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+    - run: npm i -g @denizokcu/haze
+    - name: Configure haze provider <span class="c"># keys live in settings.json, never env vars</span>
+      run: |
+        mkdir -p ~/.haze
+        cat &gt; ~/.haze/settings.json &lt;&lt;EOF
+        { "provider": "openrouter",
+          "model": "anthropic/claude-sonnet-4.6",
+          "providers": [ { "name": "openrouter",
+            "url": "https://openrouter.ai/api/v1",
+            "key": "${{ secrets.OPENROUTER_API_KEY }}",
+            "models": ["anthropic/claude-sonnet-4.6"] } ] }
+        EOF
+        chmod 600 ~/.haze/settings.json
+    - name: Review the PR diff
+      run: |
+        git diff origin/main...HEAD | \
+          haze -p "review this diff: bugs, test gaps, risks" \
+          --output json &gt; review.json</pre>
+            </div>
+            <p><code>--output json</code> emits one envelope for scripts; <code>--output stream-json</code> streams live NDJSON events first. Combine with <code>--resume &lt;id&gt;</code> to load a saved session's context without modifying it. See the <a href="commands.html#cli">terminal flags</a> for the full contract.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

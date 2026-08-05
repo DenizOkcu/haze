@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Command reference — haze docs</title>
+  <meta name="description" content="Every haze slash command and CLI flag: sessions, providers, models, skills, LSP, MCP, fleet, headless print mode, and JSON output.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="site-2.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link">Quickstart</a>
+        <a href="commands.html" class="head-link active">Commands</a>
+        <a href="tools.html" class="head-link">Tools</a>
+        <a href="skills.html" class="head-link">Skills</a>
+        <a href="workflows.html" class="head-link">Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v0.10.0</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Reference</div>
+        <h1 class="doc-h1">Command <span class="em">reference.</span></h1>
+        <p class="doc-lede">Slash commands inside haze, plus the terminal flags for interactive and headless runs. Type <code class="cmd">/</code> in the chat to discover commands and installed skills; <strong>Tab</strong> completes.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#session">Agent &amp; session</a>
+              <a href="#config">Configuration</a>
+              <a href="#skills">Skills</a>
+              <a href="#cli">Terminal flags</a>
+              <a href="#print">Headless &amp; CI</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="quickstart.html">Quickstart</a>
+            <a href="tools.html">Tool reference</a>
+            <a href="skills.html">Skills guide</a>
+            <a href="workflows.html">Workflows</a>
+          </div>
+        </aside>
+
+        <div class="doc-main">
+          <section id="session">
+            <h2>Agent &amp; <span class="em">session</span></h2>
+            <table class="cmd-table" aria-label="Agent and session commands">
+              <tbody>
+                <tr><td class="cmd-c"><code>/help</code></td><td class="cmd-d">Show all slash commands.</td></tr>
+                <tr><td class="cmd-c"><code>/exit</code>, <code>/quit</code></td><td class="cmd-d">Exit haze. Registered background processes stop.</td></tr>
+                <tr><td class="cmd-c"><code>/clear</code></td><td class="cmd-d">Clear conversation history and the task list.</td></tr>
+                <tr><td class="cmd-c"><code>/new</code></td><td class="cmd-d">Start a fresh durable session for this workspace.</td></tr>
+                <tr><td class="cmd-c"><code>/resume [id]</code></td><td class="cmd-d">Browse this workspace's sessions and continue one or fork a copy. Pass an exact id to resume it directly.</td></tr>
+                <tr><td class="cmd-c"><code>/session</code></td><td class="cmd-d">Show the current durable session file.</td></tr>
+                <tr><td class="cmd-c"><code>/compact [instructions]</code></td><td class="cmd-d">Keep recent messages and condense older context into a size-limited excerpt, newest first. The result says what was omitted.</td></tr>
+                <tr><td class="cmd-c"><code>/init</code></td><td class="cmd-d">Create or update compact, budget-aware <code>AGENTS.md</code> project instructions.</td></tr>
+                <tr><td class="cmd-c"><code>/context</code></td><td class="cmd-d">Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.</td></tr>
+                <tr><td class="cmd-c"><code>/tips</code></td><td class="cmd-d">Toggle rotating keyboard and workflow tips beneath the busy label.</td></tr>
+                <tr><td class="cmd-c"><code>/fleet [--review] [--profile name] [--workers provider:model] [--concurrency n] &lt;prompt&gt;</code></td><td class="cmd-d">Split independent work across disposable, context-isolated workers. The profile controls concurrency and deadlines; each run has a tool limit and file changes are serialized across retries. Options apply to one run; haze declines work that cannot run in parallel.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="config">
+            <h2>Confi<span class="em">guration</span></h2>
+            <table class="cmd-table" aria-label="Configuration commands">
+              <tbody>
+                <tr><td class="cmd-c"><code>/provider</code></td><td class="cmd-d">Choose or add a provider. Manage its models, set the API key, toggle image input, or remove the provider.</td></tr>
+                <tr><td class="cmd-c"><code>/model</code></td><td class="cmd-d">Choose a configured model, or fetch a provider's model list from its OpenAI-compatible <code>/models</code> endpoint.</td></tr>
+                <tr><td class="cmd-c"><code>/model &lt;name-or-provider:name&gt;</code></td><td class="cmd-d">Set a model directly; also sets its provider.</td></tr>
+                <tr><td class="cmd-c"><code>/model list</code></td><td class="cmd-d">List all configured models.</td></tr>
+                <tr><td class="cmd-c"><code>/settings</code></td><td class="cmd-d">Show provider, model, API key and image-capability status, LSP/MCP servers, skills, and loaded context files.</td></tr>
+                <tr><td class="cmd-c"><code>/settings open</code></td><td class="cmd-d">Open <code>~/.haze/settings.json</code> with the OS default app.</td></tr>
+                <tr><td class="cmd-c"><code>/logs [id]</code></td><td class="cmd-d">List recent LLM logs, or summarize one by id. Detailed logs exist only when haze started with <code>--debug</code>.</td></tr>
+                <tr><td class="cmd-c"><code>/lsp</code></td><td class="cmd-d">Configure language-server navigation: add a preset (<code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, <code>php</code>) or a custom command, then enable/disable/remove. LSP tools appear only when an enabled server command is on <code>PATH</code>.</td></tr>
+                <tr><td class="cmd-c"><code>/mcp</code></td><td class="cmd-d">Configure Model Context Protocol servers. Add a preset (Context7) or custom <code>http</code>/<code>sse</code>/<code>stdio</code> server, enable/disable/remove it, or set a masked API key. MCP tools never shadow built-ins.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="skills">
+            <h2><span class="em">Skills</span></h2>
+            <table class="cmd-table" aria-label="Skill commands">
+              <tbody>
+                <tr><td class="cmd-c"><code>/skills</code></td><td class="cmd-d">Create and manage global or project Markdown skills. The picker shows each skill's source and lets you enable, disable, validate, or remove it.</td></tr>
+                <tr><td class="cmd-c"><code>/&lt;skill-name&gt;</code></td><td class="cmd-d">Invoke any installed skill directly, such as <code>/code-review</code>. The model can also load skills on its own when they match a request.</td></tr>
+              </tbody>
+            </table>
+            <div class="callout"><strong>No task command.</strong> The model maintains its own task list with the <code>writeTasks</code> tool; track it in the status area while substantial work runs.</div>
+          </section>
+
+          <section id="cli">
+            <h2>Terminal <span class="em">flags</span></h2>
+            <table class="cmd-table" aria-label="CLI flags">
+              <tbody>
+                <tr class="cmd-cat"><td colspan="2">Run <code>haze --help</code> for the authoritative list</td></tr>
+                <tr><td class="cmd-c"><code>haze</code></td><td class="cmd-d">Open the interactive chat in the current directory.</td></tr>
+                <tr><td class="cmd-c"><code>haze -p, --prompt &lt;text&gt;</code></td><td class="cmd-d">Run one non-interactive turn with the full toolset, print the final reply, and exit. Complete turns exit 0; aborted or failed turns exit non-zero. Pipe stdin for longer prompts: <code>echo "…" | haze -p</code>. Print mode does not save sessions.</td></tr>
+                <tr><td class="cmd-c"><code>haze --output &lt;text|json|stream-json&gt;</code></td><td class="cmd-d">Choose the print-mode output. <code>json</code> writes one <code>{ type, status, result, usage }</code> envelope for scripts and CI. <code>stream-json</code> writes live NDJSON events followed by the same envelope. The final status determines the exit code.</td></tr>
+                <tr><td class="cmd-c"><code>haze -m, --model &lt;selector&gt;</code></td><td class="cmd-d">Override the model for this run without changing settings. Use a model <code>name</code> or <code>provider:model</code> selector for a model added through <code>/provider</code>; unknown selectors exit non-zero with a precise error.</td></tr>
+                <tr><td class="cmd-c"><code>haze -c, --continue</code></td><td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td></tr>
+                <tr><td class="cmd-c"><code>haze --resume &lt;id&gt;</code></td><td class="cmd-d">Resume an exact workspace session. Combine with <code>-p</code> to load its context for one non-durable turn. Unknown ids exit non-zero.</td></tr>
+                <tr><td class="cmd-c"><code>haze --no-session</code></td><td class="cmd-d">Run without saving or resuming a durable session.</td></tr>
+                <tr><td class="cmd-c"><code>haze --debug</code></td><td class="cmd-d">Show model/tool debug logs and write a detailed JSONL log to <code>~/.haze/logs/</code> (interactive and print mode).</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="print">
+            <h2>Headless &amp; <span class="em">CI</span></h2>
+            <div class="codeblock">
+              <div class="codeblock-head"><span class="cb-left"><span class="dot-accent"></span>shell · one-shot runs</span><button class="codeblock-copy" type="button">Copy</button></div>
+              <pre><span class="c"># answer from the current repo, JSON envelope for scripts</span>
+haze -p "which function parses the budget file?" --output json
+
+<span class="c"># pipe context in and stream events for a wrapper</span>
+git diff | haze -p "review this diff for bugs" --output stream-json
+
+<span class="c"># reuse a saved session's context without modifying it</span>
+haze --resume 2f9c41d8 -p "summarize where we stopped" --output text</pre>
+            </div>
+            <p>Exit codes are contract: <code>0</code> for complete turns, non-zero for aborted or failed runs — safe to use in CI gates and Git hooks.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>
