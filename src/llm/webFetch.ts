@@ -158,21 +158,15 @@ function decodeValidUtf8Prefix(buffer: Buffer): string {
   return '';
 }
 
-function truncateUtf8Bytes(text: string, maxBytes: number) {
-  const buffer = Buffer.from(text, 'utf8');
-  if (buffer.byteLength <= maxBytes) return {text, bytes: buffer.byteLength, truncated: false};
-  return {text: decodeValidUtf8Prefix(buffer.subarray(0, maxBytes)), bytes: maxBytes, truncated: true};
-}
-
 async function readBodyCapped(
   response: Response,
   maxBytes: number,
   abortController: AbortController,
 ): Promise<{text: string; bytes: number; truncated: boolean}> {
   const body = response.body;
-  if (body == null || typeof (body as {getReader?: unknown}).getReader !== 'function') {
-    // No streamable body; read as text once and cap.
-    return truncateUtf8Bytes(await response.text(), maxBytes);
+  if (body == null) return {text: '', bytes: 0, truncated: false};
+  if (typeof (body as {getReader?: unknown}).getReader !== 'function') {
+    throw new Error('Response body is not streamable; refusing unbounded read');
   }
 
   const reader = body.getReader();
@@ -250,8 +244,25 @@ function normalizeHeaders(input: HeadersInit | undefined): Record<string, string
   return {...(input as Record<string, string>)};
 }
 
+function normalizeResponseHeaders(input: Record<string, string | string[] | undefined>): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    // Cookie fidelity is out of scope for this read-only transport; all array
+    // headers are represented deterministically as comma-separated values.
+    headers[key] = Array.isArray(value) ? value.join(', ') : value;
+  }
+  return headers;
+}
+
 export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: RequestInit): Promise<Response> {
-  if (!pinnedIp) return globalThis.fetch(url, init);
+  const method = (init.method ?? 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    throw new Error('Pinned fetch supports only GET and HEAD requests');
+  }
+  if (init.body != null) throw new Error('Pinned fetch does not support request bodies');
+  if (url.username || url.password) throw new Error('Pinned fetch does not support URL credentials');
+  if (!pinnedIp) return globalThis.fetch(url, {...init, method});
 
   const isTls = url.protocol === 'https:';
   const port = url.port ? Number(url.port) : (isTls ? 443 : 80);
@@ -265,7 +276,7 @@ export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: 
   return new Promise<Response>((resolve, reject) => {
     const req = lib.request(
       {
-        method: init.method ?? 'GET',
+        method,
         hostname: pinnedIp,
         port,
         path,
@@ -278,7 +289,7 @@ export async function pinnedFetch(url: URL, pinnedIp: string | undefined, init: 
         resolve(new Response(body, {
           status: res.statusCode ?? 200,
           statusText: res.statusMessage ?? '',
-          headers: res.headers as Record<string, string>,
+          headers: normalizeResponseHeaders(res.headers),
         }));
       },
     );
@@ -310,28 +321,23 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
   // lookup in between (that gap was the rebinding window).
   let currentPinnedIp: string | undefined = initial.resolvedAddresses?.[0];
   let response: Response | undefined;
+  let responseAbortController: AbortController | undefined;
   const visited: string[] = [];
+  const totalTimeoutSignal = AbortSignal.timeout(timeoutMs * 2);
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
     const abortController = new AbortController();
-    const onAbort = () => abortController.abort();
-    if (opts?.signal) {
-      if (opts.signal.aborted) abortController.abort();
-      else opts.signal.addEventListener('abort', onAbort, {once: true});
-    }
-    const combined = AbortSignal.any([timeoutSignal, abortController.signal]);
+    const signals = [totalTimeoutSignal, timeoutSignal, abortController.signal];
+    if (opts?.signal) signals.push(opts.signal);
+    const combined = AbortSignal.any(signals);
 
-    try {
-      response = await fetcher(currentUrl, currentPinnedIp, {
-        redirect: 'manual',
-        signal: combined,
-        headers: {accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.5,*/*;q=0.1', 'user-agent': userAgent()},
-      });
-    } finally {
-      // Listener cleanup only; fetch errors propagate unchanged (CR-017).
-      if (opts?.signal) opts.signal.removeEventListener('abort', onAbort);
-    }
+    response = await fetcher(currentUrl, currentPinnedIp, {
+      redirect: 'manual',
+      signal: combined,
+      headers: {accept: 'text/html,application/xhtml+xml,application/json,text/plain;q=0.5,*/*;q=0.1', 'user-agent': userAgent()},
+    });
+    responseAbortController = abortController;
 
     // Follow redirects ourselves, re-validating each Location (closes the
     // redirect-to-internal-IP hole).
@@ -339,6 +345,7 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
     if (status >= 300 && status < 400) {
       const location = response.headers.get('location');
       if (!location) break;
+      await response.body?.cancel().catch(() => undefined);
       if (hop >= maxRedirects) {
         throw new Error(`Too many redirects (>${maxRedirects}) fetching ${input}`);
       }
@@ -371,18 +378,7 @@ export async function fetchUrlContent(input: string, opts?: FetchOptions): Promi
   // here would only reopen a rebinding race against a connection that already
   // used a safe, pinned IP.
 
-  const abortController = new AbortController();
-  const onAbort = () => abortController.abort();
-  if (opts?.signal) {
-    if (opts.signal.aborted) abortController.abort();
-    else opts.signal.addEventListener('abort', onAbort, {once: true});
-  }
-  let bodyResult: {text: string; bytes: number; truncated: boolean};
-  try {
-    bodyResult = await readBodyCapped(response, maxBytes, abortController);
-  } finally {
-    if (opts?.signal) opts.signal.removeEventListener('abort', onAbort);
-  }
+  const bodyResult = await readBodyCapped(response, maxBytes, responseAbortController ?? new AbortController());
 
   const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
   const kind = classifyContentType(contentType);

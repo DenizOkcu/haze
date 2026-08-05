@@ -109,12 +109,25 @@ describe('webFetch fetchUrlContent', () => {
     expect(result.bytes).toBeLessThanOrEqual(5000);
   }, 10_000);
 
-  it('caps non-streaming bodies by bytes, not UTF-16 characters', async () => {
+  it('caps streaming bodies by bytes without splitting UTF-8 characters', async () => {
     globalThis.fetch = vi.fn(async () => textResponse('é'.repeat(10))) as typeof globalThis.fetch;
     const result = await fetchUrlContent('https://93.184.216.34/unicode', {maxBytes: 5});
     expect(result.truncated).toBe(true);
     expect(result.bytes).toBe(5);
     expect(Buffer.byteLength(result.content, 'utf8')).toBeLessThanOrEqual(5);
+  });
+
+  it('refuses a non-streamable response body instead of buffering it unbounded', async () => {
+    const response = {
+      body: {},
+      headers: new Headers({'content-type': 'text/plain'}),
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    } as unknown as Response;
+    const fetcher = vi.fn(async () => response);
+    await expect(fetchUrlContent('https://93.184.216.34/non-streamable', {fetcher}))
+      .rejects.toThrow('Response body is not streamable; refusing unbounded read');
   });
 
   it('follows redirects and re-validates the target', async () => {
@@ -132,6 +145,41 @@ describe('webFetch fetchUrlContent', () => {
     expect(result.content).toBe('arrived');
     expect(result.url).toBe('https://93.184.216.34/dest');
     expect(calls).toBe(2);
+  });
+
+  it('cancels a redirect body before following the next hop', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({cancel});
+    let calls = 0;
+    const fetcher = vi.fn(async () => {
+      calls++;
+      return calls === 1
+        ? new Response(body, {status: 302, headers: {location: 'https://93.184.216.34/dest'}})
+        : textResponse('arrived');
+    });
+    await fetchUrlContent('https://93.184.216.34/start', {fetcher});
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('enforces one total deadline across redirect hops', async () => {
+    let hop = 0;
+    const fetcher = vi.fn(async (_url: URL, _pinnedIp: string | undefined, init: RequestInit) => {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 50);
+        init.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new DOMException('aborted', 'AbortError'));
+        }, {once: true});
+      });
+      hop++;
+      return new Response(null, {
+        status: 302,
+        headers: {location: `https://93.184.216.34/hop-${hop}`},
+      });
+    });
+    await expect(fetchUrlContent('https://93.184.216.34/start', {fetcher, timeoutMs: 60}))
+      .rejects.toMatchObject({name: 'AbortError'});
+    expect(fetcher.mock.calls.length).toBeGreaterThan(1);
   });
 
   it('blocks a redirect to a metadata address', async () => {
@@ -249,7 +297,10 @@ describe('webFetch pinnedFetch transport', () => {
     server = http.createServer((req, res) => {
       receivedHost = req.headers.host;
       receivedPath = req.url;
-      res.writeHead(200, {'content-type': 'text/plain'});
+      res.writeHead(200, {
+        'content-type': 'text/plain',
+        'set-cookie': ['first=1', 'second=2'],
+      });
       res.end('reached-pinned-server');
     });
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -269,11 +320,23 @@ describe('webFetch pinnedFetch transport', () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain');
+    expect(res.headers.get('set-cookie')).toBe('first=1, second=2');
     expect(await res.text()).toBe('reached-pinned-server');
     // The server received the original hostname in the Host header and the
     // original path — proving the request line was not rewritten to the IP.
     expect(receivedHost).toBe(`example.invalid:${port}`);
     expect(receivedPath).toBe('/docs?q=1');
+  });
+
+  it('rejects non-GET/HEAD requests and request bodies', async () => {
+    const url = new URL(`http://example.invalid:${port}/submit`);
+    await expect(pinnedFetch(url, '127.0.0.1', {method: 'POST'})).rejects.toThrow('GET and HEAD');
+    await expect(pinnedFetch(url, '127.0.0.1', {body: 'payload'})).rejects.toThrow('request bodies');
+  });
+
+  it('rejects URL credentials rather than dropping them', async () => {
+    const url = new URL(`http://user:pass@example.invalid:${port}/private`);
+    await expect(pinnedFetch(url, '127.0.0.1', {})).rejects.toThrow('URL credentials');
   });
 
   it('falls back to global fetch when no pinned IP is given', async () => {

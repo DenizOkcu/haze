@@ -47,7 +47,7 @@ When adding/removing/changing a tool or result shape:
 Current reliability contracts:
 
 - LSP stdio protocol errors must reject pending requests and isolate the failed server; malformed server output must not crash the CLI. Frame/header/aggregate-buffer sizes are capped (`core/limits`); overflow terminates the client and rejects pending requests without heap growth. On POSIX, LSP servers run detached in their own process group. Close and protocol-failure teardown reuse `core/process` tree signaling, send `SIGTERM`, escalate to `SIGKILL` after 500 ms, destroy owned stdio, and run at most once. Opened documents and returned locations are real-path-confined to the workspace; outside-workspace locations are omitted or labeled `external`.
-- Fetch byte limits are byte limits, including for UTF-8/multibyte content and both streaming and non-streaming bodies.
+- Fetch byte limits are byte limits, including for UTF-8/multibyte content. Response bodies must be streamable; refuse transports that would require an unbounded fallback read.
 - Bash and grep run through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, and omitted bytes are reported.
 - MCP discovery has per-server deadlines, runs with bounded concurrency, accepts the turn abort signal, closes partial/late clients, and bounds cleanup. One hanging server never blocks a turn.
 
