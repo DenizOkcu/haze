@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
-import {createToolGroupRenderer} from '../../../../src/cli/commands/streaming/toolGroupRenderer.js';
+import {createToolGroupRenderer, toolDiffFromResult} from '../../../../src/cli/commands/streaming/toolGroupRenderer.js';
 import type {NativeToolCall} from '../../../../src/cli/commands/streaming/toolGroupRenderer.js';
 
 function fakeDeps() {
@@ -117,6 +117,34 @@ describe('createToolGroupRenderer', () => {
     expect(lastText).toContain('✓');
     expect(lastText).toContain('readFile');
     expect(lastText).toContain('12 lines');
+  });
+
+  it('carries structured edit diffs alongside the compact tool summary', () => {
+    const deps = fakeDeps();
+    const r = createToolGroupRenderer(deps);
+    const toolCall = call('edit-1', 'editFile', {path: 'src/a.ts'});
+    const item = r.ensureToolItem(toolCall);
+    item.status = 'success';
+    item.diff = toolDiffFromResult(toolCall, {
+      ok: true,
+      path: 'src/a.ts',
+      addedLines: 1,
+      removedLines: 1,
+      diff: [
+        {type: 'remove', oldLine: 4, text: 'const oldValue = 1;'},
+        {type: 'add', newLine: 4, text: 'const newValue = 2;'},
+      ],
+    });
+    r.updateToolGroup(true);
+
+    const update = deps.updates.at(-1)?.update as {toolDiffs?: Array<{path: string; lines: unknown[]}>} | undefined;
+    expect(update?.toolDiffs).toEqual([expect.objectContaining({path: 'src/a.ts'})]);
+    expect(update?.toolDiffs?.[0]?.lines).toHaveLength(2);
+  });
+
+  it('rejects malformed or non-edit diff results', () => {
+    expect(toolDiffFromResult(call('read-1', 'readFile', {path: 'a.ts'}), {ok: true, diff: []})).toBeUndefined();
+    expect(toolDiffFromResult(call('edit-1', 'editFile', {path: 'a.ts'}), {ok: true, diff: [{type: 'add', text: 42}]})).toBeUndefined();
   });
 
   it('renders AGENTS.md and CLAUDE.md reads inside the active tool group without a result suffix', () => {

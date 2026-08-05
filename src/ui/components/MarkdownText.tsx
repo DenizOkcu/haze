@@ -1,19 +1,38 @@
 import React from 'react';
 import {Box, Text} from 'ink';
 import {marked, type Tokens} from 'marked';
-import {highlight} from 'cli-highlight';
 import stripAnsi from 'strip-ansi';
 import {theme} from '../theme.js';
+import {highlightedCodeLine} from '../codeHighlight.js';
 
 export const MarkdownText = React.memo(function MarkdownText({content, width}: {content: string; width: number}) {
   const tokens = marked.lexer(content, {gfm: true, breaks: true});
   const contentWidth = Math.max(20, width - 2);
   return <Box flexDirection="column">
-    {tokens.map((token, index) => <MarkdownBlock key={index} token={token} width={contentWidth} />)}
+    {tokens.map((token, index) => {
+      const codeLead = token.type === 'paragraph' || token.type === 'text' ? codeLeadForFollowingFence(tokens, index) : undefined;
+      if (token.type === 'space' && bridgesCodeLeadToFence(tokens, index)) return null;
+      return <MarkdownBlock
+        key={index}
+        token={token}
+        width={contentWidth}
+        source={token.type === 'code' ? precedingCodeSource(tokens, index) : undefined}
+        textOverride={codeLead?.text}
+        compactAfter={codeLead != null}
+      />;
+    })}
   </Box>;
 });
 
-function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
+type CodeSource = {path: string; startLine: number};
+
+function MarkdownBlock({token, width, source, textOverride, compactAfter}: {
+  token: Tokens.Generic;
+  width: number;
+  source?: CodeSource;
+  textOverride?: string;
+  compactAfter?: boolean;
+}) {
   switch (token.type) {
     case 'heading': {
       const heading = token as Tokens.Heading;
@@ -21,11 +40,11 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     }
     case 'paragraph': {
       const paragraph = token as Tokens.Paragraph;
-      return <Box marginBottom={1}><InlineMarkdown text={paragraph.text} /></Box>;
+      return <Box marginBottom={compactAfter ? 0 : 1}><InlineMarkdown text={textOverride ?? paragraph.text} /></Box>;
     }
     case 'text': {
       const text = token as Tokens.Text;
-      return <InlineMarkdown text={text.text} />;
+      return <InlineMarkdown text={textOverride ?? text.text} />;
     }
     case 'space':
       return <Text> </Text>;
@@ -47,7 +66,8 @@ function MarkdownBlock({token, width}: {token: Tokens.Generic; width: number}) {
     }
     case 'code': {
       const code = token as Tokens.Code;
-      return <CodeBlock code={code.text} language={code.lang} width={width} />;
+      const fence = parseCodeFenceInfo(code.lang);
+      return <CodeBlock code={code.text} language={fence.language} source={fence.source ?? source} width={width} />;
     }
     case 'table': {
       const table = token as Tokens.Table;
@@ -145,19 +165,71 @@ function TableLine({line}: {line: string}) {
   </Text>;
 }
 
-function CodeBlock({code, language, width}: {code: string; language?: string; width: number}) {
-  let rendered: string;
-  try {
-    rendered = highlight(code, {language: language || undefined, ignoreIllegals: true});
-  } catch {
-    rendered = code;
-  }
-
-  const lines = rendered.replace(/\n$/, '').split('\n');
-  return <Box flexDirection="column" marginY={1}>
-    {language ? <Text color={theme.muted} backgroundColor={theme.surfaceBg}>{padAnsi(language, width)}</Text> : null}
-    {lines.map((line, index) => <Text key={index} backgroundColor={theme.surfaceBg}>{padAnsi(line || ' ', width)}</Text>)}
+function CodeBlock({code, language, source, width}: {code: string; language?: string; source?: CodeSource; width: number}) {
+  const lines = code.replace(/\n$/, '').split('\n');
+  const firstLine = source?.startLine ?? 1;
+  const showLineNumbers = source != null || lines.length > 1;
+  const lineNumberWidth = String(firstLine + lines.length - 1).length;
+  const header = source ? `${source.path}:${source.startLine}${language ? ` · ${language}` : ''}` : language;
+  return <Box flexDirection="column" marginTop={source ? 0 : 1} marginBottom={1}>
+    {header ? <Text color={source ? theme.command : theme.muted} backgroundColor={theme.codeBg}>{padAnsi(header, width)}</Text> : null}
+    {lines.map((line, index) => {
+      const lineNumber = firstLine + index;
+      const prefix = showLineNumbers ? `${String(lineNumber).padStart(lineNumberWidth)} │ ` : '';
+      const rendered = highlightedCodeLine(line, Math.max(1, width - prefix.length), language);
+      return <Text key={index} backgroundColor={theme.codeBg}>
+        {prefix ? <Text color={theme.muted} backgroundColor={theme.codeBg}>{prefix}</Text> : null}{rendered}
+      </Text>;
+    })}
   </Box>;
+}
+
+function parseCodeSource(value: string): CodeSource | undefined {
+  const match = /((?:[A-Za-z]:)?[^\s`()]+?\.[A-Za-z0-9]+):([1-9]\d*)(?:-[1-9]\d*)?[).,;:]?$/.exec(stripInline(value).trim());
+  if (!match) return undefined;
+  return {path: match[1], startLine: Number(match[2])};
+}
+
+function precedingCodeSource(tokens: readonly Tokens.Generic[], codeIndex: number): CodeSource | undefined {
+  for (let index = codeIndex - 1; index >= 0; index--) {
+    const token = tokens[index];
+    if (!token || token.type === 'space') continue;
+    if (token.type !== 'paragraph' && token.type !== 'text') return undefined;
+    return parseCodeSource((token as Tokens.Paragraph | Tokens.Text).text);
+  }
+  return undefined;
+}
+
+function codeLeadForFollowingFence(tokens: readonly Tokens.Generic[], leadIndex: number): {source: CodeSource; text: string} | undefined {
+  const token = tokens[leadIndex];
+  if (!token || (token.type !== 'paragraph' && token.type !== 'text')) return undefined;
+  const value = (token as Tokens.Paragraph | Tokens.Text).text;
+  const source = parseCodeSource(value);
+  if (!source) return undefined;
+  let nextIndex = leadIndex + 1;
+  while (tokens[nextIndex]?.type === 'space') nextIndex++;
+  if (tokens[nextIndex]?.type !== 'code') return undefined;
+  const pathIndex = value.lastIndexOf(source.path);
+  const text = value.slice(0, pathIndex).replace(/\s*(?:—|–|-)\s*`?\s*$/, '').trimEnd();
+  return {source, text};
+}
+
+function bridgesCodeLeadToFence(tokens: readonly Tokens.Generic[], spaceIndex: number): boolean {
+  let previousIndex = spaceIndex - 1;
+  while (tokens[previousIndex]?.type === 'space') previousIndex--;
+  let nextIndex = spaceIndex + 1;
+  while (tokens[nextIndex]?.type === 'space') nextIndex++;
+  return codeLeadForFollowingFence(tokens, previousIndex) != null && tokens[nextIndex]?.type === 'code';
+}
+
+function parseCodeFenceInfo(info?: string): {language?: string; source?: CodeSource} {
+  const parts = info?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const firstSource = parts.findIndex(part => parseCodeSource(part) != null);
+  if (firstSource === -1) return {language: parts[0]};
+  return {
+    language: firstSource === 0 ? undefined : parts[0],
+    source: parseCodeSource(parts[firstSource]),
+  };
 }
 
 function InlineMarkdown({text}: {text: string}) {
@@ -166,7 +238,7 @@ function InlineMarkdown({text}: {text: string}) {
 }
 
 function renderInlinePart(part: {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}, index: number | string) {
-  if (part.kind === 'code') return <Text key={index} color={theme.warning}>{part.text}</Text>;
+  if (part.kind === 'code') return <Text key={index} color={theme.warning} backgroundColor={theme.codeBg}>{part.text}</Text>;
   if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
   if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
   if (part.kind === 'link') return <Text key={index} color={theme.purple}>{part.text}</Text>;

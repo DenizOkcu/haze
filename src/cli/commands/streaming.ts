@@ -24,7 +24,7 @@ import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS,
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
-import {createToolGroupRenderer, type NativeToolCall} from './streaming/toolGroupRenderer.js';
+import {createToolGroupRenderer, toolDiffFromResult, type NativeToolCall, type ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
 import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
@@ -35,7 +35,7 @@ import {isMalformedToolInputError} from './streaming/toolCallRecovery.js';
 import {WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
-export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number; toolCount?: number};
+export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number; toolCount?: number; toolDiffs?: ToolDisplayDiff[]};
 
 export type TurnStatus = 'complete' | 'aborted' | 'failed';
 
@@ -382,6 +382,7 @@ async function runAgentAttempt(
           const item = toolDisplay.ensureToolItem(toolCall);
           item.status = ok ? 'success' : 'error';
           item.result = toolResultSummary(finish);
+          item.diff = toolDiffFromResult(toolCall, part.output);
           item.durationMs = finish.durationMs;
           item.finishedAt = startedAt + finish.durationMs;
           callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}));

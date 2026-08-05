@@ -38,6 +38,83 @@ describe('MarkdownText width reactivity', () => {
   });
 });
 
+describe('MarkdownText code rendering', () => {
+  it('renders single-backtick paths as inline code without showing the delimiters', () => {
+    const content = [
+      'New untracked documentation/configuration',
+      '',
+      '• `AGENTS.md` — repository guidance.',
+      '• `src/AGENTS.md` — state-update guidance.',
+    ].join('\n');
+
+    const {lastFrame} = render(<MarkdownText content={content} width={80} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('• AGENTS.md — repository guidance.');
+    expect(frame).toContain('• src/AGENTS.md — state-update guidance.');
+    expect(frame).not.toContain('`');
+  });
+
+  it('numbers multiline fenced code while keeping syntax content intact', () => {
+    const content = [
+      '```ts',
+      'export function add(a: number, b: number) {',
+      '  return a + b;',
+      '}',
+      '```',
+    ].join('\n');
+
+    const {lastFrame} = render(<MarkdownText content={content} width={60} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('1 │ export function add(a: number, b: number) {');
+    expect(frame).toContain('2 │   return a + b;');
+    expect(frame).toContain('3 │ }');
+  });
+
+  it('keeps a referenced filename with its code and preserves original file line numbers', () => {
+    const content = [
+      '**Centralized board mutations and activity events** — `src/App.tsx:105`',
+      '',
+      '```tsx',
+      'const applyMutation = (updater: (prev: Board) => MutatorResult) => {',
+      '  setBoard((prev) => {',
+      '    const [next, events] = updater(prev);',
+      '    if (events.length === 0) return next;',
+      '    return { ...next, activity: [...next.activity, ...events] };',
+      '  });',
+      '};',
+      '```',
+    ].join('\n');
+
+    const {lastFrame} = render(<MarkdownText content={content} width={80} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    const lines = frame.split('\n');
+    const sourceIndex = lines.findIndex(line => line.startsWith('src/App.tsx:105 · tsx'));
+    expect(sourceIndex).toBeGreaterThan(-1);
+    expect(lines[sourceIndex - 1]).toBe('Centralized board mutations and activity events');
+    expect(lines[sourceIndex + 1]).toContain('105 │ const applyMutation');
+    expect(frame).toContain('111 │ };');
+    expect(frame).not.toContain('1 │ const applyMutation');
+  });
+
+  it('leaves inline and single-line fenced code unnumbered', () => {
+    const content = ['Use `npm test`.', '', '```sh', 'npm test', '```'].join('\n');
+    const {lastFrame} = render(<MarkdownText content={content} width={40} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('Use npm test.');
+    expect(frame).toContain('npm test');
+    expect(frame).not.toContain('1 │');
+  });
+
+  it('clips long source rows instead of wrapping beneath the number gutter', () => {
+    const content = ['```ts', `const value = '${'x'.repeat(80)}';`, 'return value;', '```'].join('\n');
+    const {lastFrame} = render(<MarkdownText content={content} width={30} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    const firstSourceLine = frame.split('\n').find(line => line.includes('1 │'));
+    expect(firstSourceLine).toContain('…');
+    expect(firstSourceLine?.length).toBeLessThanOrEqual(28);
+  });
+});
+
 describe('MarkdownText list rendering', () => {
   it('renders fenced code blocks inside a list item as a real code block, not flattened inline text', () => {
     // Regression: the list case used item.text.replace(/\n/g, ' '), which

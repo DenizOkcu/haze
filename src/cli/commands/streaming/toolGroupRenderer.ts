@@ -11,12 +11,15 @@ import {toolCallSummary, compact, formatElapsedTimeWhole, formatSeconds} from '.
 
 export type NativeToolCall = {toolCallId: string; toolName: string; input: unknown};
 
-export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number; showResult?: boolean};
+export type ToolDisplayDiffLine = {type: 'add' | 'remove' | 'context'; oldLine?: number; newLine?: number; text: string};
+export type ToolDisplayDiff = {id: string; path: string; addedLines: number; removedLines: number; lines: ToolDisplayDiffLine[]};
+
+export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number; showResult?: boolean; diff?: ToolDisplayDiff};
 type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean; caption?: string};
 
 export interface ToolGroupRendererDeps {
-  addMessage: (msg: {id: string; role: 'tool'; text: string; streaming: boolean; toolCount: number}) => void;
-  updateMessage: (id: string, update: {text?: string; streaming?: boolean; toolCount?: number}) => void;
+  addMessage: (msg: {id: string; role: 'tool'; text: string; streaming: boolean; toolCount: number; toolDiffs?: ToolDisplayDiff[]}) => void;
+  updateMessage: (id: string, update: {text?: string; streaming?: boolean; toolCount?: number; toolDiffs?: ToolDisplayDiff[]}) => void;
   debugLog: (line: string) => void;
   onEvent?: AgentEventSink;
   log?: LlmLog;
@@ -45,6 +48,37 @@ function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
 
 const createToolGroup = (): ToolDisplayGroup => ({id: `tools-${Date.now()}-${Math.random().toString(36).slice(2)}`, items: [], started: false, finalized: false});
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value != null ? value as Record<string, unknown> : undefined;
+}
+
+/** Extract the bounded structured diff returned by editFile/replaceLines for rich terminal rendering. */
+export function toolDiffFromResult(toolCall: NativeToolCall, output: unknown): ToolDisplayDiff | undefined {
+  if (toolCall.toolName !== 'editFile' && toolCall.toolName !== 'replaceLines') return undefined;
+  const result = record(output);
+  if (!result || result.ok !== true || !Array.isArray(result.diff)) return undefined;
+  const lines = result.diff.flatMap((candidate): ToolDisplayDiffLine[] => {
+    const line = record(candidate);
+    if (!line || (line.type !== 'add' && line.type !== 'remove' && line.type !== 'context') || typeof line.text !== 'string') return [];
+    return [{
+      type: line.type,
+      ...(typeof line.oldLine === 'number' ? {oldLine: line.oldLine} : {}),
+      ...(typeof line.newLine === 'number' ? {newLine: line.newLine} : {}),
+      text: line.text,
+    }];
+  });
+  if (lines.length === 0) return undefined;
+  const input = record(toolCall.input);
+  const path = typeof result.path === 'string' ? result.path : typeof input?.path === 'string' ? input.path : 'edited file';
+  return {
+    id: toolCall.toolCallId,
+    path,
+    addedLines: typeof result.addedLines === 'number' ? result.addedLines : lines.filter(line => line.type === 'add').length,
+    removedLines: typeof result.removedLines === 'number' ? result.removedLines : lines.filter(line => line.type === 'remove').length,
+    lines,
+  };
+}
+
 export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupRenderer {
   let toolGroup = createToolGroup();
   let toolTimer: ReturnType<typeof setInterval> | undefined;
@@ -71,15 +105,16 @@ export function createToolGroupRenderer(deps: ToolGroupRendererDeps): ToolGroupR
 
   const updateToolGroup = (streaming = true, group: ToolDisplayGroup = toolGroup) => {
     const text = renderToolGroup(group);
-    // toolCount is carried structurally so metrics never depend on the rendered
-    // caption/row format (CR-015).
+    const toolDiffs = group.items.flatMap(item => item.diff ? [item.diff] : []);
+    // toolCount and diffs are carried structurally so metrics and rich code
+    // rendering never depend on parsing the compact caption/row format.
     if (!group.started) {
       group.started = true;
       group.finalized = !streaming;
-      deps.addMessage({id: group.id, role: 'tool', text, streaming, toolCount: group.items.length});
+      deps.addMessage({id: group.id, role: 'tool', text, streaming, toolCount: group.items.length, toolDiffs});
     } else {
       group.finalized = !streaming;
-      deps.updateMessage(group.id, {text, streaming, toolCount: group.items.length});
+      deps.updateMessage(group.id, {text, streaming, toolCount: group.items.length, toolDiffs});
     }
   };
 

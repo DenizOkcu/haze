@@ -2,10 +2,12 @@ import React from 'react';
 import {Box, Text} from 'ink';
 import Spinner from 'ink-spinner';
 import type {Message} from '../commands/streaming.js';
+import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../commands/formatters.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
+import {highlightedCodeLine, languageForPath} from '../../ui/codeHighlight.js';
 
 function fullWidthLines(text: string, width: number, leftPadding = 0) {
   const safeWidth = Math.max(1, width);
@@ -60,25 +62,42 @@ function SystemMessageText({text}: {text: string}) {
   </Text>;
 }
 
-function ToolMessageText({text, streaming}: {text: string; streaming?: boolean}) {
+function diffLineNumber(line: ToolDisplayDiffLine) {
+  return line.type === 'remove' ? line.oldLine : line.newLine ?? line.oldLine;
+}
+
+function ToolDiffView({diff, width}: {diff: ToolDisplayDiff; width: number}) {
+  const contentWidth = Math.max(1, width - 2);
+  const lineNumberWidth = Math.max(4, ...diff.lines.map(line => String(diffLineNumber(line) ?? '').length));
+  return <Box flexDirection="column" marginLeft={2} marginTop={1}>
+    <Text color={theme.muted}>⎿ <Text color={theme.command}>{diff.path}</Text> · Added {diff.addedLines} line{diff.addedLines === 1 ? '' : 's'}, removed {diff.removedLines} line{diff.removedLines === 1 ? '' : 's'}</Text>
+    {diff.lines.map((line, index) => {
+      const marker = line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' ';
+      const lineNumber = `${String(diffLineNumber(line) ?? '').padStart(lineNumberWidth)} `;
+      const markerPrefix = `${marker} `;
+      const prefixWidth = lineNumber.length + markerPrefix.length;
+      const code = highlightedCodeLine(line.text, Math.max(1, contentWidth - prefixWidth), languageForPath(diff.path));
+      if (line.type === 'context') {
+        return <Box key={`${diff.id}-${index}`} flexDirection="row">
+          <Text color={theme.muted}>{lineNumber}{markerPrefix}</Text><Text>{code}</Text>
+        </Box>;
+      }
+      const isAdd = line.type === 'add';
+      const backgroundColor = isAdd ? theme.successBg : theme.dangerBg;
+      return <Box key={`${diff.id}-${index}`} flexDirection="row">
+        <Text color={theme.muted}>{lineNumber}</Text>
+        <Text color={theme.foreground} backgroundColor={backgroundColor}>
+          <Text color={isAdd ? theme.success : theme.danger} backgroundColor={backgroundColor}>{markerPrefix}</Text>{code}
+        </Text>
+      </Box>;
+    })}
+  </Box>;
+}
+
+function ToolMessageText({text, streaming, width, toolDiffs}: {text: string; streaming?: boolean; width: number; toolDiffs?: ToolDisplayDiff[]}) {
   const lines = text.split('\n');
   return <Box flexDirection="column">
     {lines.map((line, index) => {
-      const diffRow = /^(\s*\d+\s+)([+-])(.*)$/.exec(line);
-      if (diffRow) {
-        const [, prefix, marker, rest] = diffRow;
-        const isAdd = marker === '+';
-        return <Text key={`${index}-${line}`} color={theme.foreground} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>
-          <Text color={isAdd ? theme.success : theme.danger} backgroundColor={isAdd ? theme.successBg : theme.dangerBg}>{prefix}{marker}</Text>{rest}
-        </Text>;
-      }
-      const contextRow = /^(\s*\d+\s+)\s(.*)$/.exec(line);
-      if (contextRow) {
-        const [, prefix, rest] = contextRow;
-        return <Text key={`${index}-${line}`} color={theme.foreground}>
-          <Text color={theme.muted}>{prefix} </Text>{rest}
-        </Text>;
-      }
       const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
       if (!row) {
         const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(line);
@@ -93,6 +112,7 @@ function ToolMessageText({text, streaming}: {text: string; streaming?: boolean})
         {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
       </Text>;
     })}
+    {toolDiffs?.map(diff => <ToolDiffView key={diff.id} diff={diff} width={width} />)}
   </Box>;
 }
 
@@ -123,7 +143,7 @@ export const MessageView = React.memo(function MessageView({message, width}: {me
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text>
     {message.role === 'tool'
-      ? <ToolMessageText text={message.text} streaming={message.streaming} />
+      ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} />
       : message.role === 'assistant' && !message.streaming
         // Only settled assistant messages get Markdown rendering. Streaming
         // text re-tokenizes on every delta (expensive) and the partial Markdown

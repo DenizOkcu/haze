@@ -12,4 +12,5 @@ export const theme = {
   /** Slash commands, paths, and active terminal work; matches --command in docs/index.html. */
   command: '#ffb86c',
   surfaceBg: '#1f1633',
+  codeBg: '#202124',
 };
