@@ -60,7 +60,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     return log;
   }
 
-  async function startNewSession(message = 'Started a new session.', mergeWithPreviousInfo = false) {
+  async function startNewSession(message = 'New session started.', mergeWithPreviousInfo = false) {
     await teardownBackgroundProcesses().catch(deps.showPersistenceWarning);
     await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
     clearToolOutputs();
@@ -75,7 +75,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     deps.sessionRef.current = session;
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
-    const status = `${message}\nSession saved: ${session.file}`;
+    const status = `${message}\nSession: ${session.file}`;
     deps.setMessages(messages => {
       const previous = messages.at(-1);
       if (mergeWithPreviousInfo && previous?.role === 'system') {
@@ -122,7 +122,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
           return;
         }
       }
-      await startNewSession(deps.continueSession ? 'No previous session found. Started a new session.' : 'Started a new session.', true);
+      await startNewSession(deps.continueSession ? 'No previous session found. New session started.' : 'New session started.', true);
     },
 
     startNewSession,

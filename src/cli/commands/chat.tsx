@@ -448,7 +448,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
         lastAssistantTextRef.current = '';
         setLiveMessagesState(() => []);
         setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
-        await sessionLifecycle.startNewSession('Started a new session.');
+        await sessionLifecycle.startNewSession('New session started.');
       },
       resumeSession: noSession ? undefined : async id => {
         if (id) await sessionLifecycle.resumeSessionById(id);
@@ -621,15 +621,17 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
   const headerSubtitle = (
     <Text>
-      {'A minimal LLM harness for growing your own workflows while you work.\n\nStart with simple chat, then teach haze your habits with skills:\n'}
+      {'A minimal coding agent for your terminal.\n\nStart with chat. Turn repeated work into Markdown skills:\n'}
       <Text color={theme.command}>/skills</Text>
-      {'  — add, enable/disable, validate, or remove Markdown skills.\n\nMention a path with '}
+      {'  — create, enable, disable, validate, or remove skills.\n\nType '}
+      <Text color={theme.command}>@</Text>
+      {' to browse workspace files. To grant read-only access to a file or directory outside the workspace for this turn, mention a path containing '}
       <Text color={theme.command}>/</Text>
-      {' (e.g. '}
-      <Text color={theme.command}>@path/to/file</Text>
-      {' or any '}
-      <Text color={theme.command}>/-containing path</Text>
-      {') to let the model read that file or directory this turn, even outside the working directory. Image mentions additionally require a vision-capable model.\n\nEdits and writes stay inside the workspace.\n\nThe most adaptive workflow is the one you shape as you go.\n\nGuardrails are light: haze lets the LLM work from the terminal almost like you,\nwhile trying to stay scoped to this project.\n\nUse '}
+      {' (for example, '}
+      <Text color={theme.command}>@../shared/file.ts</Text>
+      {' or '}
+      <Text color={theme.command}>/tmp/reference.md</Text>
+      {').\n\nImage mentions require a vision-capable model. File edits and writes stay inside the workspace.\n\nhaze runs tool calls without confirmation gates. Supervise consequential work as you would any shell session.\n\nShape haze around your workflow as you go.\n\nUse '}
       <Text color={theme.command}>/help</Text>
       {' for commands.'}
     </Text>

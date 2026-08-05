@@ -7,9 +7,9 @@ import type {ContextFile} from '../../config/contextFiles.js';
 export function startupContextInfo(contextFiles: ContextFile[]) {
   const lines = contextFiles.map(file => `- ${file.path}`);
   return [
-    'Context files sent with the system prompt together with the first request:',
+    'Context files included with the first request:',
     ...(lines.length > 0 ? lines : ['- none']),
-    'Nested AGENTS.md or CLAUDE.md files are sent along as well when haze works in those subfolders.',
+    'Nested AGENTS.md and CLAUDE.md files load when haze works in their subfolders.',
   ].join('\n');
 }
 
@@ -20,12 +20,12 @@ export function startupProviderInfo(settings: HazeSettings) {
   const enabledLsp = lspServers.filter(server => server.enabled !== false);
   const lspLine = enabledLsp.length > 0
     ? `- LSP: ${enabledLsp.length} configured (${enabledLsp.map(server => server.name).join(', ')}; tools appear only when the command is installed)`
-    : '- LSP: none configured (optional: install a language server, then /lsp presets and /lsp add typescript for semantic code navigation)';
+    : '- LSP: not configured (optional: use /lsp presets, then /lsp add typescript)';
   const mcpServers = configuredMcpServers(settings);
   const enabledMcp = mcpServers.filter(server => server.enabled !== false);
   const mcpLine = enabledMcp.length > 0
     ? `- MCP: ${enabledMcp.length} configured (${enabledMcp.map(server => server.name).join(', ')}; tools load each turn)`
-    : '- MCP: none configured (optional: /mcp add context7 for up-to-date library docs)';
+    : '- MCP: not configured (optional: use /mcp add context7 for current library docs)';
   if (!selection) {
     return [
       'Provider configuration',

@@ -115,7 +115,8 @@ export async function assembleRequestContext(input: {
 
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
   const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`);
-  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
+  const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
+  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {systemPrompt, availableTools, toolCategories, loadedMcp, executionScope};
 }

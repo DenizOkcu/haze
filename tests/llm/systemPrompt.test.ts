@@ -89,6 +89,23 @@ describe('buildSystemPrompt', () => {
     const files: ContextFile[] = [{path: 'AGENTS.md', content: 'stable body'}];
     expect(buildSystemPrompt(files, session)).toBe(buildSystemPrompt(files, session));
   });
+
+  it('omits the active model line when no model is provided', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).not.toContain('Active model:');
+  });
+
+  it('exposes the configured provider/model identifier when provided', () => {
+    const prompt = buildSystemPrompt([], undefined, {model: {provider: 'openai', name: 'gpt-5'}});
+    expect(prompt).toContain('Active model: openai/gpt-5');
+    // Surfaces after the cwd line so the long system-prompt prefix stays cacheable.
+    expect(prompt.indexOf('Current working directory:')).toBeLessThan(prompt.indexOf('Active model:'));
+  });
+
+  it('renders the identifier verbatim for slash-bearing models (e.g. openrouter)', () => {
+    const prompt = buildSystemPrompt([], undefined, {model: {provider: 'openrouter', name: 'anthropic/claude-3.5-sonnet'}});
+    expect(prompt).toContain('Active model: openrouter/anthropic/claude-3.5-sonnet');
+  });
 });
 
 describe('buildSubagentPrompt', () => {
