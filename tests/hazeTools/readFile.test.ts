@@ -45,6 +45,20 @@ describe('readFile tool', () => {
     expect(result.content).not.toContain('a');
   });
 
+  it('returns a structured range failure when offset is beyond EOF', async () => {
+    await fs.writeFile(path.join(tmp, 'test.txt'), 'a\nb\n');
+
+    const result = await readFile({path: 'test.txt', offset: 10});
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'invalid_line_range',
+      recoveryTool: 'readFile',
+      recoveryInput: {path: 'test.txt', offset: 3},
+    });
+    expect(result.suggestedNextStep).toContain('reported total line count');
+  });
+
   it('reads with limit', async () => {
     await fs.writeFile(path.join(tmp, 'test.txt'), 'a\nb\nc\nd\ne\n');
     const result = await readFile({path: 'test.txt', offset: 2, limit: 2});
@@ -127,6 +141,18 @@ describe('readFile tool', () => {
     expect(second).not.toHaveProperty('applicableProjectInstructions');
   });
 
+  it('rejects binary and directory reads with actionable reason codes', async () => {
+    await fs.writeFile(path.join(tmp, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
+    await fs.ensureDir(path.join(tmp, 'directory'));
+
+    const binary = await readFile({path: 'binary.dat'});
+    const directory = await readFile({path: 'directory'});
+
+    expect(binary).toMatchObject({ok: false, reasonCode: 'binary_file'});
+    expect(binary.suggestedNextStep).toContain('binary or image inspection tool');
+    expect(directory).toMatchObject({ok: false, reasonCode: 'not_a_file', recoveryTool: 'listFiles'});
+  });
+
   it('rejects symlinks that resolve outside the workspace', async () => {
     const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-outside-'));
     try {
@@ -136,16 +162,27 @@ describe('readFile tool', () => {
       const result = await readFile({path: 'link.txt'});
 
       expect(result.ok).toBe(false);
+      expect(result.reasonCode).toBe('outside_workspace');
       expect(result.error).toContain('outside the workspace');
     } finally {
       await fs.remove(outsideDir);
     }
   });
 
-  it('returns structured failure for nonexistent file', async () => {
-    const result = await readFile({path: 'nope.txt'});
-    expect(result.ok).toBe(false);
+  it('returns structured recovery details and nearby paths for a misspelled file', async () => {
+    await fs.outputFile(path.join(tmp, 'src/config.ts'), 'export const value = 1;');
+
+    const result = await readFile({path: 'src/confg.ts'});
+
+    expect(result).toMatchObject({
+      ok: false,
+      reasonCode: 'path_not_found',
+      recoverable: true,
+      recoveryTool: undefined,
+      suggestedPaths: ['src/config.ts'],
+    });
     expect(result.error).toBeTruthy();
+    expect(result.suggestedNextStep).toContain('do not guess another path');
   });
 });
 

@@ -16,7 +16,7 @@ import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
-import {isDuplicateSkippedOutput, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
+import {isDuplicateSkippedOutput, safeToolFailureDetails, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
 import {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
@@ -149,6 +149,7 @@ async function runAgentAttempt(
           : {type: 'subagent_state', id: event.id, state: 'settled', mode: event.mode, queueMs: event.queueMs, durationMs: event.durationMs, termination: event.termination, execution: 'settled', running: event.running}))});
     turnScope.executionScope ??= assembled.executionScope;
     const availableTools = assembled.availableTools;
+    const toolCategories = assembled.toolCategories;
     loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
 
@@ -285,12 +286,23 @@ async function runAgentAttempt(
         }
         return messagesChanged ? {messages: scopedMessages} : undefined;
       },
+      onStepStart({stepNumber}) {
+        callbacks.onEvent?.(agentEvent({type: 'step_start', attempt: retryAttempt + 1, step: stepNumber + 1}));
+      },
       onStepEnd({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
         completedSteps++;
         completedToolCalls += toolCalls.length;
         if (toolCalls.length > 0 && text.trim().length === 0) completedToolOnlySteps++;
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         const stepUsage = stepCacheMetrics(usage);
+        const publicUsage = {
+          inputTokens: stepUsage.inputTokens ?? 0,
+          outputTokens: usage?.outputTokens ?? 0,
+          cacheReadTokens: stepUsage.cacheReadTokens,
+          cacheWriteTokens: stepUsage.cacheWriteTokens,
+          reasoningTokens: stepUsage.reasoningTokens,
+        };
+        callbacks.onEvent?.(agentEvent({type: 'step_end', attempt: retryAttempt + 1, step: stepNumber + 1, finishReason, toolCallCount: toolCalls.length, usage: publicUsage}));
         logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
         callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
       },
@@ -385,7 +397,8 @@ async function runAgentAttempt(
           item.diff = toolDiffFromResult(toolCall, part.output);
           item.durationMs = finish.durationMs;
           item.finishedAt = startedAt + finish.durationMs;
-          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}));
+          const failureDetails = ok || toolCategories.get(toolCall.toolName) !== 'builtin' ? {} : safeToolFailureDetails(part.output);
+          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, ...failureDetails, durationMs: finish.durationMs}));
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}});
           toolResultState = applyToolResultState(toolResultState, {toolName: toolCall.toolName, input: toolCall.input, output: part.output, ok});
           observeGoalToolEvent(goal, {...toolCall, success: ok, output: part.output, duplicateSkipped: isDuplicateSkippedOutput(part.output)});
@@ -414,7 +427,8 @@ async function runAgentAttempt(
           item.result = toolResultSummary(finish);
           item.durationMs = finish.durationMs;
           item.finishedAt = startedAt + finish.durationMs;
-          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, error: part.error, durationMs: finish.durationMs}));
+          const publicError = toolCategories.get(toolCall.toolName) === 'builtin' ? {error: part.error} : {};
+          callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_execution_error', ...publicError, durationMs: finish.durationMs}));
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: false, error: part.error, durationMs: finish.durationMs}});
           if (isMutatingToolName(toolCall.toolName)) {
             toolResultState = {...toolResultState, editRecoveryPath: toolInputField(toolCall.input, 'path'), editRecoveryReadSatisfied: false};

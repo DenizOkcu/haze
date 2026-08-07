@@ -3,6 +3,11 @@ export type ToolFailureReasonCode =
   | 'old_text_not_unique'
   | 'overlapping_edits'
   | 'ignored_path'
+  | 'path_not_found'
+  | 'not_a_file'
+  | 'permission_denied'
+  | 'outside_workspace'
+  | 'binary_file'
   | 'existing_file_requires_overwrite'
   | 'write_chunk_too_large'
   | 'conflicting_write_modes'
@@ -55,6 +60,7 @@ export type StructuredToolFailure = {
   suggestedNextStep: string;
   recoveryTool?: string;
   recoveryInput?: unknown;
+  suggestedPaths?: string[];
 };
 
 export function isObject(value: unknown): value is Record<string, unknown> {

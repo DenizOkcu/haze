@@ -41,9 +41,10 @@ Print mode (-p):
   The prompt comes from -p, otherwise from piped stdin. Piped prompts over 256 KiB are rejected;
   pass a file path and ask haze to read it instead. With --output json the reply is wrapped in a
   single-line { type, status, result, usage } envelope. With --output stream-json haze streams
-  one NDJSON agent event per line (turn_start, message_*, tool_*, retry, turn_end) as the run
-  progresses, then prints that same { type:'result', ... } envelope as the final line — giving
-  harnesses live progress and stagnation detection. --model overrides the model for this
+  one NDJSON agent event per line (turn_start, step_*, message_*, tool_*, retry, turn_end) as the
+  run progresses, then prints that same { type:'result', ... } envelope as the final line — giving
+  harnesses live progress, per-step usage, bounded tool-failure diagnostics, and stagnation
+  detection without raw tool inputs or outputs. --model overrides the model for this
   run only (no settings change) and must already be registered under a provider (add it once via
   the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
   saved. --resume <id> loads saved context for the turn without changing that session. There is no

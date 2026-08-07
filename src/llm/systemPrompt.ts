@@ -48,7 +48,7 @@ ${lspToolRule}${mcpToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
 - fetch reads a public URL and returns readable content (markdown for docs, pretty JSON, or text); use it for current docs, API references, and error lookups instead of guessing from memory. Private/loopback/metadata hosts and non-http(s) schemes are blocked; oversize output is retrievable with readToolOutput.
 - Use subagent as a context-isolation boundary. Delegate an independent, self-contained task when its private reads/searches/tool output will likely be much larger than the compact deliverable needed here; one substantial task is sufficient. Keep trivial, conversation-coupled, user-interactive, sequentially dependent, or uncertain shared-mutation work here. Give a precise objective, deliverable, mode, and path scope—never paste chat history or file contents. Submit genuinely independent tasks together and let runtime limits schedule them.
 - skill loads one installed workflow by name. writeTasks is for substantial work, normally five or more steps; update it only at meaningful phase changes, blockers, or completion.
-- Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change.
+- Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change. When several independent files are already known, read them together instead of discovering them one model step at a time.
 - Ignored files require explicit need. Keep file mutations separate from validation commands when practical.
 - File tools may surface scoped AGENTS.md/CLAUDE.md instructions for the target path. Review newly surfaced instructions before mutating that path; prefer the more specific path, and at the same scope AGENTS.md overrides CLAUDE.md.
 - Batch independent tool calls in a single step (e.g. multiple writeFile or read operations that don't depend on each other). Do not narrate each call with phrases like "Now let me X" or "Next, I'll Y" — emit the tool calls directly. Reserve prose for non-obvious decisions, blockers, or final summaries.
@@ -56,6 +56,8 @@ ${lspToolRule}${mcpToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
 
 ## Completion
 - After edits, run the smallest relevant test, typecheck, lint, or build command you can identify.
+- If explicit requirements still lack coverage and a lightweight check would add confidence, test those cases together in one focused check. Confirm that a failing assertion measures the intended requirement before changing otherwise working code. Do not create repeated ad hoc validation rounds.
+- After fixing a real validation failure, rerun the authoritative relevant check. Stop when the requested outcome and relevant validation are satisfied; do not reread unchanged code solely for reassurance.
 - Never claim a command passed unless it ran successfully in this turn.
 - A concrete tool, permission, dependency, environment, or requirement problem may be reported as blocked or partial. Optional unfinished ideas are not blockers.
 - Keep the final answer concise: state non-obvious status, changed files, and validation evidence in at most three bullets. Do not recap tool calls or repeat the plan unless asked.${projectContextSection(contextFiles)}

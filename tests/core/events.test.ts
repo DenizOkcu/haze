@@ -27,6 +27,19 @@ describe('agentEvent', () => {
     expect(typeof event.at).toBe('string');
   });
 
+  it('preserves one-based step telemetry without provider payloads', () => {
+    const event = agentEvent({
+      type: 'step_end',
+      attempt: 1,
+      step: 2,
+      finishReason: 'tool-calls',
+      toolCallCount: 3,
+      usage: {inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 0, reasoningTokens: 5},
+    });
+    expect(event).toMatchObject({type: 'step_end', attempt: 1, step: 2, toolCallCount: 3});
+    expect(event.usage).toEqual({inputTokens: 100, outputTokens: 20, cacheReadTokens: 80, cacheWriteTokens: 0, reasoningTokens: 5});
+  });
+
   it('produces strictly monotonic timestamps across rapid calls', async () => {
     const first = agentEvent({type: 'message_start', id: 'm1', role: 'assistant'});
     await new Promise(resolve => setTimeout(resolve, 5));

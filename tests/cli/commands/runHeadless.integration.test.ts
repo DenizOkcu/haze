@@ -23,8 +23,11 @@ async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = 
   vi.doMock('../../../src/llm/requestContext.js', () => ({
     assembleRequestContext: async () => ({
       systemPrompt: 'You are haze.',
-      availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
-      toolCategories: new Map([['bash', 'builtin']]),
+      availableTools: {
+        bash: {description: 'bash', execute: async () => ({ok: true})},
+        readFile: {description: 'read', execute: async () => ({ok: true})},
+      },
+      toolCategories: new Map([['bash', 'builtin'], ['readFile', 'builtin']]),
     }),
   }));
   vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: async () => undefined}));
@@ -38,9 +41,21 @@ async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = 
         this.options = options;
       }
       stream() {
+        const onStepStart = this.options.onStepStart as ((event: Record<string, unknown>) => void | Promise<void>) | undefined;
+        const onStepEnd = this.options.onStepEnd as ((event: Record<string, unknown>) => void | Promise<void>) | undefined;
         return {
           stream: (async function* () {
+            await onStepStart?.({stepNumber: 0});
             for (const part of parts) yield part;
+            await onStepEnd?.({
+              stepNumber: 0,
+              text: '',
+              toolCalls: [],
+              toolResults: [],
+              finishReason: 'stop',
+              usage: {inputTokens: 10, outputTokens: 2, inputTokenDetails: {cacheReadTokens: 4}},
+              response: {messages: responseMessages},
+            });
           })(),
           response: Promise.resolve({messages: responseMessages}),
           responseMessages: responseError ? Promise.reject(responseError) : Promise.resolve(responseMessages),
@@ -137,14 +152,20 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     const code = await runHeadless({prompt: 'go', output: 'stream-json'});
     const lines = writes.join('').split('\n').filter(Boolean);
     // Every line is standalone valid JSON (true NDJSON — pipeable through `jq -c .`).
-    const parsed = lines.map((l) => JSON.parse(l) as {type: string; status?: string; usage?: Record<string, number>});
+    const parsed = lines.map((l) => JSON.parse(l) as {type: string; status?: string; result?: string; attempt?: number; step?: number; finishReason?: string; toolCallCount?: number; usage?: Record<string, number>});
     expect(parsed.length).toBeGreaterThan(2);
     expect(parsed[0]).toMatchObject({type: 'turn_start'});
     const types = parsed.map((p) => p.type);
+    expect(types).toContain('step_start');
+    expect(types).toContain('step_end');
     expect(types).toContain('tool_start');
     expect(types).toContain('tool_end');
     expect(types).toContain('turn_end');
     expect(types.filter((type) => type === 'turn_end')).toHaveLength(1);
+    const stepEvents = parsed.filter((p) => p.type === 'step_start' || p.type === 'step_end');
+    expect(stepEvents[0]).toMatchObject({type: 'step_start', attempt: 1, step: 1});
+    expect(stepEvents[1]).toMatchObject({type: 'step_end', attempt: 1, step: 1, finishReason: 'stop', toolCallCount: 0});
+    expect(stepEvents[1]?.usage).toEqual({inputTokens: 10, outputTokens: 2, cacheReadTokens: 4, cacheWriteTokens: 0, reasoningTokens: 0});
     const toolEvents = parsed.filter((p) => p.type === 'tool_start' || p.type === 'tool_end');
     expect(toolEvents.some((event) => 'input' in event || 'output' in event)).toBe(false);
     // The final line is the same envelope as --output json, so harnesses parse the last line identically.
@@ -158,6 +179,23 @@ describe('runHeadless integration (real runAgentTurn)', () => {
       ['cacheReadTokens', 'cacheWriteTokens', 'inputTokens', 'outputTokens', 'reasoningTokens'],
     );
     expect(code).toBe(0);
+  });
+
+  it('--output stream-json exposes bounded structured tool failure diagnostics without raw output', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunHeadless([
+      {type: 'tool-input-start', id: 't1', toolName: 'readFile'},
+      {type: 'tool-call', toolCallId: 't1', toolName: 'readFile', input: {path: 'missing.ts'}},
+      {type: 'tool-result', toolCallId: 't1', toolName: 'readFile', input: {path: 'missing.ts'}, output: {ok: false, toolName: 'readFile', recoverable: true, reasonCode: 'path_not_found', error: 'File not found'}},
+      {type: 'finish', finishReason: 'stop'},
+    ]);
+
+    await runHeadless({prompt: 'go', output: 'stream-json'});
+
+    const parsed = writes.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+    const toolEnd = parsed.find(event => event.type === 'tool_end');
+    expect(toolEnd).toMatchObject({type: 'tool_end', name: 'readFile', success: false, errorCode: 'path_not_found', error: 'File not found'});
+    expect(toolEnd).not.toHaveProperty('output');
   });
 
   it('--output stream-json still prints a final failed envelope when the turn fails', async () => {

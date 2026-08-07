@@ -25,7 +25,7 @@ export class HazeToolError extends Error {
  * `HazeToolError` reason/recovery hints when present and lets callers override
  * the reason code (e.g. fetch's `blocked_url`).
  */
-export function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown}) {
+export function structuredToolFailure(toolName: string, error: unknown, suggestedNextStep: string, pathForError?: string, options?: {reasonCode?: ToolFailureReasonCode; recoveryTool?: string; recoveryInput?: unknown; suggestedPaths?: string[]}) {
   const message = error instanceof Error ? error.message : String(error);
   const hazeError = error instanceof HazeToolError ? error : undefined;
   return {
@@ -38,5 +38,6 @@ export function structuredToolFailure(toolName: string, error: unknown, suggeste
     suggestedNextStep,
     recoveryTool: options?.recoveryTool ?? hazeError?.recoveryTool,
     recoveryInput: options?.recoveryInput ?? hazeError?.recoveryInput,
+    ...(options?.suggestedPaths?.length ? {suggestedPaths: options.suggestedPaths} : {}),
   };
 }

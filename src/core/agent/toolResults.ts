@@ -26,6 +26,42 @@ export function toolOutputOk(output: unknown, success: boolean): boolean {
   return success && !isFailedToolOutput(output);
 }
 
+export interface SafeToolFailureDetails {
+  errorCode?: string;
+  error?: string;
+}
+
+const MAX_PUBLIC_TOOL_ERROR_CHARS = 500;
+const SAFE_ERROR_CODE = /^[a-z0-9_-]{1,80}$/i;
+
+function boundedSingleLine(value: string): string {
+  const normalized = value.replace(/\p{Cc}+/gu, ' ').replace(/\s+/g, ' ').trim();
+  if (normalized.length <= MAX_PUBLIC_TOOL_ERROR_CHARS) return normalized;
+  return `${normalized.slice(0, MAX_PUBLIC_TOOL_ERROR_CHARS - 1)}…`;
+}
+
+/**
+ * Extract a bounded diagnostic from Haze's structured failure shape. Generic
+ * third-party tool outputs are intentionally ignored because their error fields
+ * may contain arbitrary remote content or secrets.
+ */
+export function safeToolFailureDetails(output: unknown): SafeToolFailureDetails {
+  if (typeof output !== 'object' || output == null) return {};
+  const value = output as Record<string, unknown>;
+  if (value.ok !== false) return {};
+  const structuredHazeFailure = typeof value.toolName === 'string' && typeof value.recoverable === 'boolean';
+  const reasonCode = typeof value.reasonCode === 'string' && SAFE_ERROR_CODE.test(value.reasonCode) ? value.reasonCode : undefined;
+  const errorCode = reasonCode
+    ?? (value.timedOut === true ? 'command_timed_out'
+      : typeof value.exitCode === 'number' && value.exitCode !== 0 ? 'nonzero_exit'
+        : typeof value.signal === 'string' ? 'process_signal'
+          : undefined);
+  // Only the dedicated Haze failure shape guarantees that `error` is a bounded
+  // local diagnostic. Bash stderr and third-party fields may contain secrets.
+  const error = structuredHazeFailure && typeof value.error === 'string' ? boundedSingleLine(value.error) : undefined;
+  return {...(errorCode ? {errorCode} : {}), ...(error ? {error} : {})};
+}
+
 /**
  * Read a string field from an `unknown` tool input object. Returns undefined
  * for non-objects, missing keys, or non-string values.

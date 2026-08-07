@@ -25,6 +25,7 @@ import {runRipgrepBounded} from './tools/grepRunner.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
+import {assertReadableTextFile, readFailureRecovery} from './tools/readRecovery.js';
 
 function mutationDiffFields(filePath: string, fullDiff: ToolDiffLine[]) {
   const preview = boundedDiff(fullDiff, INLINE_DIFF_LINE_LIMIT);
@@ -97,9 +98,13 @@ export const hazeTools = {
     execute: async ({path: filePath, offset, limit, mode, allowIgnored}, context) => runDedupedTool('readFile', {path: filePath, offset, limit, mode, allowIgnored}, context, async () => {
       try {
         const absolutePath = await prepareWorkspaceRead(filePath, allowIgnored, context);
+        await assertReadableTextFile(absolutePath, filePath);
         const start = offset == null ? 0 : offset - 1;
         const pageLimit = limit ?? DEFAULT_READ_LINES;
         const page = await readUtf8LinesPage(absolutePath, start + 1, pageLimit);
+        if (offset != null && offset > page.totalLines) {
+          throw new HazeToolError(`offset ${offset} is beyond end of file (${page.totalLines} lines)`, 'invalid_line_range', {recoveryTool: 'readFile', recoveryInput: {path: filePath, offset: Math.max(1, page.totalLines)}});
+        }
         const lines = page.lines;
         const totalLines = page.totalLines;
         const requestedEnd = Math.min(totalLines, start + pageLimit);
@@ -156,7 +161,8 @@ export const hazeTools = {
           ...(mode === 'outline' ? {outline: true, outlineEntries: includedLines, ...(outlineDroppedEntries > 0 ? {outlineDroppedEntries} : {}), warning: 'Outline mode is lossy discovery output. Use exact readFile around relevant lines before editing.'} : {}),
         }, scopedContext);
       } catch (error) {
-        return structuredToolFailure('readFile', error, 'Check the path with listFiles, or set allowIgnored=true only if the user explicitly asked to inspect an ignored file.', filePath);
+        const recovery = await readFailureRecovery(filePath, error);
+        return structuredToolFailure('readFile', error, recovery.suggestedNextStep, filePath, {reasonCode: recovery.reasonCode, suggestedPaths: recovery.suggestedPaths});
       }
     }),
   }),

@@ -32,11 +32,13 @@ export interface HeadlessUsage {
 type HeadlessStreamEvent =
   | {type: 'turn_start'; request: string; at: string}
   | {type: 'turn_end'; request: string; status: TurnStatus; at: string}
+  | {type: 'step_start'; attempt: number; step: number; at: string}
+  | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
   | {type: 'message_update'; id: string; text: string; at: string}
   | {type: 'message_end'; id: string; text: string; hidden?: boolean; at: string}
   | {type: 'tool_start'; id: string; name: string; at: string}
-  | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; error?: string; at: string}
+  | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; errorCode?: string; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
@@ -54,7 +56,9 @@ function pinnedUsage(usage: TokenUsage): HeadlessUsage {
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const value = error instanceof Error ? error.message : String(error);
+  const normalized = value.replace(/\p{Cc}+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return normalized.length <= 500 ? normalized : `${normalized.slice(0, 499)}…`;
 }
 
 function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefined {
@@ -63,6 +67,10 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'turn_start', request: event.request, at: event.at};
     case 'turn_end':
       return {type: 'turn_end', request: event.request, status: event.status, at: event.at};
+    case 'step_start':
+      return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
+    case 'step_end':
+      return {type: 'step_end', attempt: event.attempt, step: event.step, finishReason: event.finishReason, toolCallCount: event.toolCallCount, usage: event.usage, at: event.at};
     case 'message_start':
       return {type: 'message_start', id: event.id, role: event.role, at: event.at};
     case 'message_update':
@@ -73,7 +81,7 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       // Intentionally omit raw tool input: stdout is often persisted by harnesses/CI.
       return {type: 'tool_start', id: event.id, name: event.name, at: event.at};
     case 'tool_end':
-      return {type: 'tool_end', id: event.id, name: event.name, success: event.success, durationMs: event.durationMs, ...(event.error === undefined ? {} : {error: errorText(event.error)}), at: event.at};
+      return {type: 'tool_end', id: event.id, name: event.name, success: event.success, durationMs: event.durationMs, ...(event.errorCode === undefined ? {} : {errorCode: event.errorCode}), ...(event.error === undefined ? {} : {error: errorText(event.error)}), at: event.at};
     case 'retry':
       return {type: 'retry', attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, error: event.error, at: event.at};
     case 'context_overflow':
