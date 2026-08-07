@@ -1,4 +1,4 @@
-import {ToolLoopAgent, isStepCount, type ModelMessage} from 'ai';
+import {ToolLoopAgent, isStepCount, type ModelMessage, type ToolSet} from 'ai';
 import type {LlmLog} from '../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../core/log/llmLog.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
@@ -13,15 +13,20 @@ import {isContextOverflowError, isRetryableModelError} from '../../core/agent/er
 import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
-import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../core/goal/completionPolicy.js';
+import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, lengthContinuationPrompt, completionRescuePrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
 import {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
-import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
-import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../core/goal/sessionGoal.js';
+import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
+import {createTurnExecutionState, decideLengthRecovery, decideRescue, isBudgetExhausted, normalizeFinishReason, RESCUE_BOUNDARY, toCompletionEvidence, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
+export type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
+import {clampSlice, mainTurnBudget, remainingSteps, remainingToolCalls, type TurnBudget} from '../../core/agent/turnBudget.js';
+import {isMutatingCapability, isValidationCapable} from '../../core/agent/toolCapabilities.js';
+import {deriveValidationOutcome} from '../../core/agent/workState.js';
+import {createSessionGoal, formatGoalStatus, observeGoalToolEvent, type SessionGoal} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, toolDiffFromResult, type NativeToolCall, type ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
@@ -42,6 +47,8 @@ export type TurnStatus = 'complete' | 'aborted' | 'failed';
 /** Authoritative outcome of a turn, so callers (esp. headless/CI) need not sniff message text. */
 export interface TurnResult {
   status: TurnStatus;
+  /** Bounded, safe completion evidence (no raw commands/output). Additive. */
+  evidence?: TurnCompletionEvidence;
 }
 
 export interface TurnExecutionOptions {
@@ -51,6 +58,8 @@ export interface TurnExecutionOptions {
   attachments?: readonly ImageAttachment[];
   /** User-mentioned paths whose reads may escape workspace confinement this turn. */
   blessedPaths?: readonly BlessedPath[];
+  /** When set, this attempt is a bounded recovery slice (length-continuation or rescue). */
+  recoverySlice?: {kind: 'length' | 'rescue'; maxSteps: number; maxToolCalls: number};
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -67,6 +76,21 @@ function withScopedContextControl(messages: ModelMessage[], context: HazeToolCon
     messages,
     `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`,
   );
+}
+
+/**
+ * Restrict a tool set to the capabilities permitted in a completion-rescue
+ * slice: mutation (edit/write/replace) and validation-capable (bash) built-in
+ * tools only. Discovery, read, coordinate, and all third-party (MCP) tools are
+ * dropped so the rescue cannot reopen exploration. Returns the original set if
+ * nothing qualifies (caller then forces a tool-free synthesis).
+ */
+function restrictToRescueTools(tools: ToolSet): ToolSet {
+  const restricted: ToolSet = {};
+  for (const [name, tool] of Object.entries(tools)) {
+    if (isMutatingCapability(name) || isValidationCapable(name)) restricted[name] = tool;
+  }
+  return Object.keys(restricted).length > 0 ? restricted : tools;
 }
 
 export interface StreamCallbacks {
@@ -92,6 +116,8 @@ export interface StreamCallbacks {
 
 type AgentAttemptResult = TurnResult & {
   retry?: {attempt: number; contextOverflowRecovered: boolean; delayMs: number};
+  /** When set, run one bounded recovery slice next (length-continuation or rescue). */
+  recovery?: {kind: 'length' | 'rescue'; control: string; slice: {maxSteps: number; maxToolCalls: number}};
 };
 
 async function runAgentAttempt(
@@ -106,10 +132,14 @@ async function runAgentAttempt(
   abortController: AbortController,
   turnOptions: TurnExecutionOptions,
   turnScope: {executionScope?: TurnExecutionScope},
+  turnState: TurnExecutionState,
+  turnBudget: TurnBudget,
+  goal: SessionGoal,
 ): Promise<AgentAttemptResult> {
   let thinkingLabel = modelThinkingLabel(undefined);
   callbacks.setBusyLabel?.(thinkingLabel);
   let turnStatus: TurnStatus = 'failed';
+  let recovery: AgentAttemptResult['recovery'];
   let loadedMcp: LoadedMcpTools | undefined;
   // Tool calls currently executing. A concurrent subagent wave can run for many
   // minutes with no stream parts; that is activity, not a dead stream, so the
@@ -136,6 +166,9 @@ async function runAgentAttempt(
 
     thinkingLabel = modelThinkingLabel(runtime.config.modelName);
     callbacks.setBusyLabel?.(thinkingLabel);
+    // Observable requested-vs-effective reasoning policy (safe: level strings + reason only).
+    const reasoningPolicy = runtime.config.reasoningPolicy;
+    if (reasoningPolicy) callbacks.onEvent?.(agentEvent({type: 'reasoning_policy', requested: reasoningPolicy.requested, effective: reasoningPolicy.effective, reason: reasoningPolicy.reason}));
 
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;
@@ -153,7 +186,6 @@ async function runAgentAttempt(
     loadedMcp = assembled.loadedMcp;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
 
-    const goal = createSessionGoal(value);
     callbacks.setWorkState?.(goal);
     callbacks.setGoalStatus?.(formatGoalStatus(goal));
     const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
@@ -199,9 +231,6 @@ async function runAgentAttempt(
     let streamFinished = false;
     let finishReason: string | undefined;
     let lastToolOk: boolean | undefined;
-    let completedSteps = 0;
-    let completedToolCalls = 0;
-    let completedToolOnlySteps = 0;
     let pendingMalformedToolName: string | undefined;
     let unresolvedMalformedToolName: string | undefined;
     // Per-attempt (not per-turn) recovery counter: a transient retry gets a
@@ -235,16 +264,23 @@ async function runAgentAttempt(
       return !hidden;
     };
 
+    const recoverySlice = turnOptions.recoverySlice;
+    const stepCap = recoverySlice?.maxSteps ?? MAIN_STEP_LIMIT;
+    // Rescue exposes only mutation + validation-capable built-in tools so
+    // discovery cannot be reopened near the boundary. Length-continuation keeps
+    // the full tool set.
+    const sliceTools = recoverySlice?.kind === 'rescue' ? restrictToRescueTools(availableTools) : availableTools;
+
     const agent = new ToolLoopAgent({
       id: 'haze-main',
       model: activeModel,
       instructions: systemPrompt,
-      tools: availableTools,
+      tools: sliceTools,
       ...(!omitMaxOutputTokens ? {maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS} : {}),
       ...providerSettings,
-      stopWhen: isStepCount(MAIN_STEP_LIMIT),
+      stopWhen: isStepCount(stepCap),
       runtimeContext: toolExecutionContext,
-      toolsContext: toolsContextFor(availableTools, toolExecutionContext) as never,
+      toolsContext: toolsContextFor(sliceTools, toolExecutionContext) as never,
       experimental_repairToolCall: async ({toolCall, error}) => {
         if (isMalformedToolInputError(error)) {
           pendingMalformedToolName = toolCall.toolName;
@@ -259,6 +295,13 @@ async function runAgentAttempt(
         const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
         const scopedMessages = withScopedContextControl(messages, toolExecutionContext);
         const messagesChanged = scopedMessages !== messages;
+        // Turn-wide hard caps (shared across retries and recovery slices).
+        const turnToolCallsExhausted = turnState.toolCallsUsed >= turnBudget.toolCallLimit;
+        // Per-slice tool-call cap for a recovery slice (counts this slice's calls).
+        const sliceToolCallsExhausted = recoverySlice ? toolCalls.length >= recoverySlice.maxToolCalls : false;
+        // Reserve the final tool-only slot for rescue: normal exploration stops at
+        // the boundary; a rescue slice is exempt so it may use the reserved slot.
+        const toolOnlyBoundaryHit = !recoverySlice && toolOnlyStepCount(steps) >= RESCUE_BOUNDARY;
         if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
         if (pendingMalformedToolName && pendingMalformedToolName in availableTools) {
           const toolName = pendingMalformedToolName as keyof typeof availableTools;
@@ -280,7 +323,7 @@ async function runAgentAttempt(
             ? {activeTools, messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
             : {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
         }
-        if (toolCalls.length >= MAIN_TOOL_CALL_LIMIT || toolOnlyStepCount(steps) >= MAIN_TOOL_ONLY_STEP_LIMIT) {
+        if (turnToolCallsExhausted || sliceToolCallsExhausted || toolOnlyBoundaryHit || toolCalls.length >= MAIN_TOOL_CALL_LIMIT) {
           callbacks.debugLog('forcing text response to avoid tool loop');
           return {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, toolLoopBudgetPrompt())};
         }
@@ -290,9 +333,11 @@ async function runAgentAttempt(
         callbacks.onEvent?.(agentEvent({type: 'step_start', attempt: retryAttempt + 1, step: stepNumber + 1}));
       },
       onStepEnd({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
-        completedSteps++;
-        completedToolCalls += toolCalls.length;
-        if (toolCalls.length > 0 && text.trim().length === 0) completedToolOnlySteps++;
+        // Turn-wide counters (shared across provider retries and recovery
+        // slices) so the global budget cannot reset between attempts.
+        turnState.stepsUsed += 1;
+        turnState.toolCallsUsed += toolCalls.length;
+        if (toolCalls.length > 0 && text.trim().length === 0) turnState.toolOnlyStepsUsed += 1;
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         const stepUsage = stepCacheMetrics(usage);
         const publicUsage = {
@@ -478,18 +523,43 @@ async function runAgentAttempt(
       callbacks.addMessage({role: 'system', text: 'Tool work ended without a substantive final answer.'});
     }
 
-    const budgetReached = finishReason === 'length'
-      || completedSteps >= MAIN_STEP_LIMIT
-      || completedToolCalls >= MAIN_TOOL_CALL_LIMIT
-      || completedToolOnlySteps >= MAIN_TOOL_ONLY_STEP_LIMIT;
-    turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached, unresolvedToolInputError: unresolvedMalformedToolName != null});
+    turnState.finishCause = normalizeFinishReason(finishReason);
+    // Observable work evidence (Increment 3 surfaces this additively; tracked
+    // here so the turn-wide state is the single source of runtime evidence).
+    turnState.validationOutcome = deriveValidationOutcome(goal);
+    turnState.mutationCount = goal.mutationCount;
+    turnState.validationKind = goal.validations.at(-1)?.kind;
+    turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
+    turnState.budgetBoundary = isBudgetExhausted(turnState, turnBudget);
+    turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: unresolvedMalformedToolName != null});
     if (unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
     goal.phase = 'done';
     goal.status = turnStatus === 'complete' ? 'complete' : 'blocked';
     callbacks.setWorkState?.(goal);
     callbacks.setGoalStatus?.(undefined);
+
+    // Bounded recovery (Increment 2). Only the main flow proposes a slice; a
+    // slice never proposes another (credits are single-use and the controllers
+    // decline once used), so recovery cannot loop. Aborts and a satisfactory
+    // outcome are declined by the controllers.
+    if (!turnOptions.recoverySlice && !abortController.signal.aborted) {
+      const evidence = {sawToolCall: latestToolCalls.size > 0, assistantText, lastToolOk, unresolvedToolInputError: unresolvedMalformedToolName != null};
+      const lengthDecision = decideLengthRecovery(turnState, turnBudget);
+      if (lengthDecision.action === 'continue') {
+        const clamped = clampSlice(lengthDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
+        if (clamped.steps > 0) recovery = {kind: 'length', control: lengthContinuationPrompt(), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
+      } else {
+        const isMutatingRequest = goal.intent === 'implement' || goal.intent === 'fix';
+        const rescueDecision = decideRescue(turnState, evidence, turnBudget, isMutatingRequest);
+        if (rescueDecision.action === 'continue') {
+          const clamped = clampSlice(rescueDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
+          if (clamped.steps > 0) recovery = {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
+        }
+      }
+    }
   } catch (error) {
     if (abortController.signal.aborted) {
+      turnState.aborted = true;
       turnStatus = 'aborted';
       callbacks.debugLog('request aborted');
       callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
@@ -520,7 +590,7 @@ async function runAgentAttempt(
     toolDisplay.stopToolTimer();
     toolDisplay.finalizeToolGroup();
   }
-  return {status: turnStatus};
+  return {status: turnStatus, recovery};
 }
 
 export async function runAgentTurn(
@@ -537,6 +607,7 @@ export async function runAgentTurn(
 ): Promise<TurnResult> {
   const abortController = new AbortController();
   let status: TurnStatus = 'failed';
+  const turnState = createTurnExecutionState();
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
   callbacks.setBusy(true);
   callbacks.setAbortController?.(abortController);
@@ -545,22 +616,42 @@ export async function runAgentTurn(
     // Retries are one logical turn and therefore share coordinator admission and
     // the workspace mutation lease, including quarantined lingering work.
     const turnScope: {executionScope?: TurnExecutionScope} = {};
+    const turnBudget = mainTurnBudget();
+    // Turn-wide work state: persists across provider retries and recovery
+    // slices so mutation/validation evidence accumulates correctly.
+    const goal = createSessionGoal(value);
+    let activeOptions = turnOptions;
     let attempt = retryAttempt;
     let overflowRecovered = contextOverflowRecovered;
     let retrying = retryingExistingRequest;
     while (true) {
-      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, turnOptions, turnScope);
+      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, activeOptions, turnScope, turnState, turnBudget, goal);
       status = result.status;
-      if (!result.retry) break;
-      attempt = result.retry.attempt;
-      overflowRecovered = result.retry.contextOverflowRecovered;
-      retrying = true;
-      if (result.retry.delayMs > 0) await abortableDelay(result.retry.delayMs, abortController.signal);
-      if (abortController.signal.aborted) { status = 'aborted'; break; }
+      if (result.retry) {
+        attempt = result.retry.attempt;
+        overflowRecovered = result.retry.contextOverflowRecovered;
+        retrying = true;
+        if (result.retry.delayMs > 0) await abortableDelay(result.retry.delayMs, abortController.signal);
+        if (abortController.signal.aborted) { status = 'aborted'; break; }
+        continue;
+      }
+      // Bounded recovery slice (length-continuation or rescue). Credits are
+      // single-use, so a slice cannot trigger another of the same kind; abort
+      // is re-checked before and within the slice.
+      if (result.recovery && !abortController.signal.aborted) {
+        const rec = result.recovery;
+        if (rec.kind === 'length') { turnState.lengthCreditUsed = true; turnState.lengthRecoveriesAttempted += 1; } else turnState.rescueUsed = true;
+        activeOptions = {...activeOptions, ephemeralControl: rec.control, recoverySlice: {kind: rec.kind, maxSteps: rec.slice.maxSteps, maxToolCalls: rec.slice.maxToolCalls}};
+        retrying = true;
+        callbacks.debugLog(`starting ${rec.kind} recovery slice: ${rec.slice.maxSteps} steps / ${rec.slice.maxToolCalls} tool calls`);
+        continue;
+      }
+      break;
     }
-    return {status};
+    const evidence = toCompletionEvidence(turnState);
+    return {status, evidence};
   } finally {
-    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status}));
+    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState)}));
     callbacks.setAbortController?.(null);
     callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
     callbacks.setBusy(false);

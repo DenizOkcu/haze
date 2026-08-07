@@ -4,6 +4,7 @@ import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
+import {resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy} from '../core/agent/reasoningPolicy.js';
 import {createChatGptCodexFetch} from './openaiCodex.js';
 export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
 
@@ -20,6 +21,8 @@ export interface ModelRuntimeConfig {
   modelName: string;
   cacheKey: string;
   capabilities: ProviderCapabilities;
+  /** Resolved reasoning policy (requested vs effective); observable, no secrets. */
+  reasoningPolicy: ResolvedReasoningPolicy;
 }
 
 const HAZE_SITE_URL = 'https://denizokcu.github.io/haze/';
@@ -47,6 +50,7 @@ function capabilities(providerName: string, baseURL: string, providerKind?: Haze
     supportsStickySessionId: openRouter,
     supportsServerCompaction: false,
     supportsTextVerbosity: directOpenAI,
+    supportsReasoningEffort: directOpenAI,
   };
 }
 
@@ -59,14 +63,21 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const name = selection.model;
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
+  const caps = capabilities(selection.provider.name, baseURL, providerKind);
+  const requestedReasoning = isReasoningLevel(settings.reasoning) ? settings.reasoning : undefined;
+  const reasoningPolicy = resolveReasoningPolicy({requested: requestedReasoning, capabilities: caps});
   const openai = providerKind === 'chatgpt-codex'
     ? createOpenAI({apiKey: 'haze-oauth-placeholder', baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
     : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
   return {
     model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector: modelSelector(selection.provider, name),
-    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: capabilities(selection.provider.name, baseURL, providerKind)},
+    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: caps, reasoningPolicy},
   };
+}
+
+function isReasoningLevel(value: unknown): value is ReasoningLevel {
+  return value === 'low' || value === 'medium' || value === 'high';
 }
 
 export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string}, settings?: Awaited<ReturnType<typeof readSettings>>) {
@@ -101,15 +112,14 @@ export function providerRequestSettings(config: ModelRuntimeConfig): ProviderReq
       headers: {'session-id': config.cacheKey},
     };
   }
+  const caps = config.capabilities;
+  const openaiOptions: Record<string, import('ai').JSONValue | undefined> = {};
+  if (caps.supportsPromptCacheKey) openaiOptions.promptCacheKey = config.cacheKey;
+  if (caps.supportsTextVerbosity) openaiOptions.textVerbosity = 'low';
+  if (config.reasoningPolicy.effective !== 'disabled') openaiOptions.reasoningEffort = config.reasoningPolicy.effective;
+  const providerOptions = Object.keys(openaiOptions).length > 0 ? {openai: openaiOptions} : undefined;
   return {
-    ...(config.capabilities.supportsPromptCacheKey || config.capabilities.supportsTextVerbosity ? {
-      providerOptions: {
-        openai: {
-          ...(config.capabilities.supportsPromptCacheKey ? {promptCacheKey: config.cacheKey} : {}),
-          ...(config.capabilities.supportsTextVerbosity ? {textVerbosity: 'low' as const} : {}),
-        },
-      },
-    } : {}),
-    ...(config.capabilities.supportsStickySessionId ? {headers: {'x-session-id': config.cacheKey}} : {}),
+    ...(providerOptions ? {providerOptions} : {}),
+    ...(caps.supportsStickySessionId ? {headers: {'x-session-id': config.cacheKey}} : {}),
   };
 }

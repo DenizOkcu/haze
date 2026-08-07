@@ -1,6 +1,7 @@
 import {tool} from 'ai';
 import {z} from 'zod';
 import {classifyBashCommand, isValidationClassification} from '../../core/safety/bashClassifier.js';
+import {detectMissingExecutable, missingExecutableFields} from '../../core/safety/missingExecutable.js';
 import {parseValidationOutput} from '../../core/validation/outputParser.js';
 import {filterBashOutput} from '../../core/bashOutput/registry.js';
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
@@ -54,12 +55,16 @@ export const bashTool = tool({
       : undefined;
     const validationPassed = validationSummary?.status === 'passed';
     const output = filterBashOutput({command, code, stdout, stderr, timedOut, classification, validationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
+    // Generic, dependency-agnostic diagnostic for a missing executable. Only the
+    // executable name and a generic next step are exposed (never raw stderr).
+    const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;
     return {
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
       code, command, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
       aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
       stdout: output.stdout, stderr: output.stderr, validationSummary,
       stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),
+      ...(missing ? {...missingExecutableFields(missing), missingExecutableStep: missing.suggestedNextStep} : {}),
       ...(processResult.error ? {error: processResult.error} : {}),
     };
   }),

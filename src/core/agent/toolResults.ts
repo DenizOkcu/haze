@@ -51,15 +51,17 @@ export function safeToolFailureDetails(output: unknown): SafeToolFailureDetails 
   if (value.ok !== false) return {};
   const structuredHazeFailure = typeof value.toolName === 'string' && typeof value.recoverable === 'boolean';
   const reasonCode = typeof value.reasonCode === 'string' && SAFE_ERROR_CODE.test(value.reasonCode) ? value.reasonCode : undefined;
+  const missingExecutable = typeof value.missingExecutable === 'string' && value.missingExecutable.trim() ? boundedSingleLine(value.missingExecutable) : undefined;
   const errorCode = reasonCode
-    ?? (value.timedOut === true ? 'command_timed_out'
-      : typeof value.exitCode === 'number' && value.exitCode !== 0 ? 'nonzero_exit'
-        : typeof value.signal === 'string' ? 'process_signal'
-          : undefined);
+    ?? (missingExecutable ? 'missing_executable'
+      : value.timedOut === true ? 'command_timed_out'
+        : typeof value.exitCode === 'number' && value.exitCode !== 0 ? 'nonzero_exit'
+          : typeof value.signal === 'string' ? 'process_signal'
+            : undefined);
   // Only the dedicated Haze failure shape guarantees that `error` is a bounded
   // local diagnostic. Bash stderr and third-party fields may contain secrets.
   const error = structuredHazeFailure && typeof value.error === 'string' ? boundedSingleLine(value.error) : undefined;
-  return {...(errorCode ? {errorCode} : {}), ...(error ? {error} : {})};
+  return {...(errorCode ? {errorCode} : {}), ...(error ? {error} : {}), ...(missingExecutable ? {missingExecutable} : {})};
 }
 
 /**

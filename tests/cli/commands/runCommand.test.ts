@@ -11,11 +11,11 @@ function fullUsage(partial: {inputTokens?: number; outputTokens?: number; cacheR
   };
 }
 
-async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
+async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; evidence?: unknown; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
   const status = opts.status ?? 'complete';
   const runAgentTurn = vi.fn(async (_value: unknown, _display: unknown, _ctx: unknown, callbacks: any) => {
     await opts.runAgentTurnImpl?.(callbacks);
-    return {status};
+    return {status, ...(opts.evidence ? {evidence: opts.evidence} : {})};
   });
   vi.doMock('../../../src/cli/commands/streaming.js', () => ({runAgentTurn}));
   vi.doMock('../../../src/config/contextFiles.js', () => ({readContextFiles: async () => []}));
@@ -79,6 +79,24 @@ describe('runHeadless: output', () => {
     });
     await runHeadless({prompt: 'do it', output: 'text'});
     expect(writes.join('')).toBe('Visible.\n');
+  });
+
+  it('includes bounded completion evidence additively in the JSON envelope', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => {
+        cb.addMessage({id: 'a1', role: 'assistant', text: 'Done.', streaming: false});
+      },
+      evidence: {validationOutcome: 'passed', validationKind: 'test', validationAfterMutation: true, mutationCount: 1, finishCause: 'stop', recoveryUsed: {length: false, rescue: false}, budgetBoundary: false},
+    });
+    await runHeadless({prompt: 'do it', output: 'json'});
+    const parsed = JSON.parse(writes.join(''));
+    expect(parsed.evidence).toMatchObject({validationOutcome: 'passed', finishCause: 'stop', recoveryUsed: {length: false, rescue: false}});
+    // Evidence must never carry raw commands, output, or secrets.
+    const json = JSON.stringify(parsed.evidence);
+    for (const forbidden of ['command', 'stdout', 'stderr', 'error', 'key', 'token']) {
+      expect(json).not.toContain(forbidden);
+    }
   });
 
   it('emits a JSON envelope with status, result, and a pinned usage shape', async () => {

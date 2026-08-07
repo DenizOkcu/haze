@@ -86,6 +86,8 @@ export interface ProviderCapabilities {
   supportsStickySessionId: boolean;
   supportsServerCompaction: boolean;
   supportsTextVerbosity: boolean;
+  /** Protocol accepts an OpenAI-style reasoning-effort provider option. */
+  supportsReasoningEffort: boolean;
 }
 
 export interface ProviderRequestOptions {
@@ -112,6 +114,7 @@ export function fallbackProviderCapabilities(): ProviderCapabilities {
     supportsStickySessionId: false,
     supportsServerCompaction: false,
     supportsTextVerbosity: false,
+    supportsReasoningEffort: false,
   };
 }
 

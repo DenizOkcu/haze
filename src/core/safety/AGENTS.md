@@ -15,6 +15,16 @@ Current contract:
 - Traits/risk labels should be explainable from the command text and stable enough for tests.
 - Do not add interactive confirmation behavior here; that belongs in UI/extensions if ever added.
 
+## Missing-executable diagnostic
+
+- `missingExecutable.ts` derives a bounded, dependency-agnostic blocker when a
+  command fails because an executable is missing (exit 127 / "not found").
+- It exposes only the executable name and a generic recovery order (alternative
+  → project manifest/local install → consent-gated system install → precise
+  blocker), never raw stderr/command text.
+- No dependency-specific branching. System install is never performed silently;
+  the system-install permission model is deferred (documented in the module).
+
 ## URL guard
 
 - `urlGuard.ts` enforces the `fetch` tool's SSRF boundary.

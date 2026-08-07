@@ -26,7 +26,7 @@ describe('SessionGoal', () => {
     expect(goal.phase).toBe('editing');
     expect(goal.touchedFiles).toEqual(['src/a.ts']);
 
-    observeGoalToolEvent(goal, {toolName: 'bash', input: {command: 'npm test'}, success: true, output: {ok: true}}, 4);
+    observeGoalToolEvent(goal, {toolName: 'bash', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'tests passed', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}}, 4);
     expect(goal.phase).toBe('validating');
     expect(goal.validationCommands).toEqual([{command: 'npm test', status: 'passed'}]);
     expect(formatGoalStatus(goal)).toContain('Goal: add a feature');

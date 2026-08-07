@@ -1,10 +1,26 @@
 import type {RequestIntent} from '../goal/requestClassifier.js';
+import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 
 export type WorkFileAction = 'read' | 'created' | 'modified';
 export type WorkValidationStatus = 'pending' | 'passed' | 'failed';
 export type WorkStatus = 'active' | 'needs-user' | 'blocked' | 'complete' | 'aborted';
 export type WorkPhase = 'starting' | 'inspecting' | 'editing' | 'validating' | 'summarizing' | 'done';
+
+/**
+ * Derived validation outcome for a turn, used as bounded completion evidence.
+ *  - `passed`: a classifier-confirmed validation passed after the latest mutation.
+ *  - `failed`: a validation failed and is the most recent result.
+ *  - `stale`: a validation ran but predates the latest mutation (no longer trustworthy).
+ *  - `absent`: validation was expected for this request but never ran.
+ *  - `not_applicable`: the request does not call for validation (answer/review/plan).
+ */
+export type ValidationOutcome = 'passed' | 'failed' | 'stale' | 'absent' | 'not_applicable';
+
+/** Request intents where a missing validation is itself meaningful evidence. */
+export function intentExpectsValidation(intent: RequestIntent): boolean {
+  return intent === 'implement' || intent === 'fix' || intent === 'test';
+}
 
 export interface WorkState {
   id: string;
@@ -17,8 +33,14 @@ export interface WorkState {
   decisions: Array<{decision: string; reason?: string}>;
   files: Array<{path: string; action: WorkFileAction; note?: string}>;
   touchedFiles: string[];
-  validations: Array<{command: string; status: Exclude<WorkValidationStatus, 'pending'>; summary: string}>;
+  validations: Array<{command: string; status: Exclude<WorkValidationStatus, 'pending'>; summary: string; kind?: ValidationKind}>;
   validationCommands: Array<{command: string; status: WorkValidationStatus}>;
+  /** Number of successful workspace mutations observed this turn. */
+  mutationCount: number;
+  /** Monotonic sequence number of the latest successful mutation (0 = none). */
+  mutationSeq: number;
+  /** Monotonic sequence number of the latest validation (0 = none). */
+  validationSeq: number;
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -58,14 +80,21 @@ function outputSummary(output: unknown) {
   return '';
 }
 
-function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string) {
+function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined) {
   const existing = state.validations.find(validation => validation.command === command);
-  if (existing) Object.assign(existing, {status, summary});
-  else state.validations.push({command, status, summary});
+  if (existing) Object.assign(existing, {status, summary, ...(kind ? {kind} : {})});
+  else state.validations.push({command, status, summary, ...(kind ? {kind} : {})});
 
   const existingCommand = state.validationCommands.find(item => item.command === command);
   if (existingCommand) existingCommand.status = status;
   else state.validationCommands.push({command, status});
+}
+
+/** Extract a classifier-confirmed validation summary from a tool output, if any. */
+export function validationSummaryFromOutput(output: unknown): ValidationSummary | undefined {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const candidate = (output as {validationSummary?: unknown}).validationSummary;
+  return isValidationSummary(candidate) ? candidate : undefined;
 }
 
 export function createWorkState(goal: string, intent: RequestIntent, successCriteria: string[], now = Date.now()): WorkState {
@@ -82,6 +111,9 @@ export function createWorkState(goal: string, intent: RequestIntent, successCrit
     touchedFiles: [],
     validations: [],
     validationCommands: [],
+    mutationCount: 0,
+    mutationSeq: 0,
+    validationSeq: 0,
     blockers: [],
     pending: [],
     status: 'active',
@@ -95,6 +127,9 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
   if (event.duplicateSkipped) return state;
   const ok = toolOutputOk(event.output, event.success);
   const path = toolInputField(event.input, 'path');
+  // Monotonic turn-wide clock. mutationSeq/validationSeq snapshot this value so
+  // a validation that predates the latest mutation can be marked stale.
+  const seq = state.revision + 1;
 
   if (ok && path && ['listFiles', 'readFile', 'grep'].includes(event.toolName)) {
     if (event.toolName === 'readFile') upsertFile(state, path, 'read');
@@ -108,28 +143,53 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       state.phase = 'editing';
       state.lastProgressAt = now;
       state.blockers = state.blockers.filter(blocker => !blocker.includes(path));
+      state.mutationCount += 1;
+      state.mutationSeq = seq;
     } else {
       state.blockers = [...new Set([...state.blockers, `Edit failed for ${path}: ${outputSummary(event.output) || 'fresh read required'}`])];
       state.nextAction = `Read ${path}, then retry the edit with current content.`;
     }
   }
 
+  // Only a classifier-confirmed bash command is a validation step. An arbitrary
+  // shell call (inspection, mkdir, echo) is process work, not validation; the
+  // bash tool embeds a `validationSummary` exactly when the classifier says so.
   if (event.toolName === 'bash') {
     const command = toolInputField(event.input, 'command');
-    if (command) {
-      const status: Exclude<WorkValidationStatus, 'pending'> = ok ? 'passed' : 'failed';
-      const summary = outputSummary(event.output);
-      upsertValidation(state, command, status, summary);
+    const summary = validationSummaryFromOutput(event.output);
+    if (command && summary) {
+      const status: Exclude<WorkValidationStatus, 'pending'> = summary.status === 'passed' ? 'passed' : 'failed';
+      upsertValidation(state, command, status, summary.summaryText, summary.kind);
+      state.validationSeq = seq;
       state.phase = 'validating';
       state.lastProgressAt = now;
-      if (!ok) {
+      if (status === 'failed') {
         state.blockers = [...new Set([...state.blockers, `Validation failed: ${command}`])];
       }
     }
   }
 
-  state.revision += 1;
+  state.revision = seq;
   return state;
+}
+
+/**
+ * Derive the bounded validation outcome for completion evidence.
+ * See `ValidationOutcome` for the contract. Honors mutation/validation
+ * ordering so a result that predates the latest mutation is `stale`.
+ */
+export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
+  const hasValidation = state.validationSeq > 0;
+  if (!hasValidation) {
+    return intentExpectsValidation(state.normalizedIntent) ? 'absent' : 'not_applicable';
+  }
+  // A validation is stale when a mutation happened after it. `mutationSeq === 0`
+  // means no mutation occurred (e.g. a pure test/run request), so the latest
+  // validation stands on its own.
+  const stale = state.mutationSeq > 0 && state.validationSeq < state.mutationSeq;
+  if (stale) return 'stale';
+  const latest = state.validations.at(-1);
+  return latest?.status === 'passed' ? 'passed' : 'failed';
 }
 
 export function workStatePrompt(state: WorkState) {

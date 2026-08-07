@@ -24,6 +24,7 @@ export type ToolFailureReasonCode =
   | 'process_kill_failed'
   | 'output_expired'
   | 'aborted'
+  | 'missing_executable'
   | 'scoped_instructions_discovered';
 
 export type ToolDiffLine =

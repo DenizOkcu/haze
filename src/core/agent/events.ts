@@ -1,3 +1,6 @@
+import type {TurnCompletionEvidence} from './completionController.js';
+import type {EffectiveReasoning, ReasoningLevel} from './reasoningPolicy.js';
+
 export interface AgentStepUsage {
   inputTokens: number;
   outputTokens: number;
@@ -8,7 +11,7 @@ export interface AgentStepUsage {
 
 export type AgentEvent =
   | {type: 'turn_start'; request: string; at: string}
-  | {type: 'turn_end'; request: string; at: string; status: 'complete' | 'aborted' | 'failed'}
+  | {type: 'turn_end'; request: string; at: string; status: 'complete' | 'aborted' | 'failed'; evidence?: TurnCompletionEvidence}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: AgentStepUsage; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
@@ -17,6 +20,7 @@ export type AgentEvent =
   | {type: 'tool_start'; id: string; name: string; input: unknown; at: string}
   | {type: 'tool_end'; id: string; name: string; success: boolean; output?: unknown; errorCode?: string; error?: unknown; durationMs: number; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
   | {type: 'subagent_state'; id: string; state: 'queued' | 'started' | 'terminal' | 'settled'; mode: string; queued?: number; running: number; queueMs?: number; durationMs?: number; termination?: string; execution?: 'settled' | 'quarantined'; at: string};
 

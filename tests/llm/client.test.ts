@@ -32,8 +32,10 @@ function config(capabilities: Partial<ModelRuntimeConfig['capabilities']>): Mode
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
+      supportsReasoningEffort: false,
       ...capabilities,
     },
+    reasoningPolicy: {requested: undefined, effective: 'disabled', reason: 'no reasoning depth requested'},
   };
 }
 
@@ -219,6 +221,7 @@ describe('modelWithConfig', () => {
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
+      supportsReasoningEffort: false,
     });
   });
 

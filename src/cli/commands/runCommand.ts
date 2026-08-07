@@ -1,6 +1,7 @@
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
-import {runAgentTurn, type Message, type StreamCallbacks, type TokenUsage, type TurnStatus} from './streaming.js';
+import {runAgentTurn, type Message, type StreamCallbacks, type TokenUsage, type TurnCompletionEvidence, type TurnStatus} from './streaming.js';
+import type {EffectiveReasoning, ReasoningLevel} from '../../core/agent/reasoningPolicy.js';
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
@@ -31,7 +32,7 @@ export interface HeadlessUsage {
 
 type HeadlessStreamEvent =
   | {type: 'turn_start'; request: string; at: string}
-  | {type: 'turn_end'; request: string; status: TurnStatus; at: string}
+  | {type: 'turn_end'; request: string; status: TurnStatus; evidence?: TurnCompletionEvidence; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
@@ -40,6 +41,7 @@ type HeadlessStreamEvent =
   | {type: 'tool_start'; id: string; name: string; at: string}
   | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; errorCode?: string; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
+  | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string};
 
 function pinnedUsage(usage: TokenUsage): HeadlessUsage {
@@ -66,7 +68,7 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
     case 'turn_start':
       return {type: 'turn_start', request: event.request, at: event.at};
     case 'turn_end':
-      return {type: 'turn_end', request: event.request, status: event.status, at: event.at};
+      return {...(event.evidence ? {evidence: event.evidence} : {}), type: 'turn_end', request: event.request, status: event.status, at: event.at};
     case 'step_start':
       return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
     case 'step_end':
@@ -86,6 +88,8 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'retry', attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, error: event.error, at: event.at};
     case 'context_overflow':
       return {type: 'context_overflow', recovered: event.recovered, error: event.error, at: event.at};
+    case 'reasoning_policy':
+      return {...(event.requested ? {requested: event.requested} : {}), type: 'reasoning_policy', effective: event.effective, reason: event.reason, at: event.at};
   }
 }
 
@@ -187,10 +191,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
 
   let status: TurnStatus;
   let result: string;
+  let evidence: TurnCompletionEvidence | undefined;
   let persistenceError: string | undefined;
   let backgroundTeardownError: string | undefined;
   try {
-    ({status} = await runAgentTurn(options.prompt, options.prompt, contextFiles, callbacks, 0, false, false, session, options.modelOverride));
+    ({status, evidence} = await runAgentTurn(options.prompt, options.prompt, contextFiles, callbacks, 0, false, false, session, options.modelOverride));
     result = segments.filter((s) => !s.hidden && s.text).map((s) => s.text).join('\n');
   } catch (error) {
     status = 'failed';
@@ -209,7 +214,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   if (options.output === 'json' || options.output === 'stream-json') {
     // For stream-json the authoritative agent events have already streamed above; this is the terminal line.
     // It is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
-    writeNdjson({type: 'result', status, result, usage: pinnedUsage(usage)});
+    writeNdjson({type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {})});
   } else if (status === 'complete') {
     process.stdout.write(result + (result.endsWith('\n') ? '' : '\n'));
   } else {

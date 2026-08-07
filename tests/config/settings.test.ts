@@ -137,4 +137,26 @@ describe('settings', () => {
       subagents: {workerModel: 'local:qwen', pluginField: 'keep', profiles: {custom: {maxConcurrency: 1, maxSteps: 30, pluginProfile: 'keep'}}},
     });
   });
+
+  it('parses an optional reasoning depth and rejects invalid values loudly', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({reasoning: 'high', unknownField: 'keep'});
+    const settings = await readSettings();
+    expect(settings.reasoning).toBe('high');
+    // Unknown fields are preserved (passthrough).
+    expect(settings.unknownField).toBe('keep');
+    // Invalid reasoning is rejected loudly.
+    await fs.writeJson(settingsFile, {reasoning: 'turbo'});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
+  it('keeps reasoning unset by default and survives a patch that does not mention it', async () => {
+    const {writeSettings, updateSettings, readSettings} = await loadSettings();
+    await writeSettings({reasoning: 'medium', plugin: true});
+    await updateSettings({model: 'gpt-x'});
+    const settings = await readSettings();
+    expect(settings.reasoning).toBe('medium');
+    expect(settings.model).toBe('gpt-x');
+    expect(settings.plugin).toBe(true);
+  });
 });

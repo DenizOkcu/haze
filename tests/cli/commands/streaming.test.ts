@@ -1,4 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {RESCUE_BOUNDARY} from '../../../src/core/agent/completionController.js';
 
 interface FakeFullStreamPart {
   type: string;
@@ -27,10 +28,15 @@ interface MocksConfig {
   retryable?: boolean;
   streamParts?: FakeFullStreamPart[];
   responseMessages?: unknown[];
+  availableTools?: Record<string, unknown>;
   failFirstNAgents?: number;
   idle?: boolean;
   hangUntilAbort?: boolean;
   stepEnds?: Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string}>;
+  /** Per-call stream parts, indexed by agent call number (1-based). Enables recovery-slice scenarios. */
+  callStreams?: FakeFullStreamPart[][];
+  /** Per-call step ends, indexed by agent call number (1-based). */
+  callStepEnds?: Array<Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string}>>;
 }
 
 const mocks = vi.hoisted(() => {
@@ -80,8 +86,8 @@ async function loadStreaming(config: MocksConfig) {
       mocks.assembledCalls.push({input, executionScope});
       return mocks.assembleContextResult ?? {
         systemPrompt: 'You are haze.',
-        availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
-        toolCategories: new Map([['bash', 'builtin']]),
+        availableTools: config.availableTools ?? {bash: {description: 'bash', execute: async () => ({ok: true})}},
+        toolCategories: new Map(Object.keys(config.availableTools ?? {bash: {}}).map(name => [name, 'builtin'])),
         executionScope,
       };
     },
@@ -172,12 +178,14 @@ async function loadStreaming(config: MocksConfig) {
           };
         }
         const onStepEnd = this.onStepEnd;
-        const stepEnds = config.stepEnds ?? [];
+        const callIndex = agentCallCount - 1;
+        const activeParts = config.callStreams ? config.callStreams[Math.min(callIndex, config.callStreams.length - 1)] : parts;
+        const stepEnds = config.callStepEnds ? config.callStepEnds[Math.min(callIndex, config.callStepEnds.length - 1)] : (config.stepEnds ?? []);
         return {
           ...this._fake,
           stream: (async function* () {
             for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: []}});
-            for (const part of parts) {
+            for (const part of activeParts) {
               if (typeof part.testNow === 'number') vi.setSystemTime(part.testNow);
               yield part;
             }
@@ -268,7 +276,7 @@ describe('runAgentTurn: setup', () => {
     expect(cb.events[0]?.type).toBe('turn_start');
     expect(cb.messages[0]).toEqual({role: 'user', text: 'hello'});
     expect(cb.events.at(-1)?.type).toBe('turn_end');
-    expect(outcome).toEqual({status: 'complete'});
+    expect(outcome).toMatchObject({status: 'complete'});
   });
 
   it('steers malformed write input into a forced smaller retry', async () => {
@@ -474,7 +482,7 @@ describe('runAgentTurn: stream handling', () => {
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
       streamParts: [
         {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}},
-        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: false, code: 1}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: false, code: 1, validationSummary: {kind: 'test', status: 'failed', summaryText: 'test failed: 1 failed test', failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}}},
         {type: 'text-delta', text: 'The validation failed and remains unresolved.'},
         {type: 'finish', finishReason: 'stop'},
       ],
@@ -489,7 +497,7 @@ describe('runAgentTurn: stream handling', () => {
     expect(cb.events.find(event => event.type === 'tool_end')).toMatchObject({success: false});
     expect(logEntries.find(entry => entry.toolResult)?.toolResult?.success).toBe(false);
     expect(workStates.some(state => state.validations.some(validation => validation.status === 'failed'))).toBe(true);
-    expect(outcome).toEqual({status: 'failed'});
+    expect(outcome).toMatchObject({status: 'failed'});
   });
 
   it('cannot report complete after the hard step budget is reached', async () => {
@@ -498,7 +506,7 @@ describe('runAgentTurn: stream handling', () => {
       stepEnds: Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: []})),
       streamParts: [{type: 'text-delta', text: 'A final answer arrived only after exhausting the budget.'}, {type: 'finish', finishReason: 'stop'}],
     });
-    await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toEqual({status: 'failed'});
+    await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toMatchObject({status: 'failed'});
   });
 });
 
@@ -578,7 +586,7 @@ describe('runAgentTurn: error paths', () => {
     await vi.runAllTimersAsync();
     const outcome = await promise;
     expect(cb.messages.some((m) => /Model call failed/.test(m.text))).toBe(true);
-    expect(outcome).toEqual({status: 'failed'});
+    expect(outcome).toMatchObject({status: 'failed'});
     vi.useRealTimers();
   });
 });
@@ -602,7 +610,7 @@ describe('runAgentTurn: abort', () => {
     abortControllerRef?.abort();
     const outcome = await promise;
     expect(cb.messages.some((m) => m.role === 'system' && /aborted/i.test(m.text))).toBe(true);
-    expect(outcome).toEqual({status: 'aborted'});
+    expect(outcome).toMatchObject({status: 'aborted'});
   });
 });
 
@@ -644,5 +652,147 @@ describe('runAgentTurn: MCP cleanup', () => {
     const cb = makeCallbacks();
     await runAgentTurn('hi', undefined, [], cb);
     expect(cb.messages.some((m) => m.role === 'system' && /mcp:\/\/broken/.test(m.text))).toBe(true);
+  });
+});
+
+describe('runAgentTurn: bounded completion recovery', () => {
+  const fullTools = {
+    listFiles: {description: 'list', execute: async () => ({ok: true})},
+    readFile: {description: 'read', execute: async () => ({ok: true})},
+    grep: {description: 'grep', execute: async () => ({ok: true})},
+    editFile: {description: 'edit', execute: async () => ({ok: true})},
+    writeFile: {description: 'write', execute: async () => ({ok: true})},
+    bash: {description: 'bash', execute: async () => ({ok: true})},
+  };
+
+  it('a normal successful turn makes no extra recovery call', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done, the file is written.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('add a feature', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('a length finish triggers one continuation slice that writes the file and completes', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      availableTools: fullTools,
+      callStreams: [
+        // Main attempt: truncated mid-answer.
+        [{type: 'text-delta', text: 'Here is the start of the'}, {type: 'finish', finishReason: 'length'}],
+        // Recovery slice: finish writing the file, then a substantive answer.
+        [
+          {type: 'tool-call', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt', content: 'done'}},
+          {type: 'tool-result', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt'}, output: {ok: true}},
+          {type: 'text-delta', text: 'Wrote out.txt.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('write out.txt with the result', undefined, [], cb);
+    await new Promise(resolve => queueMicrotask(resolve));
+    expect(mocks.streamedMessages).toHaveLength(2);
+    // The recovery slice carries the continuation control, not a re-added user message.
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/truncated by the output-token limit/);
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('a repeated length finish terminates cleanly (single continuation credit)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      callStreams: [
+        [{type: 'text-delta', text: 'partial'}, {type: 'finish', finishReason: 'length'}],
+        [{type: 'text-delta', text: 'still partial'}, {type: 'finish', finishReason: 'length'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('write a long answer', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(outcome).toMatchObject({status: 'failed'});
+  });
+
+  it('rescue near the tool-only boundary runs a restricted slice and saves the value', async () => {
+    // 23 trailing tool-only steps exhaust the reserved boundary with no answer.
+    const boundaryStepEnds = Array.from({length: RESCUE_BOUNDARY}, (_, i) => ({stepNumber: i, text: '', toolCalls: [{id: `c${i}`}]}));
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      availableTools: fullTools,
+      callStepEnds: [
+        boundaryStepEnds,
+        [],
+      ],
+      callStreams: [
+        [{type: 'finish', finishReason: 'stop'}],
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: [{oldText: 'x', newText: 'y'}]}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'text-delta', text: 'Applied the discovered fix to a.ts.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('add a feature to a.ts', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/tool-boundary without a substantive final answer/);
+    // Rescue exposes only mutation + validation-capable tools; discovery/read are dropped.
+    const rescueTools = Object.keys((mocks.agentOptions[1] as {tools?: Record<string, unknown>}).tools ?? {});
+    expect(rescueTools).toContain('editFile');
+    expect(rescueTools).toContain('writeFile');
+    expect(rescueTools).toContain('bash');
+    expect(rescueTools).not.toContain('listFiles');
+    expect(rescueTools).not.toContain('readFile');
+    expect(rescueTools).not.toContain('grep');
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('does not rescue a non-mutating (answer) request even at the boundary', async () => {
+    const boundaryStepEnds = Array.from({length: RESCUE_BOUNDARY}, (_, i) => ({stepNumber: i, text: '', toolCalls: [{id: `c${i}`}]}));
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      availableTools: fullTools,
+      callStepEnds: [boundaryStepEnds],
+      callStreams: [[{type: 'finish', finishReason: 'stop'}]],
+    });
+    await runAgentTurn('explain how the module works', undefined, [], makeCallbacks());
+    expect(mocks.streamedMessages).toHaveLength(1);
+  });
+});
+
+describe('runAgentTurn: completion evidence', () => {
+  it('surfaces validation evidence in the turn_end event', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [
+        {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
+        {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+        {type: 'text-delta', text: 'All tests pass.'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('add a feature', undefined, [], cb);
+    const turnEnd = cb.events.find(event => event.type === 'turn_end') as {evidence?: {validationOutcome?: string; validationKind?: string; finishCause?: string}};
+    expect(turnEnd?.evidence?.validationOutcome).toBe('passed');
+    expect(turnEnd?.evidence?.validationKind).toBe('test');
+    expect(turnEnd?.evidence?.finishCause).toBe('stop');
+  });
+
+  it('reports length recovery in the turn_end evidence', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      callStreams: [
+        [{type: 'text-delta', text: 'partial'}, {type: 'finish', finishReason: 'length'}],
+        [{type: 'text-delta', text: 'completed now.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('write a long doc', undefined, [], cb);
+    const turnEnd = cb.events.find(event => event.type === 'turn_end') as {evidence?: {recoveryUsed?: {length?: boolean}}};
+    expect(turnEnd?.evidence?.recoveryUsed?.length).toBe(true);
   });
 });

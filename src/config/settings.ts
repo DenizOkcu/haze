@@ -5,6 +5,10 @@ import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 import {customProfileSchema} from '../core/subagent/executionProfiles.js';
 
+/** Optional, explicitly user-controlled reasoning depth (provider/protocol gated). */
+export type ReasoningLevel = 'low' | 'medium' | 'high';
+export const reasoningLevelSchema = z.enum(['low', 'medium', 'high']);
+
 export interface HazeProviderSettings {
   name: string;
   url: string;
@@ -71,6 +75,8 @@ export interface HazeSettings {
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
   subagents?: HazeSubagentSettings;
+  /** Optional reasoning depth; unset by default, mapped by supported provider protocol. */
+  reasoning?: ReasoningLevel;
   /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
   tips?: {enabled?: boolean};
 
@@ -132,6 +138,7 @@ const settingsSchema = z.object({
   mcpServers: z.array(mcpServerSchema).optional(),
   skills: z.array(skillSettingSchema).optional(),
   subagents: subagentSettingsSchema.optional(),
+  reasoning: reasoningLevelSchema.optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
