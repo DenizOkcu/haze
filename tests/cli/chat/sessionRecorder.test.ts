@@ -30,4 +30,23 @@ describe('session recorder', () => {
     await expect(recorder.flush()).rejects.toThrow();
     expect(recorder.error()).toBeInstanceOf(Error);
   });
+
+  it('coalesces rapid conversation snapshots so the full history is not rewritten on every update', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-recorder-'));
+    dirs.push(tmp);
+    const cwd = path.join(tmp, 'workspace');
+    await fs.ensureDir(cwd);
+    const session = await createSession({cwd, sessionsDir: path.join(tmp, 'sessions')});
+    const recorder = createSessionRecorder(() => session);
+    // Many setConversation calls within one turn (e.g. overflow recovery + steps).
+    for (let i = 1; i <= 6; i++) recorder.recordConversation([{role: 'user', content: `turn ${i}`}]);
+    await recorder.flush();
+    const {entries} = await readSessionEntries(session);
+    const snapshots = entries.filter(entry => entry.type === 'conversation_snapshot');
+    // Only the latest snapshot is meaningful for restore; coalescing keeps the
+    // number of full-history writes bounded (at most one in flight + one drain).
+    expect(snapshots.length).toBeLessThanOrEqual(2);
+    const latest = snapshots.at(-1);
+    expect(latest && latest.type === 'conversation_snapshot' ? latest.messages : []).toEqual([{role: 'user', content: 'turn 6'}]);
+  });
 });
