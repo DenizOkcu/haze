@@ -93,4 +93,29 @@ describe('listFiles tool', () => {
     expect(result.error).toBeTruthy();
     expect(result.suggestedNextStep).toBeTruthy();
   });
+
+  it('paginates a nested repo without overlap and prunes ignored subtrees', async () => {
+    for (const name of ['m0', 'm1', 'm2']) {
+      await fs.ensureDir(path.join(tmp, name));
+      for (let i = 0; i < 8; i++) await fs.writeFile(path.join(tmp, name, `f${i}.ts`), 'x');
+    }
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'm2/' + String.fromCharCode(10));
+
+    const seen = new Set<string>();
+    const pages: string[][] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await listFiles({recursive: true, maxEntries: 10, cursor});
+      pages.push(page.entries);
+      for (const entry of page.entries) expect(seen.has(entry)).toBe(false);
+      for (const entry of page.entries) seen.add(entry);
+      cursor = page.nextCursor;
+      expect(page.entries.some(entry => entry.startsWith('m2/'))).toBe(false);
+    } while (cursor);
+
+    // All m0/m1 entries (dir + 8 files each) plus .gitignore are covered
+    // exactly once across pages; m2 is fully pruned (dir + 8 files).
+    expect(seen.size).toBe(1 + 2 * (1 + 8));
+    expect(pages.length).toBeGreaterThan(1);
+  });
 });

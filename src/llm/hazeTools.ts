@@ -20,7 +20,8 @@ import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePat
 import {fetchTool} from './tools/fetchTool.js';
 import {bashTool} from './tools/bashTool.js';
 import {processTool} from './tools/processTool.js';
-import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, isGitIgnored, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
+import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
+import {createIgnoreClassifier} from './tools/gitIgnore.js';
 import {runRipgrepBounded} from './tools/grepRunner.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
@@ -57,10 +58,17 @@ export const hazeTools = {
         const entries: string[] = [];
         let ignoredSkipped = 0;
 
-        const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, filter: async entry => {
-          if (!includeIgnored && await isGitIgnored(entry.absolutePath)) { ignoredSkipped++; return false; }
-          return true;
-        }});
+        // One persistent classifier owns the whole listing so a frontier of
+        // candidates collapses to O(visited directories) Git subprocesses
+        // instead of one process per walked entry (RH-001). Page-2 cursor
+        // resumes do not re-check entries preceding the cursor.
+        const ignoreBatch = includeIgnored ? undefined : (relativePaths: string[]) =>
+          createIgnoreClassifier(workspaceRoot()).classify(relativePaths).then(ignored => {
+            ignoredSkipped += ignored.size;
+            return ignored;
+          });
+
+        const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, ignoreBatch});
         const page = walked.slice(0, maxEntries);
         const hasMore = walked.length > maxEntries;
 

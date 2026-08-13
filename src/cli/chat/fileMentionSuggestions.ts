@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {walkDir} from '../../utils/fs.js';
-import {isGitIgnored} from '../../llm/tools/fileToolShared.js';
+import {createIgnoreClassifier} from '../../llm/tools/gitIgnore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 
@@ -91,10 +91,11 @@ export async function fileMentionSuggestions(
   }
   if (!parentStats.isDirectory()) return [];
 
+  const classifier = createIgnoreClassifier(root);
   const entries = await walkDir(absoluteParent, {
     recursive: false,
     maxEntries: MAX_MENTION_SUGGESTIONS * 4,
-    filter: async entry => !await isGitIgnored(entry.absolutePath),
+    ignoreBatch: relativePaths => classifier.classify(relativePaths),
   });
 
   const matches = entries

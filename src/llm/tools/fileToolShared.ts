@@ -1,28 +1,15 @@
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
-import {workspaceRelativePath, workspaceRoot} from '../../utils/path.js';
 import {MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
 import {HazeToolError} from './failures.js';
-
-const execFile = promisify(execFileCallback);
+import {isGitIgnored} from './gitIgnore.js';
 
 export {MAX_OUTPUT_CHARS};
 export const DEFAULT_READ_LINES = 300;
 /** Maximum real diff rows shown inline; larger diffs retain a head/tail preview and retrieval handle. */
 export const INLINE_DIFF_LINE_LIMIT = 8;
 
-export async function isGitIgnored(absolutePath: string) {
-  const relative = workspaceRelativePath(absolutePath);
-  if (relative === '.') return false;
-  try {
-    await execFile('git', ['-C', workspaceRoot(), 'check-ignore', '-q', '--', relative]);
-    return true;
-  } catch {
-    // Fail open: exit 1 means "not ignored", exit 128 means "not a repo", and
-    // any other git failure should not block workspace reads (CR-016).
-    return false;
-  }
-}
+// Re-exported so existing import sites keep a single source for ignore checks
+// while traversal uses the batched classifier in `gitIgnore.ts` (RH-001).
+export {isGitIgnored};
 
 export async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean) {
   if (!allowIgnored && await isGitIgnored(absolutePath)) {
