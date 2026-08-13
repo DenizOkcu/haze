@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Last updated: 2026-08-05 for static streamed Markdown and lazy empty-session persistence.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
-Last analysis: 2026-08-05.
+Last analysis: 2026-08-13.
 
 ## Project overview
 
@@ -79,6 +79,7 @@ Recent decisions to preserve:
 - No default provider/model. Users configure providers via `/provider`; no user-facing env vars for provider/model settings.
 - File tools are confined to `process.cwd()`, respect `.gitignore` by default, and skip `.git`/`node_modules` walking; user-typed `@path` mentions and bare paths containing `/` are the exception and may bless host paths outside it for read-only tools (readFile, grep, listFiles). Mutating tools never honour the bless set. URL safety fails closed for malformed IPv6-shaped literals.
 - Output is aggressively bounded/reduced but raw large outputs may be retrievable by handle. Exact line paging uses bounded, signature-validated sparse indexes; subprocess teardown must not hang when escaped descendants retain stdio pipes.
+- Failed file mutations activate read-only recovery only when their structured result explicitly requests `readFile`. Recovery state advances in the AI SDK's ordered `onStepEnd` callback, compares lexical workspace path identity (`a.ts` and `./a.ts` are equivalent), and repeated-tool suppression applies only to the immediately following step.
 - Session state is JSONL under `~/.haze/sessions`; new sessions stay memory-only until the first resumable message, empty legacy files stay out of resume/latest listings, persisted sessions skip streaming `message_update` spam and slim large tool outputs, and file LLM logging under `~/.haze/logs` is enabled only by `--debug`.
 - The Ink transcript is append-only static output above a dynamic tail. Streamed assistant Markdown may move into static output only after a root block is stable; the final root remains plain and dynamic until another root begins or the response finishes.
 - Context files: global `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`; ancestor `CLAUDE.md`/`AGENTS.md` load at startup; nested subtree files load lazily when tools touch that subtree and are reread when their signature changes.

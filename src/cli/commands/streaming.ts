@@ -16,9 +16,9 @@ import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, lengthContinuationPrompt, completionRescuePrompt} from '../../core/goal/completionPolicy.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
-import {isDuplicateSkippedOutput, safeToolFailureDetails, toolInputField, toolOutputOk} from '../../core/agent/toolResults.js';
-import {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
-export {uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
+import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../core/agent/toolResults.js';
+import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
+export {latestRepeatedToolNames, uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
 import {createTurnExecutionState, decideLengthRecovery, decideRescue, isBudgetExhausted, normalizeFinishReason, RESCUE_BOUNDARY, toCompletionEvidence, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
@@ -30,7 +30,7 @@ import {createSessionGoal, formatGoalStatus, observeGoalToolEvent, type SessionG
 import type {WorkState} from '../../core/agent/workState.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, toolDiffFromResult, type NativeToolCall, type ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
-import {applyToolResultState, initialToolResultState, isMutatingToolName} from './streaming/toolResultState.js';
+import {applyStepToolResultState, initialToolResultState} from './streaming/toolResultState.js';
 import {abortableDelay, estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, type TokenUsage} from './streaming/turnRuntime.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
@@ -292,7 +292,7 @@ async function runAgentAttempt(
       },
       prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
-        const repeatedToolNames = uniqueRepeatedToolNames(toolCalls);
+        const repeatedToolNames = latestRepeatedToolNames(steps);
         const scopedMessages = withScopedContextControl(messages, toolExecutionContext);
         const messagesChanged = scopedMessages !== messages;
         // Turn-wide hard caps (shared across retries and recovery slices).
@@ -303,8 +303,8 @@ async function runAgentAttempt(
         // the boundary; a rescue slice is exempt so it may use the reserved slot.
         const toolOnlyBoundaryHit = !recoverySlice && toolOnlyStepCount(steps) >= RESCUE_BOUNDARY;
         if (likelyPlanOnlyRequest && toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
-        if (pendingMalformedToolName && pendingMalformedToolName in availableTools) {
-          const toolName = pendingMalformedToolName as keyof typeof availableTools;
+        if (pendingMalformedToolName && pendingMalformedToolName in sliceTools) {
+          const toolName = pendingMalformedToolName as keyof typeof sliceTools;
           const attempt = malformedRecoveryAttempts.get(String(toolName)) ?? 0;
           pendingMalformedToolName = undefined;
           if (attempt >= 2) {
@@ -315,9 +315,12 @@ async function runAgentAttempt(
           callbacks.debugLog(`forcing smaller retry after malformed ${String(toolName)} input`);
           return {toolChoice: {type: 'tool' as const, toolName}, messages: withSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
         }
-        if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof availableTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof availableTools>};
+        if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) {
+          if ('readFile' in sliceTools) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof sliceTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof sliceTools>};
+          return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, `The failed mutation of ${toolResultState.editRecoveryPath} requires a fresh read, but readFile is unavailable in this bounded recovery slice. Report the unfinished edit as blocked; do not claim it succeeded.`)};
+        }
         if (repeatedToolNames.length > 0) {
-          const activeTools = (Object.keys(availableTools) as Array<keyof typeof availableTools>).filter(name => !repeatedToolNames.includes(name as string));
+          const activeTools = (Object.keys(sliceTools) as Array<keyof typeof sliceTools>).filter(name => !repeatedToolNames.includes(name as string));
           callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
           return activeTools.length > 0
             ? {activeTools, messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
@@ -332,7 +335,11 @@ async function runAgentAttempt(
       onStepStart({stepNumber}) {
         callbacks.onEvent?.(agentEvent({type: 'step_start', attempt: retryAttempt + 1, step: stepNumber + 1}));
       },
-      onStepEnd({stepNumber, text, toolCalls, toolResults, finishReason, usage, response}) {
+      onStepEnd({stepNumber, text, content = [], toolCalls, toolResults, finishReason, usage, response}) {
+        // Tool-loop control must advance from this internal callback, which the
+        // SDK awaits before prepareStep. Updating it from the public stream can
+        // lag behind fast providers and leave the next request read-only.
+        toolResultState = applyStepToolResultState(toolResultState, content);
         // Turn-wide counters (shared across provider retries and recovery
         // slices) so the global budget cannot reset between attempts.
         turnState.stepsUsed += 1;
@@ -445,7 +452,6 @@ async function runAgentAttempt(
           const failureDetails = ok || toolCategories.get(toolCall.toolName) !== 'builtin' ? {} : safeToolFailureDetails(part.output);
           callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, ...failureDetails, durationMs: finish.durationMs}));
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: ok, output: part.output, durationMs: finish.durationMs}});
-          toolResultState = applyToolResultState(toolResultState, {toolName: toolCall.toolName, input: toolCall.input, output: part.output, ok});
           observeGoalToolEvent(goal, {...toolCall, success: ok, output: part.output, duplicateSkipped: isDuplicateSkippedOutput(part.output)});
           callbacks.setWorkState?.(goal);
           callbacks.setGoalStatus?.(formatGoalStatus(goal));
@@ -475,9 +481,6 @@ async function runAgentAttempt(
           const publicError = toolCategories.get(toolCall.toolName) === 'builtin' ? {error: part.error} : {};
           callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_execution_error', ...publicError, durationMs: finish.durationMs}));
           logEntry(callbacks.log, {at: new Date().toISOString(), type: 'tool_result', stream: 'main', toolResult: {id: toolCall.toolCallId, name: toolCall.toolName, success: false, error: part.error, durationMs: finish.durationMs}});
-          if (isMutatingToolName(toolCall.toolName)) {
-            toolResultState = {...toolResultState, editRecoveryPath: toolInputField(toolCall.input, 'path'), editRecoveryReadSatisfied: false};
-          }
           observeGoalToolEvent(goal, {...toolCall, success: false, output: part.error});
           callbacks.setWorkState?.(goal);
           callbacks.setGoalStatus?.(formatGoalStatus(goal));

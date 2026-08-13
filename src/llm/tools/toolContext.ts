@@ -1,8 +1,8 @@
 import {z} from 'zod';
 import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import {readScopedContextFilesForPath, type ContextFile} from '../../config/contextFiles.js';
-import {workspaceRoot} from '../../utils/path.js';
-import {isFailedToolOutput, toolInputField} from '../../core/agent/toolResults.js';
+import {workspacePathKey, workspaceRoot} from '../../utils/path.js';
+import {isFailedToolOutput, requiresReadFileRecovery, toolInputField} from '../../core/agent/toolResults.js';
 import {HazeToolError} from './failures.js';
 import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
@@ -179,7 +179,7 @@ function isDeduplicableReadOnlyTool(toolName: string) {
 /**
  * Wrap a tool's execution with turn-scoped deduplication and edit-recovery:
  *  - skip concurrent mutations of the same path;
- *  - force a re-read before retrying an edit that just failed on a path;
+ *  - force a re-read when a stale-content failure explicitly requests one;
  *  - skip identical completed read-only calls until a mutation occurs;
  *  - skip identical in-flight calls;
  *  - bump a mutation epoch on successful writes so read caches invalidate.
@@ -196,7 +196,8 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
   ctx.mutationEpoch ??= 0;
   const key = toolCallKey(toolName, input);
   const pathForInput = toolInputField(input, 'path');
-  if (isMutatingTool(toolName) && pathForInput && ctx.inFlightMutationPaths.has(pathForInput)) {
+  const mutationPathKey = pathForInput ? workspacePathKey(pathForInput) : undefined;
+  if (isMutatingTool(toolName) && mutationPathKey && ctx.inFlightMutationPaths.has(mutationPathKey)) {
     return {
       ok: true,
       duplicateSkipped: true,
@@ -204,12 +205,12 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
       reason: `Skipped concurrent mutation for ${pathForInput}. Read the file again, then make one editFile call with all non-overlapping replacements or one replaceLines call based on the latest line numbers.`,
     };
   }
-  if (isMutatingTool(toolName) && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput)) {
-    const reason = ctx.failedMutationReasons.get(pathForInput);
+  if (isMutatingTool(toolName) && mutationPathKey && ctx.failedMutationPaths.has(mutationPathKey) && !ctx.pathsReadAfterFailedMutation.has(mutationPathKey)) {
+    const reason = ctx.failedMutationReasons.get(mutationPathKey);
     throw new HazeToolError(`Read ${pathForInput} before attempting another edit after the previous edit failure${reason ? ` (${reason})` : ''}.`, reason ?? 'io_error', {recoveryTool: 'readFile', recoveryInput: {path: pathForInput}});
   }
   const completedAt = ctx.completedToolCalls.get(key);
-  const readAfterFailedMutation = toolName === 'readFile' && pathForInput && ctx.failedMutationPaths.has(pathForInput) && !ctx.pathsReadAfterFailedMutation.has(pathForInput);
+  const readAfterFailedMutation = toolName === 'readFile' && mutationPathKey && ctx.failedMutationPaths.has(mutationPathKey) && !ctx.pathsReadAfterFailedMutation.has(mutationPathKey);
   if ((isDeduplicableReadOnlyTool(toolName)) && completedAt === ctx.mutationEpoch && !readAfterFailedMutation) {
     return {
       ok: true,
@@ -229,7 +230,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
     };
   }
 
-  if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths.add(pathForInput);
+  if (isMutatingTool(toolName) && mutationPathKey) ctx.inFlightMutationPaths.add(mutationPathKey);
   let releaseMutation: (() => void) | undefined;
   const promise = (async () => {
     if (isMutatingTool(toolName) && ctx.mutationPolicy) {
@@ -245,35 +246,35 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
   try {
     const result = await promise;
     if (isFailedToolOutput(result)) {
-      if (isMutatingTool(toolName) && pathForInput) {
-        ctx.failedMutationPaths.add(pathForInput);
+      if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(result)) {
+        ctx.failedMutationPaths.add(mutationPathKey);
         const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as ToolFailureReasonCode | undefined : undefined;
-        ctx.failedMutationReasons.set(pathForInput, reasonCode);
-        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+        ctx.failedMutationReasons.set(mutationPathKey, reasonCode);
+        ctx.pathsReadAfterFailedMutation.delete(mutationPathKey);
       }
       return result;
     }
-    if (toolName === 'readFile' && pathForInput) ctx.pathsReadAfterFailedMutation.add(pathForInput);
+    if (toolName === 'readFile' && mutationPathKey) ctx.pathsReadAfterFailedMutation.add(mutationPathKey);
     if (isMutatingTool(toolName)) {
       ctx.mutationEpoch += 1;
-      if (pathForInput) {
-        ctx.failedMutationPaths.delete(pathForInput);
-        ctx.failedMutationReasons.delete(pathForInput);
-        ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+      if (mutationPathKey) {
+        ctx.failedMutationPaths.delete(mutationPathKey);
+        ctx.failedMutationReasons.delete(mutationPathKey);
+        ctx.pathsReadAfterFailedMutation.delete(mutationPathKey);
       }
     }
     ctx.completedToolCalls.set(key, ctx.mutationEpoch);
     return result;
   } catch (error) {
-    if (isMutatingTool(toolName) && pathForInput) {
-      ctx.failedMutationPaths.add(pathForInput);
-      ctx.failedMutationReasons.set(pathForInput, error instanceof HazeToolError ? error.reasonCode : undefined);
-      ctx.pathsReadAfterFailedMutation.delete(pathForInput);
+    if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(error)) {
+      ctx.failedMutationPaths.add(mutationPathKey);
+      ctx.failedMutationReasons.set(mutationPathKey, error instanceof HazeToolError ? error.reasonCode : undefined);
+      ctx.pathsReadAfterFailedMutation.delete(mutationPathKey);
     }
     throw error;
   } finally {
     releaseMutation?.();
     ctx.inFlightToolCalls.delete(key);
-    if (isMutatingTool(toolName) && pathForInput) ctx.inFlightMutationPaths?.delete(pathForInput);
+    if (isMutatingTool(toolName) && mutationPathKey) ctx.inFlightMutationPaths?.delete(mutationPathKey);
   }
 }

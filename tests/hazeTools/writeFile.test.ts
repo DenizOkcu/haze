@@ -86,10 +86,13 @@ describe('writeFile tool', () => {
     expect(result.diff).toEqual(expect.arrayContaining([{type: 'meta', text: 'No newline at end of file'}]));
   });
 
-  it('rejects append to a missing file and conflicting write modes', async () => {
-    await expect(writeFile({path: 'missing.txt', content: 'later', append: true})).resolves.toMatchObject({ok: false, reasonCode: 'append_target_missing'});
+  it('rejects invalid modes without read-locking a corrected write', async () => {
+    const context = {};
+    await expect(writeFile({path: 'missing.txt', content: 'later', append: true}, context)).resolves.toMatchObject({ok: false, reasonCode: 'append_target_missing'});
+    await expect(writeFile({path: './missing.txt', content: 'first'}, context)).resolves.toMatchObject({ok: true});
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'first');
-    await expect(writeFile({path: 'existing.txt', content: 'later', append: true, overwriteExisting: true})).resolves.toMatchObject({ok: false, reasonCode: 'conflicting_write_modes'});
+    await expect(writeFile({path: 'existing.txt', content: 'later', append: true, overwriteExisting: true}, context)).resolves.toMatchObject({ok: false, reasonCode: 'conflicting_write_modes'});
+    await expect(writeFile({path: 'existing.txt', content: 'later', append: true}, context)).resolves.toMatchObject({ok: true});
   });
 
   it('enforces the UTF-8 byte limit for each chunk', async () => {
@@ -123,9 +126,8 @@ describe('writeFile tool', () => {
     expect(result.applicableProjectInstructions).toEqual([expect.objectContaining({path: 'pkg/AGENTS.md'})]);
     await expect(fs.readFile(path.join(tmp, 'pkg/src/a.ts'), 'utf8')).resolves.toBe('old');
 
-    // Edit-recovery gating: retrying without a fresh read throws until the file is read.
-    await expect(writeFile({path: 'pkg/src/a.ts', content: 'x', overwriteExisting: true}, context)).rejects.toThrow(/Read pkg\/src\/a\.ts before attempting another edit/);
-    await hazeTools.readFile.execute({path: 'pkg/src/a.ts', mode: 'exact', allowIgnored: false}, {abortSignal: undefined, context});
+    // The next model step receives the discovered instructions directly, so
+    // this control failure must not force an unrelated file reread.
     const retry = await writeFile({path: 'pkg/src/a.ts', content: 'x', overwriteExisting: true}, context);
     expect(retry.ok).toBe(true);
   });

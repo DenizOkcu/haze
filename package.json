@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "1.0.0",
+  "version": "0.10.1",
   "description": "A minimal LLM harness for your terminal.",
   "type": "module",
   "license": "MIT",
@@ -45,10 +45,10 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.25",
-    "@ai-sdk/openai": "4.0.30",
+    "@ai-sdk/mcp": "^2.0.31",
+    "@ai-sdk/openai": "4.0.41",
     "@vscode/ripgrep": "1.18.0",
-    "ai": "7.0.52",
+    "ai": "7.0.64",
     "cli-highlight": "2.1.11",
     "commander": "15.0.0",
     "defuddle": "^0.19.2",
@@ -66,13 +66,13 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/fs-extra": "11.0.4",
-    "@types/node": "26.1.2",
+    "@types/node": "26.2.0",
     "@types/react": "19.2.18",
-    "eslint": "^10.8.0",
+    "eslint": "^10.8.1",
     "ink-testing-library": "^4.0.0",
-    "tsx": "4.23.7",
+    "tsx": "4.23.12",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.66.0",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.10"
   },
   "allowScripts": {

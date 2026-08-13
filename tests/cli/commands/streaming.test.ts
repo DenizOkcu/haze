@@ -305,6 +305,29 @@ describe('runAgentTurn: setup', () => {
     expect(prepare({steps: [], messages: []}).toolChoice).toBe('none');
   });
 
+  it('updates edit recovery before the next prepareStep instead of waiting for streamed tool results', async () => {
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {readFile: {description: 'read'}, editFile: {description: 'edit'}},
+      toolCategories: new Map([['readFile', 'builtin'], ['editFile', 'builtin']]),
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await runAgentTurn('fix a.ts', undefined, [], makeCallbacks());
+    const options = mocks.agentOptions.at(-1)!;
+    const onStepEnd = options.onStepEnd as (input: Record<string, unknown>) => void;
+    const prepare = options.prepareStep as (input: {steps: unknown[]; messages: unknown[]}) => {activeTools?: string[]} | undefined;
+    const base = {stepNumber: 0, text: '', toolCalls: [], toolResults: [], finishReason: 'tool-calls', usage: {}, response: {messages: []}};
+
+    onStepEnd({...base, content: [{type: 'tool-result', toolName: 'editFile', input: {path: './a.ts'}, output: {ok: false, recoveryTool: 'readFile'}}]});
+    expect(prepare({steps: [], messages: []})?.activeTools).toEqual(['readFile']);
+
+    onStepEnd({...base, stepNumber: 1, content: [{type: 'tool-result', toolName: 'readFile', input: {path: 'a.ts'}, output: {ok: true, content: 'x'}}]});
+    expect(prepare({steps: [], messages: []})?.activeTools).toBeUndefined();
+  });
+
   it('uses displayValue when provided instead of the raw value', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {

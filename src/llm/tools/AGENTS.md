@@ -1,6 +1,6 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Implementation helpers for haze built-in tools.
 
@@ -19,7 +19,7 @@ Implementation helpers for haze built-in tools.
 - Deduplicates identical read-only tool calls until a mutation epoch changes.
 - Deduplicates identical in-flight calls.
 - Prevents concurrent mutations of the same path.
-- Tracks failed mutations and forces a fresh `readFile` before retry.
+- Tracks only mutation failures that explicitly request `recoveryTool: 'readFile'` and forces a fresh read before retrying those paths. Argument-only failures remain directly retryable. Path state uses normalized lexical workspace identity so aliases such as `a.ts` and `./a.ts` agree.
 - Lazily discovers nested `CLAUDE.md`/`AGENTS.md` instructions for touched subtrees.
 - Tracks loaded context-file signatures, serializes concurrent scoped discovery, queues newly discovered scoped files in `pendingContextFiles`, and notifies the UI when instruction files are read.
 - Carries the turn-scoped workspace mutation policy/owner. File mutations and bash acquire it; worker owners are reentrant so a whole-worker lease cannot deadlock its internal tools. Bash coordination is conservative and is not a sandbox.

@@ -2,19 +2,22 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.0.0
+## What's new in 0.10.1
 
-haze 1.0.0 establishes the stable public contract for CLI flags, slash commands, tool results, settings, sessions, skills, and Node.js 22 or newer.
+haze 0.10.1 is a reliability and release-hardening update for the 0.10 line. It keeps the Node.js 22 support floor and the documented CLI, settings, session, skill, and tool-result contracts.
 
-- External tool output is explicitly treated as untrusted data. The README and `SECURITY.md` now document the attended-use threat model, the lack of command confirmation gates, prompt-injection limits, and debug-log sensitivity.
-- OpenAI Subscription provider preset with browser OAuth against the ChatGPT Codex Responses endpoint. Credentials live in `~/.haze/auth.json` and are refreshed transparently near expiry.
-- Fetching has a total redirect deadline, cancels redirect bodies, rejects non-streamable responses, and keeps the pinned transport GET/HEAD-only. Piped stdin, session entries, log ids, and terminal titles now have stricter validation and bounds.
-- Windows process termination uses tree semantics in both graceful and forced phases. Session-picker summaries are cached by file signature, while capped process streams keep draining to avoid child-process deadlocks.
-- `writeFile` enforces a per-call byte cap at both schema and body; malformed tool input triggers up to two smaller retries before the turn reports blocked.
-- CI now runs typecheck, tests, lint, build, a full high-severity dependency audit, and a package dry run on Node 22 and 24. The dependency audit is clean.
-- Shared UTF-8 truncation, package-version loading, and external-opening helpers remove duplicate boundary code. Runtime tool-context fields are lightly validated.
-- The terminal interface has clearer startup information, system-message formatting, and a consistent shared color palette.
-- The docs site is now a multi-page redesign (landing, quickstart, commands, tools, skills, workflows) backed by shared CSS/JS.
+- Fast models no longer get stuck with read-only tools after a successful recovery read. Edit recovery advances before the next model step, recognizes equivalent paths such as `a.ts` and `./a.ts`, and only activates when a failure explicitly requires a reread. Argument-only write errors can be retried directly, and duplicate-call suppression no longer disables a tool for the rest of the turn.
+- Long turns have bounded output-length continuation and a final mutation/validation rescue slice. Headless results include safe completion and validation evidence, while structured file-tool failures expose concise diagnostics and recovery hints.
+- Completed transcript entries and parser-stable streamed Markdown roots move into Ink static output. New sessions remain memory-only until the first resumable message, so empty sessions no longer create files or appear in resume lists.
+- File mutation tools show compact colorized diffs, including bounded previews and retained handles for large changes.
+- External tool output is explicitly treated as untrusted data. The README and `SECURITY.md` document the attended-use threat model, lack of command confirmation gates, prompt-injection limits, and debug-log sensitivity.
+- The OpenAI Subscription preset uses browser OAuth against the ChatGPT Codex Responses endpoint. Credentials live in `~/.haze/auth.json` and refresh transparently near expiry.
+- Fetching has a total redirect deadline, cancels redirect bodies, rejects non-streamable responses, and keeps the pinned transport GET/HEAD-only. Piped stdin, session entries, log ids, and terminal titles have stricter validation and bounds.
+- Windows process termination uses tree semantics in graceful and forced phases. Session summaries are cached by file signature, and capped process streams keep draining to avoid child-process deadlocks.
+- `writeFile` enforces a per-call byte cap at schema and runtime boundaries; malformed tool input gets up to two smaller retries before the turn reports blocked.
+- CI covers typecheck, tests, lint, build, high-severity dependency audit, and package inspection on Node 22 and 24. Runtime and development dependencies are current, excluding the intentionally pinned TypeScript version, and the audit is clean.
+- Shared UTF-8 truncation, package-version loading, external-opening, and path-identity helpers remove duplicate boundary code. Runtime tool-context fields are lightly validated.
+- The terminal UI has clearer startup information, system-message formatting, a shared palette, and a multi-page static documentation site.
 
 Previous releases:
 

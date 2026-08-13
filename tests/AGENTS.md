@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-08-05 for static streamed Markdown and lazy empty-session persistence.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Vitest test suite instructions.
 
@@ -8,7 +8,7 @@ Vitest test suite instructions.
 
 Current regression priorities:
 
-- Cover explicit provider/model selection and discovery fallback, malformed settings errors, image/path mention parsing and read-only blessings, project-skill precedence/provenance/symlink isolation, lazy session materialization and empty-session filtering, session browsing/forking, static/dynamic transcript ordering and streamed Markdown roots, managed background-process cleanup, subagent/fleet isolation, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
+- Cover explicit provider/model selection and discovery fallback, malformed settings errors, image/path mention parsing and read-only blessings, project-skill precedence/provenance/symlink isolation, lazy session materialization and empty-session filtering, session browsing/forking, static/dynamic transcript ordering and streamed Markdown roots, ordered edit-recovery state for fast providers, normalized recovery paths, one-step repeated-tool suppression, managed background-process cleanup, subagent/fleet isolation, LSP protocol isolation and forced teardown, bash classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.

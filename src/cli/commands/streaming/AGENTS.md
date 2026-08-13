@@ -1,6 +1,6 @@
 # src/cli/commands/streaming/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Helpers for `src/cli/commands/streaming.ts`.
 
@@ -23,7 +23,8 @@ Maintainability focus:
 
 - Keep helpers deterministic where possible. UI callbacks and logs should be injected, not imported from chat state.
 - Assistant text filtering must avoid hiding substantive final answers while suppressing duplicated/empty/lead-in fragments around tool calls.
-- Tool result state drives model constraints in `prepareStep`; changes here can alter autonomy behavior and must be tested.
+- Tool result state drives model constraints in `prepareStep`; changes here can alter autonomy behavior and must be tested. Advance it from ordered `onStepEnd` content, not the later public stream, so fast providers cannot race recovery state. Read-only recovery applies only when a structured mutation failure explicitly requests `readFile`, and equivalent lexical workspace paths must satisfy it.
+- Repeated identical calls may suppress that tool for the immediately following step only. A duplicate earlier in the turn must not permanently remove an edit/write tool.
 - Token estimates are approximate display/control inputs, not billing truth. Preserve provider usage fields when available.
 - Context files discovered from tool outputs should be remembered for the active turn only; durable context loading belongs in `config/contextFiles.ts`.
 - Turn options separate durable user value from ephemeral synthetic control and subagent overrides. Reapply control on retry, strip it before conversation/session writes, and share one workspace mutation scope across main and worker tools. User-attached images (F03) ride along as `attachments` on the first attempt only; `userTurnMessage` keeps text-only turns as a plain string payload.

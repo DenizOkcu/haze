@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-08-05 for static streamed Markdown and lazy empty-session persistence.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 CLI and terminal UI orchestration instructions.
 

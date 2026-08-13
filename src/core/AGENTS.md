@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-08-05 for lazy empty-session persistence.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 

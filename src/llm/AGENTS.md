@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-08-05 for the complete 1.0.0 release.
+Last updated: 2026-08-13 for the 0.10.1 release.
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
@@ -23,7 +23,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - File tools are confined to `process.cwd()` via workspace path helpers and respect `.gitignore` unless explicit `allowIgnored`/`includeIgnored` options are used.
 - `listFiles`, `readFile`, `grep`, and `fetch` are deduplicated within a turn when no mutation occurred. `bash` is never deduplicated because commands may observe changed external state between identical calls.
 - `editFile`, `replaceLines`, and `writeFile` are mutating; they must check scoped nested instructions before writing and pause if new applicable instructions are discovered.
-- Failed mutations force a fresh `readFile` before another mutation attempt on the same path.
+- Failed mutations force a fresh `readFile` only when the structured failure explicitly carries `recoveryTool: 'readFile'` (for example stale or ambiguous edit content). Argument-only failures such as invalid write modes can be retried directly with corrected input. Recovery compares normalized lexical workspace paths.
 - Tool outputs should be JSON-serializable, bounded, and include recovery hints on failure.
 - Large output should use `storeToolOutput`/handles and reduction metadata rather than returning unbounded text.
 

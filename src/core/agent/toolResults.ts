@@ -74,6 +74,12 @@ export function toolInputField(input: unknown, key: string): string | undefined 
   return typeof value === 'string' ? value : undefined;
 }
 
+/** A mutation failure needs a fresh file read only when it explicitly says so. */
+export function requiresReadFileRecovery(value: unknown): boolean {
+  return typeof value === 'object' && value != null && 'recoveryTool' in value
+    && (value as {recoveryTool?: unknown}).recoveryTool === 'readFile';
+}
+
 /**
  * Deduplicated read-only tool calls return a `{duplicateSkipped: true}` marker
  * instead of re-running. Lets observers treat them as no-ops.

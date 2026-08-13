@@ -2,12 +2,7 @@
 
 ## Unreleased
 
-### Changed
-
-- The interactive transcript uses Ink static output for the header, completed messages, and parser-stable root-level Markdown blocks from an active response. Only the unfinished root block and live controls rerender, reducing terminal flicker and scroll jumps without rendering incomplete Markdown as if it were finished.
-- New interactive sessions stay in memory until the first non-empty UI message or conversation snapshot. Empty sessions no longer create JSONL files, and zero-message files from earlier versions are omitted from `/resume`, `--continue`, and latest-session selection.
-
-## 1.0.0 - 2026-08-05
+## 0.10.1 - 2026-08-13
 
 ### Added
 
@@ -17,14 +12,18 @@
 
 ### Changed
 
+- The interactive transcript uses Ink static output for the header, completed messages, and parser-stable root-level Markdown blocks from an active response. Only the unfinished root block and live controls rerender, reducing terminal flicker and scroll jumps without rendering incomplete Markdown as if it were finished.
+- New interactive sessions stay in memory until the first non-empty UI message or conversation snapshot. Empty sessions no longer create JSONL files, and zero-message files from earlier versions are omitted from `/resume`, `--continue`, and latest-session selection.
+- Added bounded completion recovery for long turns: one output-length continuation and one final mutation/validation rescue slice, both counted against turn-wide budgets. Headless results and lifecycle events now include safe completion and validation evidence.
+- File mutation tools now render compact colorized diffs, with first/last previews and retained handles for large changes.
+- Updated runtime and development dependencies to current releases while keeping TypeScript pinned at 6.0.3; the full dependency audit reports zero vulnerabilities.
 - Replaced the single-page docs site with a multi-page redesign (landing, quickstart, commands, tools, skills, workflows) backed by shared CSS/JS.
-- Declared the 1.0 stability contract for CLI flags, slash commands, tool result shapes, settings and session files, Markdown skill packages, and the Node.js 22 support floor. Future incompatible changes to these surfaces require a semver-major release.
+- Documented the public contracts for CLI flags, slash commands, tool result shapes, settings and session files, Markdown skill packages, and the Node.js 22 support floor.
 - CI now runs typecheck, tests, lint, build, `npm audit --audit-level=high`, and `npm pack --dry-run` on Node 22 and 24. Explicit `any` is now a lint error.
-- Updated runtime and development dependencies to current compatible releases; the full dependency audit now reports zero vulnerabilities.
 - Consolidated UTF-8-safe byte truncation, package-version loading, and platform external-opening helpers. Known tool-context fields now receive light runtime type validation.
 - Refined the terminal palette, startup guidance, system-message formatting, task display, and session startup grouping.
 - Session-picker summaries are cached by file size and modification time. Windows graceful and forced termination both target the complete process tree.
-- `writeFile` now enforces a `${WRITE_FILE_CHUNK_BYTES}` per-call cap at both the Zod schema and the runtime body. Malformed tool input triggers up to two smaller retries before the turn is reported as blocked with an unresolved-tool-input marker.
+- `writeFile` now enforces a 16 KiB per-call cap at both the Zod schema and the runtime body. Malformed tool input triggers up to two smaller retries before the turn is reported as blocked with an unresolved-tool-input marker.
 
 ### Security
 
@@ -35,6 +34,10 @@
 
 ### Fixed
 
+- Fast providers can no longer outrun edit-recovery state and leave the following step restricted to `readFile`. Recovery now advances in the AI SDK's ordered step callback, and equivalent lexical paths such as `a.ts` and `./a.ts` satisfy the reread requirement.
+- Read-only recovery now activates only for structured mutation failures that explicitly request `readFile`; argument-only `writeFile` failures can be retried directly with corrected input.
+- Repeated identical calls suppress a tool only for the immediately following step instead of removing that tool for the remainder of the turn.
+- `readFile` failures provide bounded reason codes, suggested paths, and actionable recovery guidance. Streaming diagnostics consistently expose safe built-in failure details without leaking third-party output.
 - Fetch now cancels redirect bodies, enforces one total redirect deadline, rejects non-streamable bodies instead of buffering them without a cap, normalizes array response headers, and rejects request bodies, unsupported methods, and URL credentials in the pinned transport.
 - Piped stdin is capped at 256 KiB and oversized prompts fail with guidance to pass a file path instead. Non-TTY pipes are detected correctly.
 - Bounded process collectors continue draining discarded bytes after their retention cap so chatty children can exit without filling their pipes.

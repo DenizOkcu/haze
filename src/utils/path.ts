@@ -5,9 +5,14 @@ export function workspaceRoot() {
   return process.cwd();
 }
 
+/** Lexical identity for comparing model-supplied paths without touching the filesystem. */
+export function workspacePathKey(inputPath: string) {
+  return path.resolve(workspaceRoot(), inputPath);
+}
+
 export function resolveWorkspacePath(inputPath: string) {
   const root = workspaceRoot();
-  const resolved = path.resolve(root, inputPath);
+  const resolved = workspacePathKey(inputPath);
   const relative = path.relative(root, resolved);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Path is outside the workspace: ${inputPath}`);

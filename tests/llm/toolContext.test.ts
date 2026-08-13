@@ -51,6 +51,21 @@ describe('toolContext', () => {
     expect(executions).toBe(1);
   });
 
+  it('gates only stale-content failures and accepts an equivalent reread path', async () => {
+    const context: HazeToolContext = {};
+    const stale = await runDedupedTool('editFile', {path: './a.ts'}, {context}, async () => ({ok: false, reasonCode: 'old_text_missing' as const, recoveryTool: 'readFile'}));
+    expect(stale).toMatchObject({ok: false});
+    await expect(runDedupedTool('editFile', {path: 'a.ts'}, {context}, async () => ({ok: true}))).rejects.toThrow(/Read a\.ts/);
+    await runDedupedTool('readFile', {path: 'a.ts'}, {context}, async () => ({ok: true}));
+    await expect(runDedupedTool('editFile', {path: 'a.ts'}, {context}, async () => ({ok: true}))).resolves.toEqual({ok: true});
+  });
+
+  it('does not gate a corrected mutation after an argument-only failure', async () => {
+    const context: HazeToolContext = {};
+    await runDedupedTool('writeFile', {path: 'new.ts', append: true}, {context}, async () => ({ok: false, reasonCode: 'append_target_missing' as const}));
+    await expect(runDedupedTool('writeFile', {path: './new.ts', append: false}, {context}, async () => ({ok: true}))).resolves.toEqual({ok: true});
+  });
+
   it('serializes concurrent main-turn file mutation and bash under the workspace policy', async () => {
     const context: HazeToolContext = {mutationPolicy: new WorkspaceMutationPolicy()};
     let releaseFirst!: () => void;

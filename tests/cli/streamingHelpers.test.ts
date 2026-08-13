@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {toolOnlyStepCount, uniqueRepeatedToolNames} from '../../src/cli/commands/streaming.js';
+import {latestRepeatedToolNames, toolOnlyStepCount, uniqueRepeatedToolNames} from '../../src/cli/commands/streaming.js';
 
 describe('uniqueRepeatedToolNames', () => {
   it('flags a tool called twice with identical input', () => {
@@ -43,6 +43,33 @@ describe('uniqueRepeatedToolNames', () => {
       {toolName: 'bash', input: {command: 'x'}},
     ];
     expect(uniqueRepeatedToolNames(calls).sort()).toEqual(['bash', 'readFile']);
+  });
+});
+
+describe('latestRepeatedToolNames', () => {
+  it('flags a duplicate introduced by the latest step', () => {
+    const steps = [
+      {toolCalls: [{toolName: 'editFile', input: {path: 'a.ts'}}]},
+      {toolCalls: [{toolName: 'editFile', input: {path: 'a.ts'}}]},
+    ];
+    expect(latestRepeatedToolNames(steps)).toEqual(['editFile']);
+  });
+
+  it('does not keep a tool disabled after a different latest step', () => {
+    const steps = [
+      {toolCalls: [{toolName: 'editFile', input: {path: 'a.ts'}}]},
+      {toolCalls: [{toolName: 'editFile', input: {path: 'a.ts'}}]},
+      {toolCalls: [{toolName: 'readFile', input: {path: 'a.ts'}}]},
+    ];
+    expect(latestRepeatedToolNames(steps)).toEqual([]);
+  });
+
+  it('detects duplicates within one parallel batch', () => {
+    const steps = [{toolCalls: [
+      {toolName: 'readFile', input: {path: 'a.ts'}},
+      {toolName: 'readFile', input: {path: 'a.ts'}},
+    ]}];
+    expect(latestRepeatedToolNames(steps)).toEqual(['readFile']);
   });
 });
 
