@@ -41,8 +41,9 @@
     "lint:fix": "eslint src/ --fix",
     "typecheck": "tsc --noEmit",
     "context:report": "node --import tsx src/cli/contextReport.ts",
+    "release:verify": "node scripts/verify-release-metadata.mjs",
     "haze": "tsx src/cli/index.ts",
-    "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high"
+    "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high && npm run release:verify"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.31",

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- Headless `--timeout <duration>` (e.g. `30s`, `10m`, `2h`) sets an absolute turn deadline that bounds total elapsed time; on expiry haze emits a `timeout` stream-json event and exits non-zero. Per-tool execution deadlines (default 10m; 20m for subagents) ensure an uncooperative tool cannot defer a turn indefinitely, with late-settlement quarantine so ignored cancellation cannot mutate state.
+- Optional per-provider `modelLimits` metadata (`contextWindowTokens`, `maxOutputTokens`) for request budgeting; `npm run release:verify` checks package/lockfile/README/changelog/SECURITY/docs/AGENTS version agreement in one run (wired into `prepublishOnly`).
+
+### Changed
+
+- Performance and long-running-autonomous hardening: `listFiles` discovery now uses one bounded `git check-ignore` batch per directory level instead of one Git subprocess per walked entry, and cursor pagination no longer re-checks entries that preceded the cursor. LSP navigation (symbols/definition/references/workspace symbols) reuses a single initialized language server and its opened documents per turn instead of restarting and reindexing on every call. `/fleet` subagents now let read-only work fill idle slots behind one blocked mutation (bounded so a serialized mutation is never starved). Session conversation/work-state snapshots are coalesced so a long turn does not rewrite the full history on every update. The interactive transcript caches settled Markdown root chunks so it no longer re-lexes the whole history on each render.
+- Main tool-call budgets are now enforced atomically at the execution boundary, so one oversized parallel batch cannot overshoot the turn or recovery-slice limit; blocked calls have no side effect and force a final synthesis.
+- Context budgeting is now model-aware: the message allowance is the configured context window minus the system prompt, tool schemas, output reserve, and a safety margin (no longer a fixed 40K). Long multi-step turns compact accumulated tool history before each provider request, and context-overflow retries shrink the target progressively.
+- `--output stream-json` now emits `message_update` deltas (not cumulative text) through an ordered, backpressure-aware NDJSON sink, so total update payload stays linear in the final response size; `message_end.text` remains complete and authoritative.
+
 ## 0.10.1 - 2026-08-13
 
 ### Added

@@ -122,6 +122,7 @@
                 <tr><td class="cmd-c"><code>haze -c, --continue</code></td><td class="cmd-d">Resume the latest saved session for this workspace (interactive only).</td></tr>
                 <tr><td class="cmd-c"><code>haze --resume &lt;id&gt;</code></td><td class="cmd-d">Resume an exact workspace session. Combine with <code>-p</code> to load its context for one non-durable turn. Unknown ids exit non-zero.</td></tr>
                 <tr><td class="cmd-c"><code>haze --no-session</code></td><td class="cmd-d">Run without saving or resuming a durable session.</td></tr>
+                <tr><td class="cmd-c"><code>haze --timeout &lt;duration&gt;</code></td><td class="cmd-d">Print-mode absolute turn deadline, e.g. <code>30s</code>, <code>10m</code>, or <code>2h</code> (raw ms also accepted; 1&nbsp;second–24&nbsp;hours). Bounds total elapsed time so a busy or uncooperative tool cannot run indefinitely. When the deadline fires haze emits a <code>timeout</code> stream-json event and exits non-zero.</td></tr>
                 <tr><td class="cmd-c"><code>haze --debug</code></td><td class="cmd-d">Show model/tool debug logs and write detailed JSONL payloads to <code>~/.haze/logs/</code> (interactive and print mode). Logs can contain secrets and file content; redact them before sharing.</td></tr>
               </tbody>
             </table>
