@@ -45,5 +45,6 @@ export async function buildContextReport(input: {
     });
   } finally {
     if (assembled.loadedMcp?.clients.length) await closeMcpClients(assembled.loadedMcp.clients);
+    if (assembled.lspPool) await assembled.lspPool.close();
   }
 }

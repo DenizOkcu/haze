@@ -1,6 +1,7 @@
 import type {ToolSet} from 'ai';
 import {hazeTools} from './hazeTools.js';
-import {lspTools} from './lspTools.js';
+import {buildLspTools} from './lspTools.js';
+import {LspPool} from './lsp.js';
 import {buildSystemPrompt, type PromptSession} from './systemPrompt.js';
 import {readSettings} from '../config/settings.js';
 import {resolveWorkerRuntime, type ModelRuntimeSelection} from './client.js';
@@ -41,6 +42,8 @@ export interface AssembledRequestContext {
   /** Tool name -> coarse origin bucket, used by /context to group token estimates. */
   toolCategories: Map<string, ToolCategory>;
   loadedMcp?: LoadedMcpTools;
+  /** Turn-scoped LSP client pool; callers close it once the turn/context is done. */
+  lspPool?: LspPool;
   executionScope: TurnExecutionScope;
 }
 
@@ -100,8 +103,9 @@ export async function assembleRequestContext(input: {
   const toolCategories = new Map<string, ToolCategory>();
   const availableTools: ToolSet = {};
 
+  const lspPool = hasInstalledLsp ? new LspPool() : undefined;
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'builtin', tools: hazeTools}});
-  if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: lspTools}});
+  if (hasInstalledLsp) addCapabilityTools({availableTools, toolCategories, loaded: {category: 'lsp', tools: buildLspTools(lspPool)}});
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'subagent', tools: {subagent: createSubagentTool({runtime: workerRuntime, profile: profile ?? undefined, coordinator, mutationPolicy, blockedReason, forceMode: input.subagentOverrides?.forceMode, session: input.session})}}});
   addCapabilityTools({availableTools, toolCategories, loaded: {category: 'skill', tools: buildSkillTools({skills: enabledSkills, errors: skillRegistry.errors ?? []})}});
 
@@ -118,5 +122,5 @@ export async function assembleRequestContext(input: {
   const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
   const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
-  return {systemPrompt, availableTools, toolCategories, loadedMcp, executionScope};
+  return {systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope};
 }
