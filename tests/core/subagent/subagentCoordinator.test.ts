@@ -144,18 +144,53 @@ describe('SubagentCoordinator', () => {
     expect(events).toEqual([expect.objectContaining({type: 'terminal', execution: 'settled'})]);
   });
 
-  it('does not let later reads bypass and starve an older queued mutation', async () => {
-    const coordinator = new SubagentCoordinator({...COMPATIBILITY_PROFILE, maxConcurrency: 2, deadlineMs: 500});
-    const gate = deferred();
-    const order: string[] = [];
-    const active = coordinator.submit<Result>({id: 'active', mode: 'implement', run: async () => { order.push('active'); await gate.promise; return {id: 'active', termination: 'completed'}; }, terminal: terminal('active'), terminationOf: value => value.termination});
+  it('allows bounded read-only bypass behind a blocked mutation without starving it', async () => {
+    // maxConcurrency 3 -> bypassCap 2: two reads may fill idle slots while a
+    // mutation runs and another mutation is blocked at the head. The blocked
+    // mutation is never starved: it is admitted the moment the running mutation
+    // settles, ahead of the remaining queued reads (RH-010).
+    const coordinator = new SubagentCoordinator({...COMPATIBILITY_PROFILE, maxConcurrency: 3, deadlineMs: 5000});
+    const activeGate = deferred();
+    const readGates = Array.from({length: 4}, deferred);
+    const started: string[] = [];
+    const active = coordinator.submit<Result>({id: 'active', mode: 'implement', run: async () => { started.push('active'); await activeGate.promise; return {id: 'active', termination: 'completed'}; }, terminal: terminal('active'), terminationOf: value => value.termination});
     await new Promise(resolve => setTimeout(resolve, 0));
-    const mutation = coordinator.submit<Result>({id: 'mutation', mode: 'validate', run: async () => { order.push('mutation'); return {id: 'mutation', termination: 'completed'}; }, terminal: terminal('mutation'), terminationOf: value => value.termination});
-    const reads = Array.from({length: 4}, (_, index) => coordinator.submit<Result>({id: `read-${index}`, mode: 'inspect', run: async () => { order.push(`read-${index}`); return {id: `read-${index}`, termination: 'completed'}; }, terminal: terminal(`read-${index}`), terminationOf: value => value.termination}));
+    const mutation = coordinator.submit<Result>({id: 'mutation', mode: 'validate', run: async () => { started.push('mutation'); return {id: 'mutation', termination: 'completed'}; }, terminal: terminal('mutation'), terminationOf: value => value.termination});
+    const reads = readGates.map((readGate, index) => coordinator.submit<Result>({id: `read-${index}`, mode: 'inspect', run: async () => { started.push(`read-${index}`); await readGate.promise; return {id: `read-${index}`, termination: 'completed'}; }, terminal: terminal(`read-${index}`), terminationOf: value => value.termination}));
     await new Promise(resolve => setTimeout(resolve, 5));
-    expect(order).toEqual(['active']);
-    gate.resolve();
+
+    // Two reads bypass (cap), the third read and the blocked mutation wait.
+    expect(started).toEqual(['active', 'read-0', 'read-1']);
+    expect(coordinator.peakBypass).toBe(2);
+
+    // Releasing the running mutation admits the blocked mutation next, before
+    // the remaining reads can monopolize the freed slots.
+    activeGate.resolve();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(started).toContain('mutation');
+    expect(started.indexOf('mutation')).toBeLessThan(started.indexOf('read-2'));
+
+    for (const readGate of readGates) readGate.resolve();
     await Promise.all([active, mutation, ...reads]);
-    expect(order[1]).toBe('mutation');
+  });
+
+  it('never runs two mutations concurrently even under read-only bypass', async () => {
+    const coordinator = new SubagentCoordinator({...COMPATIBILITY_PROFILE, maxConcurrency: 4, deadlineMs: 5000});
+    const gate = deferred();
+    let activeMutations = 0;
+    let peakMutations = 0;
+    const submit = (id: string, mode: 'implement' | 'inspect') => coordinator.submit<Result>({id, mode, run: async () => {
+      if (mode === 'implement') { activeMutations++; peakMutations = Math.max(peakMutations, activeMutations); await gate.promise; activeMutations--; }
+      return {id, termination: 'completed'};
+    }, terminal: terminal(id), terminationOf: value => value.termination});
+    const m1 = submit('m1', 'implement');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const m2 = submit('m2', 'implement');
+    const reads = Array.from({length: 4}, (_, index) => submit(`r${index}`, 'inspect'));
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(peakMutations).toBe(1);
+    gate.resolve();
+    await Promise.all([m1, m2, ...reads]);
+    expect(peakMutations).toBe(1);
   });
 });

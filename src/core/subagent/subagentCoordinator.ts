@@ -30,11 +30,15 @@ export class SubagentCoordinator {
   private readonly queue: Array<Submission<unknown>> = [];
   private running = 0;
   private mutationRunning = false;
+  /** Read-only workers admitted behind a blocked mutation head (RH-010). */
+  private bypassRunning = 0;
   private nextId = 1;
   private nextSequence = 1;
   private submissionBatch = 1;
   private admissionScheduled = false;
   peakConcurrency = 0;
+  /** Peak read-only workers running concurrently behind a blocked mutation. */
+  peakBypass = 0;
 
   constructor(private readonly profile: SubagentExecutionProfile, private readonly onEvent?: (event: CoordinatorEvent) => void) {}
 
@@ -86,18 +90,39 @@ export class SubagentCoordinator {
   }
 
   private admit() {
+    // FIFO admission from the queue head. A mutation at the head blocks behind
+    // another running mutation; everything else is admitted in order while
+    // slots remain free.
     while (this.running < this.profile.maxConcurrency) {
       const item = this.queue[0];
       if (!item || (isMutationMode(item.mode) && this.mutationRunning)) break;
       this.queue.shift();
       if (item.signal && item.abortListener) item.signal.removeEventListener('abort', item.abortListener);
-      this.start(item);
+      this.start(item, false);
+    }
+    // Bounded read-only bypass: while a mutation is blocked at the head, let
+    // read-only work waiting behind it consume otherwise-idle slots. The cap is
+    // maxConcurrency - 1 so a serialized mutation always retains a free slot
+    // the moment the running mutation settles, preventing starvation (RH-010).
+    const bypassCap = Math.max(0, this.profile.maxConcurrency - 1);
+    while (this.running < this.profile.maxConcurrency && this.bypassRunning < bypassCap) {
+      const head = this.queue[0];
+      if (!head || !(isMutationMode(head.mode) && this.mutationRunning)) break;
+      const index = this.queue.findIndex(item => !isMutationMode(item.mode));
+      if (index === -1) break;
+      const [item] = this.queue.splice(index, 1);
+      if (item.signal && item.abortListener) item.signal.removeEventListener('abort', item.abortListener);
+      this.start(item, true);
     }
   }
 
-  private start(item: Submission<unknown>) {
+  private start(item: Submission<unknown>, bypass: boolean) {
     const mutation = isMutationMode(item.mode);
     this.running++;
+    if (bypass) {
+      this.bypassRunning++;
+      this.peakBypass = Math.max(this.peakBypass, this.bypassRunning);
+    }
     if (mutation) this.mutationRunning = true;
     this.peakConcurrency = Math.max(this.peakConcurrency, this.running);
     const queueMs = performance.now() - item.submittedAt;
@@ -137,6 +162,7 @@ export class SubagentCoordinator {
         clearTimeout(timer);
         item.signal?.removeEventListener('abort', parentAbort);
         this.running--;
+        if (bypass) this.bypassRunning--;
         if (mutation) this.mutationRunning = false;
         if (deliveredTermination && abortSource) {
           this.onEvent?.({type: 'settled', id: item.id, mode: item.mode, termination: deliveredTermination, queueMs, durationMs: performance.now() - startedAt, running: this.running});
