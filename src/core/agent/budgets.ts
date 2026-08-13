@@ -2,6 +2,14 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 /** Keep generated file payloads comfortably below a model's output-token ceiling. */
 export const WRITE_FILE_CHUNK_BYTES = 16 * 1024;
 export const IDLE_TIMEOUT_MS = 5 * 60_000;
+/** Default per-tool execution deadline; an uncooperative tool cannot defer the turn indefinitely (RH-004). */
+export const DEFAULT_TOOL_DEADLINE_MS = 10 * 60_000;
+/** Subagents legitimately run long; give their wrapper a larger deadline. */
+export const SUBAGENT_TOOL_DEADLINE_MS = 20 * 60_000;
+/** Absolute main-turn deadline: no single turn runs longer than this by default. */
+export const DEFAULT_TURN_DEADLINE_MS = 30 * 60_000;
+/** Maximum accepted explicit `--timeout` value (24 hours). */
+export const MAX_TURN_DEADLINE_MS = 24 * 60 * 60_000;
 export const MAIN_STEP_LIMIT = 64;
 export const MAIN_TOOL_CALL_LIMIT = 120;
 export const MAIN_TOOL_ONLY_STEP_LIMIT = 24;

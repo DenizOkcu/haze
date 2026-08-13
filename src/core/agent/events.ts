@@ -22,6 +22,7 @@ export type AgentEvent =
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
+  | {type: 'timeout'; phase: 'turn' | 'tool' | 'model-stream'; timeoutMs: number; at: string}
   | {type: 'subagent_state'; id: string; state: 'queued' | 'started' | 'terminal' | 'settled'; mode: string; queued?: number; running: number; queueMs?: number; durationMs?: number; termination?: string; execution?: 'settled' | 'quarantined'; at: string};
 
 export type AgentEventSink = (event: AgentEvent) => void;
