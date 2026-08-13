@@ -10,6 +10,7 @@ import {
 import {storeToolOutput} from '../agent/toolOutputStore.js';
 import {withSyntheticControl} from '../agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../agent/turnPolicy.js';
+import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget} from '../agent/toolExecutionBudget.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import {buildSubagentPrompt, projectContextSection} from '../../llm/systemPrompt.js';
@@ -36,32 +37,6 @@ import {resolveWorkspacePath, workspaceRelativePath} from '../../utils/path.js';
 const SYNTHESIS_DIRECTIVE = 'You have reached your tool/step budget. Stop calling tools. Return the requested self-contained deliverable now, including evidence, coverage gaps, changed paths, validation, and precise remaining work. A concise partial deliverable is mandatory and better than an empty response.';
 
 type SubagentStep = {toolCalls: unknown[]; text: string};
-
-const TOOL_BUDGET_BLOCKED = '__hazeSubagentToolBudgetBlocked';
-
-function withToolExecutionBudget(tools: ToolSet, maxToolCalls: number, state: {started: number; exceeded: boolean}): ToolSet {
-  return Object.fromEntries(Object.entries(tools).map(([name, definition]) => {
-    if (typeof definition.execute !== 'function') return [name, definition];
-    const execute = definition.execute as unknown as (...args: unknown[]) => unknown;
-    return [name, {
-      ...definition,
-      execute: (...args: unknown[]) => {
-        // This check is at the actual execute boundary. Concurrent calls from
-        // one emitted batch enter synchronously, so no more than the remaining
-        // budget can reach an underlying tool implementation. Relies on JS's
-        // single-threaded event loop keeping the check-and-increment atomic.
-        // Revisit if the AI SDK ever yields between queueing a tool batch and
-        // invoking execute.
-        if (state.started >= maxToolCalls) {
-          state.exceeded = true;
-          return {ok: false, [TOOL_BUDGET_BLOCKED]: true, error: `Subagent tool-call budget of ${maxToolCalls} exhausted; execution was blocked.`};
-        }
-        state.started++;
-        return execute(...args);
-      },
-    }];
-  })) as ToolSet;
-}
 
 function toolSummary(output: unknown): string {
   if (typeof output !== 'object' || output == null) return 'completed';
@@ -149,8 +124,8 @@ export async function runSubagent(
   const validation: SubagentResultCapsule['validation'] = [];
   let usageIn: number | undefined;
   let usageOut: number | undefined;
-  const toolBudget = {started: 0, exceeded: false};
-  const budgetedTools = withToolExecutionBudget(bundle.tools, profile.maxToolCalls, toolBudget);
+  const toolBudget = createToolExecutionBudget();
+  const budgetedTools = withToolExecutionBudget(bundle.tools, {state: toolBudget, limit: profile.maxToolCalls});
   const mutationPolicy = options.mutationPolicy;
   const mutationOwner = mutationPolicy?.createOwner();
   const toolExecutionContext: HazeToolContext = {
@@ -190,13 +165,14 @@ export async function runSubagent(
       onToolExecutionEnd(event) {
         if (!event.toolCall) return;
         const output = event.toolOutput.type === 'tool-result' ? event.toolOutput.output : undefined;
-        if (typeof output === 'object' && output != null && TOOL_BUDGET_BLOCKED in output) return;
-        const toolError = 'error' in event.toolOutput ? event.toolOutput.error : 'tool execution failed';
-        if (toolCallLog.length < profile.maxToolCalls) toolCallLog.push({name: event.toolCall.toolName, summary: output === undefined ? `failed: ${String(toolError).slice(0, 120)}` : toolSummary(output), durationMs: event.toolExecutionMs});
-        const changedPath = changedPathFromOutput(event.toolCall.toolName, output);
-        if (changedPath) changedPaths.add(changedPath);
-        const validationRecord = validationFromOutput(event.toolCall.toolName, output);
-        if (validationRecord) validation.push(validationRecord);
+        if (!isToolBudgetBlocked(output)) {
+          const toolError = 'error' in event.toolOutput ? event.toolOutput.error : 'tool execution failed';
+          if (toolCallLog.length < profile.maxToolCalls) toolCallLog.push({name: event.toolCall.toolName, summary: output === undefined ? `failed: ${String(toolError).slice(0, 120)}` : toolSummary(output), durationMs: event.toolExecutionMs});
+          const changedPath = changedPathFromOutput(event.toolCall.toolName, output);
+          if (changedPath) changedPaths.add(changedPath);
+          const validationRecord = validationFromOutput(event.toolCall.toolName, output);
+          if (validationRecord) validation.push(validationRecord);
+        }
       },
     });
     usageIn = result.usage.inputTokens ?? usageIn;
