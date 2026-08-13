@@ -6,6 +6,17 @@ import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachmen
 export const DEFAULT_CHARS_PER_TOKEN = 4;
 
 /**
+ * Conservative fallback context window when a provider/model carries no
+ * explicit metadata (RH-005). Chosen small enough that small local models do
+ * not overflow on first request; large-context models should declare their
+ * capacity via provider `modelLimits`.
+ */
+export const FALLBACK_CONTEXT_WINDOW_TOKENS = 32_768;
+
+/** Safety margin reserved below the computed budget to absorb estimate drift. */
+export const CONTEXT_SAFETY_MARGIN_TOKENS = 1_000;
+
+/**
  * Rough vision estimate for attached images: providers bill images by
  * resolution, not by serialized bytes. ~750 bytes per token matches common
  * screenshot encodings closely enough for budget/display estimates. Labeled
@@ -134,4 +145,35 @@ export function effectiveNonCachedInput(inputTokens: number | undefined, cacheRe
 export function cacheHitRatio(inputTokens: number | undefined, cacheReadTokens: number | undefined) {
   if (!inputTokens || !cacheReadTokens) return undefined;
   return cacheReadTokens / inputTokens;
+}
+
+export interface RequestTokenBudget {
+  contextWindowTokens: number;
+  systemTokens: number;
+  toolSchemaTokens: number;
+  outputReserveTokens: number;
+  safetyMarginTokens: number;
+  /** Tokens available for the message history. */
+  messageTokens: number;
+}
+
+/**
+ * Compute the message-token allowance for a request from the full input
+ * breakdown: context window minus system prompt, tool schemas, output reserve,
+ * and a safety margin (RH-005). Falls back to a conservative window when a
+ * model declares no capacity metadata.
+ */
+export function calculateRequestTokenBudget(input: {
+  contextWindowTokens?: number;
+  requestedOutputTokens: number;
+  system: string;
+  tools: Record<string, unknown>;
+}): RequestTokenBudget {
+  const contextWindowTokens = input.contextWindowTokens ?? FALLBACK_CONTEXT_WINDOW_TOKENS;
+  const systemTokens = estimateTextTokens(input.system);
+  const toolSchemaTokens = estimateToolSchemas(input.tools).reduce((sum, tool) => sum + tool.tokens, 0);
+  const outputReserveTokens = input.requestedOutputTokens;
+  const safetyMarginTokens = CONTEXT_SAFETY_MARGIN_TOKENS;
+  const messageTokens = Math.max(0, contextWindowTokens - systemTokens - toolSchemaTokens - outputReserveTokens - safetyMarginTokens);
+  return {contextWindowTokens, systemTokens, toolSchemaTokens, outputReserveTokens, safetyMarginTokens, messageTokens};
 }

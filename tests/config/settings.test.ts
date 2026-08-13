@@ -159,4 +159,16 @@ describe('settings', () => {
     expect(settings.model).toBe('gpt-x');
     expect(settings.plugin).toBe(true);
   });
+
+  it('preserves optional per-model context-window/output metadata and rejects malformed values', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({providers: [{name: 'local', url: 'http://x/v1', models: ['qwen'], modelLimits: {'qwen': {contextWindowTokens: 32_768, maxOutputTokens: 4_096}}, providerExtra: 'passthrough'}]});
+    const settings = await readSettings();
+    expect(settings.providers?.[0]?.modelLimits?.['qwen']).toMatchObject({contextWindowTokens: 32_768, maxOutputTokens: 4_096});
+    // Unknown provider-level fields are preserved (passthrough).
+    expect((settings.providers?.[0] as Record<string, unknown> | undefined)?.providerExtra).toBe('passthrough');
+    // Malformed limits are rejected loudly (RH-005).
+    await fs.writeJson(settingsFile, {providers: [{name: 'local', url: 'http://x/v1', models: ['qwen'], modelLimits: {qwen: {contextWindowTokens: -1}}}]});
+    await expect(readSettings()).rejects.toThrow();
+  });
 });

@@ -21,6 +21,12 @@ export interface HazeProviderSettings {
    * providers the user marked image-capable (F03).
    */
   capabilities?: {images?: boolean};
+  /**
+   * Optional per-model capacity metadata used for request budgeting (RH-005).
+   * Absent entries fall back to a conservative default window. Preserved as
+   * passthrough so unknown metadata is not dropped.
+   */
+  modelLimits?: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>;
 }
 
 export interface HazeLspServerSettings {
@@ -101,6 +107,7 @@ const providerSchema = z.object({
   models: z.array(z.string()),
   kind: z.enum(['openai-compatible', 'chatgpt-codex']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
+  modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
 }).passthrough();
 
 const lspServerSchema = z.object({

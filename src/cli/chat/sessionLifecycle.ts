@@ -2,6 +2,7 @@ import type {ModelMessage} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
+import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type HazeSession} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
@@ -195,7 +196,9 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     },
 
     compactConversation(instructions?: string) {
-      const result = compactModelMessages(deps.conversationRef.current, {instructions, tokenBudget: 40_000, workState: deps.workStateRef.current});
+      // Manual /compact and overflow recovery use the centralized fallback
+      // window (RH-005); the live turn path applies the model-aware budget.
+      const result = compactModelMessages(deps.conversationRef.current, {instructions, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, workState: deps.workStateRef.current});
       if (!result.compacted) {
         deps.setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
         return false;

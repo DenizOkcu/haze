@@ -23,6 +23,10 @@ export interface ModelRuntimeConfig {
   capabilities: ProviderCapabilities;
   /** Resolved reasoning policy (requested vs effective); observable, no secrets. */
   reasoningPolicy: ResolvedReasoningPolicy;
+  /** Optional context-window metadata for request budgeting (RH-005). */
+  contextWindowTokens?: number;
+  /** Optional output-token limit metadata for request budgeting (RH-005). */
+  maxOutputTokens?: number;
 }
 
 const HAZE_SITE_URL = 'https://denizokcu.github.io/haze/';
@@ -72,8 +76,18 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   return {
     model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector: modelSelector(selection.provider, name),
-    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: caps, reasoningPolicy},
+    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: caps, reasoningPolicy, ...modelLimitsFor(selection.provider, name)},
   };
+}
+
+/** Resolve optional context-window/output-token metadata for the selected model (RH-005). */
+function modelLimitsFor(provider: HazeProviderSettings, modelName: string): {contextWindowTokens?: number; maxOutputTokens?: number} {
+  const limits = provider.modelLimits?.[modelName];
+  if (!limits) return {};
+  const out: {contextWindowTokens?: number; maxOutputTokens?: number} = {};
+  if (typeof limits.contextWindowTokens === 'number') out.contextWindowTokens = limits.contextWindowTokens;
+  if (typeof limits.maxOutputTokens === 'number') out.maxOutputTokens = limits.maxOutputTokens;
+  return out;
 }
 
 function isReasoningLevel(value: unknown): value is ReasoningLevel {

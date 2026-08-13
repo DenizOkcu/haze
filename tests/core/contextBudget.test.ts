@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {tool} from 'ai';
 import {z} from 'zod';
-import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateTextTokens, estimateValueTokens, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
+import {cacheHitRatio, calculateRequestTokenBudget, contextBreakdown, effectiveNonCachedInput, estimateTextTokens, estimateValueTokens, FALLBACK_CONTEXT_WINDOW_TOKENS, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
 
 describe('context budget', () => {
   it('accounts for system, messages, project context, and exact tool schemas', () => {
@@ -55,5 +55,32 @@ describe('context budget', () => {
     // the millions of tokens a serialized payload would imply.
     expect(tokens).toBeGreaterThan(200);
     expect(tokens).toBeLessThan(400);
+  });
+});
+
+describe('calculateRequestTokenBudget', () => {
+  it('derives the message allowance from the full input breakdown', () => {
+    const budget = calculateRequestTokenBudget({contextWindowTokens: 128_000, requestedOutputTokens: 16_384, system: 'system prompt', tools: {}});
+    const overhead = budget.systemTokens + budget.toolSchemaTokens + budget.outputReserveTokens + budget.safetyMarginTokens;
+    expect(budget.messageTokens + overhead).toBe(128_000);
+    expect(budget.messageTokens).toBeGreaterThan(100_000);
+  });
+
+  it('keeps the request within capacity for a small 16K context', () => {
+    const budget = calculateRequestTokenBudget({contextWindowTokens: 16_384, requestedOutputTokens: 4_096, system: 's', tools: {}});
+    expect(budget.messageTokens).toBeLessThanOrEqual(16_384);
+    expect(budget.messageTokens).toBeGreaterThan(0);
+  });
+
+  it('falls back to a conservative window when no metadata is declared', () => {
+    const budget = calculateRequestTokenBudget({requestedOutputTokens: 4_096, system: 's', tools: {}});
+    expect(budget.contextWindowTokens).toBe(FALLBACK_CONTEXT_WINDOW_TOKENS);
+  });
+
+  it('reduces the message allowance as system/tool overhead grows', () => {
+    const tools = {a: tool({description: 'a'.repeat(200), inputSchema: z.object({value: z.string()})})};
+    const lean = calculateRequestTokenBudget({contextWindowTokens: 32_768, requestedOutputTokens: 4_096, system: 's', tools: {}});
+    const heavy = calculateRequestTokenBudget({contextWindowTokens: 32_768, requestedOutputTokens: 4_096, system: 's', tools});
+    expect(heavy.messageTokens).toBeLessThan(lean.messageTokens);
   });
 });
