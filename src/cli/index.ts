@@ -22,7 +22,8 @@ program
   .option('--no-session', 'run without saving or resuming a durable session')
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
-  .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'));
+  .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'))
+  .option('--timeout <duration>', 'print-mode absolute turn deadline (e.g. 30s, 10m, 2h); bounds total elapsed time so a busy tool cannot run indefinitely');
 
 program.addHelpText('after', `
 Examples:
@@ -90,7 +91,7 @@ async function readStdinPrompt(): Promise<string | undefined> {
 }
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string}>();
   // Name the terminal tab for the run; no-op unless stdout is a real TTY.
   installTerminalTitle(terminalTitleLabel(process.cwd()));
   // -p takes precedence; otherwise fall back to piped stdin. An empty stdin yields no prompt.
@@ -108,6 +109,7 @@ program.action(async () => {
       // 'text' | 'json' | 'stream-json'; default to text for piped/stdin runs without the flag.
       output: opts.output === 'json' || opts.output === 'stream-json' ? opts.output : 'text',
       debug: Boolean(opts.debug),
+      timeout: opts.timeout,
     });
     // Set the exit code and return instead of process.exit(code): the latter does not wait
     // for stdout to drain and can truncate piped/redirected output (e.g. `haze -p ... | jq`).

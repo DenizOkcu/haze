@@ -254,3 +254,52 @@ describe('runHeadless: model pre-resolution', () => {
     expect(runAgentTurn).not.toHaveBeenCalled();
   });
 });
+
+describe('runHeadless: stream-json deltas (RH-006)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('emits message_update as deltas that reconstruct message_end and stay linear', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => {
+        cb.onEvent?.({type: 'message_start', id: 'a1', role: 'assistant', at: 't'} as any);
+        const cumulative = ['Hello', 'Hello world', 'Hello world this is', 'Hello world this is a test'];
+        for (const text of cumulative) cb.onEvent?.({type: 'message_update', id: 'a1', text, at: 't'} as any);
+        cb.onEvent?.({type: 'message_end', id: 'a1', text: 'Hello world this is a test', at: 't'} as any);
+      },
+    });
+    await runHeadless({prompt: 'hi', output: 'stream-json'});
+    const lines = writes.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+    const updates = lines.filter(line => line.type === 'message_update');
+    const end = lines.find(line => line.type === 'message_end');
+    expect(end?.text).toBe('Hello world this is a test');
+    // Deltas reconstruct the authoritative final text exactly.
+    const reconstructed = updates.map(update => String(update.delta)).join('');
+    expect(reconstructed).toBe(end?.text);
+    // Total update payload is linear in the final text size, not quadratic.
+    const totalDeltaBytes = updates.reduce((sum, update) => sum + String(update.delta).length, 0);
+    expect(totalDeltaBytes).toBeLessThanOrEqual(String(end?.text).length);
+  });
+});
+
+describe('parseTurnTimeoutMs', () => {
+  it('accepts ms/s/m/h units and raw ms', async () => {
+    const {parseTurnTimeoutMs} = await loadRunCommand({});
+    expect(parseTurnTimeoutMs(undefined)).toBeUndefined();
+    expect(parseTurnTimeoutMs('')).toBeUndefined();
+    expect(parseTurnTimeoutMs('2000ms')).toBe(2000);
+    expect(parseTurnTimeoutMs('30s')).toBe(30_000);
+    expect(parseTurnTimeoutMs('10m')).toBe(600_000);
+    expect(parseTurnTimeoutMs('2h')).toBe(7_200_000);
+    expect(parseTurnTimeoutMs('1500')).toBe(1500);
+  });
+
+  it('rejects malformed or out-of-range durations', async () => {
+    const {parseTurnTimeoutMs} = await loadRunCommand({});
+    expect(() => parseTurnTimeoutMs('soon')).toThrow();
+    expect(() => parseTurnTimeoutMs('100ms')).toThrow(/at least 1 second/);
+    expect(() => parseTurnTimeoutMs('48h')).toThrow(/at most 24 hours/);
+  });
+});

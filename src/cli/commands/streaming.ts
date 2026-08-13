@@ -5,6 +5,7 @@ import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {assembleRequestContext, type SubagentOverrides, type TurnExecutionScope} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
+import type {LspPool} from '../../llm/lsp.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {readSettings} from '../../config/settings.js';
 import {toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds} from './formatters.js';
@@ -14,16 +15,18 @@ import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, lengthContinuationPrompt, completionRescuePrompt} from '../../core/goal/completionPolicy.js';
-import {estimateValueTokens} from '../../core/agent/contextBudget.js';
+import {calculateRequestTokenBudget, estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../core/agent/toolResults.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {latestRepeatedToolNames, uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
-import {ACTIVE_CONTEXT_TOKEN_BUDGET, DEFAULT_MAX_OUTPUT_TOKENS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
 import {createTurnExecutionState, decideLengthRecovery, decideRescue, isBudgetExhausted, normalizeFinishReason, RESCUE_BOUNDARY, toCompletionEvidence, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
 export type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {clampSlice, mainTurnBudget, remainingSteps, remainingToolCalls, type TurnBudget} from '../../core/agent/turnBudget.js';
+import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget, type ToolExecutionBudgetState} from '../../core/agent/toolExecutionBudget.js';
+import {createAbsoluteDeadline, isToolDeadlineExceeded, withToolDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../core/agent/toolCapabilities.js';
 import {deriveValidationOutcome} from '../../core/agent/workState.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent, type SessionGoal} from '../../core/goal/sessionGoal.js';
@@ -60,6 +63,8 @@ export interface TurnExecutionOptions {
   blessedPaths?: readonly BlessedPath[];
   /** When set, this attempt is a bounded recovery slice (length-continuation or rescue). */
   recoverySlice?: {kind: 'length' | 'rescue'; maxSteps: number; maxToolCalls: number};
+  /** Absolute turn deadline in milliseconds (headless `--timeout`); defaults to DEFAULT_TURN_DEADLINE_MS. */
+  turnDeadlineMs?: number;
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -134,6 +139,7 @@ async function runAgentAttempt(
   turnScope: {executionScope?: TurnExecutionScope},
   turnState: TurnExecutionState,
   turnBudget: TurnBudget,
+  globalBudget: ToolExecutionBudgetState,
   goal: SessionGoal,
 ): Promise<AgentAttemptResult> {
   let thinkingLabel = modelThinkingLabel(undefined);
@@ -141,6 +147,7 @@ async function runAgentAttempt(
   let turnStatus: TurnStatus = 'failed';
   let recovery: AgentAttemptResult['recovery'];
   let loadedMcp: LoadedMcpTools | undefined;
+  let lspPool: LspPool | undefined;
   // Tool calls currently executing. A concurrent subagent wave can run for many
   // minutes with no stream parts; that is activity, not a dead stream, so the
   // idle timer defers while any tool is in flight (see streaming/idleTimer.ts).
@@ -148,7 +155,11 @@ async function runAgentAttempt(
   const idleTimer = createIdleTimer({
     timeoutMs: IDLE_TIMEOUT_MS,
     isBusy: () => inFlightTools.size > 0,
-    onTimeout: () => abortController.abort('haze turn timed out after no model/tool activity.'),
+    onTimeout: () => {
+      if (abortController.signal.aborted) return;
+      callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'model-stream', timeoutMs: IDLE_TIMEOUT_MS}));
+      abortController.abort('haze model stream was idle for the configured timeout.');
+    },
   });
 
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
@@ -184,6 +195,7 @@ async function runAgentAttempt(
     const availableTools = assembled.availableTools;
     const toolCategories = assembled.toolCategories;
     loadedMcp = assembled.loadedMcp;
+    lspPool = assembled.lspPool;
     if (loadedMcp?.errors.length) callbacks.addMessage({role: 'system', text: `MCP: ${loadedMcp.errors.join('; ')}`});
 
     callbacks.setWorkState?.(goal);
@@ -195,9 +207,18 @@ async function runAgentAttempt(
         ? stripSyntheticControls(callbacks.getConversation())
         : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])],
     ).messages;
+    // Model-aware request budget (RH-005): message allowance is the context
+    // window minus system prompt, tool schemas, output reserve, and a safety
+    // margin — not a fixed 40K constant. Small contexts get a safe budget; the
+    // assembled request plus output reserve stays within configured capacity.
+    const requestedOutputTokens = runtime.config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+    const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: assembled.systemPrompt, tools: availableTools});
+    // A context-overflow retry progressively shrinks the target so it cannot loop
+    // at an unchanged budget; further overflows get even smaller (RH-005).
+    const overflowTargetTokens = contextOverflowRecovered ? Math.floor(requestBudget.messageTokens * 0.6) : requestBudget.messageTokens;
     let requestMessages = durableRequestMessages;
-    if (estimateValueTokens(requestMessages) > ACTIVE_CONTEXT_TOKEN_BUDGET) {
-      requestMessages = compactModelMessages(requestMessages, {tokenBudget: ACTIVE_CONTEXT_TOKEN_BUDGET, workState: goal}).messages;
+    if (estimateValueTokens(requestMessages) > overflowTargetTokens) {
+      requestMessages = compactModelMessages(requestMessages, {tokenBudget: overflowTargetTokens, workState: goal}).messages;
     }
     requestMessages = withoutSystemMessages(requestMessages);
     callbacks.setConversation(stripSyntheticControls(requestMessages));
@@ -270,17 +291,34 @@ async function runAgentAttempt(
     // discovery cannot be reopened near the boundary. Length-continuation keeps
     // the full tool set.
     const sliceTools = recoverySlice?.kind === 'rescue' ? restrictToRescueTools(availableTools) : availableTools;
+    // Execution-boundary budgets (RH-003). The global budget is turn-wide
+    // (shared across retries and recovery slices); the slice budget is
+    // per-attempt and caps a recovery slice. Both are checked atomically at the
+    // actual execute boundary so one oversized parallel batch cannot overshoot.
+    const sliceBudget = createToolExecutionBudget();
+    const sliceToolCallCap = recoverySlice?.maxToolCalls ?? MAIN_TOOL_CALL_LIMIT;
+    const budgetedTools = withToolExecutionBudget(sliceTools, {state: globalBudget, limit: turnBudget.toolCallLimit}, {state: sliceBudget, limit: sliceToolCallCap});
+    // Layer a per-tool execution deadline on top of the budget (RH-004). The
+    // budget is checked first (cheap); a permitted call then runs under a
+    // deadline so an uncooperative tool cannot defer the turn indefinitely.
+    // Subagents legitimately run long, so their wrapper gets a larger bound.
+    const deadlineWrappedTools = Object.fromEntries(Object.entries(budgetedTools).map(([name, definition]) => {
+      if (typeof definition.execute !== 'function') return [name, definition];
+      const execute = definition.execute as unknown as (...args: unknown[]) => Promise<unknown>;
+      const deadlineMs = name === 'subagent' ? SUBAGENT_TOOL_DEADLINE_MS : DEFAULT_TOOL_DEADLINE_MS;
+      return [name, {...definition, execute: (...args: unknown[]) => withToolDeadline(() => execute(...args), deadlineMs, abortController.signal)}];
+    })) as typeof budgetedTools;
 
     const agent = new ToolLoopAgent({
       id: 'haze-main',
       model: activeModel,
       instructions: systemPrompt,
-      tools: sliceTools,
+      tools: deadlineWrappedTools,
       ...(!omitMaxOutputTokens ? {maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS} : {}),
       ...providerSettings,
       stopWhen: isStepCount(stepCap),
       runtimeContext: toolExecutionContext,
-      toolsContext: toolsContextFor(sliceTools, toolExecutionContext) as never,
+      toolsContext: toolsContextFor(deadlineWrappedTools, toolExecutionContext) as never,
       experimental_repairToolCall: async ({toolCall, error}) => {
         if (isMalformedToolInputError(error)) {
           pendingMalformedToolName = toolCall.toolName;
@@ -293,8 +331,16 @@ async function runAgentAttempt(
       prepareStep({steps, messages}) {
         const toolCalls = steps.flatMap(step => step.toolCalls);
         const repeatedToolNames = latestRepeatedToolNames(steps);
-        const scopedMessages = withScopedContextControl(messages, toolExecutionContext);
-        const messagesChanged = scopedMessages !== messages;
+        let scopedMessages = withScopedContextControl(messages, toolExecutionContext);
+        let messagesChanged = scopedMessages !== messages;
+        // Re-evaluate the accumulated request size before each provider call and
+        // compact old tool history when it exceeds the model-aware budget, so a
+        // long multi-step turn compacts before overflowing (RH-005).
+        if (estimateValueTokens(scopedMessages) > requestBudget.messageTokens) {
+          const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal}).messages;
+          scopedMessages = compacted;
+          messagesChanged = true;
+        }
         // Turn-wide hard caps (shared across retries and recovery slices).
         const turnToolCallsExhausted = turnState.toolCallsUsed >= turnBudget.toolCallLimit;
         // Per-slice tool-call cap for a recovery slice (counts this slice's calls).
@@ -341,9 +387,12 @@ async function runAgentAttempt(
         // lag behind fast providers and leave the next request read-only.
         toolResultState = applyStepToolResultState(toolResultState, content);
         // Turn-wide counters (shared across provider retries and recovery
-        // slices) so the global budget cannot reset between attempts.
+        // slices) so the global budget cannot reset between attempts. The
+        // execution-boundary budget (RH-003) is the authoritative count of
+        // underlying executions; sync the turn state to it so blocked calls are
+        // not double-counted and recovery math stays consistent.
         turnState.stepsUsed += 1;
-        turnState.toolCallsUsed += toolCalls.length;
+        turnState.toolCallsUsed = globalBudget.started;
         if (toolCalls.length > 0 && text.trim().length === 0) turnState.toolOnlyStepsUsed += 1;
         if (Array.isArray(response?.messages) && response.messages.length > 0) latestAccumulatedResponseMessages = response.messages as ModelMessage[];
         const stepUsage = stepCacheMetrics(usage);
@@ -439,6 +488,32 @@ async function runAgentAttempt(
           latestToolCalls.set(part.toolCallId, toolCall);
           inFlightTools.delete(part.toolCallId);
           const startedAt = startedTools.get(part.toolCallId) ?? Date.now();
+          // A budget-blocked call never reached the underlying implementation;
+          // record it as a bounded non-event with no goal/observal side effect (RH-003).
+          if (isToolBudgetBlocked(part.output)) {
+            const item = toolDisplay.ensureToolItem(toolCall);
+            item.status = 'error';
+            item.result = 'skipped: tool-call budget exhausted';
+            item.durationMs = Date.now() - startedAt;
+            item.finishedAt = startedAt + (item.durationMs ?? 0);
+            callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_budget_blocked', durationMs: item.durationMs ?? 0}));
+            toolDisplay.updateToolGroup(true);
+            break;
+          }
+          // A deadline-exceeded call was terminated at the wrapper boundary; the
+          // underlying work may still be settling and must not mutate goal state (RH-004).
+          if (isToolDeadlineExceeded(part.output)) {
+            const item = toolDisplay.ensureToolItem(toolCall);
+            item.status = 'error';
+            item.result = `timed out after ${DEFAULT_TOOL_DEADLINE_MS}ms`;
+            const durationMs = Date.now() - startedAt;
+            item.durationMs = durationMs;
+            item.finishedAt = startedAt + durationMs;
+            callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_deadline', durationMs}));
+            callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'tool', timeoutMs: toolCall.toolName === 'subagent' ? SUBAGENT_TOOL_DEADLINE_MS : DEFAULT_TOOL_DEADLINE_MS}));
+            toolDisplay.updateToolGroup(true);
+            break;
+          }
           const ok = toolOutputOk(part.output, true);
           lastToolOk = ok;
           if (ok && part.toolName === unresolvedMalformedToolName) unresolvedMalformedToolName = undefined;
@@ -589,6 +664,7 @@ async function runAgentAttempt(
     }
   } finally {
     if (loadedMcp?.clients.length) await closeMcpClients(loadedMcp.clients);
+    if (lspPool) await lspPool.close();
     idleTimer.clear();
     toolDisplay.stopToolTimer();
     toolDisplay.finalizeToolGroup();
@@ -615,11 +691,28 @@ export async function runAgentTurn(
   callbacks.setBusy(true);
   callbacks.setAbortController?.(abortController);
   if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayValue ?? value});
+  let turnDeadline: AbsoluteDeadline | undefined;
   try {
+    // Absolute main-turn deadline (RH-004): distinct from the idle timer, it
+    // bounds total turn elapsed time so a stream of busy tools cannot defer it.
+    const turnDeadlineMs = turnOptions.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
+    turnDeadline = createAbsoluteDeadline({
+      timeoutMs: turnDeadlineMs,
+      signal: abortController.signal,
+      onTimeout: () => {
+        if (abortController.signal.aborted) return;
+        callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'turn', timeoutMs: turnDeadlineMs}));
+        abortController.abort(`haze turn exceeded the ${turnDeadlineMs}ms absolute deadline.`);
+      },
+    });
     // Retries are one logical turn and therefore share coordinator admission and
     // the workspace mutation lease, including quarantined lingering work.
     const turnScope: {executionScope?: TurnExecutionScope} = {};
     const turnBudget = mainTurnBudget();
+    // Turn-wide execution budget (RH-003): one authoritative counter of
+    // underlying tool executions, shared across retries and recovery slices so
+    // the global limit cannot be reset or exceeded.
+    const globalBudget = createToolExecutionBudget();
     // Turn-wide work state: persists across provider retries and recovery
     // slices so mutation/validation evidence accumulates correctly.
     const goal = createSessionGoal(value);
@@ -628,7 +721,7 @@ export async function runAgentTurn(
     let overflowRecovered = contextOverflowRecovered;
     let retrying = retryingExistingRequest;
     while (true) {
-      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, activeOptions, turnScope, turnState, turnBudget, goal);
+      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, activeOptions, turnScope, turnState, turnBudget, globalBudget, goal);
       status = result.status;
       if (result.retry) {
         attempt = result.retry.attempt;
@@ -654,6 +747,7 @@ export async function runAgentTurn(
     const evidence = toCompletionEvidence(turnState);
     return {status, evidence};
   } finally {
+    turnDeadline?.clear();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState)}));
     callbacks.setAbortController?.(null);
     callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
