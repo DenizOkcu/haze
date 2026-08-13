@@ -29,16 +29,21 @@ export const MarkdownText = React.memo(function MarkdownText({content, width}: {
 type CodeSource = {path: string; startLine: number};
 
 /**
- * Split Markdown into stable root-level chunks. The final chunk is deliberately
- * considered active: Marked may still reclassify it as more text arrives (for
- * example, a paragraph can become a setext heading or a GFM table). Once a
- * following root block exists, the preceding chunk is safe to render once in
- * Ink's <Static> transcript.
- *
- * A source-path lead and its following fenced code block stay in one chunk so
- * MarkdownText can preserve their shared filename and starting line metadata.
+ * Bounded LRU cache for Markdown root chunking (RH-007). Settled assistant
+ * messages never change, but `partitionDisplayMessages` runs on every render
+ * and would otherwise re-lex the entire historical transcript each time. The
+ * chunking is a pure function of the source text, so identical content reuses a
+ * cached result; the LRU bound keeps memory predictable for long sessions.
  */
-export function markdownRootChunks(content: string): string[] {
+const ROOT_CHUNKS_CACHE_MAX = 500;
+const rootChunksCache = new Map<string, string[]>();
+
+/** Test-only: clear the chunk cache to assert lexer call counts deterministically. */
+export function clearMarkdownRootChunksCacheForTests(): void {
+  rootChunksCache.clear();
+}
+
+function computeMarkdownRootChunks(content: string): string[] {
   const tokens = marked.lexer(content, MARKED_OPTIONS);
   if (tokens.length === 0) return content ? [content] : [];
 
@@ -64,6 +69,32 @@ export function markdownRootChunks(content: string): string[] {
 
   const activeChunk = tokens.slice(chunkStart).map(token => token.raw).join('');
   if (activeChunk) chunks.push(activeChunk);
+  return chunks;
+}
+
+/**
+ * Split Markdown into stable root-level chunks. The final chunk is deliberately
+ * considered active: Marked may still reclassify it as more text arrives (for
+ * example, a paragraph can become a setext heading or a GFM table). Once a
+ * following root block exists, the preceding chunk is safe to render once in
+ * Ink's <Static> transcript.
+ *
+ * A source-path lead and its following fenced code block stay in one chunk so
+ * MarkdownText can preserve their shared filename and starting line metadata.
+ */
+export function markdownRootChunks(content: string): string[] {
+  const cached = rootChunksCache.get(content);
+  if (cached) {
+    rootChunksCache.delete(content);
+    rootChunksCache.set(content, cached);
+    return cached;
+  }
+  const chunks = computeMarkdownRootChunks(content);
+  if (rootChunksCache.size >= ROOT_CHUNKS_CACHE_MAX) {
+    const oldest = rootChunksCache.keys().next().value;
+    if (oldest !== undefined) rootChunksCache.delete(oldest);
+  }
+  rootChunksCache.set(content, chunks);
   return chunks;
 }
 

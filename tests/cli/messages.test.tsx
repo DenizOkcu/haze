@@ -1,8 +1,10 @@
 import React from 'react';
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {render} from 'ink-testing-library';
 import stripAnsi from 'strip-ansi';
+import {marked} from 'marked';
 import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages} from '../../src/cli/chat/messages.js';
+import {clearMarkdownRootChunksCacheForTests} from '../../src/ui/components/MarkdownText.js';
 
 describe('streaming assistant Markdown messages', () => {
   it('moves only completed root blocks into the append-only transcript', () => {
@@ -137,5 +139,25 @@ describe('tool diff messages', () => {
     const changedLine = frame.split('\n').find(line => line.includes('12 +'));
     expect(changedLine).toContain('…');
     expect(changedLine?.length).toBeLessThanOrEqual(30);
+  });
+
+  it('does not re-lex settled assistant Markdown across repeated partitions (RH-007)', () => {
+    clearMarkdownRootChunksCacheForTests();
+    const messages = Array.from({length: 40}, (_, index) => ({
+      id: `a-${index}`,
+      role: 'assistant' as const,
+      text: `# Heading ${index}\n\nParagraph ${index} with some detail.\n\n\`\`\`\ncode line ${index}\n\`\`\`\n`,
+      streaming: false,
+    }));
+    const spy = vi.spyOn(marked, 'lexer');
+    partitionDisplayMessages(messages);
+    const firstRunCalls = spy.mock.calls.length;
+    expect(firstRunCalls).toBeGreaterThan(0);
+    // Re-partitioning the same settled transcript (every render) must be served
+    // from the cache rather than re-lexing the whole history each time.
+    partitionDisplayMessages(messages);
+    partitionDisplayMessages(messages);
+    expect(spy.mock.calls.length).toBe(firstRunCalls);
+    spy.mockRestore();
   });
 });
