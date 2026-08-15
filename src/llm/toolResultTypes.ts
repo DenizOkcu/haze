@@ -3,6 +3,7 @@ export type ToolFailureReasonCode =
   | 'old_text_not_unique'
   | 'overlapping_edits'
   | 'ignored_path'
+  | 'ignore_check_unavailable'
   | 'path_not_found'
   | 'not_a_file'
   | 'permission_denied'

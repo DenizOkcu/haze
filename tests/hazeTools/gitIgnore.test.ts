@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,5 +85,72 @@ describe('gitIgnore batch classifier', () => {
     expect(await isGitIgnored(path.join(tmp, 'skip.txt'))).toBe(true);
     expect(await isGitIgnored(path.join(tmp, 'keep.txt'))).toBe(false);
     expect(await isGitIgnored(tmp)).toBe(false); // workspace root is never ignored
+  });
+
+  it('classifyChecked distinguishes checked from could-not-check (F-05)', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'skip.txt\n');
+    await fs.writeFile(path.join(tmp, 'skip.txt'), 'x');
+    const {ignored, checked} = await createIgnoreClassifier(tmp).classifyChecked(['skip.txt', 'keep.txt']);
+    expect(checked).toBe(true);
+    expect(ignored.has('skip.txt')).toBe(true);
+    expect(ignored.has('keep.txt')).toBe(false);
+  });
+
+  it('checkGitIgnored returns not-ignored outside a repository — semantics, not a failure (F-05)', async () => {
+    const nonRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-nogit2-'));
+    try {
+      process.chdir(nonRepo);
+      const {checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
+      expect(await checkGitIgnored(path.join(nonRepo, 'a.txt'))).toBe('not-ignored');
+    } finally {
+      process.chdir(tmp);
+      await fs.remove(nonRepo);
+    }
+  });
+});
+
+describe('gitIgnore tri-state under a broken Git (F-05)', () => {
+  let tmp: string;
+  let originalCwd: string;
+
+  beforeEach(async () => {
+    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-gitignore-broken-')));
+    originalCwd = process.cwd();
+    process.chdir(tmp);
+    vi.resetModules();
+    // Simulate a missing git binary: spawn fails at the transport level, which
+    // is the one failure the fail-open contract cannot distinguish on its own.
+    vi.doMock('node:child_process', async () => {
+      const {EventEmitter} = await import('node:events');
+      const spawn = () => {
+        const child = new EventEmitter() as EventEmitter & {stdout: EventEmitter; stderr: EventEmitter; stdin: {on: () => void; end: () => void}};
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = {on: () => undefined, end: () => undefined};
+        queueMicrotask(() => child.emit('error', new Error('spawn git ENOENT')));
+        return child;
+      };
+      return {spawn};
+    });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('node:child_process');
+    vi.resetModules();
+    process.chdir(originalCwd);
+    void fs.remove(tmp);
+  });
+
+  it('reads still fail open while the tri-state reports unknown', async () => {
+    const {classifyGitIgnored, checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
+    await expect(classifyGitIgnored(['a.txt'])).resolves.toEqual(new Set());
+    await expect(checkGitIgnored(path.join(tmp, 'a.txt'))).resolves.toBe('unknown');
+  });
+
+  it('mutation guards fail closed on unknown status unless allowIgnored is set', async () => {
+    const {assertNotIgnored} = await import('../../src/llm/tools/fileToolShared.js');
+    const target = path.join(tmp, 'mutate.txt');
+    await expect(assertNotIgnored(target, 'mutate.txt')).rejects.toMatchObject({reasonCode: 'ignore_check_unavailable'});
+    await expect(assertNotIgnored(target, 'mutate.txt', true)).resolves.toBeUndefined();
   });
 });

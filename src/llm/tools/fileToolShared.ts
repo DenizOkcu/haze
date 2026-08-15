@@ -1,6 +1,6 @@
 import {MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
 import {HazeToolError} from './failures.js';
-import {isGitIgnored} from './gitIgnore.js';
+import {checkGitIgnored, isGitIgnored} from './gitIgnore.js';
 
 export {MAX_OUTPUT_CHARS};
 export const DEFAULT_READ_LINES = 300;
@@ -12,8 +12,16 @@ export const INLINE_DIFF_LINE_LIMIT = 8;
 export {isGitIgnored};
 
 export async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean) {
-  if (!allowIgnored && await isGitIgnored(absolutePath)) {
+  if (allowIgnored) return;
+  // Mutations fail closed when ignore status cannot be verified (F-05): reads
+  // failing open is right, but silently proceeding into a possibly-ignored
+  // path because Git is missing/broken is the unsafe direction for writes.
+  const status = await checkGitIgnored(absolutePath);
+  if (status === 'ignored') {
     throw new HazeToolError(`Path is ignored by .gitignore: ${inputPath}. Set allowIgnored=true only if you explicitly need to access ignored files.`, 'ignored_path', {recoveryTool: 'listFiles'});
+  }
+  if (status === 'unknown') {
+    throw new HazeToolError(`Could not verify git-ignore status for ${inputPath} (Git unavailable or failed). Set allowIgnored=true to proceed anyway.`, 'ignore_check_unavailable', {recoveryTool: 'listFiles'});
   }
 }
 

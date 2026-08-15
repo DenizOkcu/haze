@@ -15,6 +15,17 @@ export const GIT_IGNORE_BATCH = 256;
  */
 const CHECK_IGNORE_MAX_BYTES = 8 * 1024 * 1024;
 
+export interface IgnoreClassification {
+  /** Subset of the submitted paths Git reports as ignored. */
+  ignored: Set<string>;
+  /**
+   * False when a Git failure (e.g. git not installed) made the result partial.
+   * Reads treat that as "nothing ignored" (fail open); mutation guards treat
+   * it as un-verifiable and fail closed instead (F-05).
+   */
+  checked: boolean;
+}
+
 export interface IgnoreClassifier {
   /**
    * Classify workspace-relative candidate paths. Returns the subset that Git
@@ -23,6 +34,8 @@ export interface IgnoreClassifier {
    * here is ignored" so workspace reads are never blocked by ignore checks.
    */
   classify(relativePaths: readonly string[]): Promise<Set<string>>;
+  /** Like `classify`, but distinguishes "checked" from "could not check" (F-05). */
+  classifyChecked(relativePaths: readonly string[]): Promise<IgnoreClassification>;
   /** Number of `git check-ignore` subprocesses started by this classifier. */
   readonly invocationCount: number;
 }
@@ -81,12 +94,13 @@ function runCheckIgnore(root: string, input: string): Promise<string> {
  */
 export function createIgnoreClassifier(root: string = workspaceRoot()): IgnoreClassifier {
   let invocationCount = 0;
-  const classify = async (relativePaths: readonly string[]): Promise<Set<string>> => {
+  const classifyChecked = async (relativePaths: readonly string[]): Promise<IgnoreClassification> => {
     // De-duplicate and drop meaningless inputs; preserve insertion uniqueness
     // so the returned set keys match caller-supplied relative paths exactly.
     const unique = Array.from(new Set(relativePaths.filter(candidate => candidate && candidate !== '.')));
-    if (unique.length === 0) return new Set();
+    if (unique.length === 0) return {ignored: new Set(), checked: true};
     const ignored = new Set<string>();
+    let checked = true;
     for (let offset = 0; offset < unique.length; offset += GIT_IGNORE_BATCH) {
       const batch = unique.slice(offset, offset + GIT_IGNORE_BATCH);
       const input = `${batch.join('\0')}\0`;
@@ -98,15 +112,17 @@ export function createIgnoreClassifier(root: string = workspaceRoot()): IgnoreCl
         const stdout = await runCheckIgnore(root, input);
         for (const part of stdout.split('\0')) if (part) ignored.add(part);
       } catch {
-        // Spawn-level failure (e.g. git not installed): fail open with
-        // whatever has been classified so far; remaining paths are not ignored.
-        return ignored;
+        // Spawn-level failure (e.g. git not installed): whatever was classified
+        // so far stands, but the batch could not be checked.
+        checked = false;
+        return {ignored, checked};
       }
     }
-    return ignored;
+    return {ignored, checked};
   };
   return {
-    classify,
+    classifyChecked,
+    classify: async (relativePaths: readonly string[]) => (await classifyChecked(relativePaths)).ignored,
     get invocationCount() {
       return invocationCount;
     },
@@ -118,14 +134,24 @@ export async function classifyGitIgnored(relativePaths: readonly string[], root?
   return createIgnoreClassifier(root ?? workspaceRoot()).classify(relativePaths);
 }
 
+/** Distinguish "checked and not ignored" from "could not check" (F-05). */
+export type GitIgnoreStatus = 'ignored' | 'not-ignored' | 'unknown';
+
 /**
  * Single-path ignore classification (used by mutating-tool guards and other
- * one-off checks). Built on the batch primitive so the public fail-open
- * contract is identical to batched traversal.
+ * one-off checks). Built on the batch primitive so the fail-open read contract
+ * stays identical to batched traversal; `unknown` means Git could not be run
+ * at all, so callers that must not fail open (mutations) can fail closed.
  */
 export async function isGitIgnored(absolutePath: string): Promise<boolean> {
+  return (await checkGitIgnored(absolutePath)) === 'ignored';
+}
+
+/** Tri-state single-path check: mutation guards key off `unknown` (F-05). */
+export async function checkGitIgnored(absolutePath: string): Promise<GitIgnoreStatus> {
   const relative = workspaceRelativePath(absolutePath);
-  if (relative === '.') return false;
-  const ignored = await classifyGitIgnored([relative], workspaceRoot());
-  return ignored.has(relative);
+  if (relative === '.') return 'not-ignored';
+  const {ignored, checked} = await createIgnoreClassifier(workspaceRoot()).classifyChecked([relative]);
+  if (!checked) return 'unknown';
+  return ignored.has(relative) ? 'ignored' : 'not-ignored';
 }
