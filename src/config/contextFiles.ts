@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {HAZE_DIR} from './paths.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
+import {assertRealPathInsideRoot} from '../utils/path.js';
 
 export interface ContextFile {
   path: string;
@@ -71,7 +72,7 @@ function displayPath(filePath: string) {
   return filePath;
 }
 
-async function readContextCandidates(candidates: string[], seen = new Set<string>(), options: ReadContextFileOptions = {}): Promise<ContextFile[]> {
+async function readContextCandidates(candidates: string[], seen = new Set<string>(), options: ReadContextFileOptions = {}, allowedRoot?: string): Promise<ContextFile[]> {
   const contextFiles: ContextFile[] = [];
   for (const candidate of candidates) {
     const absolute = path.resolve(candidate);
@@ -80,12 +81,16 @@ async function readContextCandidates(candidates: string[], seen = new Set<string
     if (!await fs.pathExists(absolute)) continue;
     const stat = await fs.stat(absolute).catch(() => null);
     if (!stat?.isFile()) continue;
+    const readablePath = allowedRoot
+      ? await assertRealPathInsideRoot(allowedRoot, absolute, absolute, 'workspace').catch(() => undefined)
+      : absolute;
+    if (!readablePath) continue;
     const displayedPath = displayPath(absolute);
     const signature = contextFileSignature(stat);
     const loadedSignature = options.alreadyLoadedSignatures?.get(displayedPath) ?? options.alreadyLoadedSignatures?.get(absolute);
     if (loadedSignature === signature) continue;
     options.onContextFileRead?.(displayedPath);
-    const prefix = await readUtf8Prefix(absolute, MAX_CONTEXT_FILE_CHARS * 4);
+    const prefix = await readUtf8Prefix(readablePath, MAX_CONTEXT_FILE_CHARS * 4);
     const content = prefix.content.slice(0, MAX_CONTEXT_FILE_CHARS);
     const truncated = prefix.truncated || prefix.content.length > MAX_CONTEXT_FILE_CHARS;
     const file = {
@@ -143,7 +148,7 @@ export async function readScopedContextFilesForPath(targetPath: string, options:
       else alreadySeen.add(path.resolve(cwd, loadedPath));
     }
   }
-  return await readContextCandidates(candidates, alreadySeen, options);
+  return await readContextCandidates(candidates, alreadySeen, options, cwd);
 }
 
 export function contextFileDiagnostics(files: ContextFile[]): ContextFileDiagnostic[] {

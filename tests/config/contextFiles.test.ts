@@ -69,6 +69,17 @@ describe('readScopedContextFilesForPath', () => {
     expect(changed.map(file => file.path)).toEqual(['packages/api/AGENTS.md']);
     expect(changed[0]?.content).toBe('api agents changed');
   });
+
+  it.skipIf(process.platform === 'win32')('does not follow scoped instruction symlinks outside the workspace', async () => {
+    const outside = path.join(path.dirname(tmp), `${path.basename(tmp)}-outside.md`);
+    await fs.writeFile(outside, 'outside instructions');
+    await fs.ensureDir(path.join(tmp, 'packages/api'));
+    await fs.symlink(outside, path.join(tmp, 'packages/api/AGENTS.md'));
+    process.chdir(tmp);
+
+    await expect(readScopedContextFilesForPath('packages/api/src/server.ts')).resolves.toEqual([]);
+    await fs.remove(outside);
+  });
 });
 
 describe('contextFileDiagnostics', () => {
