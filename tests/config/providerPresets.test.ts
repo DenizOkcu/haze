@@ -1,6 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {PROVIDER_PRESETS, findPreset} from '../../src/config/providerPresets.js';
-
+import {PROVIDER_PRESETS, findPreset, presetModelLimitsForModels} from '../../src/config/providerPresets.js';
 describe('providerPresets', () => {
   it('has at least one cloud and one local preset', () => {
     expect(PROVIDER_PRESETS.some(p => p.category === 'cloud')).toBe(true);
@@ -108,5 +107,57 @@ describe('providerPresets', () => {
         expect(preset.apiKeyEnvVar).toMatch(/^[A-Z][A-Z0-9_]*$/);
       }
     }
+  });
+});
+
+describe('preset model limits', () => {
+  // The curated catalog is only useful while it stays complete. Local presets
+  // are exempt (their context depends on the local server, not the model);
+  // Thesean has no models.dev data yet and is the only allowed cloud gap.
+  const LIMIT_EXEMPT = new Set(['ollama', 'llamacpp', 'mlx-server', 'lmstudio', 'thesean']);
+
+  it('every suggested model on every non-exempt preset carries limits', () => {
+    const missing: string[] = [];
+    for (const preset of PROVIDER_PRESETS) {
+      if (LIMIT_EXEMPT.has(preset.id)) continue;
+      for (const model of preset.suggestedModels ?? []) {
+        if (!preset.modelLimits?.[model]) missing.push(`${preset.id}:${model}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('carries no limit entries for models not in suggestedModels', () => {
+    for (const preset of PROVIDER_PRESETS) {
+      const suggested = new Set(preset.suggestedModels ?? []);
+      for (const model of Object.keys(preset.modelLimits ?? {})) {
+        expect(suggested.has(model), `${preset.id}:${model}`).toBe(true);
+      }
+    }
+  });
+
+  it('limit values are plausible tokens', () => {
+    for (const preset of PROVIDER_PRESETS) {
+      for (const [model, limits] of Object.entries(preset.modelLimits ?? {})) {
+        expect(limits.contextWindowTokens, `${preset.id}:${model} context`).toBeGreaterThan(0);
+        expect(limits.contextWindowTokens, `${preset.id}:${model} context ceiling`).toBeLessThanOrEqual(10_000_000);
+        expect(limits.maxOutputTokens, `${preset.id}:${model} output`).toBeGreaterThan(0);
+        // Output may exceed the provider's context cap upstream (e.g. Poe routes
+        // that clamp context but not output), so only bound it absolutely.
+        expect(limits.maxOutputTokens, `${preset.id}:${model} output ceiling`).toBeLessThanOrEqual(1_000_000);
+      }
+    }
+  });
+
+  it('resolves limits by provider URL and name without cross-preset leakage', () => {
+    const byUrl = presetModelLimitsForModels({url: 'https://api.deepseek.com/v1'}, ['deepseek-v4-pro', 'kimi-k3']);
+    expect(byUrl).toEqual({'deepseek-v4-pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000}});
+    // The same model id on a different provider resolves to that provider's cap.
+    const byRouter = presetModelLimitsForModels({url: 'https://api.together.ai/v1'}, ['deepseek-ai/DeepSeek-V4-Pro']);
+    expect(byRouter['deepseek-ai/DeepSeek-V4-Pro']?.contextWindowTokens).toBe(512_000);
+    const byName = presetModelLimitsForModels({name: 'OpenAI Subscription'}, ['gpt-5.5']);
+    expect(byName).toEqual({'gpt-5.5': {contextWindowTokens: 1_050_000, maxOutputTokens: 128_000}});
+    expect(presetModelLimitsForModels({url: 'http://localhost:8080/v1'}, ['qwen3-coder'])).toEqual({});
+    expect(presetModelLimitsForModels({url: 'https://unknown.example/v1'}, ['gpt-5.5'])).toEqual({});
   });
 });

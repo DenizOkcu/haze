@@ -6,6 +6,7 @@
 
 - Headless `--timeout <duration>` (e.g. `30s`, `10m`, `2h`) sets an absolute turn deadline that bounds total elapsed time; on expiry haze emits a `timeout` stream-json event and exits non-zero. Per-tool execution deadlines (default 10m; 20m for subagents) ensure an uncooperative tool cannot defer a turn indefinitely, with late-settlement quarantine so ignored cancellation cannot mutate state.
 - Optional per-provider `modelLimits` metadata (`contextWindowTokens`, `maxOutputTokens`) for request budgeting; `npm run release:verify` checks package/lockfile/README/changelog/SECURITY/docs/AGENTS version agreement in one run (wired into `prepublishOnly`).
+- Provider presets now carry curated per-model context-window and output-token limits (from the models.dev catalog, the same source pi and nanocoder use), and the provider wizard writes them into the provider's `modelLimits` settings when a suggested model is added — so request budgeting uses the real window instead of the conservative 32K fallback without any user configuration. Limits are per-preset because aggregators may cap context below the origin model (e.g. Together serves DeepSeek-V4-Pro at 512K vs DeepSeek's own 1M); a drift-guard test keeps every suggested model on every hosted preset covered. Suggested model lists were refreshed to current releases (e.g. gpt-5.6 family, gemini-3.7-flash, claude-opus-5, grok-4.6, glm-5.3, kimi-k3, Qwen3.7-Max) and stale/deprecated ids (o4-mini, devstral-2512, qwen3-32b) were replaced. Poe's suggested ids were corrected to its provider-prefixed form (`anthropic/claude-opus-4.8`, not `claude-opus-4.8`).
 
 ### Changed
 
@@ -13,6 +14,10 @@
 - Main tool-call budgets are now enforced atomically at the execution boundary, so one oversized parallel batch cannot overshoot the turn or recovery-slice limit; blocked calls have no side effect and force a final synthesis.
 - Context budgeting is now model-aware: the message allowance is the configured context window minus the system prompt, tool schemas, output reserve, and a safety margin (no longer a fixed 40K). Long multi-step turns compact accumulated tool history before each provider request, and context-overflow retries shrink the target progressively.
 - `--output stream-json` now emits `message_update` deltas (not cumulative text) through an ordered, backpressure-aware NDJSON sink, so total update payload stays linear in the final response size; `message_end.text` remains complete and authoritative.
+
+### Fixed
+
+- Provider normalization no longer strips user-configured `modelLimits` from settings: `normalizeProvider` whitelisted name/url/key/kind/capabilities/models only, so limits configured in `settings.json` were silently dropped before model resolution ever saw them.
 
 ## 0.10.1 - 2026-08-13
 

@@ -20,6 +20,26 @@ describe('provider wizard helpers', () => {
     expect(result.settingsPatch?.provider).toBe('remote');
   });
 
+  it('writes preset-curated limits for matching models and never overwrites user limits', () => {
+    const created = providerFinishAdd({}, {name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: 'k'}, 'deepseek-v4-pro, other');
+    expect(created.provider?.modelLimits).toEqual({
+      'deepseek-v4-pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
+    });
+
+    const withUserLimits = {
+      provider: 'DeepSeek',
+      providers: [{
+        name: 'DeepSeek',
+        url: 'https://api.deepseek.com/v1',
+        models: ['deepseek-v4-flash'],
+        modelLimits: {'deepseek-v4-pro': {contextWindowTokens: 123_456, maxOutputTokens: 1_024}},
+      }],
+    };
+    const appended = providerAppendModels(withUserLimits, 'DeepSeek', 'deepseek-v4-pro');
+    expect(appended.settingsPatch?.providers?.[0].modelLimits?.['deepseek-v4-pro']).toEqual({contextWindowTokens: 123_456, maxOutputTokens: 1_024});
+    expect(appended.settingsPatch?.providers?.[0].modelLimits).not.toHaveProperty('deepseek-v4-flash');
+  });
+
   it('removes models and updates active model when necessary', () => {
     const result = providerRemoveModels(settings, 'local', 'old, missing');
     expect(result.settingsPatch?.model).toBeUndefined();

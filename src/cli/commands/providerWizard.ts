@@ -4,6 +4,7 @@ import type {Mode} from './chatModes.js';
 import {PROVIDER_ACTIONS} from './wizardActions.js';
 import {commaList} from './wizardInput.js';
 import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
+import {presetModelLimitsForModels} from '../../config/providerPresets.js';
 
 type WizardPatch = {
   settingsPatch?: Partial<HazeSettings>;
@@ -18,7 +19,12 @@ export function providerAppendModels(settings: HazeSettings, providerName: strin
   const models = commaList(modelsValue);
   if (!provider) return {message: 'No provider selected.'};
   if (models.length === 0) return {provider, models, message: 'Enter at least one model name.'};
-  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])]};
+  // Preset-curated limits (models.dev) flow into settings so request budgeting
+  // uses the real window without the user configuring anything. Existing keys
+  // are never overwritten: user-configured limits always win.
+  const curatedLimits = presetModelLimitsForModels({name: provider.name, url: provider.url}, models);
+  const modelLimits = {...curatedLimits, ...provider.modelLimits};
+  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(Object.keys(modelLimits).length > 0 ? {modelLimits} : {})};
   return {
     provider,
     models,
@@ -35,12 +41,14 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
   try { assertCredentialedEndpointSecure(draft.url, draft.key); } catch (error) {
     return {models, message: error instanceof Error ? error.message : String(error)};
   }
+  const curatedLimits = presetModelLimitsForModels({name: draft.name, url: draft.url}, models);
   const provider: HazeProviderSettings = {
     name: draft.name,
     url: draft.url,
     ...(draft.key ? {key: draft.key} : {}),
     ...(draft.kind ? {kind: draft.kind} : {}),
     models: [...new Set(models)],
+    ...(Object.keys(curatedLimits).length > 0 ? {modelLimits: curatedLimits} : {}),
   };
   return {
     provider,

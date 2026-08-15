@@ -105,4 +105,17 @@ describe('providers', () => {
     expect(providers[0]?.capabilities).toEqual({images: true});
     expect(providers[1]?.capabilities).toBeUndefined();
   });
+
+  it('preserves user-configured modelLimits through provider normalization', () => {
+    // Regression: normalizeProvider used to whitelist fields without modelLimits,
+    // so limits configured in settings were silently dropped before model
+    // resolution ever saw them.
+    const settings = {providers: [
+      {name: 'cloud', url: 'https://x/v1', models: ['m'], modelLimits: {m: {contextWindowTokens: 65_536, maxOutputTokens: 8_192}}},
+      {name: 'local', url: 'http://localhost:1234/v1', models: ['m']},
+    ]};
+    const providers = configuredProviders(settings);
+    expect(providers[0]?.modelLimits).toEqual({m: {contextWindowTokens: 65_536, maxOutputTokens: 8_192}});
+    expect(providers[1]?.modelLimits).toBeUndefined();
+  });
 });

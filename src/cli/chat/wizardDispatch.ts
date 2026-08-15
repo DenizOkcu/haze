@@ -7,7 +7,7 @@ import {findProvider, modelSelector, resolveModelSelector, upsertProvider} from 
 import {discoverProviderModels} from '../../config/modelDiscovery.js';
 import {removeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
-import {findPreset, PROVIDER_PRESETS} from '../../config/providerPresets.js';
+import {findPreset, presetModelLimitsForModels, PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
@@ -158,7 +158,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
         setMode('chat');
         return;
       }
-      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models};
+      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models, ...presetModelLimitsForModels({name: input.name, url: input.url}, input.models)};
       const next = await updateSettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
       setSettings(next);
       deps.setProviderDraft({});
