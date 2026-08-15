@@ -256,12 +256,16 @@ async function runAgentAttempt(
     const reasoningPolicy = runtime.config.reasoningPolicy;
     if (reasoningPolicy) callbacks.onEvent?.(agentEvent({type: 'reasoning_policy', requested: reasoningPolicy.requested, effective: reasoningPolicy.effective, reason: reasoningPolicy.reason}));
     // Make the context-budget guess observable: a stream event every turn
-    // (headless consumers can gate on it), and a once-per-session system
-    // message interactively when the built-in default was used — a user-set
-    // fallback setting is an intentional choice and is not warned about.
+    // (headless consumers can gate on it), and — interactively — a system
+    // message only when the built-in default was used for a model this session
+    // has not warned about yet (a user-set fallback setting is an intentional
+    // choice and is not warned about). The warned key is `provider:model`, so
+    // the message appears at the start of a session and once after a model
+    // switch, never on every turn.
     callbacks.onEvent?.(agentEvent({type: 'context_budget', contextWindowTokens: runtime.config.contextWindowTokens, source: runtime.config.contextWindowSource}));
-    if (runtime.config.contextWindowSource === 'default-fallback' && session && !session.contextFallbackWarned) {
-      session.contextFallbackWarned = true;
+    const fallbackModelKey = `${runtime.config.providerName}:${runtime.config.modelName}`;
+    if (runtime.config.contextWindowSource === 'default-fallback' && session && session.contextFallbackWarned !== fallbackModelKey) {
+      session.contextFallbackWarned = fallbackModelKey;
       callbacks.addMessage({role: 'system', text: `No context-window data for ${runtime.config.providerName}:${runtime.config.modelName}; budgeting conservatively at ${runtime.config.contextWindowTokens.toLocaleString('en-US')} tokens. Set modelLimits for this model via /provider, or contextWindowFallbackTokens in settings, to use its real window.`});
     }
 

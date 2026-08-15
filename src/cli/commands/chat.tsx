@@ -4,6 +4,7 @@ import {promisify} from 'node:util';
 import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
+import type {PromptSession} from '../../llm/systemPrompt.js';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {checkForUpdate} from '../../config/updateCheck.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
@@ -131,6 +132,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const sessionRecorderRef = useRef<SessionRecorder | undefined>(undefined);
   if (!sessionRecorderRef.current) sessionRecorderRef.current = createSessionRecorder(() => sessionRef.current);
   const sessionStartRef = useRef<Date>(new Date());
+  // Stable PromptSession object across turns so per-session flags (the
+  // context-fallback warning key) persist; rebuilt when a new session starts,
+  // detected by sessionStartRef identity (the lifecycle controller replaces
+  // the Date on new/resume/continue).
+  const promptSessionRef = useRef<{identity: Date | undefined; value: PromptSession}>({identity: undefined, value: {cwd: process.cwd()}});
   const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const persistenceWarningShownRef = useRef(false);
@@ -580,6 +586,19 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     await runSingleAgentTurn(resume.request, undefined, options, {retryAttempt: resume.retryAttempt});
   }
 
+  /**
+   * The PromptSession shared by every turn of the active session. Returning a
+   * stable object (not a fresh literal per turn) is what makes once-per-session
+   * affordances actually once-per-session; a new session identity yields a
+   * fresh object so they fire again at its start.
+   */
+  function currentPromptSession(): PromptSession {
+    if (promptSessionRef.current.identity !== sessionStartRef.current) {
+      promptSessionRef.current = {identity: sessionStartRef.current, value: {start: sessionStartRef.current, cwd: process.cwd()}};
+    }
+    return promptSessionRef.current.value;
+  }
+
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {retryAttempt: number}) {
     const sessionRecorder = sessionRecorderRef.current!;
     const finalizeMessage = (msg: Message) => {
@@ -637,7 +656,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, resumeExisting?.retryAttempt ?? 0, resumeExisting != null, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
+    }, resumeExisting?.retryAttempt ?? 0, resumeExisting != null, false, currentPromptSession(), undefined, turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
     // A model-stream stall or an incomplete goal pauses the turn with progress

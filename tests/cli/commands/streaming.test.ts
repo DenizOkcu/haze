@@ -20,7 +20,7 @@ interface FakeAgent {
 
 interface FakeModelHandle {
   model: unknown;
-  config: {providerName: string; baseURL: string; modelName: string; cacheKey: string; capabilities: Record<string, boolean>};
+  config: {providerName: string; baseURL: string; modelName: string; cacheKey: string; capabilities: Record<string, boolean>; contextWindowSource?: 'settings' | 'user-fallback' | 'default-fallback'; contextWindowTokens?: number};
 }
 
 interface MocksConfig {
@@ -455,6 +455,70 @@ describe('runAgentTurn: setup', () => {
     expect(modelWithConfigCalls[1]).toEqual({cwd: '/work', modelSelector: 'openai:gpt-4o-mini'});
   });
 });
+
+describe('runAgentTurn: context-fallback warning', () => {
+  const fallbackHandle = (modelName: string): FakeModelHandle => ({
+    model: {modelId: 'test'},
+    config: {providerName: 'test', baseURL: 'http://x', modelName, cacheKey: 'k', capabilities: {}, contextWindowSource: 'default-fallback', contextWindowTokens: 32_768},
+  });
+  const settingsHandle = (modelName: string): FakeModelHandle => ({
+    model: {modelId: 'test'},
+    config: {providerName: 'test', baseURL: 'http://x', modelName, cacheKey: 'k', capabilities: {}, contextWindowSource: 'settings', contextWindowTokens: 200_000},
+  });
+  const answer = [{type: 'text-delta', text: 'Here is the answer.'}, {type: 'finish', finishReason: 'stop'}];
+  const warningCount = (cb: ReturnType<typeof makeCallbacks>) => cb.messages.filter(m => m.role === 'system' && /No context-window data for/.test(m.text)).length;
+
+  it('shows once per session for the same model, not on every turn', async () => {
+    const {runAgentTurn} = await loadStreaming({modelHandle: fallbackHandle('mystery-model'), streamParts: answer});
+    const cb = makeCallbacks();
+    const session: PromptSessionLike = {start: new Date(), cwd: '/w'};
+    await runAgentTurn('hello', undefined, [], cb, 0, false, false, session);
+    await runAgentTurn('hello again', undefined, [], cb, 0, false, false, session);
+    expect(warningCount(cb)).toBe(1);
+    // The observed context_budget stream event still fires every turn.
+    expect(cb.events.filter(event => event.type === 'context_budget')).toHaveLength(2);
+  });
+
+  it('warns again once after a model switch to another fallback model, and not for a known-window model', async () => {
+    const session: PromptSessionLike = {start: new Date(), cwd: '/w'};
+    const first = await loadStreaming({modelHandle: fallbackHandle('model-a'), streamParts: answer});
+    const cbA = makeCallbacks();
+    await runAgentTurnVia(first, 'hello', cbA, session);
+    expect(warningCount(cbA)).toBe(1);
+
+    // Switch to a model with real limits: no warning.
+    const second = await loadStreaming({modelHandle: settingsHandle('model-b'), streamParts: answer});
+    const cbB = makeCallbacks();
+    await runAgentTurnVia(second, 'hello', cbB, session);
+    expect(warningCount(cbB)).toBe(0);
+
+    // Switch to another fallback model: warns exactly once more.
+    const third = await loadStreaming({modelHandle: fallbackHandle('model-c'), streamParts: answer});
+    const cbC = makeCallbacks();
+    await runAgentTurnVia(third, 'hello', cbC, session);
+    await runAgentTurnVia(third, 'again', cbC, session);
+    expect(warningCount(cbC)).toBe(1);
+  });
+
+  it('warns again at the start of a new session for the same model', async () => {
+    const {runAgentTurn} = await loadStreaming({modelHandle: fallbackHandle('mystery-model'), streamParts: answer});
+    const first = makeCallbacks();
+    await runAgentTurn('hello', undefined, [], first, 0, false, false, {start: new Date(), cwd: '/w'});
+    expect(warningCount(first)).toBe(1);
+    // A fresh session object (new/resume) warns once at its start, then stays quiet.
+    const second = makeCallbacks();
+    const session: PromptSessionLike = {start: new Date(), cwd: '/w'};
+    await runAgentTurn('hello', undefined, [], second, 0, false, false, session);
+    await runAgentTurn('again', undefined, [], second, 0, false, false, session);
+    expect(warningCount(second)).toBe(1);
+  });
+});
+
+interface PromptSessionLike {start?: Date; cwd?: string; contextFallbackWarned?: string}
+
+async function runAgentTurnVia(module: {runAgentTurn: (value: string, displayValue: string | undefined, contextFiles: never[], callbacks: ReturnType<typeof makeCallbacks>, retryAttempt: number, retrying: boolean, overflow: boolean, session: PromptSessionLike) => Promise<unknown>}, value: string, cb: ReturnType<typeof makeCallbacks>, session: PromptSessionLike) {
+  await module.runAgentTurn(value, undefined, [] as never[], cb, 0, false, false, session);
+}
 
 describe('runAgentTurn: no model', () => {
   it('emits a system message and returns cleanly when no provider is configured', async () => {
