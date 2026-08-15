@@ -1,6 +1,6 @@
 # src/cli/commands/streaming/AGENTS.md
 
-Last updated: 2026-08-15 for the 0.11.0 release.
+Last updated: 2026-08-16 for the 0.11.0 release.
 
 Helpers for `src/cli/commands/streaming.ts`.
 
@@ -11,11 +11,12 @@ This subtree keeps the main agent loop readable by isolating display, accounting
 - `assistantText.ts` sanitizes and filters streamed assistant fragments.
 - `abortCause.ts` tracks why a turn's shared AbortController fired (`user` / `turn-deadline` / `model-stream-idle`) so the attempt catch can classify instead of guessing from error strings.
 - `streaming.ts` is the thin turn facade: the public turn contract (`runAgentTurn`, `StreamCallbacks`, `Message`, `TurnResult`, `TurnExecutionOptions`) and the turn-level retry/recovery/deadline loop. No attempt internals live there.
-- `agentAttempt.ts` orchestrates one attempt end to end: `attemptSetup` → `streamLoop` → `attemptOutcome`, with failure classification in one catch and guaranteed MCP/LSP/stall-guard/tool-display teardown.
+- `agentAttempt.ts` orchestrates one attempt end to end: `attemptSetup` → `streamLoop` → `attemptOutcome`, with failure classification in one catch and teardown registered on the turn's `AttemptCleanupRegistry` (exactly-once, bounded — shared with the forced-settlement path).
 - `attemptSetup.ts` assembles one attempt: model resolution (one fresh settings read per turn), request context assembly, model-aware token budgeting/compaction, and recovery-slice clamping (rescue tool restriction, execution-boundary budget RH-003, per-tool deadlines RH-004). Owns `restrictToRescueTools` (F-08).
 - `streamLoop.ts` drives the `ToolLoopAgent` loop: repair/prepareStep/step observers, public stream-part application (assistant segments, tool groups, goal events), and post-stream conversation commit. Loop state lives in `AttemptLoopState`, created before the stall guard so stall classification can read what the stalled step emitted.
 - `stallRecovery.ts` owns the idle timer (absorbs the former `idleTimer.ts`), stall classification (`StreamStallGuard` + the `model-stream-idle` abort cause), the shared bounded model-retry pool (`MAX_MODEL_RETRIES`, shared by idle stalls and transient model errors), and conversation salvage to the last completed step.
 - `attemptOutcome.ts` owns terminal classification and resume/continuation decisions: the authoritative `terminalTurnStatus` adapter (absorbs the former `turnOutcome.ts`; the pure policy stays in `core/agent/completionController.ts`), work-evidence projection, goal status, bounded recovery proposals (length/goal/rescue slices and the `incomplete-goal` checkpoint), and failed-attempt classification (idle retry/pause, turn deadline, user abort, context-overflow retry, transient model retry).
+- `attemptLifecycle.ts` owns forced settlement for abort-ignoring streams: once the shared controller aborts, the attempt gets a grace window (`ATTEMPT_SETTLEMENT_GRACE_MS`) to settle; if it expires, registered resources are torn down exactly once (bounded by `ATTEMPT_TEARDOWN_BOUND_MS`), the attempt's callbacks are permanently quarantined (late messages/events/conversation writes become no-ops; `debugLog` stays live), and the turn resolves `aborted` with a truthful teardown report. The abandoned attempt keeps running detached; its eventual settlement is discarded and its own teardown is a no-op.
 - `toolGroupRenderer.ts` groups native tool calls/results into compact UI messages and emits events/log entries.
 - `toolResultState.ts` tracks mutating tool success/failure and edit-recovery state.
 - `toolCallRecovery.ts` identifies malformed tool-input errors for the forced smaller-retry path and clamps out-of-range numeric tool arguments to the tool's declared JSON-Schema bounds. The forced retry must use `activeTools: [tool]` + `toolChoice: 'required'`, never the object tool-choice form: OpenAI-compatible servers such as LM Studio and llama.cpp accept only string `tool_choice` values (`none`/`auto`/`required`) and reject the object form with HTTP 400.
@@ -47,11 +48,15 @@ Maintainability focus:
 
 ### Abort causes and idle-stall recovery
 
-- The idle timer, the absolute turn deadline, and user cancel share one AbortController; the cause is recorded in the per-turn `TurnAbortCause` holder (`abortCause.ts`) by whichever internal site aborts first. A user abort never sets it.
+- The idle timer, the absolute turn deadline, and user cancel share one AbortController; the cause is recorded in the per-turn `TurnAbortCause` holder (`abortCause.ts`) by whichever internal site aborts first. A user abort never sets it. `IdleTimer.clear()` is a permanent quiescence barrier: `reset()` after `clear()` is a no-op, so a late stream part from an abort-ignoring stream can never rearm a cleaned timer.
 - A model-stream idle stall is a retryable transport failure, but only while the stalled step emitted nothing visible (`stallEmission === 'none'`): partial text or an in-flight tool is never auto-retried. Idle stalls share one bounded retry pool (`MAX_MODEL_RETRIES`) with transient model errors.
 - An idle-stall retry salvages the conversation from the last fully completed step (via `onStepEnd`'s accumulated response messages) so completed — possibly mutating — tool work is never re-run, and requires a fresh AbortController (`retry.freshController`) because the stall aborted the old one.
 - When bounded retries are exhausted or the stall is not retryable, the turn pauses (status `failed`, not `aborted`) with the active goal preserved and `TurnResult.resume` carrying the original request plus where the retry pool stopped. The interactive UI offers a one-key R resume; headless consumers ignore it and the system message suggests a follow-up.
 - Stall diagnostics (provider/model, last stream-event time/type, stall emission, work phase, retry eligibility) go to the `timeout` agent event, the `--debug` LLM log, and the debug panel as safe metadata only — never prompt content or credentials.
+
+### Recovery-slice execution budget
+
+- The global execution budget is turn-wide; the slice budget caps the current slice (main phase or one recovery slice) and is created in `runAgentTurn`, reset exactly once when a new slice is admitted, and shared by every attempt in that slice — a provider retry inside a rescue can never re-arm the slice cap (round-1 C2). Blocked calls return a structured bounded non-event (never an exception), so the goal observer never records a phantom failure.
 
 ## Tests
 

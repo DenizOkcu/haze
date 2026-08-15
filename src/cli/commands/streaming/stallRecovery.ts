@@ -32,23 +32,29 @@ function idleStallAutoRetryEligible(retryAttempt: number, stallEmission: StallEm
  * while any tool is in flight. This prevents a long subagent wave from being
  * mistaken for a hung turn.
  *
+ * `clear()` is a permanent quiescence barrier: once cleared, `reset()` can never
+ * rearm it, so a late stream part from an abort-ignoring stream cannot keep the
+ * timer (and whatever its timeout would trigger) alive after teardown.
+ *
  * Note: there is intentionally no upper bound on how long a single tool may run
  * while in flight — a genuinely hung tool would defer indefinitely. A per-tool
  * hard timeout is a separate concern; the idle timer only guards against a turn
  * that is producing no model output AND doing no tool work.
  */
 export interface IdleTimer {
-  /** Clear any pending deadline and rearm it for a fresh idle window. */
+  /** Clear any pending deadline and rearm it for a fresh idle window. No-op after `clear()`. */
   reset: () => void;
-  /** Cancel the pending deadline without rearming. */
+  /** Cancel the pending deadline permanently; later `reset()` calls are ignored. */
   clear: () => void;
 }
 
 export function createIdleTimer(input: {timeoutMs: number; isBusy: () => boolean; onTimeout: () => void;}): IdleTimer {
   const {timeoutMs, isBusy, onTimeout} = input;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
 
   const fire = () => {
+    if (stopped) return;
     if (isBusy()) {
       // Tools are executing — that is activity. Defer by rearming.
       timer = setTimeout(fire, timeoutMs);
@@ -59,10 +65,12 @@ export function createIdleTimer(input: {timeoutMs: number; isBusy: () => boolean
 
   return {
     reset: () => {
+      if (stopped) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(fire, timeoutMs);
     },
     clear: () => {
+      stopped = true;
       if (timer) clearTimeout(timer);
       timer = undefined;
     },

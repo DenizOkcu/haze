@@ -40,6 +40,10 @@ interface MocksConfig {
   callStepEnds?: Array<Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string; response?: {messages: unknown[]}}>>;
   /** 1-based agent call numbers whose stream yields its parts, then hangs with no further events until aborted (model-stream idle stall). */
   stallCalls?: number[];
+  /** Stream never settles, even after abort (abort-ignoring model stream). */
+  ignoreAbort?: boolean;
+  /** With `ignoreAbort`: yield these parts once aborted, then hang forever (late zombie output). */
+  latePartsAfterAbort?: FakeFullStreamPart[];
 }
 
 const mocks = vi.hoisted(() => {
@@ -159,6 +163,24 @@ async function loadStreaming(config: MocksConfig) {
             responseMessages: waitForAbort.then(() => []),
           };
         }
+        if (config.ignoreAbort) {
+          const waitForAbort = new Promise<void>(resolve => {
+            if (abortSignal.aborted) resolve();
+            else abortSignal.addEventListener('abort', () => resolve(), {once: true});
+          });
+          const never = new Promise<void>(() => undefined);
+          return {
+            stream: (async function* () {
+              if (config.latePartsAfterAbort) {
+                await waitForAbort;
+                for (const part of config.latePartsAfterAbort) yield part;
+              }
+              await never;
+            })(),
+            response: never.then(() => ({messages: []})),
+            responseMessages: never.then(() => []),
+          };
+        }
         if (isFirstCall && config.contextOverflow) {
           const error = new Error('Request exceeds maximum context length');
           (error as Error & {cause?: unknown}).cause = 'context';
@@ -250,6 +272,7 @@ function makeCallbacks() {
   const events: Array<{type: string}> = [];
   const debug: string[] = [];
   const conversationSets: unknown[][] = [];
+  const controllers: AbortController[] = [];
   let busy = false;
   let lastAssistantText = '';
   return {
@@ -278,11 +301,15 @@ function makeCallbacks() {
     setGoalStatus: () => undefined,
     setWorkState: () => undefined,
     onTasksChanged: () => undefined,
+    setAbortController: (controller: AbortController | null) => {
+      if (controller) controllers.push(controller);
+    },
     compactConversation: () => false,
     messages,
     events,
     debug,
     conversationSets,
+    controllers,
     isBusy: () => busy,
   };
 }
@@ -922,6 +949,59 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     expect(cb.messages.some(m => /Thinking aborted/.test(m.text))).toBe(false);
     expect(outcome).toMatchObject({status: 'aborted'});
   });
+
+  it('forcibly settles an abort-ignoring stream at the turn deadline: bounded result, exactly-once close, quarantined late output', async () => {
+    vi.useFakeTimers();
+    mocks.assembleContextResult = {
+      systemPrompt: 'sys',
+      availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
+      toolCategories: new Map([['bash', 'builtin']]),
+      loadedMcp: {clients: [{close: async () => undefined}], tools: {}, errors: []},
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      ignoreAbort: true,
+      latePartsAfterAbort: [{type: 'text-delta', text: 'late zombie output'}],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('long work', undefined, [], cb, 0, false, false, undefined, undefined, {turnDeadlineMs: 5_000});
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    // Prompt terminal delivery even though the model stream never settled.
+    expect(outcome).toMatchObject({status: 'aborted'});
+    expect(cb.events.find(event => event.type === 'timeout')).toMatchObject({phase: 'turn'});
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+    expect(cb.messages.some(m => m.role === 'system' && /turn budget elapsed/.test(m.text))).toBe(true);
+    // Attempt-owned MCP clients close exactly once, from the forced teardown
+    // (the mocked closeMcpClients records the call instead of closing).
+    expect(mocks.closeMcpCalls).toHaveLength(1);
+    // Late zombie output after settlement is quarantined: no further messages,
+    // events, or reacquired resources — and never a second close.
+    const messagesAfter = cb.messages.length;
+    const eventsAfter = cb.events.length;
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    expect(cb.messages.length).toBe(messagesAfter);
+    expect(cb.events.length).toBe(eventsAfter);
+    expect(mocks.closeMcpCalls).toHaveLength(1);
+  });
+
+  it('forcibly settles an abort-ignoring stream after a user abort', async () => {
+    vi.useFakeTimers();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      ignoreAbort: true,
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('long work', undefined, [], cb);
+    await vi.advanceTimersByTimeAsync(10);
+    cb.controllers.at(-1)!.abort('user');
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(outcome).toMatchObject({status: 'aborted'});
+    expect(cb.messages.some(m => /Thinking aborted/.test(m.text))).toBe(true);
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+  });
 });
 
 describe('runAgentTurn: MCP cleanup', () => {
@@ -1062,6 +1142,41 @@ describe('runAgentTurn: bounded completion recovery', () => {
     expect(rescueTools).not.toContain('readFile');
     expect(rescueTools).not.toContain('grep');
     expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('keeps the slice execution cap across a provider retry inside the rescue slice (C2)', async () => {
+    // 23 trailing tool-only steps exhaust the reserved boundary with no answer,
+    // so the main attempt proposes a two-call rescue slice. The rescue attempt
+    // starts one mutation, then hits a retryable provider error; the retried
+    // attempt runs inside the SAME slice and must inherit the spent allowance:
+    // exactly one more execution, then blocked — never a re-armed cap.
+    const boundaryStepEnds = Array.from({length: RESCUE_BOUNDARY}, (_, i) => ({stepNumber: i, text: '', toolCalls: [{id: `c${i}`}]}));
+    const retryableError = new Error('Service overloaded (503)');
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      availableTools: fullTools,
+      callStepEnds: [boundaryStepEnds, [], []],
+      callStreams: [
+        [{type: 'finish', finishReason: 'stop'}],
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: [{oldText: 'x', newText: 'y'}]}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'error', error: retryableError},
+        ],
+        [{type: 'text-delta', text: 'Applied the fix to a.ts.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    await runAgentTurn('add a feature to a.ts', undefined, [], makeCallbacks());
+    // Main + rescue + rescue-retry (later goal-continuation slices may follow).
+    expect(mocks.streamedMessages.length).toBeGreaterThanOrEqual(3);
+    const toolsOf = (call: number) => (mocks.agentOptions[call] as {tools: Record<string, {execute: () => Promise<unknown>}>}).tools;
+    // One execution "during" the rescue attempt spends the shared slice state.
+    await expect(toolsOf(1).editFile.execute()).resolves.toMatchObject({ok: true});
+    // The retried attempt wraps the same shared slice budget: the second call
+    // of the two-call slice is allowed…
+    await expect(toolsOf(2).editFile.execute()).resolves.toMatchObject({ok: true});
+    // …and the third is blocked before the underlying tool runs.
+    await expect(toolsOf(2).bash.execute()).resolves.toMatchObject({ok: false, error: expect.stringMatching(/budget exhausted/)});
   });
 
   it('does not rescue a non-mutating (answer) request even at the boundary', async () => {

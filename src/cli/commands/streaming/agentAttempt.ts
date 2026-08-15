@@ -13,6 +13,8 @@ import {prepareAttempt} from './attemptSetup.js';
 import {createAttemptLoopState, runAttemptStream} from './streamLoop.js';
 import {createStreamStallGuard, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
 import {finalizeAttemptOutcome, handleAttemptFailure, type AgentAttemptResult} from './attemptOutcome.js';
+import type {AttemptCleanupRegistry} from './attemptLifecycle.js';
+import {ATTEMPT_TEARDOWN_BOUND_MS} from './attemptLifecycle.js';
 import type {TurnAbortCause} from './abortCause.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
 
@@ -31,8 +33,12 @@ export interface AgentAttemptInput {
   turnState: TurnExecutionState;
   turnBudget: TurnBudget;
   globalBudget: ToolExecutionBudgetState;
+  /** Slice execution budget shared by every attempt in the current slice (main phase or one recovery slice); reset when a new slice is admitted. */
+  sliceBudget: ToolExecutionBudgetState;
   goal: SessionGoal;
   abortCause: TurnAbortCause;
+  /** Exactly-once teardown registry; shared with the turn's forced-settlement path. */
+  cleanup: AttemptCleanupRegistry;
   remainingTurnDeadlineMs: () => number;
 }
 
@@ -44,15 +50,34 @@ export interface AgentAttemptInput {
  * display are always torn down.
  */
 export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAttemptResult> {
-  const {value, contextFiles, callbacks, retryAttempt, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, goal, abortCause, remainingTurnDeadlineMs} = input;
+  const {value, contextFiles, callbacks, retryAttempt, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs} = input;
   callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
   let loadedMcp: LoadedMcpTools | undefined;
   let lspPool: LspPool | undefined;
+  let mcpClosed = false;
+  let lspClosed = false;
   const toolDisplay = createToolGroupRenderer({addMessage: callbacks.addMessage, updateMessage: callbacks.updateMessage, debugLog: callbacks.debugLog, onEvent: callbacks.onEvent, log: callbacks.log});
+  // Teardown is registered, not inline: whichever runs first — this attempt's
+  // own finally or the turn-level forced settlement after an abort-ignoring
+  // stream — performs it exactly once (bounded), the other becomes a no-op.
+  cleanup.register(async () => {
+    const closes: Promise<unknown>[] = [];
+    if (loadedMcp?.clients.length && !mcpClosed) {
+      mcpClosed = true;
+      closes.push(closeMcpClients(loadedMcp.clients));
+    }
+    if (lspPool && !lspClosed) {
+      lspClosed = true;
+      closes.push(lspPool.close());
+    }
+    stallGuard?.clear();
+    toolDisplay.stopToolTimer();
+    await Promise.allSettled(closes);
+  });
   const salvage: AttemptSalvage = {requestMessages: [], accumulated: []};
   let stallGuard: StreamStallGuard | undefined;
   try {
-    const setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path)});
+    const setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path)});
     if (!setup) return {status: 'failed'};
     loadedMcp = setup.loadedMcp;
     lspPool = setup.lspPool;
@@ -79,10 +104,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
   } catch (error) {
     return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error});
   } finally {
-    if (loadedMcp?.clients.length) await closeMcpClients(loadedMcp.clients);
-    if (lspPool) await lspPool.close();
-    stallGuard?.clear();
-    toolDisplay.stopToolTimer();
+    await cleanup.closeOnce(ATTEMPT_TEARDOWN_BOUND_MS);
     toolDisplay.finalizeToolGroup();
   }
 }

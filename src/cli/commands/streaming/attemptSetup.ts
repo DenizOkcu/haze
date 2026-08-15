@@ -7,7 +7,7 @@ import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy
 import {calculateRequestTokenBudget, estimateMessagesTokens} from '../../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, createToolExecutionBudget, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
@@ -78,6 +78,8 @@ export interface AttemptSetupDeps {
   turnScope: {executionScope?: TurnExecutionScope};
   turnBudget: TurnBudget;
   globalBudget: ToolExecutionBudgetState;
+  /** Shared slice execution state (see AgentAttemptInput.sliceBudget). */
+  sliceBudget: ToolExecutionBudgetState;
   goal: SessionGoal;
   onContextFileRead: (path: string) => void;
 }
@@ -90,7 +92,7 @@ export interface AttemptSetupDeps {
  * configured (the caller-reported failure path).
  */
 export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSetup | undefined> {
-  const {value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, goal, globalBudget, turnBudget, onContextFileRead} = deps;
+  const {value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead} = deps;
   // Single choke point: one fresh settings read per turn, shared by model
   // resolution and request assembly (CR-024).
   const turnSettings = await readSettings();
@@ -181,11 +183,13 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   const rescueWithoutTools = recoverySlice?.kind === 'rescue' && Object.keys(rescueTools).length === 0;
   const sliceTools: ToolSet = rescueWithoutTools ? {} : rescueTools;
   // Execution-boundary budgets (RH-003). The global budget is turn-wide
-  // (shared across retries and recovery slices); the slice budget is
-  // per-attempt and caps a recovery slice. Both are checked atomically at the
-  // actual execute boundary so one oversized parallel batch cannot overshoot.
-  const sliceBudget = createToolExecutionBudget();
-  const sliceToolCallCap = recoverySlice?.maxToolCalls ?? MAIN_TOOL_CALL_LIMIT;
+  // (shared across retries and recovery slices); the slice budget belongs to
+  // the current slice (main phase or one recovery slice) and is provided by
+  // the turn loop so provider retries within the slice cannot re-arm its cap
+  // (round-1 C2): the slice envelope is clamped once at slice admission. Both
+  // are checked atomically at the actual execute boundary so one oversized
+  // parallel batch cannot overshoot.
+  const sliceToolCallCap = turnOptions.recoverySlice?.maxToolCalls ?? MAIN_TOOL_CALL_LIMIT;
   const budgetedTools = withToolExecutionBudget(sliceTools, {state: globalBudget, limit: turnBudget.toolCallLimit}, {state: sliceBudget, limit: sliceToolCallCap});
   // Layer a per-tool execution deadline on top of the budget (RH-004). The
   // budget is checked first (cheap); a permitted call then runs under a

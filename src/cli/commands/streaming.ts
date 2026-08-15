@@ -19,6 +19,8 @@ import {abortableDelay, type TokenUsage} from './streaming/turnRuntime.js';
 import type {ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
 import {abortForTurn, createUserAbortCause} from './streaming/abortCause.js';
 import {runAgentAttempt} from './streaming/agentAttempt.js';
+import {awaitAttemptWithForcedSettlement, createAttemptCleanupRegistry, createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
+import {formatIdleMinutes} from './streaming/stallRecovery.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number; toolCount?: number; toolDiffs?: ToolDisplayDiff[]};
 
@@ -132,8 +134,12 @@ export async function runAgentTurn(
     const turnBudget = mainTurnBudget();
     // Turn-wide execution budget (RH-003): one authoritative counter of
     // underlying tool executions, shared across retries and recovery slices so
-    // the global limit cannot be reset or exceeded.
+    // the global limit cannot be reset or exceeded. The slice budget caps the
+    // current slice (main phase or one recovery slice): it is shared by every
+    // attempt in that slice and reset only when a new slice is admitted, so a
+    // provider retry inside a rescue can never re-arm the slice cap (C2).
     const globalBudget = createToolExecutionBudget();
+    const sliceBudget = createToolExecutionBudget();
     // Turn-wide work state: persists across provider retries and recovery
     // slices so mutation/validation evidence accumulates correctly. When the
     // goal supervisor continues a logical goal, cumulative evidence (tasks,
@@ -148,6 +154,10 @@ export async function runAgentTurn(
     let attempt = retryAttempt;
     let overflowRecovered = contextOverflowRecovered;
     let retrying = retryingExistingRequest;
+    // The attempt machinery runs against quarantinable callbacks so an
+    // abort-ignoring stream that outlives forced settlement cannot mutate the
+    // finished turn's UI, conversation, or session state.
+    const {callbacks: attemptCallbacks, quarantine} = createQuarantinableCallbacks(callbacks);
     while (true) {
       // Absolute main-turn deadline (RH-004): distinct from the idle timer, it
       // bounds total turn elapsed time so a stream of busy tools cannot defer
@@ -163,7 +173,22 @@ export async function runAgentTurn(
           abortForTurn(abortCause, {kind: 'turn-deadline', timeoutMs: turnDeadlineMs}, abortController, `haze turn exceeded the ${turnDeadlineMs}ms absolute deadline.`);
         },
       });
-      const result = await runAgentAttempt({value, contextFiles, callbacks, retryAttempt: attempt, retryingExistingRequest: retrying, contextOverflowRecovered: overflowRecovered, session, modelOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, goal, abortCause, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt))});
+      const cleanup = createAttemptCleanupRegistry();
+      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, contextOverflowRecovered: overflowRecovered, session, modelOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt))}), {
+        abortController,
+        cleanup,
+        quarantine,
+        onForced: tornDown => {
+          // The attempt ignored cancellation past the grace window: settle the
+          // turn ourselves, truthfully reporting whether teardown completed.
+          turnState.aborted = true;
+          callbacks.debugLog(`attempt ignored cancellation; forced settlement after grace (teardown ${tornDown ? 'completed' : 'still settling'})`);
+          callbacks.addMessage({role: 'system', text: abortCause.kind === 'turn-deadline'
+            ? `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? turnDeadlineMs)} turn budget elapsed before the model finished.${tornDown ? '' : ' Some background teardown is still settling.'} Completed steps are preserved in the conversation; send a follow-up to continue.`
+            : 'Thinking aborted. You can type again.'});
+          return {status: 'aborted'};
+        },
+      });
       turnDeadline.clear();
       turnDeadline = undefined;
       status = result.status;
@@ -191,6 +216,10 @@ export async function runAgentTurn(
       if (result.recovery && !abortController.signal.aborted) {
         const rec = result.recovery;
         if (rec.kind === 'length') { turnState.lengthCreditUsed = true; turnState.lengthRecoveriesAttempted += 1; } else if (rec.kind === 'rescue') turnState.rescueUsed = true; else recordGoalContinuation(turnState);
+        // A new slice gets a fresh execution allowance, clamped once here; the
+        // slice budget persists across provider retries within the slice (C2).
+        sliceBudget.started = 0;
+        sliceBudget.exceeded = false;
         activeOptions = {...activeOptions, ephemeralControl: rec.control, recoverySlice: {kind: rec.kind, maxSteps: rec.slice.maxSteps, maxToolCalls: rec.slice.maxToolCalls}};
         retrying = true;
         callbacks.debugLog(`starting ${rec.kind} recovery slice: ${rec.slice.maxSteps} steps / ${rec.slice.maxToolCalls} tool calls`);
