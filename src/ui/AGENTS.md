@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-08-15 for the 0.11.0 release.
+Last updated: 2026-08-16 for the 0.11.0 release.
 
 Reusable Ink components, theme, and input-buffer logic.
 
@@ -20,7 +20,7 @@ Maintainability focus:
 - `Header.tsx` renders current app/session/model/status summary. Do not expose secrets.
 - `TextInput.tsx` handles terminal input/editing interactions and cursor-aware slash/`@path` suggestions; preserve keyboard, Tab, arrow, and Enter completion behavior covered by tests.
 - `MarkdownText.tsx` renders Markdown-like assistant/tool text in terminal width constraints and exposes root-level chunking for streamed assistant output. Keep rendering robust for malformed/partial Markdown from streaming models.
-- `ErrorView.tsx` should present errors compactly without stack spam unless intentionally surfaced.
+- Errors should be presented compactly without stack spam unless intentionally surfaced.
 
 ## Markdown rendering
 
