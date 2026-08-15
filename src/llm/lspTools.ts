@@ -3,7 +3,8 @@ import {tool} from 'ai';
 import {z} from 'zod';
 import {readSettings} from '../config/settings.js';
 import {configuredLspServers} from '../config/lspSettings.js';
-import {lspDefinition, lspDiagnostics, lspDocumentSymbols, lspImplementation, lspReferences, lspTypeDefinition, lspWorkspaceSymbols, pickLspServer, type LspPool} from './lsp.js';
+import {pickLspServer, type LspPool} from './lsp/pool.js';
+import {lspDefinition, lspDiagnostics, lspDocumentSymbols, lspImplementation, lspReferences, lspTypeDefinition, lspWorkspaceSymbols} from './lsp/requests.js';
 
 async function serverFor(filePath: string) {
   const servers = configuredLspServers(await readSettings()).filter(server => server.enabled !== false);

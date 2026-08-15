@@ -12,7 +12,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
 - `hazeTools.ts` defines the public built-in tool catalog and schemas.
 - `tools/**` contains implementation helpers split out of `hazeTools.ts`, including managed background-process registration/control.
-- `lsp.ts`/`lspTools.ts` provide optional read-only stdio LSP navigation.
+- `lsp/` (client/pool/protocol/requests) with `lspTools.ts` provides optional read-only stdio LSP navigation: `client.ts` owns JSON-RPC framing and process lifecycle, `pool.ts` owns server selection and turn-scoped client reuse (RH-009), `protocol.ts` owns pure URI/range/symbol/diagnostic shaping, and `requests.ts` owns the workspace-safe request facades the tools layer and its tests program against.
 - `mcp.ts` loads tools from configured MCP servers and skips collisions rather than shadowing built-ins.
 - `toolResultTypes.ts` contains structured result types and guards shared by tools, formatters, and tests.
 - `webFetch.ts` implements public URL fetching and content extraction behind the `fetch` tool.

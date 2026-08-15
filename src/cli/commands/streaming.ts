@@ -5,7 +5,7 @@ import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {assembleRequestContext, type SubagentOverrides, type TurnExecutionScope} from '../../llm/requestContext.js';
 import {projectContextSection, type PromptSession} from '../../llm/systemPrompt.js';
 import {closeMcpClients, type LoadedMcpTools} from '../../llm/mcp.js';
-import type {LspPool} from '../../llm/lsp.js';
+import type {LspPool} from '../../llm/lsp/pool.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {readSettings} from '../../config/settings.js';
 import {toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds} from './formatters.js';

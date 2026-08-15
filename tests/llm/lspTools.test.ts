@@ -23,11 +23,13 @@ async function loadLspTools() {
       return servers.map(server => ({...server, args: server.args ?? [], extensions: server.extensions ?? [], enabled: server.enabled !== false}));
     },
   }));
-  vi.doMock('../../src/llm/lsp.js', () => ({
+  vi.doMock('../../src/llm/lsp/pool.js', () => ({
     pickLspServer: (servers: Array<{extensions?: string[]; enabled?: boolean}>, filePath: string) => {
       const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
       return servers.find(server => server.enabled !== false && (server.extensions ?? []).map(e => String(e).toLowerCase()).includes(ext));
     },
+  }));
+  vi.doMock('../../src/llm/lsp/requests.js', () => ({
     ...captured.lspFns,
   }));
   vi.resetModules();

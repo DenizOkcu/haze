@@ -1,7 +1,7 @@
 import type {ToolSet} from 'ai';
 import {hazeTools} from './hazeTools.js';
 import {buildLspTools} from './lspTools.js';
-import {LspPool} from './lsp.js';
+import {LspPool} from './lsp/pool.js';
 import {buildSystemPrompt, type PromptSession} from './systemPrompt.js';
 import {readSettings} from '../config/settings.js';
 import {resolveWorkerRuntime, type ModelRuntimeSelection} from './client.js';

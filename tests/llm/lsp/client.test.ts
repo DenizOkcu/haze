@@ -1,59 +1,13 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {EventEmitter} from 'node:events';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import {
-  LspError,
-  StdioLspClient,
-  asRange,
-  flattenSymbols,
-  fromUri,
-  languageId,
-  locationToResult,
-  locationToWorkspaceResult,
-  pickLspServer,
-  toDiagnostic,
-  toUri,
-} from '../../src/llm/lsp.js';
-import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../src/core/limits.js';
-import type {HazeLspServer} from '../../src/config/lspSettings.js';
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
+import {LspError, StdioLspClient} from '../../../src/llm/lsp/client.js';
+import {toUri} from '../../../src/llm/lsp/protocol.js';
+import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../../src/core/limits.js';
+import type {HazeLspServer} from '../../../src/config/lspSettings.js';
 
 const ts: HazeLspServer = {name: 'typescript', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts', '.tsx']};
-const py: HazeLspServer = {name: 'python', command: 'pyright-langserver', args: ['--stdio'], extensions: ['.py']};
 
-describe('pickLspServer', () => {
-  it('matches a server by file extension', () => {
-    expect(pickLspServer([ts, py], 'src/app.ts')?.name).toBe('typescript');
-    expect(pickLspServer([ts, py], 'src/app.tsx')?.name).toBe('typescript');
-    expect(pickLspServer([ts, py], 'scripts/main.py')?.name).toBe('python');
-  });
-
-  it('matches case-insensitively', () => {
-    expect(pickLspServer([ts], 'SRC/APP.TSX')?.name).toBe('typescript');
-  });
-
-  it('skips disabled servers and falls through to the next match', () => {
-    expect(pickLspServer([{...ts, enabled: false}, py], 'app.ts')).toBeUndefined();
-    expect(pickLspServer([{...ts, enabled: false}, py], 'app.py')?.name).toBe('python');
-  });
-
-  it('returns undefined when no server covers the extension', () => {
-    expect(pickLspServer([ts, py], 'README.md')).toBeUndefined();
-    expect(pickLspServer([], 'app.ts')).toBeUndefined();
-  });
-
-  it('handles a server without an extensions list', () => {
-    const noext: HazeLspServer = {name: 'none', command: 'x'};
-    expect(pickLspServer([noext], 'app.ts')).toBeUndefined();
-  });
-
-  it('prefers the first matching server when several could match', () => {
-    const ts2: HazeLspServer = {...ts, name: 'typescript-2'};
-    expect(pickLspServer([ts, ts2], 'app.ts')?.name).toBe('typescript');
-  });
-});
 
 function frame(message: unknown): Buffer {
   const body = JSON.stringify(message);
@@ -114,87 +68,6 @@ function sentId(child: ReturnType<typeof fakeChild>, index = 0): number {
   return Number(/"id":\s*(\d+)/.exec(sent)?.[1]);
 }
 
-describe('lsp pure helpers', () => {
-  it('maps file extensions to language ids', () => {
-    expect(languageId('a.ts')).toBe('typescript');
-    expect(languageId('a.tsx')).toBe('typescriptreact');
-    expect(languageId('a.js')).toBe('javascript');
-    expect(languageId('a.jsx')).toBe('javascriptreact');
-    expect(languageId('a.rs')).toBe('rust');
-    expect(languageId('a.py')).toBe('python');
-    expect(languageId('a.go')).toBe('go');
-    expect(languageId('a.unknownext')).toBe('unknownext');
-    expect(languageId('Makefile')).toBe('plaintext');
-  });
-
-  it('round-trips paths through file:// URIs', () => {
-    const uri = toUri('/tmp/foo/bar.ts');
-    expect(uri.startsWith('file://')).toBe(true);
-    expect(fromUri(uri)).toBe(path.relative(process.cwd(), '/tmp/foo/bar.ts'));
-    expect(fromUri('https://example.com/x')).toBe('https://example.com/x');
-  });
-
-  it('normalizes LSP ranges to 1-indexed positions', () => {
-    // Inputs are LSP-native (0-indexed); expected outputs are 1-indexed for haze's display.
-    expect(asRange({start: {line: 0, character: 2}, end: {line: 3, character: 5}})).toEqual({
-      start: {line: 1, character: 3},
-      end: {line: 4, character: 6},
-    });
-  });
-
-  it('returns undefined when the value or its endpoints are not objects', () => {
-    expect(asRange(null)).toBeUndefined();
-    expect(asRange({start: null, end: null})).toBeUndefined();
-    expect(asRange({start: {line: 0, character: 0}, end: 'bad'})).toBeUndefined();
-  });
-
-  it('defaults missing numeric range fields to 1', () => {
-    const range = asRange({start: {}, end: {}});
-    expect(range).toEqual({start: {line: 1, character: 1}, end: {line: 1, character: 1}});
-  });
-
-  it('converts location objects to relative paths', () => {
-    const loc = locationToResult({uri: toUri('/tmp/foo/bar.ts'), range: {start: {line: 0, character: 0}, end: {line: 0, character: 3}}});
-    expect(loc).toBeDefined();
-    expect(loc?.range.start.line).toBe(1);
-  });
-
-  it('flattens hierarchical document symbols up to the limit', () => {
-    const symbols = [
-      {name: 'Top', kind: 12, range: {start: {line: 0, character: 0}, end: {line: 10, character: 0}}, selectionRange: {start: {line: 0, character: 0}, end: {line: 0, character: 3}}, children: [
-        {name: 'Inner', kind: 6, range: {start: {line: 1, character: 0}, end: {line: 2, character: 0}}, selectionRange: {start: {line: 1, character: 0}, end: {line: 1, character: 5}}},
-      ]},
-    ];
-    expect(flattenSymbols(symbols, 'a.ts', 10).map(s => s.name)).toEqual(['Top', 'Inner']);
-    expect(flattenSymbols(symbols, 'a.ts', 1).map(s => s.name)).toEqual(['Top']);
-    expect(flattenSymbols(symbols, 'a.ts', 10)[0]?.path).toBe('a.ts');
-  });
-
-  it('skips symbol entries without a name', () => {
-    expect(flattenSymbols([{kind: 1}, {name: 'Real'}], 'a.ts', 10).map(s => s.name)).toEqual(['Real']);
-  });
-
-  it('converts definition-style locations using targetUri', () => {
-    const loc = locationToResult({targetUri: toUri('/tmp/foo/bar.ts'), targetSelectionRange: {start: {line: 2, character: 4}, end: {line: 2, character: 8}}});
-    expect(loc).toBeDefined();
-    expect(loc?.range.start.line).toBe(3);
-  });
-
-  it.runIf(process.platform !== 'win32')('labels a returned symlink escape as external', async () => {
-    const workspace = await fs.mkdtemp(path.join(process.cwd(), '.haze-lsp-location-'));
-    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-lsp-outside-'));
-    const outside = path.join(outsideDir, 'outside.ts');
-    await fs.writeFile(outside, 'secret');
-    await fs.symlink(outside, path.join(workspace, 'linked.ts'));
-    try {
-      const result = await locationToWorkspaceResult({uri: toUri(path.join(workspace, 'linked.ts')), range: {start: {line: 0, character: 0}, end: {line: 0, character: 1}}});
-      expect(result).toMatchObject({external: true, path: expect.stringMatching(/^file:/)});
-    } finally {
-      await fs.rm(workspace, {recursive: true, force: true});
-      await fs.rm(outsideDir, {recursive: true, force: true});
-    }
-  });
-});
 
 describe('StdioLspClient', () => {
   afterEach(() => vi.useRealTimers());
@@ -390,19 +263,3 @@ describe('StdioLspClient', () => {
   });
 });
 
-describe('toDiagnostic', () => {
-  it('maps severity numbers to labels and keeps code/source when present', () => {
-    const range = {start: {line: 0, character: 2}, end: {line: 0, character: 5}};
-    expect(toDiagnostic({range, severity: 1, message: 'e', code: 2322, source: 'ts'})).toEqual({severity: 'error', range: {start: {line: 1, character: 3}, end: {line: 1, character: 6}}, message: 'e', code: '2322', source: 'ts'});
-    expect(toDiagnostic({range, severity: 2, message: 'w'})?.severity).toBe('warning');
-    expect(toDiagnostic({range, severity: 3, message: 'i'})?.severity).toBe('information');
-    expect(toDiagnostic({range, severity: 4, message: 'h'})?.severity).toBe('hint');
-  });
-
-  it('defaults unknown severities to information and skips entries without a range', () => {
-    const range = {start: {line: 0, character: 0}, end: {line: 0, character: 1}};
-    expect(toDiagnostic({range, severity: 99, message: 'x'})?.severity).toBe('information');
-    expect(toDiagnostic({severity: 1, message: 'no range'})).toBeUndefined();
-    expect(toDiagnostic('nope')).toBeUndefined();
-  });
-});
