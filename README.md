@@ -48,6 +48,10 @@ haze works with OpenAI-compatible providers, including OpenRouter and local endp
 
 haze keeps guardrails light. The LLM can work from the terminal with access close to yours while staying scoped to the current project where possible. It is for developers who would rather supervise tool calls than work through a stack of permission dialogs. Keep an eye on what it does.
 
+### Supervision model
+
+There is **no sandbox and no permission layer**: bash runs unsupervised (its classification is informational only), and only the file tools are confined to the workspace. Claude Code gates tools behind permissions, plan mode, and hooks; Codex CLI runs in an OS sandbox with approval modes; haze, like pi, replaces those mechanisms with your supervision. That trade-off is deliberate and keeps the agent fast and transparent, but it also means haze is **not an unattended automation runtime** — run it where you would run a shell session yourself. If a CI job runs haze headless, treat the job the way you would treat any script with shell access. SECURITY.md documents the attended-use threat model in full.
+
 ## Getting started
 
 Install haze:
@@ -69,7 +73,7 @@ On first run, create or choose a provider, then choose your first model:
 /model
 ```
 
-`/provider` sets up any OpenAI-compatible endpoint, such as OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. haze asks for a provider name, base URL, optional API key, and model names. The **OpenAI API Key** preset uses platform API billing. The **OpenAI Subscription** preset instead opens a ChatGPT browser login and uses the Codex Responses endpoint; no pasted session token is required.
+`/provider` sets up any OpenAI-compatible endpoint, such as OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. haze asks for a provider name, base URL, optional API key, and model names. The **OpenAI API Key** preset uses platform API billing. The **OpenAI Subscription** preset instead opens a ChatGPT browser login and uses the Codex Responses endpoint; no pasted session token is required. Its sign-in callback listens on a fixed localhost port (1455) required by the registered client, so a lingering process holding that port blocks sign-in until it exits; retry after freeing the port.
 
 `/model` selects the model haze should use. The picker also offers `add models`, which fetches a provider's model list from its OpenAI-compatible `/models` endpoint so you can pick instead of typing; if the endpoint is unavailable you can still type model names. You can also set one directly:
 
@@ -91,7 +95,7 @@ Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) 
 
 API keys for HTTP/SSE servers are entered in a masked prompt and sent as `Authorization: Bearer <value>`. Stdio authentication belongs in the command or wrapper; haze does not attach HTTP headers to stdio. Servers persist in `~/.haze/settings.json` under `mcpServers`. Discovery and cleanup have bounded deadlines, failures are isolated, and MCP tools never shadow built-ins.
 
-Saved settings live in `~/.haze/settings.json`. ChatGPT OAuth credentials live separately in `~/.haze/auth.json`; both files use private permissions. Provider keys and MCP headers require HTTPS unless the endpoint uses loopback HTTP (`localhost`, `*.localhost`, `127/8`, or `::1`). Keyless HTTP remains available, and local OpenAI-compatible providers do not need a key. If a settings or authentication file is malformed, haze shows an actionable error instead of treating it as empty. Configure everything inside haze with `/provider`, `/model`, and `/settings`; there are no environment variables to set.
+Saved settings live in `~/.haze/settings.json`. ChatGPT OAuth credentials live separately in `~/.haze/auth.json`; both files use private permissions. Provider keys and MCP headers require HTTPS unless the endpoint uses loopback HTTP (`localhost`, `*.localhost`, `127/8`, or `::1`). Keyless HTTP remains available, and local OpenAI-compatible providers do not need a key. If a settings or authentication file is malformed, haze shows an actionable error instead of treating it as empty. Configure everything inside haze with `/provider`, `/model`, and `/settings`; there are no environment variables to set. Provider presets carry curated per-model metadata (context window, output cap, and USD-per-million-token pricing from the models.dev catalog) which the wizard writes into `modelLimits`; when a model has pricing, the status bar and the headless `usage` envelope include an estimated `$` cost for the session or run. It is an estimate from provider-reported token counts and does not model tiered or negotiated rates.
 
 haze focuses on chat, local tools, context files, sessions, and Markdown skills. Use `/skills` for workflows outside that core. Its interactive picker can generate a skill from a description, then enable, disable, validate, or remove it. For reviews, release prep, deploy checks, debugging routines, or a team-specific checklist, ask haze to create a skill and edit the resulting Markdown as needed.
 
@@ -244,7 +248,7 @@ echo "what does this project do?" | haze
 
 `-p` and `--prompt` run one agentic turn with the full tool set and print the final assistant text. `--model` accepts a bare model name or `provider:name` and overrides the active model for that run without changing `~/.haze/settings.json`. The model must already be registered under a provider's `models`; add it once with `/provider`. Unknown or ambiguous selectors print a specific error to stderr and exit nonzero.
 
-If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts are limited to 256 KiB; for larger input, pass a file path and ask haze to read it. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. They also do not compact automatically after a context overflow, so keep large CI prompts within the model's context window. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
+If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts are limited to 256 KiB; for larger input, pass a file path and ask haze to read it. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. On a provider context overflow they compact the loaded conversation once, like the interactive path, and retry the same request; if there is too little history to compact, the run fails with a specific message. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
 
 `--output` controls the result format: `text` is the default, `json` prints one final envelope, and `stream-json` writes live NDJSON events followed by the same envelope.
 
@@ -356,7 +360,9 @@ Keep trivial, conversation-coupled, sequential, user-interactive, or uncertain s
 
 ## Context files
 
-haze saves durable workspace sessions in `~/.haze/sessions`. It writes a session after the first resumable message, so empty sessions do not create files or appear under `/resume`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, and `/resume` to browse workspace sessions, resume one, or fork its latest snapshot into a new session. `/resume <id>` and `haze --resume <id>` select an exact session. Use `/compact` to condense older model context into a bounded excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+haze saves durable workspace sessions in `~/.haze/sessions`. It writes a session after the first resumable message, so empty sessions do not create files or appear under `/resume`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, and `/resume` to browse workspace sessions, resume one, or fork its latest snapshot into a new session. `/resume <id>` and `haze --resume <id>` select an exact session. Use `/compact` to condense older model context: by default the active model writes a continuity summary of the older history (set `manualCompaction: "heuristic"` in settings to keep the model-free bounded excerpt instead); automatic mid-turn compaction always uses the heuristic excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+
+Snapshots are written at turn boundaries, not per tool call. If haze crashes or is killed mid-turn, the session resumes from the last completed turn: work already on disk (file edits, command side effects) is not reflected in the session record, so after a crash verify the working tree (`git status`, `git diff`) before continuing. To keep long sessions from growing quadratically — every turn appends the full history again — session files are automatically compacted once superseded snapshots dominate the file: only the newest conversation and work-state snapshots are kept and the file is rewritten atomically.
 
 Session files are optimized for resume and audit, not token-by-token playback: completed user/assistant messages, tool lifecycle events, conversation snapshots, and work-state snapshots are persisted, but streaming `message_update` events are skipped. Large persisted tool outputs are replaced with previews and byte counts so a resumed model can reread current files instead of carrying stale megabytes forward.
 
@@ -382,7 +388,7 @@ Bash classification is informational. haze does not ask for confirmation before 
 
 - Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
 - A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access.
-- Ignored workspace files require an explicit override unless covered by that user-granted read exception.
+- Ignored workspace files require an explicit override unless covered by that user-granted read exception. If Git cannot run at all, mutation tools refuse with `ignore_check_unavailable` (the safe direction for writes) — reads still proceed.
 - The `fetch` tool only reads public `http(s)` URLs. It rejects other schemes along with private, loopback, link-local, cloud-metadata, and malformed IPv6-like hosts. On every redirect, haze connects to the public IP it already validated, which closes the DNS-rebinding gap.
 - Project skills under `.haze/skills` are real-path-confined to the workspace and visibly labeled as untrusted repository content. Review them before using an unfamiliar repository.
 

@@ -814,7 +814,7 @@
       <div class="section-box principle-grid">
         <article>
           <h3>Workspace boundaries without approval loops</h3>
-          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision.</p>
+          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: bash runs with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
           <pre class="mini-terminal" aria-label="Workspace guardrail example"><span class="prompt">workspace</span>   current directory
 <span class="prompt">.gitignore</span>  respected by default
 <span class="prompt">@ui.png</span>    attached for vision</pre>
