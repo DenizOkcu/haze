@@ -1,6 +1,6 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-08-15 for the 0.11.0 release.
+Last updated: 2026-08-16 for the 0.11.0 release.
 
 Implementation helpers for haze built-in tools.
 
@@ -46,6 +46,7 @@ Current behavior:
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
 - `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer.
+- `gitIgnore.ts` batches candidates through `git check-ignore -z --stdin` (≤ `GIT_IGNORE_BATCH` per subprocess) and matches Git's NUL-delimited echo by exact submitted string, preserving spaces, embedded newlines, and POSIX backslash names. Every child is wall-clock bounded (`CHECK_IGNORE_DEADLINE_MS`): a stalled child is SIGKILLed and the batch rejects, so reads fail open (nothing reported ignored) while the tri-state path reports `unknown` and mutations fail closed (F-05). Output is byte-bounded; overflow resolves the batch fail-open. One classifier should own an entire listing operation so siblings/frontiers share subprocesses.
 
 ## Failure results
 

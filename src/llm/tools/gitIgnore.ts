@@ -15,6 +15,14 @@ export const GIT_IGNORE_BATCH = 256;
  */
 const CHECK_IGNORE_MAX_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Wall-clock bound for one batch. check-ignore answers in well under a second;
+ * a child that stalls (never reading stdin, never exiting) is killed here and
+ * the batch fails open, so a hung `git` can never pin a tool call or leak a
+ * process with open stdio pipes past the turn.
+ */
+export const CHECK_IGNORE_DEADLINE_MS = 10_000;
+
 interface IgnoreClassification {
   /** Subset of the submitted paths Git reports as ignored. */
   ignored: Set<string>;
@@ -52,15 +60,30 @@ function runCheckIgnore(root: string, input: string): Promise<string> {
     let totalBytes = 0;
     let overflowed = false;
     let settled = false;
+    let timedOut = false;
+
+    // Stalled-child bound: kill the process tree; its 'close' event rejects the
+    // batch as could-not-check below.
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already gone; 'close' will fire (or already did).
+      }
+    }, CHECK_IGNORE_DEADLINE_MS);
 
     const finish = (stdout: string) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       resolve(stdout);
     };
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       reject(error);
     };
 
@@ -80,6 +103,9 @@ function runCheckIgnore(root: string, input: string): Promise<string> {
       // Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a repo. All
       // are resolved with whatever stdout arrived (empty for 1/128); overflow
       // yields empty output so the batch fails open (nothing reported ignored).
+      // A deadline kill rejects instead: the batch could not be checked, so the
+      // tri-state callers report `unknown` and mutations fail closed (F-05).
+      if (timedOut) return fail(new Error(`git check-ignore stalled for ${CHECK_IGNORE_DEADLINE_MS}ms and was killed`));
       finish(overflowed ? '' : Buffer.concat(chunks).toString('utf8'));
     });
     child.stdin.on('error', () => undefined);

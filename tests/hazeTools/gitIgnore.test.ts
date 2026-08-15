@@ -154,3 +154,56 @@ describe('gitIgnore tri-state under a broken Git (F-05)', () => {
     await expect(assertNotIgnored(target, 'mutate.txt', true)).resolves.toBeUndefined();
   });
 });
+
+describe('gitIgnore stalled child (bounded check-ignore)', () => {
+  let tmp: string;
+  let originalCwd: string;
+  let killCalls: number;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-gitignore-hung-')));
+    originalCwd = process.cwd();
+    process.chdir(tmp);
+    vi.resetModules();
+    killCalls = 0;
+    // A `git` child that accepts stdin, never answers, and never exits — the
+    // abort-ignoring stall case. kill() emits the close event like a real
+    // SIGKILL would, proving the deadline (not the child) settles the batch.
+    vi.doMock('node:child_process', async () => {
+      const {EventEmitter} = await import('node:events');
+      const spawn = () => {
+        const child = new EventEmitter() as EventEmitter & {stdout: EventEmitter; stderr: EventEmitter; stdin: {on: () => void; end: () => void}; kill: (signal?: string) => void};
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.stdin = {on: () => undefined, end: () => undefined};
+        child.kill = () => {
+          killCalls++;
+          queueMicrotask(() => child.emit('close', null, 'SIGKILL'));
+        };
+        return child;
+      };
+      return {spawn};
+    });
+  });
+
+  afterEach(async () => {
+    vi.doUnmock('node:child_process');
+    vi.resetModules();
+    vi.useRealTimers();
+    process.chdir(originalCwd);
+    await fs.remove(tmp);
+  });
+
+  it('kills a stalled child at the deadline: reads fail open, tri-state reports unknown (F-05)', async () => {
+    const {createIgnoreClassifier, classifyGitIgnored, CHECK_IGNORE_DEADLINE_MS} = await import('../../src/llm/tools/gitIgnore.js');
+    const readPromise = classifyGitIgnored(['a.txt'], tmp);
+    const triStatePromise = createIgnoreClassifier(tmp).classifyChecked(['a.txt']);
+    await vi.advanceTimersByTimeAsync(CHECK_IGNORE_DEADLINE_MS + 10);
+    // Read path: bounded and fail-open (nothing reported ignored).
+    await expect(readPromise).resolves.toEqual(new Set());
+    // Tri-state path: the batch could not be checked, so mutations fail closed.
+    await expect(triStatePromise).resolves.toMatchObject({ignored: new Set(), checked: false});
+    expect(killCalls).toBe(2);
+  });
+});
