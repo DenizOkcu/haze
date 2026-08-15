@@ -1,6 +1,5 @@
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
-import {MAIN_TOOL_ONLY_STEP_LIMIT} from './budgets.js';
-import type {TurnBudget} from './turnBudget.js';
+import {MAIN_TOOL_ONLY_STEP_LIMIT, type TurnBudget} from './budgets.js';
 import {intentExpectsValidation, type ValidationOutcome, type WorkTaskProgress} from './workState.js';
 import type {RequestIntent} from '../goal/requestClassifier.js';
 
@@ -231,9 +230,9 @@ export function decideTerminalStatus(state: TurnExecutionState, evidence: Comple
   return evidence.assistantText.trim().length > 0 ? 'complete' : 'failed';
 }
 
-export type RecoveryAction = 'continue' | 'stop';
+type RecoveryAction = 'continue' | 'stop';
 
-export interface RecoverySlice {
+interface RecoverySlice {
   steps: number;
   toolCalls: number;
 }
@@ -252,11 +251,11 @@ export interface RescueRecoveryDecision {
 }
 
 /** Length-continuation slice cap: four model steps / four tool calls (global). */
-export const LENGTH_RECOVERY_SLICE: RecoverySlice = {steps: 4, toolCalls: 4};
+const LENGTH_RECOVERY_SLICE: RecoverySlice = {steps: 4, toolCalls: 4};
 /** Completion-rescue slice: one tool-bearing step (≤2 calls) + one synthesis step. */
-export const RESCUE_SLICE: RecoverySlice = {steps: 2, toolCalls: 2};
+const RESCUE_SLICE: RecoverySlice = {steps: 2, toolCalls: 2};
 /** Number of trailing tool-only slots reserved for the rescue slice. */
-export const RESCUE_RESERVE = 1;
+const RESCUE_RESERVE = 1;
 /** Tool-only boundary at which rescue becomes eligible (normal exploration stops here). */
 export const RESCUE_BOUNDARY = MAIN_TOOL_ONLY_STEP_LIMIT - RESCUE_RESERVE;
 
@@ -307,7 +306,7 @@ export function decideRescue(state: TurnExecutionState, evidence: CompletionEvid
 }
 
 /** Goal-continuation slice: real per-cycle work headroom, clamped to remaining global budget. */
-export const GOAL_CONTINUATION_SLICE: RecoverySlice = {steps: 6, toolCalls: 12};
+const GOAL_CONTINUATION_SLICE: RecoverySlice = {steps: 6, toolCalls: 12};
 
 export interface GoalContinuationDecision {
   action: RecoveryAction;
@@ -335,7 +334,7 @@ export function goalContinuationRecoverable(readiness: CompletionReadiness): boo
  */
 const RECOVERABLE_FINISH_CAUSES: ReadonlySet<FinishCause> = new Set(['stop', 'tool-calls', 'length', 'unknown'] as const);
 
-export function isRecoverableFinishCause(finishCause: FinishCause | undefined): boolean {
+function isRecoverableFinishCause(finishCause: FinishCause | undefined): boolean {
   return finishCause != null && RECOVERABLE_FINISH_CAUSES.has(finishCause);
 }
 

@@ -21,11 +21,9 @@ import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '..
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 export {latestRepeatedToolNames, uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
+import {clampSlice, createToolExecutionBudget, isToolBudgetBlocked, mainTurnBudget, remainingSteps, remainingToolCalls, withToolExecutionBudget, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, WRITE_FILE_CHUNK_BYTES, type ToolExecutionBudgetState, type TurnBudget} from '../../core/agent/budgets.js';
 import {createTurnExecutionState, assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, normalizeFinishReason, recordGoalContinuation, rescueEligibleRequest, RESCUE_BOUNDARY, toCompletionEvidence, type CompletionEvidence, type TerminalClassification, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
 export type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
-import {clampSlice, mainTurnBudget, remainingSteps, remainingToolCalls, type TurnBudget} from '../../core/agent/turnBudget.js';
-import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget, type ToolExecutionBudgetState} from '../../core/agent/toolExecutionBudget.js';
 import {createAbsoluteDeadline, isToolDeadlineExceeded, withToolDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../core/agent/toolCapabilities.js';
 import {deriveValidationOutcome, seedCarriedGoalEvidence, type ValidationOutcome, type WorkTaskProgress} from '../../core/agent/workState.js';
@@ -74,7 +72,7 @@ export interface TurnResult {
 }
 
 /** Supervisor-provided logical-goal context: tags checkpoints and seeds cumulative evidence. */
-export interface TurnGoalContext {
+interface TurnGoalContext {
   goalId: string;
   /** 1-based physical-turn counter for the logical goal. */
   cycle: number;

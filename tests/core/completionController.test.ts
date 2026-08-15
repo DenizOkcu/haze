@@ -21,7 +21,7 @@ import {
   type CompletionEvidence,
   type TurnExecutionState,
 } from '../../src/core/agent/completionController.js';
-import {mainTurnBudget} from '../../src/core/agent/turnBudget.js';
+import {mainTurnBudget} from '../../src/core/agent/budgets.js';
 
 const budget = mainTurnBudget();
 

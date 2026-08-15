@@ -6,11 +6,13 @@ import {
   SUBAGENT_MIN_STEPS,
   SUBAGENT_SYNTHESIS_RESERVE,
   SUBAGENT_TOOL_ONLY_LIMIT,
+  createToolExecutionBudget,
+  isToolBudgetBlocked,
+  withToolExecutionBudget,
 } from '../agent/budgets.js';
 import {storeToolOutput} from '../agent/toolOutputStore.js';
 import {withSyntheticControl} from '../agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../agent/turnPolicy.js';
-import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget} from '../agent/toolExecutionBudget.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import {buildSubagentPrompt, projectContextSection} from '../../llm/systemPrompt.js';
