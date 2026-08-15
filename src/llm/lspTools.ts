@@ -3,7 +3,7 @@ import {tool} from 'ai';
 import {z} from 'zod';
 import {readSettings} from '../config/settings.js';
 import {configuredLspServers} from '../config/lspSettings.js';
-import {lspDefinition, lspDocumentSymbols, lspReferences, lspWorkspaceSymbols, pickLspServer, type LspPool} from './lsp.js';
+import {lspDefinition, lspDiagnostics, lspDocumentSymbols, lspImplementation, lspReferences, lspTypeDefinition, lspWorkspaceSymbols, pickLspServer, type LspPool} from './lsp.js';
 
 async function serverFor(filePath: string) {
   const servers = configuredLspServers(await readSettings()).filter(server => server.enabled !== false);
@@ -115,6 +115,65 @@ export function buildLspTools(pool?: LspPool) {
         try {
           const locations = await lspReferences(server, filePath, line, column, maxResults, pool);
           return {ok: true, server: server.name, path: filePath, locations, truncated: locations.length >= maxResults};
+        } catch (error) {
+          return lspFailure(error);
+        }
+      },
+    }),
+
+    lspTypeDefinition: tool({
+      description: 'Use a configured language server to find the type definition (e.g. interface, type alias, class) for the symbol at a 1-based line/column. Read-only. Useful for generics and annotated values where lspDefinition lands on the annotated name instead of its type.',
+      inputSchema: z.object({
+        path: z.string().min(1).describe('Workspace-relative source file path'),
+        line: z.number().int().positive().describe('1-based line number'),
+        column: z.number().int().positive().describe('1-based column/character number'),
+        maxResults: z.number().int().positive().max(50).default(20).describe('Maximum locations to return'),
+      }),
+      execute: async ({path: filePath, line, column, maxResults}) => {
+        const server = await serverFor(filePath);
+        if (!server) return noServer(filePath);
+        try {
+          const locations = await lspTypeDefinition(server, filePath, line, column, maxResults, pool);
+          return {ok: true, server: server.name, path: filePath, locations, truncated: locations.length >= maxResults};
+        } catch (error) {
+          return lspFailure(error);
+        }
+      },
+    }),
+
+    lspImplementation: tool({
+      description: 'Use a configured language server to find implementations of an interface, abstract member, or generic signature at a 1-based line/column. Read-only.',
+      inputSchema: z.object({
+        path: z.string().min(1).describe('Workspace-relative source file path'),
+        line: z.number().int().positive().describe('1-based line number'),
+        column: z.number().int().positive().describe('1-based column/character number'),
+        maxResults: z.number().int().positive().max(100).default(50).describe('Maximum locations to return'),
+      }),
+      execute: async ({path: filePath, line, column, maxResults}) => {
+        const server = await serverFor(filePath);
+        if (!server) return noServer(filePath);
+        try {
+          const locations = await lspImplementation(server, filePath, line, column, maxResults, pool);
+          return {ok: true, server: server.name, path: filePath, locations, truncated: locations.length >= maxResults};
+        } catch (error) {
+          return lspFailure(error);
+        }
+      },
+    }),
+
+    lspDiagnostics: tool({
+      description: 'Use a configured language server to get diagnostics (errors/warnings) for one source file. Read-only. Best for a quick post-edit check of a single touched file; prefer the relevant build/test command for authoritative whole-project validation.',
+      inputSchema: z.object({
+        path: z.string().min(1).describe('Workspace-relative source file path'),
+        maxResults: z.number().int().positive().max(100).default(50).describe('Maximum diagnostics to return'),
+      }),
+      execute: async ({path: filePath, maxResults}) => {
+        const server = await serverFor(filePath);
+        if (!server) return noServer(filePath);
+        try {
+          const result = await lspDiagnostics(server, filePath, maxResults, pool);
+          if (!result.ok) return {ok: false, error: result.error};
+          return {ok: true, server: server.name, path: filePath, diagnostics: result.diagnostics, truncated: result.diagnostics.length >= maxResults};
         } catch (error) {
           return lspFailure(error);
         }

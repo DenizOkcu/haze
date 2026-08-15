@@ -13,6 +13,7 @@ import {
   locationToResult,
   locationToWorkspaceResult,
   pickLspServer,
+  toDiagnostic,
   toUri,
 } from '../../src/llm/lsp.js';
 import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../src/core/limits/byteBudgets.js';
@@ -332,5 +333,76 @@ describe('StdioLspClient', () => {
     expect(child.killedBy).toBe('SIGTERM');
     await vi.advanceTimersByTimeAsync(500);
     expect(child.killedBy).toBe('SIGKILL');
+  });
+
+  it('stores push diagnostics from publishDiagnostics notifications and drops them on close', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const uri = toUri('/tmp/foo/bar.ts');
+    child.stdout.emit('data', frame({method: 'textDocument/publishDiagnostics', params: {uri, diagnostics: [{range: {start: {line: 0, character: 0}, end: {line: 0, character: 3}}, severity: 1, message: 'boom'}]}}));
+    expect(client.publishedDiagnostics(uri)).toEqual([{range: {start: {line: 0, character: 0}, end: {line: 0, character: 3}}, severity: 1, message: 'boom'}]);
+    client.closeDocument('/tmp/foo/bar.ts');
+    expect(client.publishedDiagnostics(uri)).toBeUndefined();
+    await client.close();
+  });
+
+  it('ignores notifications other than publishDiagnostics', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const uri = toUri('/tmp/foo/bar.ts');
+    child.stdout.emit('data', frame({method: 'window/logMessage', params: {uri, message: 'noise'}}));
+    child.stdout.emit('data', frame({method: 'textDocument/publishDiagnostics', params: {diagnostics: []}}));
+    child.stdout.emit('data', frame({method: 'textDocument/publishDiagnostics', params: {uri: 42}}));
+    expect(client.publishedDiagnostics(uri)).toBeUndefined();
+    await client.close();
+  });
+
+  it('still resolves requests interleaved with notification frames', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const pending = client.request('textDocument/documentSymbol', undefined, 1000);
+    const uri = toUri('/tmp/foo/bar.ts');
+    child.stdout.emit('data', frame({method: 'textDocument/publishDiagnostics', params: {uri, diagnostics: []}}));
+    child.stdout.emit('data', frame({id: sentId(child), result: []}));
+    await expect(pending).resolves.toEqual([]);
+    await client.close();
+  });
+
+  it('detects pull-diagnostics support from the initialize result', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    expect(client.diagnosticPullSupported()).toBe(false);
+    const initializing = client.initialize();
+    child.stdout.emit('data', frame({id: sentId(child), result: {capabilities: {textDocumentDiagnostic: {interFileDependencies: true}}}}));
+    await initializing;
+    expect(client.diagnosticPullSupported()).toBe(true);
+    await client.close();
+  });
+
+  it('reports no pull support when capabilities omit textDocumentDiagnostic', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    const initializing = client.initialize();
+    child.stdout.emit('data', frame({id: sentId(child), result: {capabilities: {hoverProvider: true}}}));
+    await initializing;
+    expect(client.diagnosticPullSupported()).toBe(false);
+    await client.close();
+  });
+});
+
+describe('toDiagnostic', () => {
+  it('maps severity numbers to labels and keeps code/source when present', () => {
+    const range = {start: {line: 0, character: 2}, end: {line: 0, character: 5}};
+    expect(toDiagnostic({range, severity: 1, message: 'e', code: 2322, source: 'ts'})).toEqual({severity: 'error', range: {start: {line: 1, character: 3}, end: {line: 1, character: 6}}, message: 'e', code: '2322', source: 'ts'});
+    expect(toDiagnostic({range, severity: 2, message: 'w'})?.severity).toBe('warning');
+    expect(toDiagnostic({range, severity: 3, message: 'i'})?.severity).toBe('information');
+    expect(toDiagnostic({range, severity: 4, message: 'h'})?.severity).toBe('hint');
+  });
+
+  it('defaults unknown severities to information and skips entries without a range', () => {
+    const range = {start: {line: 0, character: 0}, end: {line: 0, character: 1}};
+    expect(toDiagnostic({range, severity: 99, message: 'x'})?.severity).toBe('information');
+    expect(toDiagnostic({severity: 1, message: 'no range'})).toBeUndefined();
+    expect(toDiagnostic('nope')).toBeUndefined();
   });
 });

@@ -4,8 +4,11 @@ const captured = vi.hoisted(() => ({
   readSettingsResult: {lspServers: [{name: 'typescript', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts', '.tsx']}]} as Record<string, unknown>,
   lspFns: {
     lspDefinition: vi.fn(async () => [{path: 'src/a.ts', range: {start: {line: 1, character: 2}, end: {line: 3, character: 4}}}]),
+    lspDiagnostics: vi.fn(async () => ({ok: true, diagnostics: [{severity: 'error', message: 'bad', range: {start: {line: 1, character: 1}, end: {line: 1, character: 4}}}], truncated: false})),
     lspDocumentSymbols: vi.fn(async () => [{name: 'foo', kind: 12, path: 'src/a.ts'}]),
+    lspImplementation: vi.fn(async () => [{path: 'src/impl.ts', range: {start: {line: 5, character: 1}, end: {line: 5, character: 9}}}]),
     lspReferences: vi.fn(async () => [{path: 'src/a.ts', range: {start: {line: 1, character: 2}, end: {line: 1, character: 5}}}]),
+    lspTypeDefinition: vi.fn(async () => [{path: 'src/types.ts', range: {start: {line: 2, character: 1}, end: {line: 4, character: 2}}}]),
     lspWorkspaceSymbols: vi.fn(async () => [{name: 'foo', kind: 12, path: 'src/a.ts'}]),
   },
 }));
@@ -168,12 +171,93 @@ describe('lspTools.lspWorkspaceSymbols', () => {
   });
 });
 
+describe('lspTools.lspTypeDefinition', () => {
+  it('returns locations for a 1-based line/column', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspTypeDefinition.execute({path: 'src/a.ts', line: 3, column: 10, maxResults: 20}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, server: 'typescript', path: 'src/a.ts'});
+    expect((result as {locations: unknown[]}).locations).toHaveLength(1);
+  });
+
+  it('returns noServer shape for an unsupported extension', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspTypeDefinition.execute({path: 'doc.md', line: 1, column: 1, maxResults: 20}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toMatch(/No enabled LSP server/);
+  });
+
+  it('maps LSP errors to a clean structured failure', async () => {
+    captured.lspFns.lspTypeDefinition.mockRejectedValueOnce(new Error('LSP request timed out: textDocument/typeDefinition'));
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspTypeDefinition.execute({path: 'src/a.ts', line: 1, column: 1, maxResults: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toContain('timed out');
+  });
+});
+
+describe('lspTools.lspImplementation', () => {
+  it('returns locations for a 1-based line/column', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspImplementation.execute({path: 'src/a.ts', line: 7, column: 6, maxResults: 50}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, server: 'typescript', path: 'src/a.ts'});
+    expect((result as {locations: unknown[]}).locations).toHaveLength(1);
+  });
+
+  it('returns noServer shape for an unsupported extension', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspImplementation.execute({path: 'doc.md', line: 1, column: 1, maxResults: 50}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+  });
+});
+
+describe('lspTools.lspDiagnostics', () => {
+  it('returns diagnostics for an enabled server', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDiagnostics.execute({path: 'src/a.ts', maxResults: 50}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, server: 'typescript', path: 'src/a.ts'});
+    expect((result as {diagnostics: unknown[]}).diagnostics).toHaveLength(1);
+    expect(result).not.toHaveProperty('truncated', true);
+  });
+
+  it('reports truncated=true when diagnostics reach the maxResults cap', async () => {
+    captured.lspFns.lspDiagnostics.mockResolvedValueOnce({ok: true, diagnostics: Array.from({length: 3}, () => ({severity: 'error', message: 'x', range: {start: {line: 1, character: 1}, end: {line: 1, character: 2}}}))});
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDiagnostics.execute({path: 'src/a.ts', maxResults: 3}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, truncated: true});
+  });
+
+  it('surfaces the unsupported-mode error shape without a server-side throw', async () => {
+    captured.lspFns.lspDiagnostics.mockResolvedValueOnce({ok: false, error: 'LSP server supports neither pull nor push diagnostics.'});
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDiagnostics.execute({path: 'src/a.ts', maxResults: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toEqual({ok: false, error: 'LSP server supports neither pull nor push diagnostics.'});
+  });
+
+  it('returns noServer shape for an unsupported extension', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDiagnostics.execute({path: 'doc.md', maxResults: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toMatch(/No enabled LSP server/);
+  });
+
+  it('maps LSP errors to a clean structured failure', async () => {
+    captured.lspFns.lspDiagnostics.mockRejectedValueOnce(new Error('LSP request timed out: textDocument/documentDiagnostic'));
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDiagnostics.execute({path: 'src/a.ts', maxResults: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toContain('timed out');
+  });
+});
+
 describe('lspTools descriptions', () => {
   it('describe workspace-symbols as the best first LSP tool for an unanchored query', async () => {
     const {lspTools} = await loadLspTools();
     expect(lspTools.lspWorkspaceSymbols.description).toContain('Best first LSP tool');
     expect(lspTools.lspSymbols.description).toContain('semantic symbols');
     expect(lspTools.lspDefinition.description).toContain('definition');
+    expect(lspTools.lspTypeDefinition.description).toContain('type definition');
+    expect(lspTools.lspImplementation.description).toContain('implementations');
     expect(lspTools.lspReferences.description).toContain('references');
+    expect(lspTools.lspDiagnostics.description).toContain('diagnostics');
   });
 });

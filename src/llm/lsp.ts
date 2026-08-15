@@ -1,4 +1,5 @@
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import type {HazeLspServer} from '../config/lspSettings.js';
@@ -110,6 +111,8 @@ export class StdioLspClient {
   private buffer = Buffer.alloc(0);
   private pending = new Map<number, Pending>();
   private terminating = false;
+  private initializeResult: unknown;
+  private readonly published = new Map<string, {diagnostics: unknown[]; version?: number}>();
 
   constructor(private server: HazeLspServer, private child: ChildProcessWithoutNullStreams) {
     child.stdout.on('data', chunk => {
@@ -175,8 +178,12 @@ export class StdioLspClient {
       if (this.buffer.length < bodyStart + length) return;
       const raw = this.buffer.slice(bodyStart, bodyStart + length).toString('utf8');
       this.buffer = this.buffer.slice(bodyStart + length);
-      const message = JSON.parse(raw) as {id?: number; result?: unknown; error?: {message?: string}};
-      if (typeof message.id !== 'number') continue;
+      const message = JSON.parse(raw) as {id?: number; method?: string; params?: unknown; result?: unknown; error?: {message?: string}};
+      if (typeof message.id !== 'number') {
+        // Server-initiated notification; only diagnostics are consumed, others are dropped.
+        if (typeof message.method === 'string') this.handleNotification(message.method, message.params);
+        continue;
+      }
       const pending = this.pending.get(message.id);
       if (!pending) continue;
       this.pending.delete(message.id);
@@ -184,6 +191,13 @@ export class StdioLspClient {
       if (message.error) pending.reject(new LspError(message.error.message ?? 'LSP request failed.'));
       else pending.resolve(message.result);
     }
+  }
+
+  private handleNotification(method: string, params: unknown) {
+    if (method !== 'textDocument/publishDiagnostics') return;
+    if (!isObject(params) || typeof params.uri !== 'string') return;
+    const diagnostics = Array.isArray(params.diagnostics) ? params.diagnostics : [];
+    this.published.set(params.uri, {diagnostics, version: typeof params.version === 'number' ? params.version : undefined});
   }
 
   private send(message: JsonObject) {
@@ -208,19 +222,39 @@ export class StdioLspClient {
   }
 
   async initialize() {
-    await this.request('initialize', {
+    this.initializeResult = await this.request('initialize', {
       processId: process.pid,
       rootUri: toUri(workspaceRoot()),
       capabilities: {
         textDocument: {
           documentSymbol: {hierarchicalDocumentSymbolSupport: true},
           definition: {linkSupport: true},
+          typeDefinition: {linkSupport: true},
+          implementation: {linkSupport: true},
           references: {},
+          diagnostic: {},
         },
         workspace: {symbol: {}},
       },
     });
     this.notify('initialized', {});
+  }
+
+  /** Server capabilities from the initialize handshake; undefined until it completes. */
+  get capabilities() {
+    return this.initializeResult;
+  }
+
+  /** Whether the server advertised pull diagnostics (`textDocument/documentDiagnostic`). */
+  diagnosticPullSupported() {
+    const result = this.initializeResult;
+    if (!isObject(result) || !isObject(result.capabilities)) return false;
+    return isObject(result.capabilities.textDocumentDiagnostic);
+  }
+
+  /** Latest push-published diagnostics for a document URI, if any arrived. */
+  publishedDiagnostics(uri: string) {
+    return this.published.get(uri)?.diagnostics;
   }
 
   async openDocument(absolutePath: string) {
@@ -230,6 +264,13 @@ export class StdioLspClient {
     this.notify('textDocument/didOpen', {
       textDocument: {uri: toUri(absolutePath), languageId: languageId(absolutePath), version: 1, text},
     });
+  }
+
+  closeDocument(absolutePath: string) {
+    const uri = toUri(absolutePath);
+    this.notify('textDocument/didClose', {textDocument: {uri}});
+    // Servers may publish an empty set on close; drop the stale snapshot either way.
+    this.published.delete(uri);
   }
 
   async close() {
@@ -253,12 +294,30 @@ export class StdioLspClient {
 export class LspPool {
   private readonly clients = new Map<string, StdioLspClient>();
   private readonly openedDocuments = new Map<string, Set<string>>();
+  private readonly openSnapshots = new Map<string, string>();
   private closed = false;
 
   /** Get (or lazily start + initialize) the reusable client for a server. */
-  async getClient(server: HazeLspServer): Promise<StdioLspClient> {
+  async getClient(server: HazeLspServer, filePath?: string): Promise<StdioLspClient> {
     const existing = this.clients.get(server.name);
-    if (existing && !existing.terminated) return existing;
+    if (existing && !existing.terminated) {
+      // Read-only navigation must not serve stale positions: when a document was
+      // modified on disk since it was opened, close/reopen it so the server sees
+      // the current text before answering position-based requests.
+      if (filePath) {
+        const snapshot = this.openSnapshots.get(filePath);
+        if (snapshot !== undefined && snapshot !== await fileFingerprint(filePath)) {
+          const absolutePath = path.resolve(workspaceRoot(), filePath);
+          const uri = toUri(absolutePath);
+          existing.closeDocument(absolutePath);
+          this.openedDocuments.get(server.name)?.delete(uri);
+          await existing.openDocument(absolutePath);
+          this.openedDocuments.get(server.name)?.add(uri);
+          this.openSnapshots.set(filePath, await fileFingerprint(filePath));
+        }
+      }
+      return existing;
+    }
     const client = StdioLspClient.start(server);
     await client.initialize();
     if (this.closed) { await client.close(); throw new LspError('LSP pool closed during initialization.'); }
@@ -274,6 +333,8 @@ export class LspPool {
     if (opened && opened.has(uri)) return;
     await client.openDocument(absolutePath);
     opened?.add(uri);
+    const relative = workspaceRelativePath(absolutePath);
+    this.openSnapshots.set(relative, await fileFingerprint(absolutePath));
   }
 
   /** Bounded teardown of every pooled client. Safe to call once. */
@@ -283,14 +344,25 @@ export class LspPool {
     const clients = [...this.clients.values()];
     this.clients.clear();
     this.openedDocuments.clear();
+    this.openSnapshots.clear();
     await Promise.all(clients.map(client => client.close().catch(() => undefined)));
+  }
+}
+
+/** Cheap file fingerprint (mtime + size) used to detect on-disk modification. */
+async function fileFingerprint(absolutePath: string) {
+  try {
+    const stats = await fs.stat(absolutePath);
+    return `${stats.mtimeMs}:${stats.size}`;
+  } catch {
+    return '';
   }
 }
 
 async function withLspClient<T>(server: HazeLspServer, filePath: string, pool: LspPool | undefined, fn: (client: StdioLspClient, absolutePath: string) => Promise<T>): Promise<T> {
   const absolutePath = await prepareWorkspaceRead(filePath, false);
   if (pool) {
-    const client = await pool.getClient(server);
+    const client = await pool.getClient(server, absolutePath);
     await pool.ensureOpen(server, client, absolutePath);
     return fn(client, absolutePath);
   }
@@ -313,12 +385,55 @@ export async function lspDocumentSymbols(server: HazeLspServer, filePath: string
   });
 }
 
+/** Structured, workspace-safe summary of one LSP diagnostic. */
+export interface LspDiagnostic {
+  severity: 'error' | 'warning' | 'information' | 'hint';
+  range: ReturnType<typeof asRange>;
+  message: string;
+  code?: string;
+  source?: string;
+}
+
+const DIAGNOSTIC_SEVERITIES = ['error', 'warning', 'information', 'hint'] as const;
+
+export function toDiagnostic(value: unknown): LspDiagnostic | undefined {
+  if (!isObject(value)) return undefined;
+  const range = asRange(value.range);
+  if (!range) return undefined;
+  const severity = typeof value.severity === 'number' && value.severity >= 1 && value.severity <= 4
+    ? DIAGNOSTIC_SEVERITIES[value.severity - 1]
+    : 'information';
+  const code = typeof value.code === 'number' || typeof value.code === 'string' ? String(value.code) : undefined;
+  const source = typeof value.source === 'string' ? value.source : undefined;
+  return {severity, range, message: typeof value.message === 'string' ? value.message : '', ...(code ? {code} : {}), ...(source ? {source} : {})};
+}
+
+function diagnosticsFrom(values: unknown[], limit: number) {
+  const out: LspDiagnostic[] = [];
+  for (const value of values) {
+    if (out.length >= limit) break;
+    const diagnostic = toDiagnostic(value);
+    if (diagnostic) out.push(diagnostic);
+  }
+  return out;
+}
+
+async function requestLocations(client: StdioLspClient, absolutePath: string, method: 'textDocument/definition' | 'textDocument/typeDefinition' | 'textDocument/implementation', line: number, character: number, limit: number) {
+  const result = await client.request(method, {textDocument: {uri: toUri(absolutePath)}, position: {line: line - 1, character: character - 1}});
+  const values = Array.isArray(result) ? result : result ? [result] : [];
+  return (await Promise.all(values.map(locationToWorkspaceResult))).filter(result => result != null).slice(0, limit);
+}
+
 export async function lspDefinition(server: HazeLspServer, filePath: string, line: number, character: number, limit: number, pool?: LspPool) {
-  return await withLspClient(server, filePath, pool, async (client, absolutePath) => {
-    const result = await client.request('textDocument/definition', {textDocument: {uri: toUri(absolutePath)}, position: {line: line - 1, character: character - 1}});
-    const values = Array.isArray(result) ? result : result ? [result] : [];
-    return (await Promise.all(values.map(locationToWorkspaceResult))).filter(result => result != null).slice(0, limit);
-  });
+  return await withLspClient(server, filePath, pool, (client, absolutePath) => requestLocations(client, absolutePath, 'textDocument/definition', line, character, limit));
+}
+
+export async function lspTypeDefinition(server: HazeLspServer, filePath: string, line: number, character: number, limit: number, pool?: LspPool) {
+  return await withLspClient(server, filePath, pool, (client, absolutePath) => requestLocations(client, absolutePath, 'textDocument/typeDefinition', line, character, limit));
+}
+
+export async function lspImplementation(server: HazeLspServer, filePath: string, line: number, character: number, limit: number, pool?: LspPool) {
+  return await withLspClient(server, filePath, pool, (client, absolutePath) => requestLocations(client, absolutePath, 'textDocument/implementation', line, character, limit));
 }
 
 export async function lspReferences(server: HazeLspServer, filePath: string, line: number, character: number, limit: number, pool?: LspPool) {
@@ -326,6 +441,42 @@ export async function lspReferences(server: HazeLspServer, filePath: string, lin
     const result = await client.request('textDocument/references', {textDocument: {uri: toUri(absolutePath)}, position: {line: line - 1, character: character - 1}, context: {includeDeclaration: true}});
     const values = Array.isArray(result) ? result : [];
     return (await Promise.all(values.map(locationToWorkspaceResult))).filter(result => result != null).slice(0, limit);
+  });
+}
+
+async function pullDiagnostics(client: StdioLspClient, absolutePath: string, limit: number) {
+  const result = await client.request('textDocument/documentDiagnostic', {textDocument: {uri: toUri(absolutePath)}}, 15000);
+  const items = isObject(result) && Array.isArray(result.items) ? result.items : [];
+  return diagnosticsFrom(items, limit);
+}
+
+/** Wait briefly for `textDocument/publishDiagnostics` push diagnostics after didOpen. */
+async function awaitPushDiagnostics(client: StdioLspClient, absolutePath: string, limit: number, waitMs: number) {
+  const uri = toUri(absolutePath);
+  const deadline = Date.now() + waitMs;
+  while (true) {
+    const published = client.publishedDiagnostics(uri);
+    if (published) return diagnosticsFrom(published, limit);
+    if (Date.now() >= deadline) return [];
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+  }
+}
+
+/**
+ * Diagnostics for one document: pull (`textDocument/documentDiagnostic`) when the
+ * server advertises it, otherwise the latest push-published set after didOpen.
+ * A timed-out pull falls back to push instead of failing the whole request.
+ */
+export async function lspDiagnostics(server: HazeLspServer, filePath: string, limit: number, pool?: LspPool): Promise<{ok: true; diagnostics: LspDiagnostic[]} | {ok: false; error: string}> {
+  return await withLspClient(server, filePath, pool, async (client, absolutePath) => {
+    if (client.diagnosticPullSupported()) {
+      try {
+        return {ok: true as const, diagnostics: await pullDiagnostics(client, absolutePath, limit)};
+      } catch (error) {
+        if (!(error instanceof LspError) || !/timed out/.test(error.message)) throw error;
+      }
+    }
+    return {ok: true as const, diagnostics: await awaitPushDiagnostics(client, absolutePath, limit, 500)};
   });
 }
 
