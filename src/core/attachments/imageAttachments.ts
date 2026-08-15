@@ -43,24 +43,73 @@ export interface ResolvedImageAttachments {
   attachments: ImageAttachment[];
 }
 
-/**
- * `@token` candidates. The lookbehind keeps emails/handles intact
- * (`user@example.com` never matches at `@example.com`). Backslash escapes
- * (`\ `, `\(`, …) are part of the token so paths containing spaces — the
- * default macOS screenshot filename is `Bildschirmfoto YYYY-MM-DD um HH.MM.SS.png` —
- * survive intact. The escape is removed during resolution, never silently.
- */
-const MENTION_PATTERN = /(?<![\w@])@((?:[\w./~-]|\\.)+)/g;
+/** ASCII path-token characters accepted by the chat mention syntax. */
+function isPathTokenCharacter(character: string | undefined): boolean {
+  if (!character) return false;
+  const code = character.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122)
+    || character === '_'
+    || character === '.'
+    || character === '/'
+    || character === '~'
+    || character === '-';
+}
 
-/**
- * Bare path candidates (no `@`). The lookahead requires a `/` somewhere in
- * the token so ordinary prose ("I named it cat.png") is never scanned; the
- * lookbehind stops mid-word matches and skips anything right after `@`
- * (handled by `MENTION_PATTERN`), `.`, or `/`. Backslash escapes are part
- * of the token. Routing (image attachment vs read-blessing) happens during
- * resolution based on extension and stat result.
- */
-const BARE_PATH_PATTERN = /(?<![\w.@/])(?=[\w.~/-]*\/)((?:[\w./~-]|\\.)+)(?![\w.-])/gi;
+function isWordCharacter(character: string | undefined): boolean {
+  if (!character) return false;
+  const code = character.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122)
+    || character === '_';
+}
+
+/** Scan one path token, retaining backslash escapes verbatim. */
+function pathTokenEnd(text: string, start: number): number {
+  let index = start;
+  while (index < text.length) {
+    if (isPathTokenCharacter(text[index])) {
+      index++;
+      continue;
+    }
+    if (text[index] === '\\' && index + 1 < text.length && text[index + 1] !== '\n' && text[index + 1] !== '\r') {
+      index += 2;
+      continue;
+    }
+    break;
+  }
+  return index;
+}
+
+/** Linear-time scanner for explicit `@path` mentions. */
+function explicitPathMentions(text: string): ScannedPathMention[] {
+  const mentions: ScannedPathMention[] = [];
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== '@' || isWordCharacter(text[index - 1]) || text[index - 1] === '@') continue;
+    const end = pathTokenEnd(text, index + 1);
+    const token = text.slice(index + 1, end);
+    if (token && (token.includes('.') || token.includes('/'))) mentions.push({mention: text.slice(index, end), token, start: index, end});
+    index = Math.max(index, end - 1);
+  }
+  return mentions;
+}
+
+/** Linear-time scanner for bare path tokens containing `/`. */
+function barePathMentions(text: string): ScannedPathMention[] {
+  const mentions: ScannedPathMention[] = [];
+  for (let index = 0; index < text.length; index++) {
+    const previous = text[index - 1];
+    if (!isPathTokenCharacter(text[index]) || isWordCharacter(previous) || previous === '.' || previous === '@' || previous === '/') continue;
+    const end = pathTokenEnd(text, index);
+    const token = text.slice(index, end);
+    const next = text[end];
+    if (token.includes('/') && !isWordCharacter(next) && next !== '.' && next !== '-') mentions.push({mention: token, token, start: index, end});
+    index = Math.max(index, end - 1);
+  }
+  return mentions;
+}
 
 export interface PathMention {
   /** Full match as it appears in the prompt (`@path` for explicit mentions, the path itself for bare). */
@@ -68,6 +117,8 @@ export interface PathMention {
   /** The path token after the `@`, or the bare path itself. */
   token: string;
 }
+
+type ScannedPathMention = PathMention & {start: number; end: number};
 
 /**
  * Extract path-like attachment candidates from prompt text. Two forms are
@@ -85,20 +136,10 @@ export function extractPathMentions(text: string): PathMention[] {
   const mentions: PathMention[] = [];
   const seen = new Set<string>();
 
-  for (const match of text.matchAll(MENTION_PATTERN)) {
-    const token = match[1];
-    if (!token || (!token.includes('.') && !token.includes('/'))) continue;
-    if (seen.has(match[0])) continue;
-    seen.add(match[0]);
-    mentions.push({mention: match[0], token});
-  }
-
-  for (const match of text.matchAll(BARE_PATH_PATTERN)) {
-    const token = match[1];
-    if (!token || !token.includes('/')) continue;
-    if (seen.has(match[0])) continue;
-    seen.add(match[0]);
-    mentions.push({mention: match[0], token});
+  for (const candidate of [...explicitPathMentions(text), ...barePathMentions(text)]) {
+    if (seen.has(candidate.mention)) continue;
+    seen.add(candidate.mention);
+    mentions.push({mention: candidate.mention, token: candidate.token});
   }
 
   return mentions;
@@ -222,14 +263,21 @@ export async function resolveImageAttachments(text: string): Promise<ResolvedIma
   }
 
   if (strippedTokens.size === 0) return {text, attachments};
-  // Strip attached mentions (explicit `@` and bare), then tidy the double
-  // space a mid-line removal can leave behind. The lookbehind keeps line-
-  // leading indentation intact.
-  const cleaned = text
-    .replace(MENTION_PATTERN, (mention, token) => strippedTokens.has(token) ? '' : mention)
-    .replace(BARE_PATH_PATTERN, (match, token) => strippedTokens.has(token) ? '' : match)
-    .replace(/(?<=[^\n])[ \t]{2,}/g, ' ')
-    .trim();
+  // Strip attached mentions (explicit `@` and bare) by their scanner ranges,
+  // then tidy the double space a mid-line removal can leave behind. Sorting is
+  // needed because extraction preserves explicit-before-bare compatibility.
+  const ranges = [...explicitPathMentions(text), ...barePathMentions(text)]
+    .filter(candidate => strippedTokens.has(candidate.token))
+    .sort((left, right) => left.start - right.start);
+  const chunks: string[] = [];
+  let cursor = 0;
+  for (const range of ranges) {
+    if (range.start < cursor) continue;
+    chunks.push(text.slice(cursor, range.start));
+    cursor = range.end;
+  }
+  chunks.push(text.slice(cursor));
+  const cleaned = chunks.join('').replace(/(?<=[^\n])[ \t]{2,}/g, ' ').trim();
   return {text: cleaned, attachments};
 }
 

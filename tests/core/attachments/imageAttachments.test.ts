@@ -69,6 +69,11 @@ describe('image attachments (F03)', () => {
     it('does not extract the host part of an email even with an image-like TLD', () => {
       expect(extractPathMentions('mail user@fake.png today')).toEqual([]);
     });
+
+    it('handles adversarial path-like input in linear time', () => {
+      const input = '-'.repeat(100_000);
+      expect(extractPathMentions(input)).toEqual([]);
+    });
   });
 
   describe('resolveImageAttachments', () => {
