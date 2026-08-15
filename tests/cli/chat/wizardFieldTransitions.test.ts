@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {transitionMcpField, transitionProviderField} from '../../src/cli/commands/wizardTransition.js';
+import {transitionMcpField, transitionProviderField} from '../../../src/cli/chat/wizardDispatch.js';
 
 describe('wizard transition boundary', () => {
   it('emits provider draft, mode, and message effects at the submit boundary', () => {

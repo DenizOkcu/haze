@@ -16,7 +16,7 @@ import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js'
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {Mode} from '../commands/chatModes.js';
-import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES, captureLspName, commaList, isYesConfirmation} from '../commands/wizardFlow.js';
+import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES, captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl, commaList, isYesConfirmation} from '../commands/wizardFlow.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult, finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/serverWizard.js';
 import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
 import {selectSkillActionResult, selectSkillResult, captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage, skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillsWizard.js';
@@ -25,11 +25,66 @@ import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
 import {openBrowser, startChatGptBrowserLogin} from '../../llm/openaiCodexOAuth.js';
 
 /**
- * Wizard submit dispatch (CR-006): one table-driven entry point for every
+ * Wizard submit engine (CR-006): one table-driven entry point for every
  * picker/wizard mode. Handlers call the pure `*Wizard.ts` result functions and
- * apply the shared settingsPatch/mode/message shape, so `chat.tsx` stays
+ * apply the shared settingsPatch/mode/message shape; field-capture steps run
+ * through the pure transition functions below, so `chat.tsx` stays
  * orchestration glue instead of a 150-line if-chain.
  */
+
+// ── Pure field-transition steps (provider/MCP add flows) ─────────────────────
+
+type SharedWizardEffect =
+  | {type: 'message'; text?: string}
+  | {type: 'mode'; mode: Mode};
+
+export type ProviderWizardEffect = SharedWizardEffect
+  | {type: 'provider-draft'; patch: Partial<HazeProviderSettings>; replace?: boolean}
+  | {type: 'discover-provider-models'; draft: Partial<HazeProviderSettings>};
+
+export type McpWizardEffect = SharedWizardEffect
+  | {type: 'mcp-draft'; patch: Partial<HazeMcpServer>}
+  | {type: 'finish-mcp-stdio'; draft: Partial<HazeMcpServer>};
+
+export function transitionProviderField(input: {mode: Mode; value: string; settings: HazeSettings; draft: Partial<HazeProviderSettings>}): ProviderWizardEffect[] | undefined {
+  if (input.mode === 'providerAddKey') {
+    const key = input.value.trim();
+    return [
+      {type: 'provider-draft', patch: key ? {key} : {}},
+      {type: 'discover-provider-models', draft: {...input.draft, ...(key ? {key} : {})}},
+    ];
+  }
+  const result = input.mode === 'providerAddName' ? captureProviderName(input.settings, input.value)
+    : input.mode === 'providerAddUrl' ? captureProviderUrl(input.value)
+    : undefined;
+  if (!result) return undefined;
+  if (result.message) return [{type: 'message', text: result.message}];
+  const patch = result.draft ?? {};
+  return [
+    ...(Object.keys(patch).length ? [{type: 'provider-draft' as const, patch, replace: input.mode === 'providerAddName'}] : []),
+    ...(result.nextMode ? [{type: 'mode' as const, mode: result.nextMode as Mode}] : []),
+    {type: 'message', text: result.systemMessage},
+  ];
+}
+
+export function transitionMcpField(input: {mode: Mode; value: string; settings: HazeSettings; draft: Partial<HazeMcpServer>}): McpWizardEffect[] | undefined {
+  const result = input.mode === 'mcpAddName' ? captureMcpName(input.settings, input.value)
+    : input.mode === 'mcpAddTransport' ? captureMcpTransport(input.value)
+    : input.mode === 'mcpAddUrl' ? captureMcpUrl(input.value)
+    : input.mode === 'mcpAddCommand' ? captureMcpCommand(input.value)
+    : undefined;
+  if (!result) return undefined;
+  if (result.message) return [{type: 'message', text: result.message}];
+  const patch = result.draft ?? {};
+  const nextDraft = {...input.draft, ...patch};
+  if (result.nextMode === 'chat' && input.mode === 'mcpAddCommand') return [{type: 'finish-mcp-stdio', draft: nextDraft}];
+  return [
+    ...(Object.keys(patch).length ? [{type: 'mcp-draft' as const, patch}] : []),
+    ...(result.nextMode ? [{type: 'mode' as const, mode: result.nextMode as Mode}] : []),
+    {type: 'message', text: result.systemMessage},
+  ];
+}
+
 export interface WizardDispatchDeps {
   settings: HazeSettings;
   skills: LoadedSkill[];
@@ -660,23 +715,51 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage(result.systemMessage);
   }
 
-  async function lspConfirmRemoveMode(value: string) {
-    if (!deps.selectedLspName) {
+  /**
+   * Generic typed-"yes" confirm-remove step shared by the LSP and MCP flows.
+   * Cancel and no-selection paths are identical; `remove` applies the domain
+   * settings mutation and returns the success message.
+   */
+  function confirmRemoveStep(input: {selectedName: () => string | undefined; cancelMessage: string; clearSelection: () => void; remove: (name: string) => Promise<string>}) {
+    return async (value: string) => {
+      const name = input.selectedName();
+      if (!name) {
+        setMode('chat');
+        return;
+      }
+      if (!isYesConfirmation(value)) {
+        showMessage(input.cancelMessage);
+        input.clearSelection();
+        setMode('chat');
+        return;
+      }
+      showMessage(await input.remove(name));
+      input.clearSelection();
       setMode('chat');
-      return;
-    }
-    if (!isYesConfirmation(value)) {
-      showMessage('Cancelled. LSP server not removed.');
-      deps.setSelectedLspName(undefined);
-      setMode('chat');
-      return;
-    }
-    const next = await updateSettings({lspServers: removeLspServer(deps.settings, deps.selectedLspName)});
-    setSettings(next);
-    showMessage(`Removed LSP server ${deps.selectedLspName}.`);
-    deps.setSelectedLspName(undefined);
-    setMode('chat');
+    };
   }
+
+  const lspConfirmRemoveMode = confirmRemoveStep({
+    selectedName: () => deps.selectedLspName,
+    cancelMessage: 'Cancelled. LSP server not removed.',
+    clearSelection: () => deps.setSelectedLspName(undefined),
+    remove: async name => {
+      const next = await updateSettings({lspServers: removeLspServer(deps.settings, name)});
+      setSettings(next);
+      return `Removed LSP server ${name}.`;
+    },
+  });
+
+  const mcpConfirmRemoveMode = confirmRemoveStep({
+    selectedName: () => deps.selectedMcpName,
+    cancelMessage: 'Cancelled. MCP server not removed.',
+    clearSelection: () => deps.setSelectedMcpName(undefined),
+    remove: async name => {
+      const next = await updateSettings({mcpServers: removeMcpServer(deps.settings, name)});
+      setSettings(next);
+      return `Removed MCP server ${name}.`;
+    },
+  });
 
   async function selectMcpServer(serverName: string) {
     const result = selectMcpServerResult(deps.settings, serverName);
@@ -719,24 +802,6 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage(result.message);
   }
 
-  async function mcpConfirmRemoveMode(value: string) {
-    if (!deps.selectedMcpName) {
-      setMode('chat');
-      return;
-    }
-    if (!isYesConfirmation(value)) {
-      showMessage('Cancelled. MCP server not removed.');
-      deps.setSelectedMcpName(undefined);
-      setMode('chat');
-      return;
-    }
-    const next = await updateSettings({mcpServers: removeMcpServer(deps.settings, deps.selectedMcpName)});
-    setSettings(next);
-    showMessage(`Removed MCP server ${deps.selectedMcpName}.`);
-    deps.setSelectedMcpName(undefined);
-    setMode('chat');
-  }
-
   const handlers: Partial<Record<Mode, (value: string) => Promise<void>>> = {
     sessions: selectSession,
     sessionAction: selectSessionAction,
@@ -771,8 +836,40 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     mcpConfirmRemove: mcpConfirmRemoveMode,
   };
 
+  /** Apply one field-transition effect at the submit boundary (was chat.tsx inline branching). */
+  async function applyProviderEffect(effect: ProviderWizardEffect) {
+    if (effect.type === 'message') showMessage(effect.text);
+    else if (effect.type === 'mode') setMode(effect.mode);
+    else if (effect.type === 'provider-draft') {
+      if (effect.replace) deps.setProviderDraft(effect.patch);
+      else deps.setProviderDraft({...deps.providerDraft, ...effect.patch});
+    } else if (effect.type === 'discover-provider-models') {
+      // The draft patch above is still pending React state, so discovery
+      // receives the merged draft explicitly (same pattern as MCP stdio).
+      await discoverProviderModelsForDraft(effect.draft);
+    }
+  }
+
+  async function applyMcpEffect(effect: McpWizardEffect) {
+    if (effect.type === 'message') showMessage(effect.text);
+    else if (effect.type === 'mode') setMode(effect.mode);
+    else if (effect.type === 'mcp-draft') deps.setMcpDraft({...deps.mcpDraft, ...effect.patch});
+    else if (effect.type === 'finish-mcp-stdio') await finishMcpCustom(undefined, effect.draft);
+  }
+
   return {
     async dispatch(mode, value) {
+      // Field-capture steps first (same order chat.tsx used), then the submit table.
+      const providerEffects = transitionProviderField({mode, value, settings: deps.settings, draft: deps.providerDraft});
+      if (providerEffects) {
+        for (const effect of providerEffects) await applyProviderEffect(effect);
+        return true;
+      }
+      const mcpEffects = transitionMcpField({mode, value, settings: deps.settings, draft: deps.mcpDraft});
+      if (mcpEffects) {
+        for (const effect of mcpEffects) await applyMcpEffect(effect);
+        return true;
+      }
       const handler = handlers[mode];
       if (!handler) return false;
       await handler(value);

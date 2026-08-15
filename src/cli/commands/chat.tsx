@@ -44,7 +44,6 @@ import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {detectCheckoutMismatch, formatMismatchWarning, runtimeCapabilities} from '../../utils/buildInfo.js';
-import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
 import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
@@ -428,34 +427,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     }
     // Any new submission supersedes a paused-task resume affordance.
     if (pausedResume) setPausedResume(undefined);
-
-    const providerEffects = transitionProviderField({mode, value, settings, draft: providerDraft});
-    if (providerEffects) {
-      for (const effect of providerEffects) {
-        if (effect.type === 'message') showWizardMessage(effect.text);
-        else if (effect.type === 'mode') setMode(effect.mode);
-        else if (effect.type === 'provider-draft') {
-          if (effect.replace) setProviderDraft(effect.patch);
-          else setProviderDraft(draft => ({...draft, ...effect.patch}));
-        } else if (effect.type === 'discover-provider-models') {
-          // The draft patch above is still pending React state, so discovery
-          // receives the merged draft explicitly (same pattern as MCP stdio).
-          await wizard.discoverProviderModelsForDraft(effect.draft);
-        }
-      }
-      return;
-    }
-
-    const mcpEffects = transitionMcpField({mode, value, settings, draft: mcpDraft});
-    if (mcpEffects) {
-      for (const effect of mcpEffects) {
-        if (effect.type === 'message') showWizardMessage(effect.text);
-        else if (effect.type === 'mode') setMode(effect.mode);
-        else if (effect.type === 'mcp-draft') setMcpDraft(draft => ({...draft, ...effect.patch}));
-        else if (effect.type === 'finish-mcp-stdio') await wizard.finishMcpCustom(undefined, effect.draft);
-      }
-      return;
-    }
 
     if (await wizard.dispatch(mode, value)) return;
 
