@@ -25,7 +25,7 @@ describe('session recorder', () => {
   });
 
   it('makes persistence failure observable at flush', async () => {
-    const recorder = createSessionRecorder(() => ({id: 'bad', cwd: process.cwd(), file: process.cwd()}));
+    const recorder = createSessionRecorder(() => ({id: 'bad', cwd: process.cwd(), file: process.cwd(), sessionsDir: process.cwd()}));
     recorder.recordNamedEvent('event', 'value');
     await expect(recorder.flush()).rejects.toThrow();
     expect(recorder.error()).toBeInstanceOf(Error);

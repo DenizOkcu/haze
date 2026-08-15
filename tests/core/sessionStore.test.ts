@@ -167,10 +167,25 @@ describe('sessionStore', () => {
     const session = await createSession({cwd, sessionsDir});
     await expect(findSession(session.id, cwd, sessionsDir)).resolves.toBeUndefined();
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'persist me'});
-    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toEqual({id: session.id, file: session.file, cwd: session.cwd});
+    await expect(findSession(session.id, cwd, sessionsDir)).resolves.toEqual({id: session.id, file: session.file, cwd: session.cwd, sessionsDir});
     await expect(findSession(`${session.id}.jsonl`, cwd, sessionsDir)).resolves.toBeUndefined();
     await expect(findSession('../other', cwd, sessionsDir)).resolves.toBeUndefined();
+    await expect(findSession('..\\other', cwd, sessionsDir)).resolves.toBeUndefined();
+    await expect(findSession(path.resolve(tmp, 'other'), cwd, sessionsDir)).resolves.toBeUndefined();
     await expect(findSession('missing', cwd, sessionsDir)).resolves.toBeUndefined();
+  });
+
+  it('rejects tampered session paths at every persistence boundary', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const escaped = {...session, file: path.join(tmp, 'outside.jsonl')};
+
+    await expect(appendSessionEntry(escaped, {type: 'ui_message', at: '1', role: 'user', text: 'escape'})).rejects.toThrow(/outside its configured session directory/);
+    await expect(readSessionEntries(escaped)).rejects.toThrow(/outside its configured session directory/);
+    await expect(vacuumSessionFileIfLarge(escaped, 0)).rejects.toThrow(/outside its configured session directory/);
+    expect(await fs.pathExists(escaped.file)).toBe(false);
+
+    const traversalId = {...session, id: '../other'};
+    await expect(readSessionEntries(traversalId)).rejects.toThrow(/Invalid session id/);
   });
 
   it('forks the latest conversation and work-state snapshots without changing the source (F02)', async () => {

@@ -24,6 +24,7 @@ export interface HazeSession {
   id: string;
   file: string;
   cwd: string;
+  sessionsDir: string;
   /** New sessions stay memory-only until they contain a resumable message. */
   deferredWrite?: DeferredSessionWrite;
 }
@@ -42,6 +43,21 @@ function sessionFile(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESS
   return path.join(sessionDir(cwd, sessionsDir), `${id}.jsonl`);
 }
 
+function validatedSessionFile(session: HazeSession): string {
+  const id = session.id.trim();
+  if (!id || id !== session.id || id === '.' || id === '..' || id.includes('/') || id.includes('\\') || path.isAbsolute(id)) {
+    throw new Error(`Invalid session id: ${session.id}`);
+  }
+  const sessionsDir = path.resolve(session.sessionsDir);
+  const expected = path.resolve(sessionFile(id, session.cwd, sessionsDir));
+  const resolved = path.resolve(session.file);
+  const relative = path.relative(sessionsDir, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative) || resolved !== expected) {
+    throw new Error(`Session file is outside its configured session directory: ${session.file}`);
+  }
+  return expected;
+}
+
 function newSessionId(now = new Date()) {
   // Timestamp prefix keeps latestSession() lexicographic ordering; the random
   // suffix prevents same-millisecond collisions (CR-025).
@@ -51,12 +67,14 @@ function newSessionId(now = new Date()) {
 export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string; forkedFrom?: string; build?: {commit?: string; builtAt?: string}} = {}): Promise<HazeSession> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const id = newSessionId();
-  const file = sessionFile(id, cwd, options.sessionsDir);
+  const sessionsDir = path.resolve(options.sessionsDir ?? DEFAULT_SESSIONS_DIR);
+  const file = sessionFile(id, cwd, sessionsDir);
   await ensurePrivateDir(path.dirname(file));
   return {
     id,
     file,
     cwd,
+    sessionsDir,
     deferredWrite: {
       header: {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom, ...(options.build ? {build: options.build} : {})},
       entries: [],
@@ -66,19 +84,18 @@ export async function createSession(options: {cwd?: string; hazeVersion?: string
 
 export async function findSession(id: string, cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
   const normalizedId = id.trim();
-  // basename equality is the actual invariant: it rejects any id containing a
-  // path separator (POSIX or Windows), which is what prevents escaping the
-  // workspace's sessions/<hash>/ directory via `..` or absolute paths.
-  if (!normalizedId || path.basename(normalizedId) !== normalizedId) return undefined;
+  // Reject both platform-native and foreign separators so session IDs remain
+  // single filenames if a session is moved between operating systems.
+  if (!normalizedId || normalizedId !== id || normalizedId === '.' || normalizedId === '..' || normalizedId.includes('/') || normalizedId.includes('\\') || path.isAbsolute(normalizedId)) return undefined;
   const file = sessionFile(normalizedId, cwd, sessionsDir);
   if (!await fs.pathExists(file)) return undefined;
-  return {id: normalizedId, file, cwd: path.resolve(cwd)};
+  return {id: normalizedId, file, cwd: path.resolve(cwd), sessionsDir: path.resolve(sessionsDir)};
 }
 
 export async function latestSession(cwd = process.cwd(), sessionsDir = DEFAULT_SESSIONS_DIR): Promise<HazeSession | undefined> {
   const latest = (await listSessions(cwd, sessionsDir))[0];
   if (!latest) return undefined;
-  return {id: latest.id, file: sessionFile(latest.id, cwd, sessionsDir), cwd: path.resolve(cwd)};
+  return {id: latest.id, file: sessionFile(latest.id, cwd, sessionsDir), cwd: path.resolve(cwd), sessionsDir: path.resolve(sessionsDir)};
 }
 
 function entryMakesSessionResumable(entry: SessionEntry): boolean {
@@ -87,6 +104,7 @@ function entryMakesSessionResumable(entry: SessionEntry): boolean {
 }
 
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
+  const file = validatedSessionFile(session);
   const prepared = prepareSessionEntryForWrite(entry);
   if (!prepared) return;
   const deferred = session.deferredWrite;
@@ -96,11 +114,11 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
       return;
     }
     const entries = [deferred.header, ...deferred.entries, prepared];
-    await appendPrivateFile(session.file, entries.map(item => JSON.stringify(item)).join('\n') + '\n');
+    await appendPrivateFile(file, entries.map(item => JSON.stringify(item)).join('\n') + '\n');
     session.deferredWrite = undefined;
     return;
   }
-  await appendPrivateFile(session.file, `${JSON.stringify(prepared)}\n`);
+  await appendPrivateFile(file, `${JSON.stringify(prepared)}\n`);
   // Snapshot deduplication runs inside the same serialized writer as the
   // append, so ordering with subsequent entries is preserved (F-03).
   await vacuumSessionFileIfLarge(session).catch(() => undefined);
@@ -125,8 +143,9 @@ export function setSessionVacuumThresholdForTests(bytes: number): void {
 }
 
 export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBytes: number = effectiveVacuumThresholdBytes): Promise<boolean> {
+  const file = validatedSessionFile(session);
   if (session.deferredWrite) return false;
-  const stat = await fs.stat(session.file).catch(() => undefined);
+  const stat = await fs.stat(file).catch(() => undefined);
   if (!stat || stat.size < thresholdBytes) return false;
   const {entries} = await readSessionEntries(session);
   let lastConversation = -1;
@@ -146,7 +165,7 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   // Only rewrite when it meaningfully shrinks the file; otherwise a single
   // dominant snapshot would trigger a full rewrite on every append.
   if (serialized.length > stat.size / 2) return false;
-  await writePrivateFileAtomic(session.file, serialized);
+  await writePrivateFileAtomic(file, serialized);
   return true;
 }
 
@@ -209,15 +228,16 @@ function parseSessionEntry(value: unknown): SessionEntry {
 }
 
 async function scanSessionEntries(session: HazeSession, onEntry: (entry: SessionEntry) => void): Promise<string[]> {
-  if (session.deferredWrite && !await fs.pathExists(session.file)) return [];
-  await tightenPrivateFile(session.file);
+  const file = validatedSessionFile(session);
+  if (session.deferredWrite && !await fs.pathExists(file)) return [];
+  await tightenPrivateFile(file);
   const parseErrors: string[] = [];
   let omittedErrors = 0;
   const report = (message: string) => {
     if (parseErrors.length < MAX_PARSE_ERRORS) parseErrors.push(message);
     else omittedErrors++;
   };
-  for await (const {line, lineNumber, oversized} of iterateBoundedUtf8Lines(session.file, JSONL_LINE_BYTES)) {
+  for await (const {line, lineNumber, oversized} of iterateBoundedUtf8Lines(file, JSONL_LINE_BYTES)) {
     if (!line && !oversized) continue;
     if (oversized) {
       report(`Line ${lineNumber}: exceeds ${JSONL_LINE_BYTES} byte limit`);
@@ -377,13 +397,14 @@ export async function listSessions(cwd = process.cwd(), sessionsDir = DEFAULT_SE
   }
   const summaries = await Promise.all(files.map(async fileName => {
     const id = path.basename(fileName, '.jsonl');
-    const session: HazeSession = {id, file: path.join(dir, fileName), cwd: path.resolve(cwd)};
-    await tightenPrivateFile(session.file);
-    const stat = await fs.stat(session.file);
-    const cached = cachedSessionSummary(session.file, stat);
+    const session: HazeSession = {id, file: path.join(dir, fileName), cwd: path.resolve(cwd), sessionsDir: path.resolve(sessionsDir)};
+    const file = validatedSessionFile(session);
+    await tightenPrivateFile(file);
+    const stat = await fs.stat(file);
+    const cached = cachedSessionSummary(file, stat);
     if (cached) return cached;
     const summary = await summarizeSession(session, stat);
-    cacheSessionSummary(session.file, stat, summary);
+    cacheSessionSummary(file, stat, summary);
     return summary;
   }));
   return summaries
