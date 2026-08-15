@@ -9,6 +9,8 @@ import {activeModel, modelSelector, resolveModelSelector} from '../../config/pro
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 import {findSession, restoreSessionState} from '../../core/session/sessionStore.js';
+import {compactModelMessages} from '../../core/agent/compaction.js';
+import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
 import {NdjsonSink} from './ndjsonSink.js';
@@ -241,6 +243,15 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     },
     recordTokenUsage: (u: TokenUsage) => {
       usage = accumulateTokenUsage(usage, u);
+    },
+    compactConversation: (instructions?: string) => {
+      // Headless context-overflow recovery (F-10): compact the in-scope
+      // conversation exactly like the interactive fallback path so a long CI
+      // run self-heals instead of dying on the first provider overflow.
+      const result = compactModelMessages(conversation, {instructions, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS});
+      if (!result.compacted) return false;
+      conversation = result.messages;
+      return true;
     },
     onEvent: emitStreamEvent,
     log,

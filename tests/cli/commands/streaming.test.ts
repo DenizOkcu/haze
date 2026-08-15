@@ -575,6 +575,39 @@ describe('runAgentTurn: error paths', () => {
     expect(mocks.assembledCalls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('reports honestly when the mode cannot compact instead of a misleading history message (F-10)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
+      },
+      contextOverflow: true,
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
+    });
+    const cb = makeCallbacks();
+    // No compactConversation callback at all (the pre-F-10 headless shape).
+    delete (cb as {compactConversation?: unknown}).compactConversation;
+    await runAgentTurn('big', undefined, [], cb);
+    expect(cb.messages.some((m) => /does not attempt automatic compaction/.test(m.text))).toBe(true);
+    expect(cb.messages.some((m) => /not enough conversation history/.test(m.text))).toBe(false);
+    expect(cb.events.find((event) => event.type === 'context_overflow')).toMatchObject({recovered: false});
+  });
+
+  it('reports insufficient history only when compaction was available and declined it (F-10)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
+      },
+      contextOverflow: true,
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
+    });
+    const cb = makeCallbacks();
+    cb.compactConversation = () => false;
+    await runAgentTurn('big', undefined, [], cb);
+    expect(cb.messages.some((m) => /not enough conversation history to compact/.test(m.text))).toBe(true);
+  });
+
   it('reuses one execution scope and reapplies ephemeral control across retries', async () => {
     vi.useFakeTimers();
     const {runAgentTurn} = await loadStreaming({

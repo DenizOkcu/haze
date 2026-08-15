@@ -670,13 +670,18 @@ async function runAgentAttempt(
       const text = error instanceof Error ? error.message : String(error);
       callbacks.debugLog(`error: ${text}`);
       if (!contextOverflowRecovered && isContextOverflowError(error)) {
-        const compacted = callbacks.compactConversation?.('Automatic recovery after provider context overflow. Preserve the active user request and concrete next steps.') ?? false;
+        const canCompact = typeof callbacks.compactConversation === 'function';
+        const compacted = canCompact
+          ? callbacks.compactConversation?.('Automatic recovery after provider context overflow. Preserve the active user request and concrete next steps.') ?? false
+          : false;
         callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
         if (compacted) {
           callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
           return {status: 'failed', retry: {attempt: retryAttempt, contextOverflowRecovered: true, delayMs: 0}};
         }
-        callbacks.addMessage({role: 'system', text: 'Context overflow detected, but there was not enough conversation history to compact automatically.'});
+        callbacks.addMessage({role: 'system', text: canCompact
+          ? 'Context overflow detected, but there was not enough conversation history to compact automatically.'
+          : 'Context overflow detected, and this mode does not attempt automatic compaction. Resume the session interactively or retry with a smaller request.'});
       }
       const maxRetries = 2;
       if (retryAttempt < maxRetries && isRetryableModelError(error)) {
