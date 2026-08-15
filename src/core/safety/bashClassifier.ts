@@ -1,6 +1,6 @@
-export type BashRiskLevel = 'read_only' | 'mutating' | 'destructive' | 'network' | 'unknown';
+type BashRiskLevel = 'read_only' | 'mutating' | 'destructive' | 'network' | 'unknown';
 
-export type BashTrait =
+type BashTrait =
   | 'reads_files'
   | 'writes_files'
   | 'deletes_files'
