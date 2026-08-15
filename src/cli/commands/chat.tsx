@@ -731,7 +731,10 @@ export async function chatCommand(options: ChatOptions = {}) {
     process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
   }
   await clearTasksFromStore().catch(() => undefined);
-  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />);
+  // Incremental rendering rewrites only changed lines of the live frame, removing
+  // the full-frame erase/rewrite flicker while streaming. The fps cap aligns with
+  // the ~80ms spinner cadence; faster renders would only repaint unchanged lines.
+  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {incrementalRendering: true, maxFps: 15});
   await app.waitUntilExit();
   await teardownBackgroundProcesses().catch(() => undefined);
   await clearTasksFromStore().catch(() => undefined);
