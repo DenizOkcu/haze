@@ -1,5 +1,5 @@
 import {createTurnExecutionState, decideTerminalStatus, normalizeFinishReason, type TurnExecutionState} from '../../../core/agent/completionController.js';
-import type {RequestIntent} from '../../../core/goal/requestClassifier.js';
+import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
 import type {ValidationOutcome, WorkTaskProgress} from '../../../core/agent/workState.js';
 import type {TurnStatus} from '../streaming.js';
 

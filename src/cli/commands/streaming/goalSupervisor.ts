@@ -6,7 +6,7 @@ import {describeCompletionReadiness} from '../../../core/agent/completionControl
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
-import {goalContinuationPrompt} from '../../../core/goal/completionPolicy.js';
+import {goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type TurnResult} from '../streaming.js';
 import {goalCheckpointSignature, type GoalCheckpoint, type IncompleteGoalResume} from './goalCheckpoint.js';
 

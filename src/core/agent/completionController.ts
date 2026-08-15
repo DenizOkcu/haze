@@ -1,7 +1,7 @@
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {MAIN_TOOL_ONLY_STEP_LIMIT, type TurnBudget} from './budgets.js';
 import {intentExpectsValidation, type ValidationOutcome, type WorkTaskProgress} from './workState.js';
-import type {RequestIntent} from '../goal/requestClassifier.js';
+import type {RequestIntent} from './goalPolicy.js';
 
 /**
  * Normalized reason a model stream finished. Derived from the AI SDK

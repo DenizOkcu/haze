@@ -1,4 +1,4 @@
-import type {RequestIntent} from '../goal/requestClassifier.js';
+import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 

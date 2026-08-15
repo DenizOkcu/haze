@@ -12,9 +12,8 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 
 ## Important subtrees
 
-- `agent/` — context accounting, model-message compaction, request assembly, tool-result helpers, turn budgets, events, and work state.
+- `agent/` — context accounting, model-message compaction, request assembly, tool-result helpers, turn budgets, events, work state, and goal policy (intent classification, session-goal state, completion prompts).
 - `bashOutput/` — command-aware reduction of bash stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
-- `goal/` — user-request classification, session-goal state, completion/continuation prompts.
 - `attachments/` — user-typed image attachment resolution and turn-scoped read blessings for explicit paths.
 - `safety/` — bash command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
 - `session/` — lazy durable JSONL session storage, resumable-session summaries/restore helpers, and disk-size slimming for streaming events/large tool outputs.

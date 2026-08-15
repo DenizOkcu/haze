@@ -1,7 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {classifyRequestIntent, isPlanOnlyRequest} from '../../src/core/goal/requestClassifier.js';
-import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../src/core/goal/completionPolicy.js';
-import {createSessionGoal, formatGoalStatus, observeGoalToolEvent} from '../../src/core/goal/sessionGoal.js';
+import {classifyRequestIntent, createSessionGoal, formatGoalStatus, isPlanOnlyRequest, malformedToolCallPrompt, observeGoalToolEvent, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../../src/core/agent/goalPolicy.js';
 
 describe('requestClassifier', () => {
   it('classifies plan-only requests without treating them as actions', () => {

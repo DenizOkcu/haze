@@ -1,3 +1,74 @@
+/**
+ * Goal policy: request-intent classification, session-goal state, and the
+ * model-facing completion/continuation control prompts (CR-006 home for the
+ * former `core/goal/` directory).
+ *
+ * Classifiers are hints, not hard authorization. Avoid preventing legitimate
+ * work solely because of a heuristic. Plan-only requests should not lead to
+ * source mutations unless the user asks for implementation.
+ */
+import {createWorkState, observeWorkToolEvent, type WorkState} from './workState.js';
+
+// ── Request intent classification ───────────────────────────────────────────
+
+export type RequestIntent = 'implement' | 'fix' | 'test' | 'review' | 'plan' | 'answer' | 'unknown';
+
+export function isPlanOnlyRequest(value: string) {
+  return /\b(create|make|write|draft|outline)\s+(?:a\s+)?plan\b|\bplan\s+(?:for|to)\b/i.test(value) && !/\bimplement|execute|do\b/i.test(value);
+}
+
+export function classifyRequestIntent(value: string): RequestIntent {
+  if (isPlanOnlyRequest(value)) return 'plan';
+  if (/\b(review|audit|inspect|analy[sz]e|compare)\b/i.test(value)) return 'review';
+  if (/\b(fix|repair|resolve|debug)\b/i.test(value)) return 'fix';
+  if (/\b(run|verify|check|validate)\b/i.test(value) || /\btests?\b/i.test(value) && !/\b(add|create|write)\b/i.test(value)) return 'test';
+  if (/\b(add|create|write|implement|update|change|support|wire|document|docs|documentation)\b/i.test(value)) return 'implement';
+  if (/\b(what|why|how|explain|tell me)\b/i.test(value)) return 'answer';
+  return 'unknown';
+}
+
+// ── Session goal state ──────────────────────────────────────────────────────
+
+export type SessionGoal = WorkState;
+export type GoalToolEvent = Parameters<typeof observeWorkToolEvent>[1];
+
+function shortRequest(value: string) {
+  return value.replace(/\s+/g, ' ').trim().slice(0, 160) || 'current request';
+}
+
+export function createSessionGoal(request: string, now = Date.now()): SessionGoal {
+  const intent = classifyRequestIntent(request);
+  const successCriteria = intent === 'plan'
+    ? ['Create or update the requested plan artifact/answer', 'Do not implement source changes unless asked']
+    : intent === 'test'
+      ? ['Run the requested validation or closest relevant check', 'Report pass/fail accurately']
+      : intent === 'review'
+        ? ['Inspect the relevant current project state', 'Return evidence-based findings with file paths']
+        : intent === 'answer'
+          ? ['Answer the user using current project context when needed']
+          : ['Inspect the relevant files', 'Make the requested change when needed', 'Validate the change when practical', 'Summarize only current-task changes and validation'];
+  return createWorkState(request, intent, successCriteria, now);
+}
+
+export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, now = Date.now()) {
+  return observeWorkToolEvent(goal, event, now);
+}
+
+export function formatGoalStatus(goal: SessionGoal) {
+  const action = goal.phase === 'starting' ? 'starting'
+    : goal.phase === 'inspecting' ? 'inspecting'
+      : goal.phase === 'editing' ? `${goal.touchedFiles.length} file${goal.touchedFiles.length === 1 ? '' : 's'} changed`
+        : goal.phase === 'validating' ? `validation ${goal.validationCommands.at(-1)?.status ?? 'running'}`
+          : goal.phase === 'summarizing' ? 'summarizing'
+            : 'done';
+  return `Goal: ${shortRequest(goal.originalUserRequest)} · ${action}`;
+}
+
+// ── Completion/continuation control prompts ─────────────────────────────────
+// Keep these small and reusable; prefer one shared helper over embedding
+// near-identical model-facing control text in multiple loops. They are
+// one-request nudges, never durable conversation history.
+
 export function toolLoopBudgetPrompt() {
   return 'Tool slice reached for this model step — tools are no longer callable in this turn. Stop attempting to describe or announce tool calls (e.g. "Let me install", "Now I\'ll run", "Let me X"); those phrases imply tool use you cannot perform. Answer once with a bounded progress checkpoint: what is done so far (changes + validation evidence) and, if work remains, the single next concrete unfinished action. haze continues the active goal automatically from that line — do not manufacture a completion summary and do not treat this as the end of the task. Do not repeat yourself, do not loop, do not emit XML/JSON tool-call syntax.';
 }
