@@ -133,7 +133,7 @@ describe('buildInfo', () => {
       await fs.outputJson(path.join(root, 'package.json'), HAZE_PKG);
       await fs.ensureDir(path.join(root, 'dist', 'cli', 'commands', 'streaming'));
       await fs.outputFile(path.join(root, 'dist', 'cli', 'commands', 'streaming', 'goalSupervisor.js'), '// built\n');
-      expect(runtimeCapabilities(root)).toEqual({logicalGoalSupervisor: true, crossTurnCheckpoints: true, automaticBudgetContinuation: true});
+      expect(runtimeCapabilities(root)).toEqual({goalSupervisorAvailable: true});
       expect(goalSupervisorArtifactPresent(root)).toBe(true);
     });
 
@@ -141,7 +141,7 @@ describe('buildInfo', () => {
       const root = path.join(tmp, 'global-old');
       await fs.outputJson(path.join(root, 'package.json'), HAZE_PKG);
       await fs.ensureDir(path.join(root, 'dist', 'cli', 'commands', 'streaming'));
-      expect(runtimeCapabilities(root)).toEqual({logicalGoalSupervisor: false, crossTurnCheckpoints: false, automaticBudgetContinuation: false});
+      expect(runtimeCapabilities(root)).toEqual({goalSupervisorAvailable: false});
     });
   });
 
@@ -214,7 +214,7 @@ describe('buildInfo', () => {
         build: {name: '@denizokcu/haze', version: '0.10.1', commit: 'd'.repeat(40)},
         runtimeRoot: '/opt/haze',
         executable: '/opt/haze/bin/haze.js',
-        capabilities: {logicalGoalSupervisor: true, crossTurnCheckpoints: true, automaticBudgetContinuation: true},
+        capabilities: {goalSupervisorAvailable: true},
       });
       expect(text).toContain('Haze 0.10.1');
       expect(text).toContain(`commit: ${'d'.repeat(40)}`);
@@ -226,7 +226,7 @@ describe('buildInfo', () => {
     it('degrades gracefully when provenance is missing', () => {
       const text = formatVersionVerbose({
         version: '0.10.1',
-        capabilities: {logicalGoalSupervisor: false, crossTurnCheckpoints: false, automaticBudgetContinuation: false},
+        capabilities: {goalSupervisorAvailable: false},
       });
       expect(text).toContain('Haze 0.10.1');
       expect(text).toContain('commit: unknown');

@@ -106,7 +106,7 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<number> {
     write();
   }
 
-  if (!capabilities.logicalGoalSupervisor) {
+  if (!capabilities.goalSupervisorAvailable) {
     write('Warning: the goal supervisor is unavailable in this runtime; exhausting a');
     write("turn's step/tool budget may pause the goal instead of continuing automatically.");
     write();

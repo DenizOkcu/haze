@@ -250,7 +250,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       const mismatch = detectCheckoutMismatch();
       if (mismatch) {
         setMessages(m => [...m, {role: 'system', text: formatMismatchWarning(mismatch)}]);
-      } else if (!runtimeCapabilities().logicalGoalSupervisor) {
+      } else if (!runtimeCapabilities().goalSupervisorAvailable) {
         setMessages(m => [...m, {role: 'system', text: 'Warning: this haze build lacks the goal supervisor module; exhausting a turn step/tool budget may pause the goal instead of continuing automatically. Reinstall or relink haze (npm run dev:link in the checkout).'}]);
       }
     })().catch(() => undefined);

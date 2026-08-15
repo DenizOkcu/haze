@@ -62,8 +62,7 @@ describe('haze doctor', () => {
     expect(text).toContain('Haze 0.10.1');
     expect(text).toContain(`commit: ${commit}`);
     expect(text).toContain(`runtime: ${path.join(root, 'dist')}`);
-    expect(text).toContain('logicalGoalSupervisor: enabled');
-    expect(text).toContain('automaticBudgetContinuation: enabled');
+    expect(text).toContain('goalSupervisorAvailable: enabled');
     expect(text).toContain('[ok] artifact dist/cli/commands/streaming/goalSupervisor.js: present');
     expect(text).toContain('[ok] package/build version');
     expect(text).toContain('[ok] build commit');
@@ -78,7 +77,7 @@ describe('haze doctor', () => {
     expect(code).toBe(1);
     const text = lines.join('\n');
     expect(text).toContain('[FAIL] artifact dist/cli/commands/streaming/goalSupervisor.js: missing');
-    expect(text).toContain('logicalGoalSupervisor: disabled');
+    expect(text).toContain('goalSupervisorAvailable: disabled');
     expect(text).toContain('goal supervisor is unavailable');
   });
 

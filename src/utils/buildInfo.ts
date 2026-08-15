@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url';
 import {compareVersions} from './version.js';
 
 /** Package identity used to recognize a haze checkout near the working directory. */
-export const HAZE_PACKAGE_NAME = '@denizokcu/haze';
+const HAZE_PACKAGE_NAME = '@denizokcu/haze';
 
 /**
  * Build provenance embedded by `npm run build` (dist/buildInfo.json). Safe
@@ -20,14 +20,14 @@ export interface BuildInfo {
 
 /**
  * Runtime capability registry: observable facts about the running build, so
- * behavior can be diagnosed without inferring it from semantic versions.
- * All three land together with the goal supervisor; a runtime missing its
- * compiled artifact reports every supervisor capability as unavailable.
+ * behavior can be diagnosed without inferring it from semantic versions. The
+ * goal supervisor's compiled artifact gates logical-goal supervision, cross-turn
+ * checkpoints, and automatic budget continuation together, so a single flag
+ * describes all supervisor-derived behavior; a runtime missing the artifact
+ * reports it unavailable.
  */
 export interface RuntimeCapabilities {
-  logicalGoalSupervisor: boolean;
-  crossTurnCheckpoints: boolean;
-  automaticBudgetContinuation: boolean;
+  goalSupervisorAvailable: boolean;
 }
 
 /** Compiled module whose presence proves the autonomous goal supervisor is in this build. */
@@ -106,7 +106,7 @@ export function readPackageVersionAt(root: string): string | undefined {
 }
 
 /** Read a package.json name from an explicit package root. */
-export function readPackageNameAt(root: string): string | undefined {
+function readPackageNameAt(root: string): string | undefined {
   try {
     const parsed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {name?: unknown};
     return typeof parsed.name === 'string' ? parsed.name : undefined;
@@ -168,21 +168,12 @@ export function goalSupervisorArtifactPresent(root: string): boolean {
 
 /** Capabilities of the running build, verified against its compiled artifacts. */
 export function runtimeCapabilities(root: string = resolvePackageRoot() ?? process.cwd()): RuntimeCapabilities {
-  const supervisor = goalSupervisorArtifactPresent(root);
-  return {
-    logicalGoalSupervisor: supervisor,
-    crossTurnCheckpoints: supervisor,
-    automaticBudgetContinuation: supervisor,
-  };
+  return {goalSupervisorAvailable: goalSupervisorArtifactPresent(root)};
 }
 
 /** One-line capability summary for logs and doctor output. */
 export function formatCapabilities(capabilities: RuntimeCapabilities): string {
-  return [
-    `logical-goal-supervisor=${capabilities.logicalGoalSupervisor ? 'enabled' : 'disabled'}`,
-    `cross-turn-checkpoints=${capabilities.crossTurnCheckpoints ? 'enabled' : 'disabled'}`,
-    `automatic-budget-continuation=${capabilities.automaticBudgetContinuation ? 'enabled' : 'disabled'}`,
-  ].join(', ');
+  return `goal-supervisor=${capabilities.goalSupervisorAvailable ? 'enabled' : 'disabled'}`;
 }
 
 /** Structured description of the executing runtime (used by --version --verbose and doctor). */
@@ -206,7 +197,7 @@ export function resolveExecutable(): string | undefined {
   }
 }
 
-export function describeRuntime(input: {runtimeRoot?: string} = {}): RuntimeProvenance {
+function describeRuntime(input: {runtimeRoot?: string} = {}): RuntimeProvenance {
   const runtimeRoot = input.runtimeRoot ?? resolvePackageRoot();
   const build = readBuildInfo(input.runtimeRoot ? [join(input.runtimeRoot, 'dist', 'buildInfo.json')] : undefined);
   const version = build?.version ?? readPackageVersionAt(runtimeRoot ?? '') ?? '0.0.0';
@@ -222,7 +213,7 @@ export function formatVersionVerbose(provenance: RuntimeProvenance = describeRun
   ];
   if (provenance.runtimeRoot) lines.push(`runtime: ${join(provenance.runtimeRoot, 'dist')}`);
   if (provenance.executable) lines.push(`executable: ${provenance.executable}`);
-  lines.push(`goal supervisor: ${provenance.capabilities.logicalGoalSupervisor ? 'enabled' : 'disabled'}`);
+  lines.push(`goal supervisor: ${provenance.capabilities.goalSupervisorAvailable ? 'enabled' : 'disabled'}`);
   return lines.join('\n');
 }
 
