@@ -43,6 +43,7 @@ import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
+import {detectCheckoutMismatch, formatMismatchWarning, runtimeCapabilities} from '../../utils/buildInfo.js';
 import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
 import {commandParts} from './wizardInput.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
@@ -51,6 +52,8 @@ import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
 interface ChatOptions {
   debug?: boolean;
   version?: string;
+  /** Safe build provenance (commit, build time) recorded into session headers. */
+  build?: {commit?: string; builtAt?: string};
   continueSession?: boolean;
   resumeSessionId?: string;
   noSession?: boolean;
@@ -100,7 +103,7 @@ function BusyBar({label, elapsed, tip}: {label: string; elapsed: string; tip?: s
   </Box>;
 }
 
-function ChatScreen({debug = false, version, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
+function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
   const {exit} = useApp();
   const {columns: width, rows: terminalRows} = useWindowSize();
   const nextDisplayOrderRef = useRef(1);
@@ -242,6 +245,14 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
           setMessages(m => [...m, {role: 'system', text: `A new version of haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
         }
       }
+      // Runtime/installation diagnostics: never switch runtimes silently, but
+      // make a stale binary serving a workspace with a newer checkout unmistakable.
+      const mismatch = detectCheckoutMismatch();
+      if (mismatch) {
+        setMessages(m => [...m, {role: 'system', text: formatMismatchWarning(mismatch)}]);
+      } else if (!runtimeCapabilities().logicalGoalSupervisor) {
+        setMessages(m => [...m, {role: 'system', text: 'Warning: this haze build lacks the goal supervisor module; exhausting a turn step/tool budget may pause the goal instead of continuing automatically. Reinstall or relink haze (npm run dev:link in the checkout).'}]);
+      }
     })().catch(() => undefined);
     readInputHistory().then(setInputHistory).catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
@@ -299,6 +310,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   // dedicated controller so this component stays orchestration glue (CR-006).
   const sessionLifecycle = createSessionLifecycle({
     version,
+    build,
     continueSession,
     resumeSessionId,
     noSession,
@@ -830,7 +842,7 @@ export async function chatCommand(options: ChatOptions = {}) {
   // Incremental rendering rewrites only changed lines of the live frame, removing
   // the full-frame erase/rewrite flicker while streaming. The fps cap aligns with
   // the ~80ms spinner cadence; faster renders would only repaint unchanged lines.
-  const app = render(<ChatScreen debug={options.debug} version={options.version} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {incrementalRendering: true, maxFps: 15});
+  const app = render(<ChatScreen debug={options.debug} version={options.version} build={options.build} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {incrementalRendering: true, maxFps: 15});
   await app.waitUntilExit();
   await teardownBackgroundProcesses().catch(() => undefined);
   await clearTasksFromStore().catch(() => undefined);

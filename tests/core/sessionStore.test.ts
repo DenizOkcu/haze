@@ -44,6 +44,23 @@ describe('sessionStore', () => {
     expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'clear', 'conversation_snapshot', 'ui_message']);
   });
 
+  it('records safe build provenance in the session header so failures tie to the executing build', async () => {
+    const session = await createSession({cwd, sessionsDir, hazeVersion: '0.10.1', build: {commit: 'abc1230000000000000000000000000000000000', builtAt: '2026-08-13T10:00:00.000Z'}});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'hello'});
+    const {entries, parseErrors} = await readSessionEntries(session);
+    expect(parseErrors).toEqual([]);
+    expect(entries[0]).toMatchObject({type: 'header', hazeVersion: '0.10.1', build: {commit: 'abc1230000000000000000000000000000000000', builtAt: '2026-08-13T10:00:00.000Z'}});
+    // Provenance is strictly bounded metadata: no environment or content fields sneak in.
+    const header = entries[0] as Extract<typeof entries[0], {type: 'header'}>;
+    expect(Object.keys(header.build ?? {})).toEqual(['commit', 'builtAt']);
+    // Headers without provenance (legacy or tsx runs) still parse.
+    const bare = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(bare, {type: 'ui_message', at: '2', role: 'user', text: 'hi'});
+    const bareEntries = await readSessionEntries(bare);
+    expect(bareEntries.parseErrors).toEqual([]);
+    expect((bareEntries.entries[0] as {build?: unknown}).build).toBeUndefined();
+  });
+
   it('creates distinct sessions even within the same millisecond (regression CR-025)', async () => {
     const [first, second] = await Promise.all([createSession({cwd, sessionsDir}), createSession({cwd, sessionsDir})]);
     expect(first.id).not.toBe(second.id);

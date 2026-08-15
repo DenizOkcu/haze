@@ -11,7 +11,7 @@ import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export type SessionEntry =
-  | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string; forkedFrom?: string}
+  | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string; forkedFrom?: string; build?: {commit?: string; builtAt?: string}}
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
@@ -48,7 +48,7 @@ function newSessionId(now = new Date()) {
   return `${now.toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
-export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string; forkedFrom?: string} = {}): Promise<HazeSession> {
+export async function createSession(options: {cwd?: string; hazeVersion?: string; sessionsDir?: string; forkedFrom?: string; build?: {commit?: string; builtAt?: string}} = {}): Promise<HazeSession> {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   const id = newSessionId();
   const file = sessionFile(id, cwd, options.sessionsDir);
@@ -58,7 +58,7 @@ export async function createSession(options: {cwd?: string; hazeVersion?: string
     file,
     cwd,
     deferredWrite: {
-      header: {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom},
+      header: {type: 'header', id, cwd, createdAt: new Date().toISOString(), hazeVersion: options.hazeVersion, forkedFrom: options.forkedFrom, ...(options.build ? {build: options.build} : {})},
       entries: [],
     },
   };
@@ -167,6 +167,12 @@ function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
+function optionalBuildProvenance(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return optionalString(value.commit) && optionalString(value.builtAt);
+}
+
 function parseSessionEntry(value: unknown): SessionEntry {
   const invalid = (detail: string): never => {
     throw new Error(`unexpected entry shape: ${detail}`);
@@ -178,7 +184,8 @@ function parseSessionEntry(value: unknown): SessionEntry {
   switch (type) {
     case 'header':
       if (typeof value.id !== 'string' || typeof value.cwd !== 'string' || typeof value.createdAt !== 'string'
-        || !optionalString(value.hazeVersion) || !optionalString(value.forkedFrom)) return invalid('invalid header');
+        || !optionalString(value.hazeVersion) || !optionalString(value.forkedFrom)
+        || !optionalBuildProvenance(value.build)) return invalid('invalid header');
       return value as SessionEntry;
     case 'ui_message':
       if (typeof value.at !== 'string' || typeof value.text !== 'string'
@@ -390,10 +397,10 @@ export interface ForkSessionResult {
 }
 
 /** Create a new session from the source's latest durable snapshots without mutating it. */
-export async function forkSession(source: HazeSession, options: {hazeVersion?: string; sessionsDir?: string} = {}): Promise<ForkSessionResult> {
+export async function forkSession(source: HazeSession, options: {hazeVersion?: string; sessionsDir?: string; build?: {commit?: string; builtAt?: string}} = {}): Promise<ForkSessionResult> {
   const restored = await restoreSessionState(source);
   if (restored.messages.length === 0) throw new Error(`Session ${source.id} has no conversation snapshot to fork.`);
-  const session = await createSession({cwd: source.cwd, sessionsDir: options.sessionsDir, hazeVersion: options.hazeVersion, forkedFrom: source.id});
+  const session = await createSession({cwd: source.cwd, sessionsDir: options.sessionsDir, hazeVersion: options.hazeVersion, forkedFrom: source.id, ...(options.build ? {build: options.build} : {})});
   const at = new Date().toISOString();
   await appendSessionEntry(session, {type: 'conversation_snapshot', at, messages: restored.messages});
   if (restored.workState) await appendSessionEntry(session, {type: 'work_state_snapshot', at, state: restored.workState});

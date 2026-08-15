@@ -22,6 +22,8 @@ import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry
  */
 export interface SessionLifecycleDeps {
   version?: string;
+  /** Safe build provenance (commit, build time) recorded into session headers. */
+  build?: {commit?: string; builtAt?: string};
   continueSession: boolean;
   resumeSessionId?: string;
   noSession: boolean;
@@ -78,7 +80,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       deps.sessionRef.current = undefined;
       return;
     }
-    const session = await createSession({hazeVersion: deps.version});
+    const session = await createSession({hazeVersion: deps.version, ...(deps.build ? {build: deps.build} : {})});
     deps.sessionRef.current = session;
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
@@ -188,7 +190,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       }
       let forked: Awaited<ReturnType<typeof forkSession>>;
       try {
-        forked = await forkSession(source, {hazeVersion: deps.version});
+        forked = await forkSession(source, {hazeVersion: deps.version, ...(deps.build ? {build: deps.build} : {})});
       } catch (error) {
         deps.setMessages(m => [...m, {role: 'system', text: error instanceof Error ? error.message : String(error)}]);
         return false;

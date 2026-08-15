@@ -93,6 +93,10 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
   let lastEvidence: TurnCompletionEvidence | undefined;
 
   callbacks.onEvent?.(agentEvent({type: 'goal_start', goalId, request}));
+  // Observable capability line at every goal start (debug panel, --debug LLM
+  // log, headless stderr): failures can be tied to runtime behavior, not
+  // guessed from semantic versions.
+  callbacks.debugLog('goal supervisor enabled; automatic continuation across physical-turn budgets');
 
   const finish = (status: GoalRunResult['status'], stopReason: GoalStopReason, resume?: GoalRunResult['resume']): GoalRunResult => {
     callbacks.onEvent?.(agentEvent({type: 'goal_end', goalId, status, cycles: cycle, ...(stopReason !== 'completed' ? {stopReason} : {}), ...(lastEvidence ? {evidence: lastEvidence} : {})}));
