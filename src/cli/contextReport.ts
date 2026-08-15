@@ -12,6 +12,8 @@ import type {ModelMessage} from 'ai';
 const reportSession = {start: new Date(0), cwd: process.cwd()};
 
 async function loadFiles(paths: string[]): Promise<ContextFile[]> {
+  // This developer-only report command intentionally accepts explicit host paths:
+  // it analyzes files selected by the local CLI user and never writes them.
   const candidates = paths.length > 0 ? paths : ['AGENTS.md', 'CLAUDE.md'];
   const files: ContextFile[] = [];
   for (const candidate of candidates) {
@@ -25,6 +27,7 @@ async function loadFiles(paths: string[]): Promise<ContextFile[]> {
 const args = process.argv.slice(2);
 const traceIndex = args.indexOf('--trace');
 if (traceIndex >= 0) {
+  // Trace fixtures are likewise explicit local-user input, not model-controlled paths.
   const tracePath = args[traceIndex + 1];
   if (!tracePath) throw new Error('--trace requires a JSON fixture path');
   const raw = await fs.readJson(path.resolve(tracePath)) as {messages?: ModelMessage[]};

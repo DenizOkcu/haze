@@ -134,7 +134,7 @@ describe('modelWithConfig', () => {
 
     expect(responses).toHaveBeenCalledWith('gpt-5.4');
     expect(chat).not.toHaveBeenCalled();
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({apiKey: 'haze-oauth-placeholder', fetch: expect.any(Function)}));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({apiKey: expect.stringMatching(/^oauth-sentinel-/), fetch: expect.any(Function)}));
     expect(runtime?.config.providerKind).toBe('chatgpt-codex');
   });
 

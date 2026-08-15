@@ -153,6 +153,8 @@ export async function startChatGptBrowserLogin(options: StartChatGptBrowserLogin
   const port = options.port ?? CHATGPT_OAUTH_CALLBACK_PORT;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = options.fetchImpl ?? fetch;
+  // RFC 8252 loopback redirects intentionally use HTTP: traffic never leaves
+  // the host, while PKCE and the random state protect the authorization code.
   const redirectUri = `http://localhost:${port}${CALLBACK_PATH}`;
   const pkce = await generatePkce();
   const state = base64UrlEncode(crypto.randomBytes(32));
@@ -215,6 +217,7 @@ export async function startChatGptBrowserLogin(options: StartChatGptBrowserLogin
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
+    // Bind only to the loopback hostname registered in redirectUri.
     server.listen(port, 'localhost', resolve);
   }).catch(error => {
     controller.abort();
