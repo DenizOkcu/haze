@@ -410,6 +410,28 @@ npm run context:report
 
 `npm run context:report` prints estimated system, project-context, and tool-schema tokens without reading `~/.haze`. Pass explicit context-file paths, or use `npm run context:report -- --trace tests/fixtures/agent-traces/long-workflow.json` for offline trace accounting.
 
+### Running the checkout instead of a global install
+
+A globally installed haze keeps serving its own code even while you work in a checkout — the exact failure mode where a fix lands locally but sessions keep running the old runtime. Two supported ways to run the checkout:
+
+```bash
+npm run haze -- <arguments>   # run the source checkout directly, no global install touched
+npm run dev:link              # build, link globally, and verify `haze` on PATH resolves to this checkout
+```
+
+`npm run dev:link` builds the checkout, runs `npm link`, resolves `command -v haze`, and fails loudly unless the linked binary reports this checkout's version and commit. Restart any running haze process afterward — a live process never hot-swaps its code.
+
+### Runtime provenance and diagnostics
+
+Every build embeds a manifest (`dist/buildInfo.json`: version, commit, build time). The launcher verifies it before starting and refuses incomplete or stale builds with a rebuild hint instead of running partially outdated code.
+
+```bash
+haze --version --verbose   # version, commit, runtime/executable paths, goal-supervisor state
+haze doctor                # provenance, artifact/manifest checks, capability registry, checkout-mismatch warning
+```
+
+Session headers record the executing build (version + commit + build time), so a saved failure can be tied to the code that actually ran. When haze starts inside or below a checkout whose version/commit diverges from the running binary, it prints a startup warning naming both — it never switches runtimes silently.
+
 Package check:
 
 ```bash
