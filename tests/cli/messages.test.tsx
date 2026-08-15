@@ -161,3 +161,65 @@ describe('tool diff messages', () => {
     spy.mockRestore();
   });
 });
+
+describe('live-region clamping', () => {
+  it('clamps a streaming assistant tail to the budget with an indicator row', () => {
+    const {lastFrame} = render(<MessageView width={40} maxVisibleLines={3} message={{
+      id: 'a1',
+      role: 'assistant',
+      text: 'line one\nline two\nline three\nline four\nline five',
+      streaming: true,
+    }} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('⋯ +3 lines above');
+    expect(frame).toContain('line five');
+    expect(frame).not.toContain('line one');
+    expect(frame).not.toContain('line two');
+  });
+
+  it('leaves short streaming tails untouched', () => {
+    const {lastFrame} = render(<MessageView width={40} maxVisibleLines={10} message={{
+      id: 'a1',
+      role: 'assistant',
+      text: 'short tail',
+      streaming: true,
+    }} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('short tail');
+    expect(frame).not.toContain('⋯');
+  });
+
+  it('clamps streaming tool-group text and hides diff previews that no longer fit', () => {
+    const {lastFrame} = render(<MessageView width={40} maxVisibleLines={3} message={{
+      id: 't1',
+      role: 'tool',
+      text: '1 calls · 0s\n  ✓ bash npm test\n  ✓ readFile a.ts\n  ✓ readFile b.ts',
+      streaming: true,
+      toolDiffs: [{
+        id: 'edit-1', path: 'a.ts', addedLines: 1, removedLines: 0,
+        lines: [{type: 'add', newLine: 1, text: 'x'}],
+      }],
+    }} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    // Budget 3: indicator + last two tool rows; the diff no longer fits and is
+    // reported instead of rendered.
+    expect(frame).toContain('⋯ +2 lines above');
+    expect(frame).toContain('readFile a.ts');
+    expect(frame).toContain('readFile b.ts');
+    expect(frame).not.toContain('bash npm test');
+    expect(frame).toContain('⋯ 1 diff preview hidden');
+  });
+
+  it('never clamps settled tool messages or static markdown chunks', () => {
+    const {lastFrame} = render(<MessageView width={40} maxVisibleLines={2} message={{
+      id: 't1',
+      role: 'tool',
+      text: 'one\ntwo\nthree\nfour',
+      streaming: false,
+    }} />);
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('one');
+    expect(frame).toContain('four');
+    expect(frame).not.toContain('⋯');
+  });
+});

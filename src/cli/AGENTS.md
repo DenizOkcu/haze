@@ -25,7 +25,7 @@ Maintainability focus:
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.
 - Keep refs for mutable turn/session machinery (`conversationRef`, abort controllers, logs, work state) when React rerenders must not reset them.
 - `messages` and `liveMessages` are display state. Durable model conversation is `ModelMessage[]` in the conversation ref/session snapshots; session persistence may slim large values for disk without changing active in-memory turn state.
-- Preserve display ordering when adding/updating messages; tests rely on stable ordering. Ink `<Static>` items must remain an append-only ordered prefix. Once a live tail appears, later settled notices stay dynamic until that earlier tail finishes.
+- Preserve display ordering when adding/updating messages; tests rely on stable ordering. Ink `<Static>` items must remain an append-only ordered prefix. Once a live tail appears, later settled notices stay dynamic until that earlier tail finishes. The dynamic tail is clamped to a live-region row budget (`chat/liveRegion.ts`) so the frame never exceeds one viewport — beyond that, Ink's overflow fallback wipes scrollback and replays the whole transcript every render. Clamped streaming content is never lost: it enters `<Static>` verbatim once settled.
 - Assistant streaming keeps the active root Markdown block plain and dynamic. Only parser-stable preceding roots enter `<Static>`; finalization commits the last root and completion metadata.
 - Do not expose provider keys or secret settings in UI text.
 

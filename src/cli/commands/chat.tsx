@@ -100,7 +100,7 @@ function BusyBar({label, elapsed, tip}: {label: string; elapsed: string; tip?: s
 
 function ChatScreen({debug = false, version, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
   const {exit} = useApp();
-  const {columns: width} = useWindowSize();
+  const {columns: width, rows: terminalRows} = useWindowSize();
   const nextDisplayOrderRef = useRef(1);
   const withDisplayOrder = (message: Message): Message => {
     if (message.displayOrder != null) return message;
@@ -673,6 +673,25 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
   const contentWidth = Math.max(1, width - 2);
 
+  // Live-region budget: once the dynamic frame exceeds the viewport, Ink falls
+  // back to clearTerminal + full transcript replay, which wipes scrollback and
+  // jumps to the top on every render. Every dynamic section is therefore
+  // clamped so the frame stays under one screen (see chat/liveRegion.ts).
+  const busyRows = busy ? (showingTip ? 2 : 1) : 0;
+  const queuedRows = queuedFollowUps.length > 0 ? 2 + queuedFollowUps.length : 0;
+  const collapsedTaskRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS);
+  const expandedTaskCap = Math.max(MAX_VISIBLE_TASKS, terminalRows - 18);
+  const expandedTaskRows = Math.min(visibleTasks.length, expandedTaskCap) + (visibleTasks.length > expandedTaskCap ? 1 : 0);
+  const taskRows = visibleTasks.length > 0 ? 2 + taskBarPadding + (tasksExpanded ? expandedTaskRows : collapsedTaskRows) : 0;
+  // Debug-only panels are counted conservatively so debug mode cannot overflow either.
+  const debugPanelRows = debug && debugLogs.length > 0 ? 4 + debugLogs.length : 0;
+  const tokenPanelRows = debug && metrics.hasTokenBreakdown ? 5 : 0;
+  // The input box is border (2) + one row; a user-pasted multiline draft can
+  // exceed this estimate (accepted: it is transient, user-driven editing state).
+  const fixedLiveRows = busyRows + queuedRows + taskRows + debugPanelRows + tokenPanelRows + 3 /* input */ + 2 /* status */ + 2 /* safety */;
+  const streamingRowsBudget = Math.max(1, terminalRows - fixedLiveRows);
+  const perStreamingItemRows = streamingItems.length > 0 ? Math.max(2, Math.floor(streamingRowsBudget / streamingItems.length)) : 0;
+
   return <Box flexDirection="column" paddingX={1}>
     <Static items={staticItems}>
       {item => item.kind === 'header'
@@ -682,7 +701,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
           : <MessageView key={item.key} message={item.message} width={contentWidth} />}
     </Static>
     {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {streamingItems.map(item => <MessageView key={item.key} message={item.message} width={contentWidth} showHeader={item.showHeader} />)}
+      {streamingItems.map(item => {
+        // One row for the optional header plus one for the item's bottom margin.
+        const chrome = (item.showHeader === false ? 0 : 1) + 1;
+        return <MessageView key={item.key} message={item.message} width={contentWidth} showHeader={item.showHeader} maxVisibleLines={Math.max(1, perStreamingItemRows - chrome)} />;
+      })}
     </Box>}
     {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text color={theme.muted} bold>Debug</Text>
@@ -698,7 +721,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       <Text color={theme.muted}> or type a follow-up</Text>
     </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-      <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} />
+      <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={expandedTaskCap} />
     </Box>}
     {busy && <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />}
     <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>

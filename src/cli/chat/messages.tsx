@@ -5,6 +5,7 @@ import type {Message} from '../commands/streaming.js';
 import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../commands/formatters.js';
 import {MarkdownText, markdownRootChunks} from '../../ui/components/MarkdownText.js';
+import {lineRows, clampTextTail} from './liveRegion.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
 import {highlightedCodeLine, languageForPath} from '../../ui/codeHighlight.js';
@@ -103,9 +104,58 @@ function ToolDiffView({diff, width}: {diff: ToolDisplayDiff; width: number}) {
   </Box>;
 }
 
-function ToolMessageText({text, streaming, width, toolDiffs}: {text: string; streaming?: boolean; width: number; toolDiffs?: ToolDisplayDiff[]}) {
-  const lines = text.split('\n');
+/** Rendered row count of a diff preview block (meta + code rows + optional handle/partial rows + top margin). */
+function toolDiffRows(diff: ToolDisplayDiff) {
+  return 1 + diff.lines.length + (diff.handle ? 1 : 0) + (diff.complete === false ? 1 : 0) + 1;
+}
+
+/**
+ * Live-region clamp for the streaming tool group (see liveRegion.ts): keep only
+ * the rows that fit the viewport budget, dropping whole logical lines from the
+ * top and whole diff previews from the bottom, with one indicator row each.
+ * The finalized group still enters the static transcript verbatim.
+ */
+function clampToolDisplay({text, width, toolDiffs, maxVisibleLines}: {text: string; width: number; toolDiffs: ToolDisplayDiff[] | undefined; maxVisibleLines: number | undefined}): {lines: string[]; hiddenTextRowCount: number; visibleDiffs: ToolDisplayDiff[]; hiddenDiffCount: number} {
+  const allLines = text.split('\n');
+  const allDiffs = toolDiffs ?? [];
+  if (maxVisibleLines == null) return {lines: allLines, hiddenTextRowCount: 0, visibleDiffs: allDiffs, hiddenDiffCount: 0};
+  const rows = allLines.map(line => lineRows(line, width));
+  const total = rows.reduce((sum, count) => sum + count, 0);
+  let lines = allLines;
+  let hiddenTextRowCount = 0;
+  let rowsUsed = total;
+  if (total > maxVisibleLines) {
+    const visibleBudget = Math.max(1, maxVisibleLines - 1); // indicator row
+    let used = 0;
+    let start = allLines.length;
+    while (start > 0) {
+      const next = rows[start - 1] ?? 0;
+      if (used + next > visibleBudget) break;
+      used += next;
+      start -= 1;
+    }
+    hiddenTextRowCount = rows.slice(0, start).reduce((sum, count) => sum + count, 0);
+    lines = allLines.slice(start);
+    rowsUsed = used + 1;
+  }
+  // Diffs get whatever budget the text left; reserve an indicator row when any
+  // diff might be hidden.
+  let budget = Math.max(0, maxVisibleLines - rowsUsed - (allDiffs.length > 0 ? 1 : 0));
+  const visibleDiffs: ToolDisplayDiff[] = [];
+  for (const diff of allDiffs) {
+    const cost = toolDiffRows(diff);
+    if (cost > budget) break;
+    budget -= cost;
+    visibleDiffs.push(diff);
+  }
+  return {lines, hiddenTextRowCount, visibleDiffs, hiddenDiffCount: allDiffs.length - visibleDiffs.length};
+}
+
+function ToolMessageText({text, streaming, width, toolDiffs, maxVisibleLines}: {text: string; streaming?: boolean; width: number; toolDiffs?: ToolDisplayDiff[]; maxVisibleLines?: number}) {
+  const clamped = clampToolDisplay({text, width, toolDiffs, maxVisibleLines});
+  const lines = clamped.lines;
   return <Box flexDirection="column">
+    {clamped.hiddenTextRowCount > 0 ? <Text color={theme.muted}>{`⋯ +${clamped.hiddenTextRowCount} line${clamped.hiddenTextRowCount === 1 ? '' : 's'} above`}</Text> : null}
     {lines.map((line, index) => {
       const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
       if (!row) {
@@ -121,7 +171,8 @@ function ToolMessageText({text, streaming, width, toolDiffs}: {text: string; str
         {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
       </Text>;
     })}
-    {toolDiffs?.map(diff => <ToolDiffView key={diff.id} diff={diff} width={width} />)}
+    {clamped.visibleDiffs.map(diff => <ToolDiffView key={diff.id} diff={diff} width={width} />)}
+    {clamped.hiddenDiffCount > 0 ? <Text color={theme.muted}>{`⋯ ${clamped.hiddenDiffCount} diff preview${clamped.hiddenDiffCount === 1 ? '' : 's'} hidden`}</Text> : null}
   </Box>;
 }
 
@@ -151,7 +202,16 @@ export const AssistantMarkdownChunkView = React.memo(function AssistantMarkdownC
   </Box>;
 });
 
-export const MessageView = React.memo(function MessageView({message, width, showHeader = true}: {message: Message; width: number; showHeader?: boolean}) {
+/** Streaming assistant tail clamped to the live-region budget; the full text enters the static transcript once the root settles. */
+function StreamingClampedText({text, width, maxVisibleLines}: {text: string; width: number; maxVisibleLines: number}) {
+  const clamped = clampTextTail(text, width, maxVisibleLines);
+  return <Box flexDirection="column">
+    {clamped.hiddenLineCount > 0 ? <Text color={theme.muted}>{`⋯ +${clamped.hiddenLineCount} line${clamped.hiddenLineCount === 1 ? '' : 's'} above`}</Text> : null}
+    <Text>{clamped.text}</Text>
+  </Box>;
+}
+
+export const MessageView = React.memo(function MessageView({message, width, showHeader = true, maxVisibleLines}: {message: Message; width: number; showHeader?: boolean; maxVisibleLines?: number}) {
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
       <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
@@ -167,7 +227,7 @@ export const MessageView = React.memo(function MessageView({message, width, show
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text> : null}
     {message.role === 'tool'
-      ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} />
+      ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} maxVisibleLines={message.streaming ? maxVisibleLines : undefined} />
       : message.role === 'assistant' && !message.streaming
         // Only settled assistant messages get Markdown rendering. Streaming
         // text re-tokenizes on every delta (expensive) and the partial Markdown
@@ -175,7 +235,9 @@ export const MessageView = React.memo(function MessageView({message, width, show
         ? <MarkdownText content={message.text} width={width} />
         : message.role === 'system'
           ? <SystemMessageText text={message.text} />
-          : <Text>{message.text}</Text>}
+          : message.streaming && maxVisibleLines != null
+            ? <StreamingClampedText text={message.text} width={width} maxVisibleLines={maxVisibleLines} />
+            : <Text>{message.text}</Text>}
   </Box>;
 });
 

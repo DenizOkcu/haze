@@ -19,12 +19,15 @@ function taskStatusColor(status: TaskStatus): string {
 
 export const MAX_VISIBLE_TASKS = 5;
 
-export function TaskBar({tasks, width, expanded, padding}: {tasks: Task[]; width: number; expanded: boolean; padding: number}) {
+export function TaskBar({tasks, width, expanded, padding, maxRows}: {tasks: Task[]; width: number; expanded: boolean; padding: number; maxRows?: number}) {
   const maxTitleWidth = Math.max(10, width - 6);
   const inProgress = tasks.filter(t => t.status === 'in_progress');
   const pending = tasks.filter(t => t.status === 'pending');
   const completed = tasks.filter(t => t.status === 'completed');
-  const limit = expanded ? tasks.length : MAX_VISIBLE_TASKS;
+  // Live-region budget (see chat/liveRegion.ts): expanded mode is capped too,
+  // otherwise a long task list alone can push the dynamic frame past one
+  // viewport and trigger Ink's scrollback-wiping overflow fallback.
+  const limit = expanded ? Math.min(tasks.length, maxRows ?? tasks.length) : MAX_VISIBLE_TASKS;
   const ordered: Task[] = [];
   for (const t of inProgress) { if (ordered.length < limit) ordered.push(t); }
   for (const t of pending) { if (ordered.length < limit) ordered.push(t); }
@@ -45,6 +48,7 @@ export function TaskBar({tasks, width, expanded, padding}: {tasks: Task[]; width
           </Text>
         );
       })}
+      {expanded && ordered.length < tasks.length ? <Text color={theme.muted}>  +{tasks.length - ordered.length} more (ctrl+o)</Text> : null}
     </Box>
   );
 }
