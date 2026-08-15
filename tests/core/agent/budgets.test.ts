@@ -105,3 +105,21 @@ describe('withToolExecutionBudget', () => {
     expect(sliceState.exceeded).toBe(true);
   });
 });
+
+describe('withToolExecutionBudget × withToolDeadline (RH-003/RH-004 composition)', () => {
+  it('a budget-blocked call resolves with the structured blocked result under the deadline wrapper', async () => {
+    // The deadline wrapper assumes execute yields a thenable; a synchronous
+    // blocked return must still surface as the bounded non-event, never as a
+    // TypeError that the SDK would classify as a tool failure.
+    const {withToolDeadline} = await import('../../../src/core/deadline.js');
+    const tools = makeTools({eat: () => ({ok: true})});
+    const globalState: ToolExecutionBudgetState = {started: 120, exceeded: false};
+    const budgeted = withToolExecutionBudget(tools, {state: globalState, limit: 120});
+    const deadlineWrapped = Object.fromEntries(Object.entries(budgeted).map(([name, definition]) => {
+      const execute = definition.execute as unknown as (...args: unknown[]) => Promise<unknown>;
+      return [name, {...definition, execute: (...args: unknown[]) => withToolDeadline(() => execute(...args), 60_000)}];
+    })) as typeof budgeted;
+    const blocked = await (deadlineWrapped.eat!.execute as unknown as () => Promise<unknown>)();
+    expect(isToolBudgetBlocked(blocked)).toBe(true);
+  });
+});

@@ -146,7 +146,11 @@ export function withToolExecutionBudget(tools: ToolSet, ...limits: BudgetLimit[]
     const execute = definition.execute as unknown as (...args: unknown[]) => unknown;
     return [name, {
       ...definition,
-      execute: (...args: unknown[]) => {
+      // Async so the wrapper always returns a thenable — outer wrappers (e.g.
+      // the tool deadline) assume `execute` yields a promise — while the
+      // check-and-increment below still runs synchronously at call time, so a
+      // model-emitted parallel batch cannot overshoot on the event loop.
+      execute: async (...args: unknown[]) => {
         for (const {state, limit} of limits) {
           if (state.started >= limit) {
             for (const entry of limits) entry.state.exceeded = true;
