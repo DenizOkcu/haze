@@ -16,6 +16,8 @@ export const GREP_MAX_OUTPUT_CHARS = 30_000;
 export const GREP_MAX_LINE_CHARS = 500;
 /** Bounded excerpt of older messages kept by /compact-style compaction. */
 export const COMPACTION_OLDER_CHARS = 8_000;
+/** Bounded older-transcript budget sent to the model for LLM-summarized /compact (F-09). */
+export const COMPACTION_LLM_TRANSCRIPT_CHARS = 60_000;
 /** Session JSONL values up to this size stay inline; larger ones become previews. */
 export const SESSION_INLINE_VALUE_BYTES = 32 * 1024;
 /** Preview length for slimmed session values. */

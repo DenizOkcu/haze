@@ -23,6 +23,8 @@ export type CommandContext = {
   resumeSession?: (id?: string) => Promise<void>;
   sessionInfo?: () => string;
   compactConversation?: (instructions?: string) => boolean;
+  /** LLM-summarized /compact (F-09); preferred over `compactConversation` when present. */
+  compactConversationLlm?: (instructions?: string) => Promise<boolean>;
   runAgentTurn: (prompt: string, displayValue?: string, options?: TurnExecutionOptions) => Promise<void>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
@@ -58,7 +60,12 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exact('/session'), run: (_args, ctx) => { ctx.addSystemMessage(ctx.sessionInfo?.() ?? 'Session persistence is unavailable.'); return HANDLED; }},
   {match: exactOrArgs('/resume'), run: async (args, ctx) => { if (ctx.resumeSession) await ctx.resumeSession(args || undefined); else ctx.addSystemMessage('Session persistence is unavailable.'); return HANDLED; }},
   {match: exact('/new'), run: async (_args, ctx) => { if (ctx.newSession) await ctx.newSession(); else ctx.addSystemMessage('Session persistence is unavailable.'); return HANDLED; }},
-  {match: exactOrArgs('/compact'), run: (args, ctx) => { if (ctx.compactConversation) ctx.compactConversation(args || undefined); else ctx.addSystemMessage('Compaction is unavailable.'); return HANDLED; }},
+  {match: exactOrArgs('/compact'), run: async (args, ctx) => {
+    if (ctx.compactConversationLlm) await ctx.compactConversationLlm(args || undefined);
+    else if (ctx.compactConversation) ctx.compactConversation(args || undefined);
+    else ctx.addSystemMessage('Compaction is unavailable.');
+    return HANDLED;
+  }},
   {match: exact('/clear'), run: async (_args, ctx) => { await ctx.clearConversation(); await clearTasks(); return HANDLED; }},
   {match: exactOrArgs('/logs'), run: async (args, ctx) => await handleLogsCommand(args, ctx)},
   {match: exactOrArgs('/lsp'), run: (_args, ctx) => { ctx.setMode('lsp'); ctx.addSystemMessage('Choose an LSP server to enable, disable, or remove it. Choose "add server" to add one from presets (e.g. typescript) or enter a custom command.'); return HANDLED; }},

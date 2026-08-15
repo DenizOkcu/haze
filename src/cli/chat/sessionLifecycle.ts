@@ -1,9 +1,11 @@
 import type {ModelMessage} from 'ai';
+import {generateText} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
-import {compactModelMessages} from '../../core/agent/compaction.js';
+import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, splitForCompaction} from '../../core/agent/compaction.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
+import {modelWithConfig} from '../../llm/client.js';
 import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type HazeSession} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message, TokenUsage} from '../commands/streaming.js';
@@ -36,6 +38,8 @@ export interface SessionLifecycleDeps {
   setMessages: (updater: (messages: Message[]) => Message[]) => void;
   setLiveMessagesState: (updater: (messages: Message[]) => Message[]) => void;
   setTokenUsage: (usage: TokenUsage) => void;
+  /** Manual /compact mode: model-written summary (default) or heuristic excerpt. */
+  manualCompaction?: () => 'llm-summary' | 'heuristic';
   debugLog: (line: string) => void;
   showPersistenceWarning: (error: unknown) => void;
 }
@@ -48,6 +52,8 @@ export interface SessionLifecycle {
   forkSessionById: (id: string) => Promise<boolean>;
   clearConversation: () => Promise<void>;
   compactConversation: (instructions?: string) => boolean;
+  /** Manual /compact with a model-written summary; falls back to the heuristic excerpt on any failure (F-09). */
+  compactConversationWithModel: (instructions?: string) => Promise<boolean>;
 }
 
 export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifecycle {
@@ -101,6 +107,22 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       const restored = [{role: 'system', text: `Resumed session: ${formatSession(session)}`} as Message, ...restoredMessages];
       return replaceTranscript ? restored : [...messages, ...restored];
     });
+  }
+
+  /** Heuristic-excerpt compaction shared by the sync path and the LLM fallback (F-09). */
+  function compactConversationSync(instructions?: string): boolean {
+    // Manual /compact and overflow recovery use the centralized fallback
+    // window (RH-005); the live turn path applies the model-aware budget.
+    const result = compactModelMessages(deps.conversationRef.current, {instructions, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, workState: deps.workStateRef.current});
+    if (!result.compacted) {
+      deps.setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
+      return false;
+    }
+    deps.conversationRef.current = result.messages;
+    deps.sessionRecorder()?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`);
+    deps.sessionRecorder()?.recordConversation(result.messages);
+    deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: condensed ${result.olderCount} older model messages into a bounded excerpt and kept the last ${result.keptCount}.`}]);
+    return true;
   }
 
   return {
@@ -196,18 +218,37 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     },
 
     compactConversation(instructions?: string) {
-      // Manual /compact and overflow recovery use the centralized fallback
-      // window (RH-005); the live turn path applies the model-aware budget.
-      const result = compactModelMessages(deps.conversationRef.current, {instructions, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, workState: deps.workStateRef.current});
-      if (!result.compacted) {
-        deps.setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${result.keptCount} model messages in context.`}]);
+      return compactConversationSync(instructions);
+    },
+
+    async compactConversationWithModel(instructions?: string) {
+      if ((deps.manualCompaction?.() ?? 'llm-summary') === 'heuristic') return compactConversationSync(instructions);
+      const messages = deps.conversationRef.current;
+      const split = splitForCompaction(messages, {tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS});
+      if (!split) {
+        deps.setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${messages.length} model messages in context.`}]);
         return false;
       }
-      deps.conversationRef.current = result.messages;
-      deps.sessionRecorder()?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`);
-      deps.sessionRecorder()?.recordConversation(result.messages);
-      deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: condensed ${result.olderCount} older model messages into a bounded excerpt and kept the last ${result.keptCount}.`}]);
-      return true;
+      try {
+        const runtime = await modelWithConfig();
+        if (!runtime?.model) throw new Error('no model provider configured');
+        const summarization = await generateText({
+          model: runtime.model,
+          prompt: buildLlmCompactionPrompt({older: split.older, instructions}),
+        });
+        const summaryText = summarization.text.trim();
+        if (!summaryText) throw new Error('model returned an empty summary');
+        const result = compactModelMessagesWithSummary(messages, {summaryText, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, instructions, workState: deps.workStateRef.current});
+        if (!result.compacted) throw new Error('nothing older to compact');
+        deps.conversationRef.current = result.messages;
+        deps.sessionRecorder()?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages with a model-written summary; kept ${result.keptCount}.`);
+        deps.sessionRecorder()?.recordConversation(result.messages);
+        deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: replaced ${result.olderCount} older model messages with a model-written summary and kept the last ${result.keptCount}.`}]);
+        return true;
+      } catch (error) {
+        deps.debugLog(`LLM compaction failed (${error instanceof Error ? error.message : String(error)}); falling back to the heuristic excerpt`);
+        return compactConversationSync(instructions);
+      }
     },
   };
 }

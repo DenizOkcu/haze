@@ -198,4 +198,13 @@ describe('settings', () => {
     await fs.writeJson(settingsFile, {providers: [{name: 'cloud', url: 'https://x/v1', models: ['m'], modelLimits: {m: {contextWindowTokens: 1, pricing: {inputPerMillionTokens: -5, outputPerMillionTokens: 2}}}}]});
     await expect(readSettings()).rejects.toThrow();
   });
+
+  it('parses the manual compaction mode and rejects unknown values loudly (F-09)', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({manualCompaction: 'heuristic'});
+    expect((await readSettings()).manualCompaction).toBe('heuristic');
+    await fs.writeJson(settingsFile, {manualCompaction: 'aggressive'});
+    await expect(readSettings()).rejects.toThrow();
+  });
+
 });

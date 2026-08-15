@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
-import {compactModelMessages, modelMessageText} from '../../src/core/agent/compaction.js';
+import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, modelMessageText, splitForCompaction} from '../../src/core/agent/compaction.js';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {isContextOverflowError, isRetryableModelError} from '../../src/core/agent/errors.js';
 
@@ -131,5 +131,39 @@ describe('agent provider error classification', () => {
     expect(isRetryableModelError(new Error('stream disconnected unexpectedly'))).toBe(true);
     expect(isRetryableModelError(new Error('bad request 400'))).toBe(false);
     expect(isRetryableModelError(new Error('payment method declined (card 4001)'))).toBe(false);
+  });
+});
+
+describe('LLM-summarized compaction pieces (F-09)', () => {
+  const many: ModelMessage[] = Array.from({length: 30}, (_, i) => msg('user', `older message ${i} ` + 'x'.repeat(50)));
+
+  it('splitForCompaction mirrors the heuristic split rules', () => {
+    const split = splitForCompaction([...many, msg('user', 'recent')], {keepRecentMessages: 3});
+    expect(split?.older).toHaveLength(28);
+    expect(split?.recent).toHaveLength(3);
+    expect(splitForCompaction(many.slice(0, 2), {keepRecentMessages: 5})).toBeUndefined();
+  });
+
+  it('buildLlmCompactionPrompt bounds the transcript and keeps the most recent entries', () => {
+    const prompt = buildLlmCompactionPrompt({older: many, instructions: 'focus on decisions', maxChars: 600});
+    expect(prompt).toContain('<older_conversation>');
+    expect(prompt).toContain('User compaction instructions: focus on decisions');
+    expect(prompt).toContain('older message 29');
+    expect(prompt).not.toContain('older message 0 ');
+    const transcript = prompt.slice(prompt.indexOf('<older_conversation>'), prompt.indexOf('</older_conversation>'));
+    expect(transcript.length).toBeLessThanOrEqual(620);
+  });
+
+  it('compactModelMessagesWithSummary wraps the model summary with continuity framing', () => {
+    const result = compactModelMessagesWithSummary([...many, msg('user', 'recent')], {summaryText: 'THE SUMMARY', keepRecentMessages: 3});
+    expect(result.compacted).toBe(true);
+    expect(result.olderCount).toBe(28);
+    expect(result.keptCount).toBe(3);
+    const first = result.messages[0] as {role: string; content: string};
+    expect(first.role).toBe('user');
+    expect(first.content).toContain('<haze_compaction>');
+    expect(first.content).toContain('Model-written summary of the older conversation:');
+    expect(first.content).toContain('THE SUMMARY');
+    expect(result.messages.at(-1)).toEqual(msg('user', 'recent'));
   });
 });

@@ -303,10 +303,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     setMessages,
     setLiveMessagesState,
     setTokenUsage,
+    manualCompaction: () => settings.manualCompaction ?? 'llm-summary',
     debugLog,
     showPersistenceWarning,
   });
-  const {clearConversation, compactConversation} = sessionLifecycle;
+  const {clearConversation, compactConversation, compactConversationWithModel} = sessionLifecycle;
 
   async function openSessionPicker() {
     await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
@@ -459,6 +460,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       },
       sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
       compactConversation,
+      compactConversationLlm: compactConversationWithModel,
       runAgentTurn: (prompt, displayValue, options) => doAgentTurn(prompt, displayValue, options),
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
