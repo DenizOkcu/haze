@@ -16,7 +16,6 @@ import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imag
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, lengthContinuationPrompt, completionRescuePrompt, goalContinuationPrompt} from '../../core/goal/completionPolicy.js';
 import {calculateRequestTokenBudget, estimateMessagesTokens, estimateValueTokens} from '../../core/agent/contextBudget.js';
-import {usageCostUsd} from '../../core/agent/costAccounting.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../core/agent/toolResults.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
@@ -531,9 +530,6 @@ async function runAgentAttempt(
           reasoningTokens: providerUsage.reasoningTokens,
           logicalInputEstimate: inputBreakdown.logicalInputEstimate,
           effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
-          // USD cost estimate from the model's configured pricing metadata, if
-          // any (F-12); undefined keeps the field absent for unpriced models.
-          ...(runtime.config.pricing ? {costUsd: usageCostUsd(providerUsage, runtime.config.pricing)} : {}),
         });
         const accumulated = [...stripSyntheticControls(requestMessages), ...event.responseMessages];
         const compacted = compactToolHistory(accumulated);

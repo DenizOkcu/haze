@@ -17,15 +17,3 @@ describe('turn state helpers', () => {
     expect(accumulateTokenUsage({...EMPTY_TOKEN_USAGE, inputTokens: 3, effectiveNonCachedInput: 4}, {...EMPTY_TOKEN_USAGE, inputTokens: 5, effectiveNonCachedInput: 6})).toMatchObject({inputTokens: 8, effectiveNonCachedInput: 10});
   });
 });
-
-describe('cost accumulation (F-12)', () => {
-  it('sums costUsd across reports and stays absent until the first priced report', () => {
-    const unpriced = accumulateTokenUsage({...EMPTY_TOKEN_USAGE}, {...EMPTY_TOKEN_USAGE, inputTokens: 10});
-    expect(unpriced.costUsd).toBeUndefined();
-    const first = accumulateTokenUsage({...EMPTY_TOKEN_USAGE}, {...EMPTY_TOKEN_USAGE, costUsd: 0.25});
-    expect(first.costUsd).toBeCloseTo(0.25, 9);
-    const mixed = accumulateTokenUsage(first, {...EMPTY_TOKEN_USAGE, inputTokens: 5});
-    expect(mixed.costUsd).toBeCloseTo(0.25, 9);
-    expect(accumulateTokenUsage(mixed, {...EMPTY_TOKEN_USAGE, costUsd: 0.5}).costUsd).toBeCloseTo(0.75, 9);
-  });
-});

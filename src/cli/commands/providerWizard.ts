@@ -19,7 +19,7 @@ export function chatgptCodexUrlWarning(provider: HazeProviderSettings): string |
 }
 
 /** Merge order for per-model limits on add: preset-curated < live-discovered < existing user settings. */
-function mergedModelLimits(curated: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number; pricing?: {inputPerMillionTokens: number; outputPerMillionTokens: number; cacheReadPerMillionTokens?: number; cacheWritePerMillionTokens?: number}}>, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
+function mergedModelLimits(curated: HarvestedModelLimits, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
   const discoveredSubset: HarvestedModelLimits = {};
   for (const model of models) if (discovered?.[model]) discoveredSubset[model] = discovered[model];
   const merged = {...curated, ...discoveredSubset, ...existing};

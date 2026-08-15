@@ -6,7 +6,6 @@ import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
 import {resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy} from '../core/agent/reasoningPolicy.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS, FALLBACK_LOCAL_CONTEXT_TOKENS} from '../core/agent/contextBudget.js';
-import type {ModelPricing} from '../core/agent/costAccounting.js';
 import {createChatGptCodexFetch} from './openaiCodex.js';
 export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
 
@@ -35,8 +34,6 @@ export interface ModelRuntimeConfig {
   contextWindowSource: 'settings' | 'user-fallback' | 'default-fallback';
   /** Optional output-token limit metadata for request budgeting (RH-005). */
   maxOutputTokens?: number;
-  /** Optional per-model pricing used for the USD cost estimate (F-12). */
-  pricing?: ModelPricing;
 }
 
 const HAZE_SITE_URL = 'https://denizokcu.github.io/haze/';
@@ -119,29 +116,17 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       contextWindowTokens: limits.contextWindowTokens ?? fallbackTokens,
       contextWindowSource,
       ...(limits.maxOutputTokens !== undefined ? {maxOutputTokens: limits.maxOutputTokens} : {}),
-      ...(limits.pricing !== undefined ? {pricing: limits.pricing} : {}),
     },
   };
 }
 
 /** Resolve optional context-window/output-token metadata for the selected model (RH-005). */
-function modelLimitsFor(provider: HazeProviderSettings, modelName: string): {contextWindowTokens?: number; maxOutputTokens?: number; pricing?: ModelPricing} {
+function modelLimitsFor(provider: HazeProviderSettings, modelName: string): {contextWindowTokens?: number; maxOutputTokens?: number} {
   const limits = provider.modelLimits?.[modelName];
   if (!limits) return {};
-  const out: {contextWindowTokens?: number; maxOutputTokens?: number; pricing?: ModelPricing} = {};
+  const out: {contextWindowTokens?: number; maxOutputTokens?: number} = {};
   if (typeof limits.contextWindowTokens === 'number') out.contextWindowTokens = limits.contextWindowTokens;
   if (typeof limits.maxOutputTokens === 'number') out.maxOutputTokens = limits.maxOutputTokens;
-  if (limits.pricing != null) {
-    const pricing = limits.pricing;
-    if (typeof pricing.inputPerMillionTokens === 'number' && typeof pricing.outputPerMillionTokens === 'number') {
-      out.pricing = {
-        inputPerMillionTokens: pricing.inputPerMillionTokens,
-        outputPerMillionTokens: pricing.outputPerMillionTokens,
-        ...(typeof pricing.cacheReadPerMillionTokens === 'number' ? {cacheReadPerMillionTokens: pricing.cacheReadPerMillionTokens} : {}),
-        ...(typeof pricing.cacheWritePerMillionTokens === 'number' ? {cacheWritePerMillionTokens: pricing.cacheWritePerMillionTokens} : {}),
-      };
-    }
-  }
   return out;
 }
 
