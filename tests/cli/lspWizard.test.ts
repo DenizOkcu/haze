@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../../src/cli/commands/lspWizard.js';
+import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../../src/cli/commands/serverWizard.js';
 
 describe('lsp wizard helpers', () => {
   const settings = {lspServers: [{name: 'ts', command: 'typescript-language-server', args: ['--stdio'], enabled: true}]};

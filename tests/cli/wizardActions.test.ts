@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {providerActionSuggestions, lspActionSuggestions, mcpActionSuggestions, skillsActionSuggestions, mcpTransportSuggestions} from '../../src/cli/commands/wizardSuggestions.js';
-import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, SKILL_ACTIONS} from '../../src/cli/commands/wizardActions.js';
+import {providerActionSuggestions, lspActionSuggestions, mcpActionSuggestions, skillsActionSuggestions, mcpTransportSuggestions} from '../../src/cli/commands/wizardFlow.js';
+import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIONS, SKILL_ACTIONS} from '../../src/cli/commands/wizardFlow.js';
 
 describe('wizard action constants', () => {
   it('backs provider action suggestions', () => {

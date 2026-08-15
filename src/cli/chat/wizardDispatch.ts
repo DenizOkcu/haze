@@ -16,15 +16,10 @@ import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js'
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {Mode} from '../commands/chatModes.js';
-import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from '../commands/wizardActions.js';
-import {captureLspName} from '../commands/wizardPrompts.js';
-import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../commands/lspWizard.js';
-import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/mcpWizard.js';
+import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES, captureLspName, commaList, isYesConfirmation} from '../commands/wizardFlow.js';
+import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult, finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/serverWizard.js';
 import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
-import {selectSkillActionResult, selectSkillResult} from '../commands/skillWizard.js';
-import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from '../commands/skillCreation.js';
-import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillConfirmRemove.js';
-import {commaList, isYesConfirmation} from '../commands/wizardInput.js';
+import {selectSkillActionResult, selectSkillResult, captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage, skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillsWizard.js';
 import {startupProviderInfo} from './startupInfo.js';
 import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
 import {openBrowser, startChatGptBrowserLogin} from '../../llm/openaiCodexOAuth.js';

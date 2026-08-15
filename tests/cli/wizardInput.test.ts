@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {commaList, commandParts, isValidUrl, isYesConfirmation} from '../../src/cli/commands/wizardInput.js';
+import {commaList, commandParts, isValidUrl, isYesConfirmation} from '../../src/cli/commands/wizardFlow.js';
 
 describe('wizard input helpers', () => {
   it('parses comma-separated values', () => {

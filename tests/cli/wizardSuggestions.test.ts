@@ -16,7 +16,7 @@ import {
   skillsSuggestions,
   skillsActionSuggestions,
   skillScopeSuggestions,
-} from '../../src/cli/commands/wizardSuggestions.js';
+} from '../../src/cli/commands/wizardFlow.js';
 
 const settings = (overrides: Partial<HazeSettings> = {}): HazeSettings => ({...overrides});
 

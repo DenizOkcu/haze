@@ -1,55 +1,28 @@
-export type Mode = 'chat' | 'sessions' | 'sessionAction' | 'provider' | 'providerAction' | 'model' | 'modelAddProvider' | 'modelPick' | 'providerAddPreset' | 'providerAddName' | 'providerAddUrl' | 'providerAddKey' | 'providerAddModels' | 'providerAppendModels' | 'providerSetKey' | 'providerRemoveModels' | 'providerConfirmRemove' | 'skills' | 'skillsAction' | 'skillsAddName' | 'skillsAddScope' | 'skillsAddDescription' | 'skillsConfirmRemove' | 'lsp' | 'lspAction' | 'lspAddPreset' | 'lspAddName' | 'lspAddCommand' | 'lspConfirmRemove' | 'mcp' | 'mcpAction' | 'mcpAddPreset' | 'mcpAddName' | 'mcpAddTransport' | 'mcpAddUrl' | 'mcpAddCommand' | 'mcpAddKey' | 'mcpSetKey' | 'mcpConfirmRemove';
+import {WIZARD_STEPS, type WizardStepDef, type WizardStepId} from './wizardFlow.js';
+
+/**
+ * Input-mode classification derived from the wizard flow table
+ * (`wizardFlow.ts`): the `Mode` union, the picker/masked/empty-submit sets,
+ * and per-mode placeholders all follow from the step definitions, so adding a
+ * step updates every classification from its single table entry.
+ */
+export type Mode = 'chat' | WizardStepId;
+
+/** Wizard steps viewed through their definition type, for uniform property access. */
+const STEPS: readonly WizardStepDef[] = WIZARD_STEPS;
+
+const stepIds = (steps: readonly WizardStepDef[]): Mode[] => steps.map(step => step.id as Mode);
 
 /** Modes that show an always-on suggestion picker (server/preset lists). */
-export const PICKER_MODES: ReadonlySet<Mode> = new Set(['sessions', 'sessionAction', 'provider', 'providerAction', 'providerAddPreset', 'model', 'modelAddProvider', 'modelPick', 'skills', 'skillsAction', 'skillsAddScope', 'lsp', 'lspAction', 'lspAddPreset', 'mcp', 'mcpAction', 'mcpAddPreset', 'mcpAddTransport']);
+export const PICKER_MODES: ReadonlySet<Mode> = new Set(stepIds(STEPS.filter(step => step.kind === 'pick')));
 
 /** Modes that mask input (secrets/API keys). */
-export const MASKED_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'providerSetKey', 'mcpAddKey', 'mcpSetKey']);
+export const MASKED_MODES: ReadonlySet<Mode> = new Set(stepIds(STEPS.filter(step => step.kind === 'masked-input')));
 
 /** Modes where submitting an empty value is valid (optional steps). */
-export const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(['providerAddKey', 'mcpAddKey']);
-
-const PLACEHOLDERS: Partial<Record<Mode, string>> = {
-  sessions: 'Choose a saved session',
-  sessionAction: 'Resume or fork this session',
-  provider: 'Choose provider',
-  providerAction: 'Choose provider action',
-  providerAddPreset: 'Choose a provider preset or custom',
-  model: 'Choose model, or add model',
-  modelAddProvider: 'Choose a provider to add models to',
-  modelPick: 'Choose a model to add',
-  providerAddName: 'Provider name',
-  providerAddUrl: 'https://example.com/v1',
-  providerAddKey: 'API key, or blank for local',
-  providerSetKey: 'API key',
-  providerAddModels: 'model-a, model-b',
-  providerAppendModels: 'model-a, model-b',
-  providerRemoveModels: 'model-a, model-b',
-  providerConfirmRemove: 'Type "yes" to confirm',
-  skills: 'Choose a skill or add skill',
-  skillsAction: 'show info, enable, disable, validate, or remove',
-  skillsAddName: 'Skill name (kebab-case, e.g. security-review)',
-  skillsAddScope: 'Choose this project or global',
-  skillsAddDescription: 'Describe what the skill should do',
-  skillsConfirmRemove: 'Type "yes" to confirm',
-  lsp: 'Choose LSP server or add server',
-  lspAction: 'enable, disable, or remove server',
-  lspAddPreset: 'Choose an LSP preset or custom',
-  lspAddName: 'LSP server name (e.g. typescript)',
-  lspAddCommand: 'Command (e.g. typescript-language-server --stdio)',
-  lspConfirmRemove: 'Type "yes" to confirm',
-  mcp: 'Choose MCP server or add server',
-  mcpAction: 'enable, disable, remove, or set key',
-  mcpAddPreset: 'Choose an MCP preset or custom',
-  mcpAddName: 'MCP server name (e.g. context7)',
-  mcpAddTransport: 'http, sse, or stdio',
-  mcpAddUrl: 'https://mcp.example.com/mcp',
-  mcpAddCommand: 'Command (e.g. npx -y @pkg/server)',
-  mcpAddKey: 'API key, or blank to skip',
-  mcpSetKey: 'API key',
-  mcpConfirmRemove: 'Type "yes" to confirm',
-};
+export const SUBMIT_EMPTY_MODES: ReadonlySet<Mode> = new Set(stepIds(STEPS.filter(step => step.optional)));
 
 export function placeholderForMode(mode: Mode, busy: boolean): string {
-  return PLACEHOLDERS[mode] ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask haze to help build your app');
+  const step = WIZARD_STEPS.find(candidate => candidate.id === mode);
+  return step?.placeholder ?? (busy ? 'Queue a follow-up, or Esc to interrupt' : 'Ask haze to help build your app');
 }

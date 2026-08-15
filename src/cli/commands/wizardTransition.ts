@@ -1,6 +1,6 @@
 import type {HazeSettings, HazeMcpServer, HazeProviderSettings} from '../../config/settings.js';
 import type {Mode} from './chatModes.js';
-import {captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from './wizardPrompts.js';
+import {captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from './wizardFlow.js';
 
 type SharedWizardEffect =
   | {type: 'message'; text?: string}

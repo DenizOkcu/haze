@@ -1,7 +1,13 @@
 import type {HazeSettings} from '../../config/settings.js';
-import {isSkillEnabled, setSkillEnabled} from '../../config/skillSettings.js';
+import {isSkillEnabled, removeSkillSetting, setSkillEnabled} from '../../config/skillSettings.js';
 import type {LoadedSkill} from '../../skills/types.js';
-import {COMMON_ACTIONS, SKILL_ACTIONS, SKILL_CHOICES} from './wizardActions.js';
+import {COMMON_ACTIONS, SKILL_ACTIONS, SKILL_CHOICES, findSelectedSkill, isYesConfirmation, skillPickerValue} from './wizardFlow.js';
+
+/**
+ * Pure result functions for the skills wizard flow: selection, actions,
+ * creation-from-description, and confirm-remove. Steps live in
+ * `wizardFlow.ts`; submit orchestration in `chat/wizardDispatch.ts`.
+ */
 
 export type SkillWizardResult = {
   message?: string;
@@ -10,16 +16,6 @@ export type SkillWizardResult = {
   settingsPatch?: Partial<HazeSettings>;
   clearDraft?: boolean;
 };
-
-export function skillPickerValue(skill: LoadedSkill) {
-  return `${skill.name} · ${skill.source}`;
-}
-
-export function findSelectedSkill(skills: LoadedSkill[], selection: string | undefined) {
-  if (!selection) return undefined;
-  return skills.find(skill => skillPickerValue(skill) === selection)
-    ?? skills.find(skill => skill.name === selection);
-}
 
 export function selectSkillResult(skills: LoadedSkill[], name: string): SkillWizardResult {
   if (name === SKILL_CHOICES.addSkill) return {mode: 'skillsAddName', clearDraft: true, message: 'Name the skill (kebab-case, e.g. security-review). ESC cancels.'};
@@ -52,4 +48,52 @@ export function selectSkillActionResult(settings: HazeSettings, skills: LoadedSk
   if (action === SKILL_ACTIONS.validate) return {validate: true, skill};
   if (action === SKILL_ACTIONS.removeSkill) return {mode: 'skillsConfirmRemove', message: `Remove ${skill.source} skill ${skill.name}? This deletes ${skill.dir}. Type "yes" to confirm. Esc to cancel.`, skill};
   return {message: `Unknown skill action: ${action}`, skill};
+}
+
+export type SkillCreationResult = {
+  busy?: boolean;
+  busyLabel?: string;
+  message?: string;
+  description?: string;
+  draftName?: string;
+  mode?: 'chat';
+  clearDraft?: boolean;
+};
+
+export function captureSkillDescription(value: string, draftName: string | undefined): SkillCreationResult {
+  const description = value.trim();
+  if (!description) return {message: 'Description is required. Try again, or press ESC to cancel.'};
+  if (!draftName) return {mode: 'chat', clearDraft: true, message: 'Skill wizard lost the name. Start over with /skills.'};
+  return {description, draftName, busy: true, busyLabel: 'Creating skill'};
+}
+
+export function skillCreationMessage(name: string, file: string): string {
+  return `Created skill ${name} at ${file}. Invoke it with /${name}. Edit SKILL.md to refine its workflow.`;
+}
+
+export function skillCreationFailure(error: unknown): string {
+  return `Skill creation failed: ${error instanceof Error ? error.message : String(error)}`;
+}
+export type SkillConfirmRemoveResult = {
+  message?: string;
+  mode?: 'chat';
+  settingsPatch?: Partial<HazeSettings>;
+  removedDir?: string;
+  selectedName?: string;
+  skill?: LoadedSkill;
+};
+
+export function skillConfirmRemoveResult(settings: HazeSettings, skills: LoadedSkill[], selectedName: string | undefined, value: string): SkillConfirmRemoveResult {
+  if (!selectedName) return {mode: 'chat'};
+  if (!isYesConfirmation(value)) return {mode: 'chat', selectedName: undefined, message: 'Cancelled. Skill not removed.'};
+  const skill = findSelectedSkill(skills, selectedName);
+  if (!skill) return {mode: 'chat', selectedName: undefined, message: `Skill ${selectedName} not found.`};
+  return {
+    mode: 'chat',
+    selectedName: undefined,
+    skill,
+    removedDir: skill.dir,
+    settingsPatch: {skills: removeSkillSetting(settings, skill.name, skill.source)},
+    message: skill.source === 'global' ? `Removed skill ${skill.name}.` : `Removed project skill ${skill.name}.`,
+  };
 }

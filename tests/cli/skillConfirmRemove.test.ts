@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {skillConfirmRemoveResult} from '../../src/cli/commands/skillConfirmRemove.js';
+import {skillConfirmRemoveResult} from '../../src/cli/commands/skillsWizard.js';
 import type {LoadedSkill} from '../../src/skills/types.js';
 
 const skill: LoadedSkill = {name: 'review', description: 'd', dir: '/tmp/review', body: 'b', references: [], source: 'global'};

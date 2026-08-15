@@ -45,7 +45,7 @@ import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {detectCheckoutMismatch, formatMismatchWarning, runtimeCapabilities} from '../../utils/buildInfo.js';
 import {transitionMcpField, transitionProviderField} from './wizardTransition.js';
-import {commandParts} from './wizardInput.js';
+import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
 

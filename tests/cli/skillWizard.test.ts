@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {selectSkillActionResult, selectSkillResult, skillInfoMessage} from '../../src/cli/commands/skillWizard.js';
+import {selectSkillActionResult, selectSkillResult, skillInfoMessage} from '../../src/cli/commands/skillsWizard.js';
 import type {LoadedSkill} from '../../src/skills/types.js';
 
 const skill: LoadedSkill = {name: 'review', description: 'Review code', dir: '/tmp/review', body: 'body', references: [], source: 'global'};

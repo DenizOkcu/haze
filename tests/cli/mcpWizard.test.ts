@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../../src/cli/commands/mcpWizard.js';
+import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../../src/cli/commands/serverWizard.js';
 
 const settings = {mcpServers: [{name: 'ctx', transport: 'http' as const, url: 'https://x'}]};
 

@@ -1,8 +1,9 @@
 import {configuredProviders, findProvider, upsertProvider} from '../../config/providers.js';
+import {PROVIDER_ACTIONS, commaList} from './wizardFlow.js';
 import type {HazeProviderSettings, HazeSettings} from '../../config/settings.js';
 import type {Mode} from './chatModes.js';
-import {PROVIDER_ACTIONS} from './wizardActions.js';
-import {commaList} from './wizardInput.js';
+
+
 import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
 import {presetModelLimitsForModels} from '../../config/providerPresets.js';
 import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';

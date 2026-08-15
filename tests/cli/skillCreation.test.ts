@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {captureSkillDescription, skillCreationFailure, skillCreationMessage} from '../../src/cli/commands/skillCreation.js';
+import {captureSkillDescription, skillCreationFailure, skillCreationMessage} from '../../src/cli/commands/skillsWizard.js';
 
 describe('skill creation', () => {
   it('rejects empty descriptions', () => {

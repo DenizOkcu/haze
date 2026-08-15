@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from '../../src/cli/commands/wizardPrompts.js';
+import {captureLspName, captureMcpCommand, captureMcpName, captureMcpTransport, captureMcpUrl, captureProviderName, captureProviderUrl} from '../../src/cli/commands/wizardFlow.js';
 
 describe('wizard capture helpers', () => {
   it('validates provider names and uniqueness', () => {

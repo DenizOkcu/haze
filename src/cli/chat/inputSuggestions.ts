@@ -1,11 +1,7 @@
-import type {HazeSettings} from '../../config/settings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
-import type {LoadedSkill} from '../../skills/types.js';
-import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
+import {wizardSuggestionsFor, type WizardSuggestionState} from '../commands/wizardFlow.js';
 import type {Mode} from '../commands/chatModes.js';
-import {providerSuggestions, providerActionSuggestions, presetSuggestions, modelSuggestions, modelAddProviderSuggestions, modelPickSuggestions, lspSuggestions, lspActionSuggestions, lspPresetSuggestions, mcpSuggestions, mcpActionSuggestions, mcpPresetSuggestions, mcpTransportSuggestions, skillsSuggestions, skillsActionSuggestions, skillScopeSuggestions} from '../commands/wizardSuggestions.js';
-import {sessionActionSuggestions, sessionSuggestions} from '../commands/sessionPicker.js';
 
 const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/help', description: 'Show commands', kind: 'command'},
@@ -27,42 +23,19 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/quit', description: 'Exit haze', kind: 'command'},
 ];
 
-interface InputSuggestionState {
+/** Inputs for suggestion building: the wizard picker state plus the current input mode. */
+export interface InputSuggestionState extends WizardSuggestionState {
   mode: Mode;
-  settings: HazeSettings;
-  skills: LoadedSkill[];
-  selectedProviderName?: string;
-  modelProviderFilter?: string;
-  providerDraftName?: string;
-  discoveredModels?: string[];
-  suggestedModels?: string[];
-  selectedSkillName?: string;
-  selectedLspName?: string;
-  selectedMcpName?: string;
-  sessions?: SessionSummary[];
 }
 
+/**
+ * Suggestions for the current input mode. Wizard/picker modes delegate to the
+ * step's suggestion builder from the flow table; chat mode shows slash
+ * commands plus enabled skill invocations.
+ */
 export function inputSuggestionsForState(state: InputSuggestionState): TextInputSuggestion[] {
-  const {mode, settings, skills} = state;
-  if (mode === 'sessions') return sessionSuggestions(state.sessions ?? []);
-  if (mode === 'sessionAction') return sessionActionSuggestions();
-  if (mode === 'provider') return providerSuggestions(settings);
-  if (mode === 'providerAction') return providerActionSuggestions(settings, state.selectedProviderName);
-  if (mode === 'providerAddPreset') return presetSuggestions();
-  if (mode === 'model') return modelSuggestions(settings, state.modelProviderFilter);
-  if (mode === 'modelAddProvider') return modelAddProviderSuggestions(settings);
-  if (mode === 'modelPick') return modelPickSuggestions(settings, state.selectedProviderName ?? state.providerDraftName, state.discoveredModels ?? [], state.suggestedModels ?? []);
-  if (mode === 'skills') return skillsSuggestions(settings, skills);
-  if (mode === 'skillsAction') return skillsActionSuggestions(settings, skills, state.selectedSkillName);
-  if (mode === 'skillsAddScope') return skillScopeSuggestions();
-  if (mode === 'lsp') return lspSuggestions(settings);
-  if (mode === 'lspAction') return lspActionSuggestions(settings, state.selectedLspName);
-  if (mode === 'lspAddPreset') return lspPresetSuggestions();
-  if (mode === 'mcp') return mcpSuggestions(settings);
-  if (mode === 'mcpAction') return mcpActionSuggestions(settings, state.selectedMcpName);
-  if (mode === 'mcpAddPreset') return mcpPresetSuggestions();
-  if (mode === 'mcpAddTransport') return mcpTransportSuggestions();
-  if (mode !== 'chat') return [];
+  if (state.mode !== 'chat') return wizardSuggestionsFor(state.mode, state) ?? [];
+  const {settings, skills} = state;
   const activeSkills = skills.filter((skill, index) => isSkillEnabled(settings, skill.name, skill.source)
     && !skills.slice(0, index).some(candidate => candidate.name === skill.name && isSkillEnabled(settings, candidate.name, candidate.source)));
   return [
