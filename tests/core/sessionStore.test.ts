@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
 
 describe('sessionStore', () => {
@@ -22,6 +22,7 @@ describe('sessionStore', () => {
 
   afterEach(async () => {
     clearSessionSummaryCacheForTests();
+    setSessionVacuumThresholdForTests(SESSION_VACUUM_THRESHOLD_BYTES);
     await fs.remove(tmp);
   });
 
@@ -396,5 +397,59 @@ describe('sessionStore', () => {
     // One scan: each malformed line surfaces exactly once.
     expect(restored.parseErrors).toHaveLength(1);
     expect(restored.parseErrors[0]).toContain('Line 4');
+  });
+
+  it('vacuums superseded snapshots once they dominate the file, preserving restore and browsing (F-03)', async () => {
+    setSessionVacuumThresholdForTests(4_096);
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'begin'});
+    const filler = 'x'.repeat(1_500);
+    for (let turn = 1; turn <= 6; turn++) {
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: String(turn), messages: [{role: 'user', content: `${filler} #${turn}`}] as ModelMessage[]});
+      await appendSessionEntry(session, {type: 'work_state_snapshot', at: String(turn), state: createWorkState(`goal-${turn}`, 'implementation', ['done'])});
+      await appendSessionEntry(session, {type: 'ui_message', at: String(turn), role: 'assistant', text: `answer ${turn}`});
+    }
+
+    const {entries} = await readSessionEntries(session);
+    // Superseded snapshots are dropped at each threshold crossing; at most one
+    // pre-vacuum survivor of each type can remain alongside the newest (the
+    // vacuum runs inside the append that crossed the threshold, not after).
+    const snapshots = entries.filter(entry => entry.type === 'conversation_snapshot');
+    const workStates = entries.filter(entry => entry.type === 'work_state_snapshot');
+    expect(snapshots.length).toBeLessThanOrEqual(2);
+    expect(workStates.length).toBeLessThanOrEqual(2);
+    expect(snapshots.length).toBeLessThan(6);
+    expect(snapshots.at(-1)).toMatchObject({messages: [{role: 'user', content: `${filler} #6`}] as never});
+    expect(workStates.at(-1)).toMatchObject({state: {goal: 'goal-6'}});
+    const uiMessages = entries.filter(entry => entry.type === 'ui_message');
+    expect(uiMessages.map(entry => (entry as {text: string}).text)).toEqual(['begin', 'answer 1', 'answer 2', 'answer 3', 'answer 4', 'answer 5', 'answer 6']);
+
+    // Restore semantics are unchanged: the newest snapshot wins.
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual([{role: 'user', content: `${filler} #6`}]);
+    expect(restored.workState).toMatchObject({goal: 'goal-6'});
+    expect(restored.parseErrors).toEqual([]);
+
+    // And the vacuum actually shrank the file versus the quadratic shape.
+    const size = (await fs.stat(session.file)).size;
+    expect(size).toBeLessThan(4_096 * 2);
+  });
+  it('does not vacuum below the threshold or when a rewrite would not halve the file (F-03)', async () => {
+    setSessionVacuumThresholdForTests(4_096);
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'begin'});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'small'}] as ModelMessage[]});
+    // Below threshold: a direct vacuum call is a no-op.
+    await expect(vacuumSessionFileIfLarge(session)).resolves.toBe(false);
+    const {entries} = await readSessionEntries(session);
+    expect(entries.filter(entry => entry.type === 'conversation_snapshot')).toHaveLength(1);
+
+    // A file that is over threshold but dominated by one giant snapshot (plus
+    // one small superseded one) would not halve, so it is left alone.
+    const big = 'y'.repeat(6_000);
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: big}] as ModelMessage[]});
+    const before = await fs.stat(session.file);
+    await expect(vacuumSessionFileIfLarge(session)).resolves.toBe(false);
+    expect((await fs.stat(session.file)).size).toBe(before.size);
   });
 });

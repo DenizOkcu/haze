@@ -6,7 +6,7 @@ import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
 import {prepareSessionEntryForWrite} from './sessionSlimming.js';
-import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile} from '../../config/privateStorage.js';
+import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
 import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
@@ -101,6 +101,53 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
     return;
   }
   await appendPrivateFile(session.file, `${JSON.stringify(prepared)}\n`);
+  // Snapshot deduplication runs inside the same serialized writer as the
+  // append, so ordering with subsequent entries is preserved (F-03).
+  await vacuumSessionFileIfLarge(session).catch(() => undefined);
+}
+
+/**
+ * Session files rewrite their full conversation history per turn, so a long
+ * session grows quadratically: N tokens of final history cost O(turns ×
+ * history) bytes on disk (F-03). Once superseded snapshots dominate the file,
+ * rewrite it keeping only the newest conversation/work-state snapshot plus
+ * every non-snapshot entry (restore reads only the newest snapshot of each
+ * type, so dropping superseded ones is lossless for restore; summaries keep
+ * their ui_message/event history). Atomic replace, never partial.
+ */
+export const SESSION_VACUUM_THRESHOLD_BYTES = 16 * 1024 * 1024;
+
+let effectiveVacuumThresholdBytes = SESSION_VACUUM_THRESHOLD_BYTES;
+
+/** Test-only override for the vacuum trigger; tests restore the original. */
+export function setSessionVacuumThresholdForTests(bytes: number): void {
+  effectiveVacuumThresholdBytes = bytes;
+}
+
+export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBytes: number = effectiveVacuumThresholdBytes): Promise<boolean> {
+  if (session.deferredWrite) return false;
+  const stat = await fs.stat(session.file).catch(() => undefined);
+  if (!stat || stat.size < thresholdBytes) return false;
+  const {entries} = await readSessionEntries(session);
+  let lastConversation = -1;
+  let lastWorkState = -1;
+  entries.forEach((entry, index) => {
+    if (entry.type === 'conversation_snapshot') lastConversation = index;
+    if (entry.type === 'work_state_snapshot') lastWorkState = index;
+  });
+  // Malformed lines are dropped by the rewrite: they were already unusable
+  // (and reported as parse errors on read) and keeping them would defeat the
+  // size bound the vacuum exists to enforce.
+  const kept = entries.filter((entry, index) =>
+    (entry.type !== 'conversation_snapshot' && entry.type !== 'work_state_snapshot')
+    || index === lastConversation
+    || index === lastWorkState);
+  const serialized = kept.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+  // Only rewrite when it meaningfully shrinks the file; otherwise a single
+  // dominant snapshot would trigger a full rewrite on every append.
+  if (serialized.length > stat.size / 2) return false;
+  await writePrivateFileAtomic(session.file, serialized);
+  return true;
 }
 
 export interface ReadSessionEntriesResult {
