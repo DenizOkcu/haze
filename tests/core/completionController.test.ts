@@ -8,6 +8,7 @@ import {
   hasRemainingRecoveryBudget,
   isBudgetExhausted,
   normalizeFinishReason,
+  rescueEligibleRequest,
   RESCUE_BOUNDARY,
   toCompletionEvidence,
   type CompletionEvidence,
@@ -135,6 +136,22 @@ describe('hasSatisfactoryTerminalOutcome', () => {
 });
 
 describe('recovery decisions (Increment 2: bounded, single-use)', () => {
+  it('rescue eligibility covers every deliverable-bearing intent, including test orchestration (F-04)', () => {
+    expect(rescueEligibleRequest('implement')).toBe(true);
+    expect(rescueEligibleRequest('fix')).toBe(true);
+    expect(rescueEligibleRequest('test')).toBe(true);
+    expect(rescueEligibleRequest('review')).toBe(false);
+    expect(rescueEligibleRequest('plan')).toBe(false);
+    expect(rescueEligibleRequest('answer')).toBe(false);
+    expect(rescueEligibleRequest('unknown')).toBe(false);
+  });
+
+  it('continues rescue for a test-orchestration request near the boundary (F-04)', () => {
+    const s = state({finishCause: 'stop', toolOnlyStepsUsed: RESCUE_BOUNDARY});
+    const ev = evidence({sawToolCall: true, assistantText: '', lastToolOk: true});
+    expect(decideRescue(s, ev, budget, rescueEligibleRequest('test')).action).toBe('continue');
+    expect(decideRescue(s, ev, budget, rescueEligibleRequest('answer')).action).toBe('stop');
+  });
   it('continues once on a length finish with budget remaining', () => {
     expect(decideLengthRecovery(state({finishCause: 'length'}), budget).action).toBe('continue');
   });

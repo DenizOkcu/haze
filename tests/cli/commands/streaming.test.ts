@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {RESCUE_BOUNDARY} from '../../../src/core/agent/completionController.js';
+import {restrictToRescueTools} from '../../../src/cli/commands/streaming.js';
 
 interface FakeFullStreamPart {
   type: string;
@@ -530,6 +531,26 @@ describe('runAgentTurn: stream handling', () => {
       streamParts: [{type: 'text-delta', text: 'A final answer arrived only after exhausting the budget.'}, {type: 'finish', finishReason: 'stop'}],
     });
     await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toMatchObject({status: 'failed'});
+  });
+});
+
+describe('restrictToRescueTools (F-08)', () => {
+  it('keeps only built-in mutation and validation-capable tools', () => {
+    const tools = {
+      readFile: {description: 'r'},
+      grep: {description: 'g'},
+      editFile: {description: 'e'},
+      writeFile: {description: 'w'},
+      replaceLines: {description: 'l'},
+      bash: {description: 'b'},
+      someMcpTool: {description: 'm'},
+    };
+    expect(Object.keys(restrictToRescueTools(tools as never)).sort()).toEqual(['bash', 'editFile', 'replaceLines', 'writeFile']);
+  });
+
+  it('returns an empty set when nothing qualifies instead of the full tool set', () => {
+    const tools = {readFile: {description: 'r'}, grep: {description: 'g'}, mcp: {description: 'm'}};
+    expect(restrictToRescueTools(tools as never)).toEqual({});
   });
 });
 

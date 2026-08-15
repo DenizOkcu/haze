@@ -22,7 +22,7 @@ import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnP
 export {latestRepeatedToolNames, uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
-import {createTurnExecutionState, decideLengthRecovery, decideRescue, isBudgetExhausted, normalizeFinishReason, RESCUE_BOUNDARY, toCompletionEvidence, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
+import {createTurnExecutionState, decideLengthRecovery, decideRescue, isBudgetExhausted, normalizeFinishReason, rescueEligibleRequest, RESCUE_BOUNDARY, toCompletionEvidence, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
 export type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {clampSlice, mainTurnBudget, remainingSteps, remainingToolCalls, type TurnBudget} from '../../core/agent/turnBudget.js';
 import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget, type ToolExecutionBudgetState} from '../../core/agent/toolExecutionBudget.js';
@@ -87,15 +87,17 @@ function withScopedContextControl(messages: ModelMessage[], context: HazeToolCon
  * Restrict a tool set to the capabilities permitted in a completion-rescue
  * slice: mutation (edit/write/replace) and validation-capable (bash) built-in
  * tools only. Discovery, read, coordinate, and all third-party (MCP) tools are
- * dropped so the rescue cannot reopen exploration. Returns the original set if
- * nothing qualifies (caller then forces a tool-free synthesis).
+ * dropped so the rescue cannot reopen exploration. May return an empty set
+ * when no built-in mutation/validation tools exist (only possible if builtins
+ * were removed); the caller then forces a tool-free synthesis slice instead
+ * of silently keeping the unfiltered tool set (F-08).
  */
-function restrictToRescueTools(tools: ToolSet): ToolSet {
+export function restrictToRescueTools(tools: ToolSet): ToolSet {
   const restricted: ToolSet = {};
   for (const [name, tool] of Object.entries(tools)) {
     if (isMutatingCapability(name) || isValidationCapable(name)) restricted[name] = tool;
   }
-  return Object.keys(restricted).length > 0 ? restricted : tools;
+  return restricted;
 }
 
 export interface StreamCallbacks {
@@ -298,8 +300,12 @@ async function runAgentAttempt(
     const stepCap = recoverySlice?.maxSteps ?? MAIN_STEP_LIMIT;
     // Rescue exposes only mutation + validation-capable built-in tools so
     // discovery cannot be reopened near the boundary. Length-continuation keeps
-    // the full tool set.
-    const sliceTools = recoverySlice?.kind === 'rescue' ? restrictToRescueTools(availableTools) : availableTools;
+    // the full tool set. When no built-in mutation/validation tool qualifies,
+    // the rescue slice runs tool-free (forced synthesis) rather than keeping
+    // the unfiltered set — the "discovery must not be reopened" invariant (F-08).
+    const rescueTools = recoverySlice?.kind === 'rescue' ? restrictToRescueTools(availableTools) : availableTools;
+    const rescueWithoutTools = recoverySlice?.kind === 'rescue' && Object.keys(rescueTools).length === 0;
+    const sliceTools: ToolSet = rescueWithoutTools ? {} : rescueTools;
     // Execution-boundary budgets (RH-003). The global budget is turn-wide
     // (shared across retries and recovery slices); the slice budget is
     // per-attempt and caps a recovery slice. Both are checked atomically at the
@@ -338,6 +344,12 @@ async function runAgentAttempt(
         return null;
       },
       prepareStep({steps, messages}) {
+        // A rescue slice with no qualifying tools must synthesize, never reopen
+        // discovery by falling back to the full tool set (F-08).
+        if (rescueWithoutTools) {
+          callbacks.debugLog('rescue slice has no mutation/validation tools; forcing tool-free synthesis');
+          return {toolChoice: 'none' as const};
+        }
         const toolCalls = steps.flatMap(step => step.toolCalls);
         const repeatedToolNames = latestRepeatedToolNames(steps);
         let scopedMessages = withScopedContextControl(messages, toolExecutionContext);
@@ -636,7 +648,7 @@ async function runAgentAttempt(
         const clamped = clampSlice(lengthDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
         if (clamped.steps > 0) recovery = {kind: 'length', control: lengthContinuationPrompt(), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
       } else {
-        const isMutatingRequest = goal.intent === 'implement' || goal.intent === 'fix';
+        const isMutatingRequest = rescueEligibleRequest(goal.intent);
         const rescueDecision = decideRescue(turnState, evidence, turnBudget, isMutatingRequest);
         if (rescueDecision.action === 'continue') {
           const clamped = clampSlice(rescueDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});

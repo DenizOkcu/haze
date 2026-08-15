@@ -1,7 +1,8 @@
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {MAIN_TOOL_ONLY_STEP_LIMIT} from './budgets.js';
 import type {TurnBudget} from './turnBudget.js';
-import type {ValidationOutcome} from './workState.js';
+import {intentExpectsValidation, type ValidationOutcome} from './workState.js';
+import type {RequestIntent} from '../goal/requestClassifier.js';
 
 /**
  * Normalized reason a model stream finished. Derived from the AI SDK
@@ -194,6 +195,16 @@ export function decideLengthRecovery(state: TurnExecutionState, budget: TurnBudg
   if (!hasRemainingRecoveryBudget(state, budget)) return stop('global budget exhausted');
   if (state.validationOutcome === 'passed') return stop('fresh passing validation already observed');
   return {action: 'continue', reason: 'output-length finish with budget remaining', slice: LENGTH_RECOVERY_SLICE};
+}
+
+/**
+ * Whether a request intent has a deliverable the rescue slice could apply or
+ * validate. Deliberately matches `intentExpectsValidation` so a test-orchestration
+ * turn (F-04) gets the same bounded rescue as implement/fix: a `test` finish is
+ * driven by tool runs exactly like the intents `decideRescue` already serves.
+ */
+export function rescueEligibleRequest(intent: RequestIntent): boolean {
+  return intentExpectsValidation(intent);
 }
 
 /**
