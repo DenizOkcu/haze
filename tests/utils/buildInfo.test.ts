@@ -2,6 +2,7 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {
   detectCheckoutMismatch,
   formatMismatchWarning,
@@ -11,6 +12,8 @@ import {
   loadBuildInfoFrom,
   parseBuildInfo,
   readPackageVersionAt,
+  readBuildInfo,
+  resetBuildInfoCache,
   resolvePackageRoot,
   runtimeCapabilities,
 } from '../../src/utils/buildInfo.js';
@@ -48,6 +51,37 @@ describe('buildInfo', () => {
       await fs.outputJson(present, {name: '@denizokcu/haze', version: '0.10.1', commit: 'a'.repeat(40)});
       expect(loadBuildInfoFrom([missing, present])).toMatchObject({version: '0.10.1', commit: 'a'.repeat(40)});
       expect(loadBuildInfoFrom([missing])).toBeUndefined();
+    });
+  });
+
+  describe('readBuildInfo default path', () => {
+    // Regression for the inverted cache sentinel: `readBuildInfo()` previously
+    // returned before ever reading the manifest, so `--version --verbose`
+    // printed `commit: unknown` and session headers never recorded provenance.
+    const srcFixture = fileURLToPath(new URL('../../src/buildInfo.json', import.meta.url));
+
+    afterEach(async () => {
+      await fs.remove(srcFixture);
+      resetBuildInfoCache();
+    });
+
+    it('reads the module-relative manifest on the first default call', async () => {
+      resetBuildInfoCache();
+      const manifest = {name: '@denizokcu/haze', version: '9.9.9', commit: 'd'.repeat(40)};
+      await fs.outputJson(srcFixture, manifest);
+      expect(readBuildInfo()).toEqual(manifest);
+      // The hit is cached: a second default call returns the same value.
+      expect(readBuildInfo()).toEqual(manifest);
+    });
+
+    it('serves repeated default calls from the cache (hit or miss)', async () => {
+      // Candidate 2 (<repo>/dist/buildInfo.json) exists after `npm run build`, so
+      // an absent src fixture may still resolve — both outcomes must be stable.
+      resetBuildInfoCache();
+      await fs.remove(srcFixture);
+      const fallback = loadBuildInfoFrom([path.join(path.dirname(srcFixture), '..', 'dist', 'buildInfo.json')]);
+      expect(readBuildInfo()).toEqual(fallback);
+      expect(readBuildInfo()).toEqual(fallback);
     });
   });
 

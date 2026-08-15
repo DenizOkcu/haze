@@ -57,6 +57,9 @@ function defaultBuildInfoCandidates(): string[] {
   ];
 }
 
+// Cache sentinel for the default-path lookup: `undefined` means "not loaded
+// yet" and `null` means "loaded and absent" (a miss is cached too). Explicit
+// candidate paths always bypass the cache.
 let cachedBuildInfo: BuildInfo | undefined | null;
 
 /**
@@ -66,12 +69,18 @@ let cachedBuildInfo: BuildInfo | undefined | null;
  */
 export function readBuildInfo(candidates?: readonly string[]): BuildInfo | undefined {
   if (!candidates) {
-    if (cachedBuildInfo !== null) return cachedBuildInfo ?? undefined;
+    // `undefined` = never loaded (load now); `null` = cached miss.
+    if (cachedBuildInfo !== undefined) return cachedBuildInfo ?? undefined;
     const found = loadBuildInfoFrom(defaultBuildInfoCandidates());
     cachedBuildInfo = found ?? null;
     return found ?? undefined;
   }
   return loadBuildInfoFrom(candidates);
+}
+
+/** Test seam: clear the default-path cache so the next `readBuildInfo()` reloads from disk. */
+export function resetBuildInfoCache(): void {
+  cachedBuildInfo = undefined;
 }
 
 /** Read the first parsable buildInfo.json among the candidate paths. */

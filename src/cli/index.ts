@@ -50,8 +50,9 @@ Print mode (-p):
   detection without raw tool inputs or outputs. --model overrides the model for this
   run only (no settings change) and must already be registered under a provider (add it once via
   the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
-  saved. --resume <id> loads saved context for the turn without changing that session. There is no
-  automatic context-overflow recovery.
+  saved. --resume <id> loads saved context for the turn without changing that session. On a
+  provider context overflow, haze compacts the conversation and retries the request once; when
+  compaction is unavailable, the error says so explicitly.
 `);
 
 async function readStdinPrompt(): Promise<string | undefined> {

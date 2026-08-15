@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "A minimal LLM harness for your terminal.",
   "type": "module",
   "license": "MIT",
@@ -79,7 +79,7 @@
     "vitest": "^4.1.10"
   },
   "allowScripts": {
-    "esbuild@0.28.1": true,
-    "fsevents@2.3.3": true
+    "fsevents@2.3.3": true,
+    "esbuild@0.28.2": true
   }
 }

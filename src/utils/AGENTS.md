@@ -1,6 +1,6 @@
 # src/utils/AGENTS.md
 
-Last updated: 2026-08-13 for the 0.10.1 release.
+Last updated: 2026-08-15 for the 0.11.0 release.
 
 Small shared utilities.
 
@@ -20,6 +20,7 @@ Maintainability focus:
 
 - `path.ts` — workspace root/path resolution and confinement helpers. `workspacePathKey` provides lexical identity for comparing model-supplied workspace paths without filesystem access. `assertRealPathInsideRoot(root, candidate)` and `assertPathInsideRoot` are the shared real-path confinement primitives reused by file tools, skills, LSP, and the skills registry; keep them generic and add domain wrappers in callers rather than duplicating prefix logic.
 - `fs.ts` — directory walking and filesystem helpers used by tools.
+- `buildInfo.ts` — embedded build provenance (`dist/buildInfo.json`), the runtime capability registry, checkout-mismatch detection, and verbose-version formatting. The default-path `readBuildInfo()` cache uses a three-state sentinel: `undefined` = not loaded yet, `null` = loaded and absent (cached miss), object = cached manifest. Do not collapse `undefined` and `null` — treating "not loaded" as a cached miss returns before ever reading the manifest (the 0.11.0 regression). `resetBuildInfoCache()` exists for tests.
 - `collections.ts` — small collection operations such as name-based upsert/find.
 - `version.ts` — cached package-version loading and dependency-free version comparison helpers.
 - `utf8.ts` — shared UTF-8-safe prefix and rolling-tail byte truncation.

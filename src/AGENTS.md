@@ -1,6 +1,6 @@
 # src/AGENTS.md
 
-Last updated: 2026-08-13 for the 0.10.1 release.
+Last updated: 2026-08-15 for the 0.11.0 release.
 
 Instructions for haze source code.
 
