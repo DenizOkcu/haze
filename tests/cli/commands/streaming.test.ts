@@ -334,14 +334,43 @@ describe('runAgentTurn: setup', () => {
     const error = new Error('JSON parsing failed');
     error.name = 'AI_InvalidToolInputError';
     await expect(repair({toolCall: {toolName: 'writeFile'}, error})).resolves.toBeNull();
-    const prepare = options.prepareStep as (input: unknown) => {toolChoice: {type: string; toolName: string}; messages: unknown[]};
+    const prepare = options.prepareStep as (input: unknown) => {toolChoice: unknown; activeTools?: string[]; messages: unknown[]};
     const prepared = prepare({steps: [], messages: []});
-    expect(prepared.toolChoice).toEqual({type: 'tool', toolName: 'writeFile'});
+    expect(prepared.toolChoice).toBe('required');
+    expect(prepared.activeTools).toEqual(['writeFile']);
     expect(JSON.stringify(prepared.messages)).toMatch(/append=true/);
     await repair({toolCall: {toolName: 'writeFile'}, error});
-    expect(prepare({steps: [], messages: []}).toolChoice).toEqual({type: 'tool', toolName: 'writeFile'});
+    const second = prepare({steps: [], messages: []}) as {toolChoice: unknown; activeTools?: string[]};
+    expect(second.toolChoice).toBe('required');
+    expect(second.activeTools).toEqual(['writeFile']);
     await repair({toolCall: {toolName: 'writeFile'}, error});
     expect(prepare({steps: [], messages: []}).toolChoice).toBe('none');
+  });
+
+  it('repairs out-of-range numeric tool input by clamping to schema bounds', async () => {
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {grep: {description: 'search'}},
+      toolCategories: new Map([['grep', 'builtin']]),
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await runAgentTurn('search everywhere', undefined, [], makeCallbacks());
+    const options = mocks.agentOptions.at(-1)!;
+    const repair = options.experimental_repairToolCall as (input: unknown) => Promise<unknown>;
+    const error = new Error('Invalid input for tool grep');
+    error.name = 'AI_InvalidToolInputError';
+    const repaired = await repair({
+      toolCall: {toolCallId: 'c1', toolName: 'grep', input: JSON.stringify({pattern: '.', maxMatches: 9999})},
+      error,
+      inputSchema: async () => ({type: 'object', properties: {pattern: {type: 'string'}, maxMatches: {type: 'integer', maximum: 200}}}),
+    });
+    expect(repaired).toEqual({type: 'tool-call', toolCallId: 'c1', toolName: 'grep', input: JSON.stringify({pattern: '.', maxMatches: 200})});
+    // A successful clamp repair must not enter the forced-retry constraint.
+    const prepare = options.prepareStep as (input: unknown) => {toolChoice?: unknown} | undefined;
+    expect(prepare({steps: [], messages: []})).toBeUndefined();
   });
 
   it('updates edit recovery before the next prepareStep instead of waiting for streamed tool results', async () => {

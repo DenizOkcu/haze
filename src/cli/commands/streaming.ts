@@ -41,7 +41,7 @@ import {modelThinkingLabel} from '../../utils/modelName.js';
 import {terminalTurnStatus} from './streaming/turnOutcome.js';
 import {createIdleTimer} from './streaming/idleTimer.js';
 import {abortForTurn, createUserAbortCause, type TurnAbortCause} from './streaming/abortCause.js';
-import {isMalformedToolInputError} from './streaming/toolCallRecovery.js';
+import {clampOutOfBoundsToolNumbers, isMalformedToolInputError} from './streaming/toolCallRecovery.js';
 import {WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
 
@@ -421,8 +421,13 @@ async function runAgentAttempt(
       stopWhen: isStepCount(stepCap),
       runtimeContext: toolExecutionContext,
       toolsContext: toolsContextFor(deadlineWrappedTools, toolExecutionContext) as never,
-      experimental_repairToolCall: async ({toolCall, error}) => {
+      experimental_repairToolCall: async ({toolCall, error, inputSchema}) => {
         if (isMalformedToolInputError(error)) {
+          const clamped = await clampOutOfBoundsToolNumbers(toolCall.input, toolCall.toolName, inputSchema);
+          if (clamped != null) {
+            callbacks.debugLog(`clamped out-of-range numeric input for ${toolCall.toolName}; executing repaired call`);
+            return {type: 'tool-call' as const, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, input: JSON.stringify(clamped)};
+          }
           pendingMalformedToolName = toolCall.toolName;
           unresolvedMalformedToolName = toolCall.toolName;
         }
@@ -467,7 +472,12 @@ async function runAgentAttempt(
           }
           malformedRecoveryAttempts.set(String(toolName), attempt + 1);
           callbacks.debugLog(`forcing smaller retry after malformed ${String(toolName)} input`);
-          return {toolChoice: {type: 'tool' as const, toolName}, messages: withSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
+          // OpenAI-compatible servers differ in tool_choice support: several
+          // (LM Studio, llama.cpp) accept only the string form (none/auto/
+          // required) and reject the object form with HTTP 400. Narrowing to a
+          // single active tool plus 'required' preserves the forced-call
+          // semantics on every server.
+          return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: withSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
         }
         if (toolResultState.editRecoveryPath && !toolResultState.editRecoveryReadSatisfied) {
           if ('readFile' in sliceTools) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof sliceTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof sliceTools>};
