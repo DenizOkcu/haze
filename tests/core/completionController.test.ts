@@ -1,13 +1,19 @@
 import {describe, expect, it} from 'vitest';
 import {
+  assessCompletionReadiness,
   createTurnExecutionState,
+  decideGoalContinuation,
   decideLengthRecovery,
   decideRescue,
   decideTerminalStatus,
+  describeCompletionReadiness,
+  goalContinuationRecoverable,
+  goalProgressSignature,
   hasSatisfactoryTerminalOutcome,
   hasRemainingRecoveryBudget,
   isBudgetExhausted,
   normalizeFinishReason,
+  recordGoalContinuation,
   rescueEligibleRequest,
   RESCUE_BOUNDARY,
   toCompletionEvidence,
@@ -101,8 +107,16 @@ describe('toCompletionEvidence (Increment 3, safe)', () => {
       validationAfterMutation: true,
       mutationCount: 2,
       finishCause: 'stop',
-      recoveryUsed: {length: true, rescue: false},
+      recoveryUsed: {length: true, rescue: false, goal: 0},
       budgetBoundary: false,
+    });
+  });
+
+  it('projects current-turn task counts and goal-continuation usage', () => {
+    const s = state({finishCause: 'stop', taskProgress: {total: 5, pending: 0, inProgress: 0, completed: 5, revision: 3}, goalContinuationsUsed: 2});
+    expect(toCompletionEvidence(s)).toMatchObject({
+      taskProgress: {total: 5, pending: 0, inProgress: 0, completed: 5},
+      recoveryUsed: {length: false, rescue: false, goal: 2},
     });
   });
 
@@ -130,8 +144,58 @@ describe('hasSatisfactoryTerminalOutcome', () => {
     expect(hasSatisfactoryTerminalOutcome(state(), evidence({assistantText: 'Done.', lastToolOk: false}))).toBe(false);
   });
 
+  it('is not satisfied by a substantive answer while declared tasks remain or validation is missing after edits', () => {
+    expect(hasSatisfactoryTerminalOutcome(state({taskProgress: {total: 5, pending: 3, inProgress: 2, completed: 0, revision: 1}}), evidence({assistantText: 'Next unfinished action: wire the tool.'}))).toBe(false);
+    expect(hasSatisfactoryTerminalOutcome(state({intent: 'implement', mutationCount: 1, validationOutcome: 'absent'}), evidence({assistantText: 'Done.'}))).toBe(false);
+  });
+
   it('is satisfied (stops recovery) when aborted', () => {
     expect(hasSatisfactoryTerminalOutcome(state({aborted: true}), evidence({assistantText: ''}))).toBe(true);
+  });
+});
+
+describe('assessCompletionReadiness (Cycle 1)', () => {
+  it('reproduces the roadmap failure: substantive text plus five pending tasks is not ready', () => {
+    const s = state({intent: 'implement', taskProgress: {total: 5, pending: 5, inProgress: 0, completed: 0, revision: 2}});
+    const readiness = assessCompletionReadiness(s, evidence({assistantText: 'Next unfinished action: implement the tool.', sawToolCall: true, lastToolOk: true}));
+    expect(readiness).toBe('pending_tasks');
+    expect(decideTerminalStatus(s, evidence({assistantText: 'Next unfinished action: implement the tool.', sawToolCall: true, lastToolOk: true}), false)).toBe('failed');
+  });
+
+  it('treats all-completed and cleared task lists as ready', () => {
+    expect(assessCompletionReadiness(state({taskProgress: {total: 3, pending: 0, inProgress: 0, completed: 3, revision: 4}}), evidence({lastToolOk: true}))).toBe('ready');
+    expect(assessCompletionReadiness(state({taskProgress: {total: 0, pending: 0, inProgress: 0, completed: 0, revision: 4}}), evidence({lastToolOk: true}))).toBe('ready');
+  });
+
+  it('enforces intent-sensitive validation policy only after mutations', () => {
+    // implement/fix/test with a mutation and no validation -> not ready.
+    expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'absent'}), evidence({lastToolOk: true}))).toBe('validation_absent_after_mutation');
+    // No mutation: an honest answer without validation stays ready.
+    expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 0, validationOutcome: 'absent'}), evidence({lastToolOk: true}))).toBe('ready');
+    // Stale and failed validations block implement turns.
+    expect(assessCompletionReadiness(state({intent: 'fix', mutationCount: 2, validationOutcome: 'stale'}), evidence({lastToolOk: true}))).toBe('validation_stale');
+    expect(assessCompletionReadiness(state({intent: 'fix', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: true}))).toBe('validation_failed');
+    // A fresh passing validation after the latest mutation is ready.
+    expect(assessCompletionReadiness(state({intent: 'fix', mutationCount: 1, validationOutcome: 'passed'}), evidence({lastToolOk: true}))).toBe('ready');
+  });
+
+  it('never demands validation for plan/review/answer turns', () => {
+    for (const intent of ['plan', 'review', 'answer'] as const) {
+      expect(assessCompletionReadiness(state({intent, mutationCount: 0, validationOutcome: 'not_applicable'}), evidence({lastToolOk: true}))).toBe('ready');
+    }
+  });
+
+  it('prefers hard failure reasons over task/validation evidence', () => {
+    expect(assessCompletionReadiness(state({aborted: true}), evidence({lastToolOk: false}))).toBe('aborted');
+    expect(assessCompletionReadiness(state({taskProgress: {total: 2, pending: 2, inProgress: 0, completed: 0, revision: 1}}), evidence({unresolvedToolInputError: true}))).toBe('unresolved_tool_input');
+    expect(assessCompletionReadiness(state({taskProgress: {total: 2, pending: 2, inProgress: 0, completed: 0, revision: 1}}), evidence({lastToolOk: false}))).toBe('tool_failure');
+  });
+
+  it('describes readiness results with safe, bounded wording', () => {
+    expect(describeCompletionReadiness('pending_tasks', {total: 5, pending: 4, inProgress: 1, completed: 0, revision: 1})).toContain('5 declared tasks still pending');
+    expect(describeCompletionReadiness('validation_stale')).toContain('after the latest validation');
+    expect(describeCompletionReadiness('ready')).toContain('complete');
+    expect(JSON.stringify(describeCompletionReadiness('validation_failed'))).not.toMatch(/command|stdout|secret/);
   });
 });
 
@@ -199,5 +263,81 @@ describe('recovery decisions (Increment 2: bounded, single-use)', () => {
     expect(decideRescue({...base, rescueUsed: true}, evidence({assistantText: ''}), budget, true).action).toBe('stop');
     expect(decideRescue({...base, aborted: true}, evidence({assistantText: ''}), budget, true).action).toBe('stop');
     expect(decideRescue(base, evidence({assistantText: 'Done.'}), budget, true).action).toBe('stop');
+  });
+});
+
+describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
+  const finalText = evidence({sawToolCall: true, assistantText: 'Next unfinished action: wire the tool.', lastToolOk: true});
+  const pendingTasks = {total: 5, pending: 5, inProgress: 0, completed: 0, revision: 2};
+
+  it('continues after a premature voluntary final while tasks remain', () => {
+    const decision = decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks}), finalText, budget);
+    expect(decision.action).toBe('continue');
+    expect(decision.pause).toBeUndefined();
+  });
+
+  it('continues for recoverable validation reasons and not for hard failures', () => {
+    for (const readiness of ['pending_tasks', 'validation_failed', 'validation_stale', 'validation_absent_after_mutation'] as const) {
+      expect(goalContinuationRecoverable(readiness)).toBe(true);
+    }
+    for (const readiness of ['ready', 'tool_failure', 'unresolved_tool_input', 'aborted'] as const) {
+      expect(goalContinuationRecoverable(readiness)).toBe(false);
+    }
+    expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', mutationCount: 1, validationOutcome: 'absent'}), evidence({sawToolCall: true, assistantText: 'Wrote the file.', lastToolOk: true}), budget).action).toBe('continue');
+    expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budget).action).toBe('stop');
+  });
+
+  it('stops without pause when ready, aborted, empty-text, or a non-voluntary finish', () => {
+    expect(decideGoalContinuation(state({finishCause: 'stop'}), evidence({assistantText: 'Done.', lastToolOk: true}), budget).action).toBe('stop');
+    expect(decideGoalContinuation(state({finishCause: 'stop', aborted: true, taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
+    expect(decideGoalContinuation(state({finishCause: 'stop', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: '', lastToolOk: true}), budget).action).toBe('stop');
+    expect(decideGoalContinuation(state({finishCause: 'tool-calls', taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
+  });
+
+  it('pauses (never completes) when the global budget is exhausted with recoverable work remaining', () => {
+    const decision = decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', stepsUsed: budget.stepLimit, taskProgress: pendingTasks}), finalText, budget);
+    expect(decision.action).toBe('stop');
+    expect(decision.pause).toEqual({readiness: 'pending_tasks'});
+  });
+
+  it('allows one corrective nudge with no progress, then pauses', () => {
+    const s = state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks});
+    // First continuation issued at this progress signature.
+    recordGoalContinuation(s);
+    expect(s.goalContinuationsUsed).toBe(1);
+    expect(s.goalContinuationCorrectiveUsed).toBe(false);
+    // No progress: the next stop is still allowed to continue (the corrective nudge).
+    expect(decideGoalContinuation(s, finalText, budget).action).toBe('continue');
+    recordGoalContinuation(s);
+    expect(s.goalContinuationCorrectiveUsed).toBe(true);
+    // Still no progress: pause instead of looping.
+    const paused = decideGoalContinuation(s, finalText, budget);
+    expect(paused.action).toBe('stop');
+    expect(paused.pause).toEqual({readiness: 'pending_tasks'});
+  });
+
+  it('keeps allowing cycles while measurable progress continues', () => {
+    const s = state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks});
+    recordGoalContinuation(s);
+    // Progress: a new mutation and an updated task list.
+    s.mutationCount += 1;
+    s.taskProgress = {total: 5, pending: 4, inProgress: 1, completed: 0, revision: 3};
+    expect(goalProgressSignature(s)).not.toBe(s.goalContinuationProgress);
+    expect(decideGoalContinuation(s, finalText, budget).action).toBe('continue');
+    recordGoalContinuation(s);
+    expect(s.goalContinuationCorrectiveUsed).toBe(false);
+    // Progress again resets the corrective credit; only consecutive no-progress stops pause.
+    s.mutationCount += 1;
+    recordGoalContinuation(s);
+    expect(s.goalContinuationCorrectiveUsed).toBe(false);
+  });
+
+  it('never resets budgets or continuation counters (state is turn-wide)', () => {
+    const s = state({finishCause: 'stop', intent: 'implement', stepsUsed: 10, toolCallsUsed: 20, taskProgress: pendingTasks});
+    recordGoalContinuation(s);
+    recordGoalContinuation(s);
+    expect(s.stepsUsed).toBe(10);
+    expect(s.toolCallsUsed).toBe(20);
+    expect(s.goalContinuationsUsed).toBe(2);
   });
 });

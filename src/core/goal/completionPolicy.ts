@@ -32,3 +32,13 @@ export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
     : '';
   return `The ${toolName} call had invalid, malformed, or truncated JSON input and did not execute. Retry it now with valid smaller arguments; do not merely announce that you will retry.${chunkGuidance}`;
 }
+
+/**
+ * Ephemeral control for a goal-continuation slice. The model volunteered a
+ * final message while structured evidence (declared task counts, post-edit
+ * validation) shows unfinished work; this nudge rejects that stop and requires
+ * resuming concrete work rather than summarizing again. One-request nudge only.
+ */
+export function goalContinuationPrompt(reason: string) {
+  return `Your final message was rejected: haze's structured evidence shows this turn is not complete (${reason}). Do not summarize again or restate what remains — resume the next concrete unfinished task now. If you declared a task list with writeTasks, its pending and in-progress items are commitments for this turn: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+}

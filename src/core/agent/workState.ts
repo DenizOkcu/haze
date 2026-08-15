@@ -41,6 +41,14 @@ export interface WorkState {
   mutationSeq: number;
   /** Monotonic sequence number of the latest validation (0 = none). */
   validationSeq: number;
+  /**
+   * Current-turn task-list evidence, recorded only from a successful `writeTasks`
+   * result. Counts only — never task titles or raw output — so malformed tool
+   * output can never fabricate or erase completion evidence. Absent when the
+   * turn never declared a task list (a stale workspace tasks.json from an
+   * earlier turn must not block completion).
+   */
+  taskProgress?: WorkTaskProgress;
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -49,6 +57,47 @@ export interface WorkState {
   phase: WorkPhase;
   lastProgressAt: number;
   revision: number;
+}
+
+/** Compact current-turn task-list evidence parsed from a successful `writeTasks` result. */
+export interface WorkTaskProgress {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  /** WorkState revision when this snapshot was recorded. */
+  revision: number;
+}
+
+/** Upper bound for parsed task counts; anything larger is treated as malformed. */
+const TASK_COUNT_LIMIT = 10_000;
+
+function boundedTaskCount(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= TASK_COUNT_LIMIT) return value;
+  if (typeof value === 'string' && /^(0|[1-9]\d{0,4})$/.test(value)) return Number(value);
+  return undefined;
+}
+
+/**
+ * Extract bounded task counts from a successful `writeTasks` structured result.
+ * Parses only numeric counts (`taskCount`, `counts.pending/in_progress/completed`),
+ * never titles or raw output. A non-empty list without a fully valid counts
+ * breakdown is ignored (rather than guessed) so partial shapes stay inert.
+ */
+export function taskProgressFromOutput(output: unknown, revision: number): WorkTaskProgress | undefined {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const candidate = output as {ok?: unknown; taskCount?: unknown; counts?: unknown};
+  if (candidate.ok !== true) return undefined;
+  const total = boundedTaskCount(candidate.taskCount);
+  if (total === undefined) return undefined;
+  if (total === 0) return {total: 0, pending: 0, inProgress: 0, completed: 0, revision};
+  if (typeof candidate.counts !== 'object' || candidate.counts === null) return undefined;
+  const counts = candidate.counts as Record<string, unknown>;
+  const pending = boundedTaskCount(counts.pending);
+  const inProgress = boundedTaskCount(counts.in_progress);
+  const completed = boundedTaskCount(counts.completed);
+  if (pending === undefined || inProgress === undefined || completed === undefined) return undefined;
+  return {total, pending, inProgress, completed, revision};
 }
 
 export interface WorkToolEvent {
@@ -166,6 +215,17 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       if (status === 'failed') {
         state.blockers = [...new Set([...state.blockers, `Validation failed: ${command}`])];
       }
+    }
+  }
+
+  // Task-list coordination: a successful writeTasks result records bounded
+  // current-turn task counts as completion evidence. It is not a file mutation,
+  // and a failed call leaves prior evidence untouched.
+  if (ok && event.toolName === 'writeTasks') {
+    const progress = taskProgressFromOutput(event.output, seq);
+    if (progress) {
+      state.taskProgress = progress;
+      state.lastProgressAt = now;
     }
   }
 

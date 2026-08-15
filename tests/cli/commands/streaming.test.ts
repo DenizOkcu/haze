@@ -896,10 +896,12 @@ describe('runAgentTurn: bounded completion recovery', () => {
       callStreams: [
         // Main attempt: truncated mid-answer.
         [{type: 'text-delta', text: 'Here is the start of the'}, {type: 'finish', finishReason: 'length'}],
-        // Recovery slice: finish writing the file, then a substantive answer.
+        // Recovery slice: finish writing the file, validate it, then a substantive answer.
         [
           {type: 'tool-call', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt', content: 'done'}},
           {type: 'tool-result', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt'}, output: {ok: true}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'cat out.txt'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'cat out.txt'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'text-delta', text: 'Wrote out.txt.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -943,6 +945,8 @@ describe('runAgentTurn: bounded completion recovery', () => {
         [
           {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: [{oldText: 'x', newText: 'y'}]}},
           {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test -- a.ts'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test -- a.ts'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'text-delta', text: 'Applied the discovered fix to a.ts.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -973,6 +977,208 @@ describe('runAgentTurn: bounded completion recovery', () => {
     });
     await runAgentTurn('explain how the module works', undefined, [], makeCallbacks());
     expect(mocks.streamedMessages).toHaveLength(1);
+  });
+});
+
+describe('runAgentTurn: autonomous goal continuation', () => {
+  const modelHandle = {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}};
+  const tools = {
+    readFile: {description: 'read', execute: async () => ({ok: true})},
+    editFile: {description: 'edit', execute: async () => ({ok: true})},
+    writeFile: {description: 'write', execute: async () => ({ok: true})},
+    bash: {description: 'bash', execute: async () => ({ok: true})},
+    writeTasks: {description: 'tasks', execute: async () => ({ok: true})},
+  };
+  const pendingTasksOutput = {ok: true, taskCount: 5, counts: {pending: 5, in_progress: 0, completed: 0}, summary: 'Tasks: 5 pending.'};
+  const completedTasksOutput = {ok: true, taskCount: 5, counts: {pending: 0, in_progress: 0, completed: 5}, summary: 'Tasks: 5 completed.'};
+  const passedValidation = (toolCallId: string) => [
+    {type: 'tool-call', toolCallId, toolName: 'bash', input: {command: 'npm test'}},
+    {type: 'tool-result', toolCallId, toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+  ];
+
+  it('continues automatically after a partial final while tasks are pending (roadmap regression)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'text-delta', text: 'Next unfinished action: wire the tool.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [{type: 'text-delta', text: 'Resuming work now.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    // The partial final was rejected: a continuation attempt started automatically.
+    expect(mocks.streamedMessages.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/final message was rejected/);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/pending or in progress/);
+  });
+
+  it('completes when the continuation finishes tasks and runs fresh validation, with no extra model call', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
+          {type: 'text-delta', text: 'Next unfinished action: wire the tool.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [
+          ...passedValidation('v1'),
+          {type: 'tool-call', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}, output: completedTasksOutput},
+          {type: 'text-delta', text: 'All five tasks are done and validation passes.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(outcome).toMatchObject({status: 'complete', evidence: {recoveryUsed: {goal: 1}}});
+    expect(outcome.evidence?.taskProgress).toEqual({total: 5, pending: 0, inProgress: 0, completed: 5});
+    expect(outcome.resume).toBeUndefined();
+  });
+
+  it('pauses as failed with bounded retries after repeated no-progress partial finals', async () => {
+    const partial = [
+      {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+      {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
+      {type: 'text-delta', text: 'Next unfinished action: wire the tool.'},
+      {type: 'finish', finishReason: 'stop'},
+    ];
+    const again = [{type: 'text-delta', text: 'Still not started; next action remains.'}, {type: 'finish', finishReason: 'stop'}];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [partial, again, again],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    // Main attempt + one corrective nudge + pause: bounded, no loop.
+    expect(mocks.streamedMessages).toHaveLength(3);
+    expect(cb.messages.some(m => m.role === 'system' && /Unfinished task paused/.test(m.text))).toBe(true);
+    expect(cb.messages.some(m => m.role === 'system' && /Press R to resume/.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'incomplete-goal', reason: 'pending_tasks', taskCounts: {total: 5, pending: 5}}});
+  });
+
+  it('keeps continuing across cycles while measurable progress accumulates', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
+          {type: 'text-delta', text: 'Next unfinished action: task one.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'tool-call', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 5, counts: {pending: 4, in_progress: 0, completed: 1}, summary: 'x'}},
+          {type: 'text-delta', text: 'One task done; next up: task two.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [
+          ...passedValidation('v1'),
+          {type: 'tool-call', toolCallId: 't3', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't3', toolName: 'writeTasks', input: {tasks: []}, output: completedTasksOutput},
+          {type: 'text-delta', text: 'All tasks complete and validation passes.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(3);
+    expect(outcome).toMatchObject({status: 'complete', evidence: {recoveryUsed: {goal: 2}}});
+  });
+
+  it('pauses (never completes) when the global step budget is exhausted with tasks pending', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      stepEnds: Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: []})),
+      streamParts: [
+        {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
+        {type: 'text-delta', text: 'Next unfinished action remains.'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    // Budget was consumed by the main attempt; continuation cannot reset it.
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'incomplete-goal', reason: 'pending_tasks'}, evidence: {budgetBoundary: true}});
+    expect(cb.messages.some(m => m.role === 'system' && /Unfinished task paused/.test(m.text))).toBe(true);
+  });
+
+  it('does not continue when the declared task list is already complete', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      streamParts: [
+        {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+        {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+        ...passedValidation('v1'),
+        {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: completedTasksOutput},
+        {type: 'text-delta', text: 'Everything is done.'},
+        {type: 'finish', finishReason: 'stop'},
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(outcome).toMatchObject({status: 'complete', evidence: {recoveryUsed: {goal: 0}}});
+  });
+
+  it('does not force mutation/validation continuation on a plan request', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      streamParts: [{type: 'text-delta', text: 'Here is the requested plan.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('create a plan for the refactor', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('continues when edits land without validation, then completes after a fresh validation', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'text-delta', text: 'I stopped here without validating.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [
+          ...passedValidation('v1'),
+          {type: 'text-delta', text: 'Validation passes after the edit.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('fix the failing build in a.ts', undefined, [], cb);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/edits landed without any relevant validation/);
+    expect(outcome).toMatchObject({status: 'complete', evidence: {validationOutcome: 'passed', recoveryUsed: {goal: 1}}});
   });
 });
 

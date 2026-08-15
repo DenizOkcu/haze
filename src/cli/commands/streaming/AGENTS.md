@@ -13,7 +13,14 @@ This subtree keeps the main agent loop readable by isolating display, accounting
 - `toolGroupRenderer.ts` groups native tool calls/results into compact UI messages and emits events/log entries.
 - `toolResultState.ts` tracks mutating tool success/failure and edit-recovery state.
 - `turnRuntime.ts` contains token/usage extraction, retry delays, context-file memory, abortable delay, and response metrics helpers.
-- `turnOutcome.ts` is the authoritative terminal turn-status function (`complete`/`aborted`/`failed`) derived from runtime facts (abort, error, last tool `ok`, finish reason, step/tool budgets, substantive final text). `runAgentTurn` calls it once per turn; do not duplicate status inference elsewhere.
+- `turnOutcome.ts` is the authoritative terminal turn-status function (`complete`/`aborted`/`failed`) derived from runtime facts (abort, error, last tool `ok`, finish reason, step/tool budgets, substantive final text, and completion readiness: declared task counts plus post-mutation validation for implement/fix/test intents). `runAgentTurn` calls it once per turn; do not duplicate status inference elsewhere.
+
+### Autonomous goal continuation and honest pauses
+
+- When a model voluntarily stops with a substantive final while completion readiness says work remains (pending/in-progress declared tasks, or missing/stale/failed validation after edits), `decideGoalContinuation` continues the same logical turn with a synthetic control (`goalContinuationPrompt`): same conversation, mutation lease, `WorkState`, and `TurnBudget`. It keeps the full tool set, unlike the discovery-free rescue slice.
+- Continuation slices clamp to the remaining global budget and never reset it. The progress guard (`recordGoalContinuation` + work/task signature) allows exactly one corrective nudge without measurable progress; a second no-progress stop, or an exhausted step/tool/deadline budget, pauses the turn: status `failed` (never `complete`), active goal preserved as `needs-user`, and `TurnResult.resume` of kind `incomplete-goal` carrying safe metadata only (readiness reason, steps used, task counts, validation outcome).
+- The interactive UI offers a one-key `R` resume for both pause kinds (`model-stream-idle` continues the same logical turn's retry pool; `incomplete-goal` starts a fresh logical turn against the preserved conversation, nudged to resume the remaining concrete work). Headless consumers see the failed status plus completion evidence (task counts, validation outcome, `recoveryUsed.goal`) and exit non-zero.
+- A claimed blocker in prose stops nothing by itself: only structured evidence (failed tool, permission/dependency/environment error) or the readiness gates decide; prose can never turn pending work into `complete`.
 
 ## Contracts
 

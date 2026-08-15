@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, validationSummaryFromOutput, workStatePrompt} from '../../src/core/agent/workState.js';
+import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, taskProgressFromOutput, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
 
 function passedSummary(text = 'tests passed') {
   return {kind: 'test', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
@@ -100,5 +100,67 @@ describe('validationSummaryFromOutput', () => {
     expect(validationSummaryFromOutput({validationSummary: {summaryText: 'no diagnostics'}})).toBeUndefined();
     expect(validationSummaryFromOutput({code: 1})).toBeUndefined();
     expect(validationSummaryFromOutput(undefined)).toBeUndefined();
+  });
+});
+
+describe('taskProgressFromOutput', () => {
+  it('parses bounded numeric counts from a successful writeTasks result', () => {
+    expect(taskProgressFromOutput({ok: true, taskCount: 5, counts: {pending: 3, in_progress: 1, completed: 1}, summary: 'x'}, 7)).toEqual({total: 5, pending: 3, inProgress: 1, completed: 1, revision: 7});
+  });
+
+  it('treats a cleared list as all-zero progress', () => {
+    expect(taskProgressFromOutput({ok: true, taskCount: 0, summary: 'Task list cleared.'}, 9)).toEqual({total: 0, pending: 0, inProgress: 0, completed: 0, revision: 9});
+  });
+
+  it('ignores failed, malformed, or partial outputs safely', () => {
+    expect(taskProgressFromOutput({ok: false, error: 'nope'}, 1)).toBeUndefined();
+    expect(taskProgressFromOutput(undefined, 1)).toBeUndefined();
+    expect(taskProgressFromOutput('tasks: 3', 1)).toBeUndefined();
+    expect(taskProgressFromOutput({ok: true}, 1)).toBeUndefined();
+    expect(taskProgressFromOutput({ok: true, taskCount: 3}, 1)).toBeUndefined();
+    expect(taskProgressFromOutput({ok: true, taskCount: 3, counts: {pending: 1}}, 1)).toBeUndefined();
+    expect(taskProgressFromOutput({ok: true, taskCount: 'all', counts: {}}, 1)).toBeUndefined();
+    expect(taskProgressFromOutput({ok: true, taskCount: 99_999, counts: {pending: 1, in_progress: 0, completed: 0}}, 1)).toBeUndefined();
+  });
+
+  it('never carries task titles or raw output', () => {
+    const progress = taskProgressFromOutput({ok: true, taskCount: 1, counts: {pending: 1, in_progress: 0, completed: 0}, summary: 'Tasks: 1 pending.'}, 2);
+    expect(JSON.stringify(progress)).not.toContain('summary');
+    expect(JSON.stringify(progress)).not.toContain('title');
+  });
+});
+
+describe('work state task progress (writeTasks observation)', () => {
+  it('records pending/in-progress counts from a successful writeTasks event and keeps them across later reads', () => {
+    const state = createWorkState('do the roadmap', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: [{title: 'a'}, {title: 'b'}, {title: 'c'}, {title: 'd'}, {title: 'e'}]}, success: true, output: {ok: true, taskCount: 5, counts: {pending: 5, in_progress: 0, completed: 0}, summary: 'Tasks: 5 pending.'}});
+    expect(state.taskProgress).toEqual({total: 5, pending: 5, inProgress: 0, completed: 0, revision: state.revision});
+    const revision = state.revision;
+    // A later read does not disturb the task evidence.
+    observeWorkToolEvent(state, {toolName: 'readFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    expect(state.taskProgress).toMatchObject({total: 5, pending: 5, revision});
+  });
+
+  it('updates counts when the model re-declares the list and accepts an all-completed list', () => {
+    const state = createWorkState('do the roadmap', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 2, counts: {pending: 1, in_progress: 1, completed: 0}, summary: 'x'}});
+    expect(state.taskProgress).toMatchObject({pending: 1, inProgress: 1});
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 2, counts: {pending: 0, in_progress: 0, completed: 2}, summary: 'x'}});
+    expect(state.taskProgress).toMatchObject({pending: 0, inProgress: 0, completed: 2});
+  });
+
+  it('ignores failed and malformed writeTasks results without touching prior evidence', () => {
+    const state = createWorkState('do the roadmap', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 1, counts: {pending: 1, in_progress: 0, completed: 0}, summary: 'x'}});
+    const first: WorkTaskProgress = state.taskProgress!;
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: false, output: {ok: false, error: 'Task 1: title cannot be empty.'}});
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, summary: 'no counts'}});
+    expect(state.taskProgress).toBe(first);
+  });
+
+  it('skips duplicate-skipped writeTasks events like any other duplicate', () => {
+    const state = createWorkState('do the roadmap', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeTasks', success: true, output: {ok: true, taskCount: 1, counts: {pending: 1, in_progress: 0, completed: 0}}, duplicateSkipped: true});
+    expect(state.taskProgress).toBeUndefined();
   });
 });

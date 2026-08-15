@@ -1,7 +1,7 @@
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {MAIN_TOOL_ONLY_STEP_LIMIT} from './budgets.js';
 import type {TurnBudget} from './turnBudget.js';
-import {intentExpectsValidation, type ValidationOutcome} from './workState.js';
+import {intentExpectsValidation, type ValidationOutcome, type WorkTaskProgress} from './workState.js';
 import type {RequestIntent} from '../goal/requestClassifier.js';
 
 /**
@@ -50,6 +50,16 @@ export interface TurnExecutionState {
   validationOutcome: ValidationOutcome;
   validationKind: ValidationKind | undefined;
   validationAfterMutation: boolean;
+  /** Request intent driving the validation policy (implement/fix/test expect validation). */
+  intent: RequestIntent;
+  /** Latest current-turn task-list evidence from a successful writeTasks call. */
+  taskProgress: WorkTaskProgress | undefined;
+  /** Goal-continuation cycles issued this turn (bounded by the global budget + progress guard). */
+  goalContinuationsUsed: number;
+  /** Work/task evidence signature recorded when the latest goal continuation was issued. */
+  goalContinuationProgress: string | undefined;
+  /** Whether the single allowed no-progress corrective nudge has been consumed. */
+  goalContinuationCorrectiveUsed: boolean;
   budgetBoundary: boolean;
   aborted: boolean;
 }
@@ -67,6 +77,11 @@ export function createTurnExecutionState(): TurnExecutionState {
     validationOutcome: 'absent',
     validationKind: undefined,
     validationAfterMutation: false,
+    intent: 'unknown',
+    taskProgress: undefined,
+    goalContinuationsUsed: 0,
+    goalContinuationProgress: undefined,
+    goalContinuationCorrectiveUsed: false,
     budgetBoundary: false,
     aborted: false,
   };
@@ -82,8 +97,10 @@ export interface TurnCompletionEvidence {
   validationKind?: ValidationKind;
   validationAfterMutation: boolean;
   mutationCount: number;
+  /** Current-turn task counts from writeTasks, when a task list was declared. */
+  taskProgress?: {total: number; pending: number; inProgress: number; completed: number};
   finishCause: FinishCause | undefined;
-  recoveryUsed: {length: boolean; rescue: boolean};
+  recoveryUsed: {length: boolean; rescue: boolean; goal: number};
   budgetBoundary: boolean;
 }
 
@@ -94,8 +111,9 @@ export function toCompletionEvidence(state: TurnExecutionState): TurnCompletionE
     ...(state.validationKind ? {validationKind: state.validationKind} : {}),
     validationAfterMutation: state.validationAfterMutation,
     mutationCount: state.mutationCount,
+    ...(state.taskProgress ? {taskProgress: {total: state.taskProgress.total, pending: state.taskProgress.pending, inProgress: state.taskProgress.inProgress, completed: state.taskProgress.completed}} : {}),
     finishCause: state.finishCause,
-    recoveryUsed: {length: state.lengthCreditUsed, rescue: state.rescueUsed},
+    recoveryUsed: {length: state.lengthCreditUsed, rescue: state.rescueUsed, goal: state.goalContinuationsUsed},
     budgetBoundary: state.budgetBoundary,
   };
 }
@@ -109,6 +127,68 @@ export interface CompletionEvidence {
 }
 
 export type TurnStatus = 'complete' | 'aborted' | 'failed';
+
+/**
+ * Reasoned completion readiness from structured current-turn evidence. A
+ * voluntary final is acceptable only when the declared work is actually done;
+ * prose alone is never evidence of completion (no semantic judge — task,
+ * mutation, validation, tool, and budget evidence is authoritative).
+ */
+export type CompletionReadiness =
+  | 'ready'
+  | 'pending_tasks'
+  | 'validation_failed'
+  | 'validation_stale'
+  | 'validation_absent_after_mutation'
+  | 'tool_failure'
+  | 'unresolved_tool_input'
+  | 'aborted';
+
+/** Inputs `assessCompletionReadiness` needs; matches the TurnExecutionState projection. */
+export interface CompletionReadinessInput {
+  aborted: boolean;
+  intent: RequestIntent;
+  mutationCount: number;
+  validationOutcome: ValidationOutcome;
+  taskProgress: WorkTaskProgress | undefined;
+}
+
+/**
+ * Pure completion-readiness assessment. Priority: abort, unresolved tool
+ * input, failed tool, declared task progress, then intent-sensitive validation
+ * policy (implement/fix/test turns with successful mutations require fresh
+ * passing validation; plan/review/answer turns never do). A task list is
+ * enforced only when this turn declared one via a successful writeTasks call.
+ */
+export function assessCompletionReadiness(state: CompletionReadinessInput, evidence: Pick<CompletionEvidence, 'lastToolOk' | 'unresolvedToolInputError'>): CompletionReadiness {
+  if (state.aborted) return 'aborted';
+  if (evidence.unresolvedToolInputError) return 'unresolved_tool_input';
+  if (evidence.lastToolOk === false) return 'tool_failure';
+  if (state.taskProgress && (state.taskProgress.pending > 0 || state.taskProgress.inProgress > 0)) return 'pending_tasks';
+  if (intentExpectsValidation(state.intent)) {
+    if (state.validationOutcome === 'failed') return 'validation_failed';
+    if (state.validationOutcome === 'stale') return 'validation_stale';
+    if (state.validationOutcome === 'absent' && state.mutationCount > 0) return 'validation_absent_after_mutation';
+  }
+  return 'ready';
+}
+
+/** Human-readable, safe (no commands/content) description of a readiness result. */
+export function describeCompletionReadiness(readiness: CompletionReadiness, taskProgress?: WorkTaskProgress): string {
+  switch (readiness) {
+    case 'pending_tasks': {
+      const open = taskProgress ? taskProgress.pending + taskProgress.inProgress : 0;
+      return `${open} declared task${open === 1 ? '' : 's'} still pending or in progress`;
+    }
+    case 'validation_failed': return 'the latest validation failed and remains unresolved';
+    case 'validation_stale': return 'edits landed after the latest validation';
+    case 'validation_absent_after_mutation': return 'edits landed without any relevant validation';
+    case 'tool_failure': return 'the last tool call failed';
+    case 'unresolved_tool_input': return 'a tool call never executed because its input was invalid';
+    case 'aborted': return 'the turn was aborted';
+    case 'ready': return 'declared work is complete';
+  }
+}
 
 /**
  * True when the turn-wide budget is exhausted. Expressed against turn-wide
@@ -145,8 +225,8 @@ export function hasRemainingRecoveryBudget(state: Pick<TurnExecutionState, 'step
  */
 export function decideTerminalStatus(state: TurnExecutionState, evidence: CompletionEvidence, budgetExhausted: boolean): TurnStatus {
   if (state.aborted) return 'aborted';
-  if (evidence.lastToolOk === false || evidence.unresolvedToolInputError) return 'failed';
   if (budgetExhausted || state.finishCause === 'length' || state.finishCause === 'error') return 'failed';
+  if (assessCompletionReadiness(state, evidence) !== 'ready') return 'failed';
   if (evidence.sawToolCall && evidence.assistantText.trim().length === 0) return 'failed';
   return evidence.assistantText.trim().length > 0 ? 'complete' : 'failed';
 }
@@ -226,14 +306,83 @@ export function decideRescue(state: TurnExecutionState, evidence: CompletionEvid
   return {action: 'continue', reason: 'near tool-only boundary with no substantive answer', slice: RESCUE_SLICE};
 }
 
+/** Goal-continuation slice: real per-cycle work headroom, clamped to remaining global budget. */
+export const GOAL_CONTINUATION_SLICE: RecoverySlice = {steps: 6, toolCalls: 12};
+
+export interface GoalContinuationDecision {
+  action: RecoveryAction;
+  reason: string;
+  /** Slice size to request when action is 'continue'. */
+  slice: RecoverySlice;
+  /**
+   * Set when stopping with autonomously recoverable work remaining but no way
+   * to continue (global budget exhausted or the no-progress guard tripped):
+   * the honest pause path (status `failed`, never `complete`).
+   */
+  pause?: {readiness: CompletionReadiness};
+}
+
+/** Readiness reasons a bounded continuation can plausibly resolve with more work. */
+export function goalContinuationRecoverable(readiness: CompletionReadiness): boolean {
+  return readiness === 'pending_tasks'
+    || readiness === 'validation_failed'
+    || readiness === 'validation_stale'
+    || readiness === 'validation_absent_after_mutation';
+}
+
+/** Compact signature of measurable work: mutations, validation outcome/kind, task counts. */
+export function goalProgressSignature(state: Pick<TurnExecutionState, 'mutationCount' | 'validationOutcome' | 'validationKind' | 'taskProgress'>): string {
+  const tasks = state.taskProgress;
+  return JSON.stringify([state.mutationCount, state.validationOutcome, state.validationKind ?? '', tasks ? [tasks.revision, tasks.pending, tasks.inProgress, tasks.completed] : null]);
+}
+
+/**
+ * Record that a goal-continuation slice was issued. Progress since the previous
+ * continuation (work/task signature comparison) decides whether this issuance
+ * is the single allowed corrective nudge; a second no-progress stop then
+ * terminates as failed (see `decideGoalContinuation`). Never resets counters.
+ */
+export function recordGoalContinuation(state: TurnExecutionState) {
+  const signature = goalProgressSignature(state);
+  state.goalContinuationCorrectiveUsed = state.goalContinuationProgress != null && signature === state.goalContinuationProgress;
+  state.goalContinuationProgress = signature;
+  state.goalContinuationsUsed += 1;
+}
+
+/**
+ * Goal-continuation decision. Fires when the model voluntarily stopped with a
+ * substantive final while structured evidence shows unfinished work (declared
+ * tasks, or missing/stale/failed validation after edits). Distinct from length
+ * recovery (truncated output) and rescue (tool boundary with no answer): it is
+ * repeatable while measurable progress continues, never resets the global
+ * budget, and pauses honestly (via `pause`) when the budget is exhausted or the
+ * model twice produces no measurable progress.
+ */
+export function decideGoalContinuation(state: TurnExecutionState, evidence: CompletionEvidence, budget: TurnBudget): GoalContinuationDecision {
+  const stop = (reason: string, pause?: {readiness: CompletionReadiness}): GoalContinuationDecision => ({action: 'stop', reason, slice: GOAL_CONTINUATION_SLICE, ...(pause ? {pause} : {})});
+  if (state.aborted) return stop('turn aborted');
+  if (state.finishCause !== 'stop') return stop('finish is not a voluntary final');
+  if (evidence.assistantText.trim().length === 0) return stop('no substantive final to reject');
+  if (evidence.lastToolOk === false || evidence.unresolvedToolInputError) return stop('unresolved tool failure');
+  const readiness = assessCompletionReadiness(state, evidence);
+  if (readiness === 'ready') return stop('completion readiness satisfied');
+  if (!goalContinuationRecoverable(readiness)) return stop(`readiness '${readiness}' is not autonomously recoverable`);
+  if (!hasRemainingRecoveryBudget(state, budget)) return stop('global budget exhausted', {readiness});
+  if (state.goalContinuationProgress != null && goalProgressSignature(state) === state.goalContinuationProgress && state.goalContinuationCorrectiveUsed) {
+    return stop('no measurable progress after the corrective nudge', {readiness});
+  }
+  return {action: 'continue', reason: `premature final rejected: ${readiness}`, slice: GOAL_CONTINUATION_SLICE};
+}
+
 /**
  * Does the turn have a satisfactory terminal outcome that should stop recovery?
- * A substantive assistant answer (with no known failed tool/validation) is
- * satisfactory. Used by recovery guards so a normal successful turn makes no
- * extra model call.
+ * A substantive assistant answer is satisfactory only when the structured
+ * completion evidence agrees: declared tasks finished, no unresolved tool
+ * failure, and (for validation-bearing intents) fresh validation after edits.
+ * Used by recovery guards so a normal successful turn makes no extra model call.
  */
 export function hasSatisfactoryTerminalOutcome(state: TurnExecutionState, evidence: CompletionEvidence): boolean {
   if (state.aborted) return true;
-  if (evidence.assistantText.trim().length > 0 && evidence.lastToolOk !== false && !evidence.unresolvedToolInputError) return true;
-  return false;
+  if (evidence.assistantText.trim().length === 0) return false;
+  return assessCompletionReadiness(state, evidence) === 'ready';
 }

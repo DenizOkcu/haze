@@ -26,6 +26,8 @@ import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
+import {describeCompletionReadiness, type CompletionReadiness} from '../../core/agent/completionController.js';
+import {goalContinuationPrompt} from '../../core/goal/completionPolicy.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages, type TranscriptStaticItem} from '../chat/messages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
@@ -155,9 +157,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
-  // A turn paused by a model-stream idle stall, when bounded retries could not
-  // continue. Carries what a one-key resume needs; any new submission clears it.
-  const [pausedResume, setPausedResume] = useState<{request: string; retryAttempt: number} | undefined>(undefined);
+  // A turn paused with recoverable work unfinished: either a model-stream idle
+  // stall (bounded retries exhausted) or an incomplete goal (a voluntary final
+  // rejected by completion evidence, with continuation budget/guard exhausted).
+  // Carries what a one-key resume needs; any new submission clears it.
+  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; reason?: CompletionReadiness} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
@@ -560,16 +564,20 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   }
 
   /**
-   * Resume a turn paused by a model-stream idle stall: re-run the original
-   * request against the preserved conversation (no re-added user message) and
-   * continue the bounded retry pool from where it stopped.
+   * Resume a paused turn against the preserved conversation (no re-added user
+   * message). An idle-stall resume continues the same logical turn's bounded
+   * retry pool; an incomplete-goal resume starts a fresh logical turn (its
+   * budget was exhausted) nudged to pick up the remaining concrete work.
    */
   async function resumePausedTask() {
     const resume = pausedResume;
     if (!resume || busy) return;
     setPausedResume(undefined);
-    setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished task from where the model stream stalled.'}]);
-    await runSingleAgentTurn(resume.request, undefined, {}, {retryAttempt: resume.retryAttempt});
+    setMessages(m => [...m, {role: 'system', text: resume.kind === 'incomplete-goal' ? 'Resuming the unfinished task; completed work is preserved in the conversation.' : 'Resuming the unfinished task from where the model stream stalled.'}]);
+    const options = resume.kind === 'incomplete-goal'
+      ? {ephemeralControl: goalContinuationPrompt(describeCompletionReadiness(resume.reason ?? 'pending_tasks'))}
+      : {};
+    await runSingleAgentTurn(resume.request, undefined, options, {retryAttempt: resume.retryAttempt});
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {retryAttempt: number}) {
@@ -632,9 +640,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     }, resumeExisting?.retryAttempt ?? 0, resumeExisting != null, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
-    // A model-stream stall pauses the turn with progress preserved; expose the
-    // one-key resume affordance until the user submits something else.
-    if (result.resume?.kind === 'model-stream-idle') setPausedResume({request: result.resume.request, retryAttempt: result.resume.retryAttempt});
+    // A model-stream stall or an incomplete goal pauses the turn with progress
+    // preserved; expose the one-key resume affordance until the user submits
+    // something else.
+    if (result.resume?.kind === 'model-stream-idle') setPausedResume({kind: 'model-stream-idle', request: result.resume.request, retryAttempt: result.resume.retryAttempt});
+    else if (result.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: result.resume.request, retryAttempt: 0, reason: result.resume.reason});
     else setPausedResume(undefined);
     return result;
   }
@@ -716,8 +726,8 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}>Unfinished task paused (model stream stalled) · </Text>
-      <Text color={theme.command} bold>Press R to retry</Text>
+      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal' ? 'Unfinished task paused (work remains)' : 'Unfinished task paused (model stream stalled)'} · </Text>
+      <Text color={theme.command} bold>Press R to {pausedResume.kind === 'incomplete-goal' ? 'resume' : 'retry'}</Text>
       <Text color={theme.muted}> or type a follow-up</Text>
     </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>

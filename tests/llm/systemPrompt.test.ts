@@ -56,6 +56,13 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Keep the final answer concise');
   });
 
+  it('frames a declared task list as a commitment for the current turn', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('commitments for the current turn');
+    expect(prompt).toContain('A "next unfinished action" line is valid only in a runtime-forced pause, never as a voluntary final');
+    expect(prompt).toContain('complete them, or update the list when scope genuinely changes, before your final synthesis');
+  });
+
   it('guides efficient exploration and trustworthy validation without model-specific behavior', () => {
     const prompt = buildSystemPrompt();
     expect(prompt).toContain('read them together instead of discovering them one model step at a time');

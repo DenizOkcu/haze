@@ -7,7 +7,7 @@ A minimal LLM harness for your terminal.
 haze 0.10.1 is a reliability and release-hardening update for the 0.10 line. It keeps the Node.js 22 support floor and the documented CLI, settings, session, skill, and tool-result contracts.
 
 - Fast models no longer get stuck with read-only tools after a successful recovery read. Edit recovery advances before the next model step, recognizes equivalent paths such as `a.ts` and `./a.ts`, and only activates when a failure explicitly requires a reread. Argument-only write errors can be retried directly, and duplicate-call suppression no longer disables a tool for the rest of the turn.
-- Long turns have bounded output-length continuation and a final mutation/validation rescue slice. Headless results include safe completion and validation evidence, while structured file-tool failures expose concise diagnostics and recovery hints.
+- Long turns have bounded output-length continuation, a final mutation/validation rescue slice, and autonomous goal continuation: a voluntary final is rejected while the turn's declared task list has pending items or post-edit validation is missing, stale, or failed, and haze keeps working within the same global step/tool/time budgets. When those budgets or a no-progress guard stop it, the turn pauses as `failed` with a one-key `R` resume instead of reporting incomplete work as done. Headless results include safe completion, validation, and task-count evidence, while structured file-tool failures expose concise diagnostics and recovery hints.
 - Completed transcript entries and parser-stable streamed Markdown roots move into Ink static output. New sessions remain memory-only until the first resumable message, so empty sessions no longer create files or appear in resume lists.
 - File mutation tools show compact colorized diffs, including bounded previews and retained handles for large changes.
 - External tool output is explicitly treated as untrusted data. The README and `SECURITY.md` document the attended-use threat model, lack of command confirmation gates, prompt-injection limits, and debug-log sensitivity.
@@ -269,7 +269,7 @@ If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts 
 }
 ```
 
-The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A turn that ends without a substantive final answer, after an unresolved final tool failure, or at a hard step/tool budget is `failed` even if the provider returned normally.
+The `status` field is authoritative (driven by the agent's terminal state, not by parsing `result`), and the exit code mirrors it: `0` only for `complete`. A turn that ends without a substantive final answer, after an unresolved final tool failure, at a hard step/tool budget, or with declared tasks or required validation still unfinished (even if the model wrote a final message) is `failed` even if the provider returned normally; the evidence envelope carries the task counts and validation outcome that gated it.
 
 `--output stream-json` writes progress as the run happens. Each public event is one newline-delimited JSON object on stdout. The last line uses the same `{ type: "result", status, result, usage }` envelope as `--output json`, so consumers can display progress and parse the final result in the same way:
 

@@ -87,16 +87,33 @@ describe('runHeadless: output', () => {
       runAgentTurnImpl: (cb) => {
         cb.addMessage({id: 'a1', role: 'assistant', text: 'Done.', streaming: false});
       },
-      evidence: {validationOutcome: 'passed', validationKind: 'test', validationAfterMutation: true, mutationCount: 1, finishCause: 'stop', recoveryUsed: {length: false, rescue: false}, budgetBoundary: false},
+      evidence: {validationOutcome: 'passed', validationKind: 'test', validationAfterMutation: true, mutationCount: 1, taskProgress: {total: 5, pending: 2, inProgress: 0, completed: 3}, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 1}, budgetBoundary: false},
     });
     await runHeadless({prompt: 'do it', output: 'json'});
     const parsed = JSON.parse(writes.join(''));
-    expect(parsed.evidence).toMatchObject({validationOutcome: 'passed', finishCause: 'stop', recoveryUsed: {length: false, rescue: false}});
+    expect(parsed.evidence).toMatchObject({validationOutcome: 'passed', finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 1}, taskProgress: {total: 5, pending: 2, inProgress: 0, completed: 3}});
+    expect(parsed.status).toBe('complete');
     // Evidence must never carry raw commands, output, or secrets.
     const json = JSON.stringify(parsed.evidence);
     for (const forbidden of ['command', 'stdout', 'stderr', 'error', 'key', 'token']) {
       expect(json).not.toContain(forbidden);
     }
+  });
+
+  it('exits non-zero for an incomplete-goal pause so CI fails loudly', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => {
+        cb.addMessage({id: 'a1', role: 'assistant', text: 'Next unfinished action remains.', streaming: false});
+      },
+      status: 'failed',
+      evidence: {validationOutcome: 'absent', validationAfterMutation: false, mutationCount: 2, taskProgress: {total: 5, pending: 5, inProgress: 0, completed: 0}, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 2}, budgetBoundary: true},
+    });
+    const exitCode = await runHeadless({prompt: 'implement the roadmap', output: 'json'});
+    const parsed = JSON.parse(writes.join(''));
+    expect(parsed.status).toBe('failed');
+    expect(parsed.evidence.taskProgress).toEqual({total: 5, pending: 5, inProgress: 0, completed: 0});
+    expect(exitCode).toBe(1);
   });
 
   it('emits a JSON envelope with status, result, and a pinned usage shape', async () => {
