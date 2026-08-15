@@ -20,21 +20,21 @@ function settingScope(entry: HazeSkillSetting): SkillSource {
   return entry.scope ?? 'global';
 }
 
-function matches(entry: HazeSkillSetting, name: string, scope: SkillSource) {
+function isSameSkillSetting(entry: HazeSkillSetting, name: string, scope: SkillSource) {
   return entry.name === name && settingScope(entry) === scope;
 }
 
 /** A skill is enabled unless an explicit scope-aware override disables it. */
 export function isSkillEnabled(settings: HazeSettings, name: string, scope: SkillSource = 'global'): boolean {
-  const entry = configuredSkillSettings(settings).find(candidate => matches(candidate, name, scope));
+  const entry = configuredSkillSettings(settings).find(candidate => isSameSkillSetting(candidate, name, scope));
   return entry ? entry.enabled !== false : true;
 }
 
 export function setSkillEnabled(settings: HazeSettings, name: string, enabled: boolean, scope: SkillSource = 'global'): HazeSkillSetting[] {
-  const others = configuredSkillSettings(settings).filter(entry => !matches(entry, name, scope));
+  const others = configuredSkillSettings(settings).filter(entry => !isSameSkillSetting(entry, name, scope));
   return enabled ? others : [...others, {name, ...(scope === 'project' ? {scope} : {}), enabled: false}];
 }
 
 export function removeSkillSetting(settings: HazeSettings, name: string, scope: SkillSource = 'global'): HazeSkillSetting[] {
-  return configuredSkillSettings(settings).filter(entry => !matches(entry, name, scope));
+  return configuredSkillSettings(settings).filter(entry => !isSameSkillSetting(entry, name, scope));
 }
