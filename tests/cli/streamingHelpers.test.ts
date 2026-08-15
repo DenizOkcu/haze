@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {latestRepeatedToolNames, toolOnlyStepCount, uniqueRepeatedToolNames} from '../../src/cli/commands/streaming.js';
+import {latestRepeatedToolNames, toolOnlyStepCount, uniqueRepeatedToolNames} from '../../src/core/agent/turnPolicy.js';
 
 describe('uniqueRepeatedToolNames', () => {
   it('flags a tool called twice with identical input', () => {

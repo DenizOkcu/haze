@@ -1,7 +1,9 @@
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {runAgentGoal, type GoalRunResult} from './streaming/goalSupervisor.js';
-import {type Message, type StreamCallbacks, type TokenUsage, type TurnCompletionEvidence, type TurnStatus} from './streaming.js';
+import {type Message, type StreamCallbacks, type TurnStatus} from './streaming.js';
+import type {TokenUsage} from './streaming/turnRuntime.js';
+import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import type {EffectiveReasoning, ReasoningLevel} from '../../core/agent/reasoningPolicy.js';
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';

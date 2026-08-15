@@ -1,7 +1,8 @@
 import os from 'node:os';
 import type {ModelMessage} from 'ai';
 import {modelMessageText} from '../../core/agent/compaction.js';
-import type {Message, TokenUsage} from '../commands/streaming.js';
+import type {Message} from '../commands/streaming.js';
+import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 
 export function toolCallCount(messages: Message[]) {
   return messages.reduce((total, message) => {

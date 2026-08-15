@@ -1,6 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {RESCUE_BOUNDARY} from '../../../src/core/agent/completionController.js';
-import {restrictToRescueTools} from '../../../src/cli/commands/streaming.js';
+import {restrictToRescueTools} from '../../../src/cli/commands/streaming/attemptSetup.js';
 
 interface FakeFullStreamPart {
   type: string;

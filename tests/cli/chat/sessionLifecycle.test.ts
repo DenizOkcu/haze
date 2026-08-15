@@ -1,7 +1,8 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {ModelMessage} from 'ai';
 import type {SessionLifecycle, SessionLifecycleDeps} from '../../../src/cli/chat/sessionLifecycle.js';
-import type {Message, TokenUsage} from '../../../src/cli/commands/streaming.js';
+import type {Message} from '../../../src/cli/commands/streaming.js';
+import type {TokenUsage} from '../../../src/cli/commands/streaming/turnRuntime.js';
 import {EMPTY_TOKEN_USAGE} from '../../../src/cli/chat/turnState.js';
 
 async function loadLifecycle(deps: SessionLifecycleDeps): Promise<SessionLifecycle> {

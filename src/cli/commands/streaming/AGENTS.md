@@ -10,11 +10,17 @@ This subtree keeps the main agent loop readable by isolating display, accounting
 
 - `assistantText.ts` sanitizes and filters streamed assistant fragments.
 - `abortCause.ts` tracks why a turn's shared AbortController fired (`user` / `turn-deadline` / `model-stream-idle`) so the attempt catch can classify instead of guessing from error strings.
+- `streaming.ts` is the thin turn facade: the public turn contract (`runAgentTurn`, `StreamCallbacks`, `Message`, `TurnResult`, `TurnExecutionOptions`) and the turn-level retry/recovery/deadline loop. No attempt internals live there.
+- `agentAttempt.ts` orchestrates one attempt end to end: `attemptSetup` → `streamLoop` → `attemptOutcome`, with failure classification in one catch and guaranteed MCP/LSP/stall-guard/tool-display teardown.
+- `attemptSetup.ts` assembles one attempt: model resolution (one fresh settings read per turn), request context assembly, model-aware token budgeting/compaction, and recovery-slice clamping (rescue tool restriction, execution-boundary budget RH-003, per-tool deadlines RH-004). Owns `restrictToRescueTools` (F-08).
+- `streamLoop.ts` drives the `ToolLoopAgent` loop: repair/prepareStep/step observers, public stream-part application (assistant segments, tool groups, goal events), and post-stream conversation commit. Loop state lives in `AttemptLoopState`, created before the stall guard so stall classification can read what the stalled step emitted.
+- `stallRecovery.ts` owns the idle timer (absorbs the former `idleTimer.ts`), stall classification (`StreamStallGuard` + the `model-stream-idle` abort cause), the shared bounded model-retry pool (`MAX_MODEL_RETRIES`, shared by idle stalls and transient model errors), and conversation salvage to the last completed step.
+- `attemptOutcome.ts` owns terminal classification and resume/continuation decisions: the authoritative `terminalTurnStatus` adapter (absorbs the former `turnOutcome.ts`; the pure policy stays in `core/agent/completionController.ts`), work-evidence projection, goal status, bounded recovery proposals (length/goal/rescue slices and the `incomplete-goal` checkpoint), and failed-attempt classification (idle retry/pause, turn deadline, user abort, context-overflow retry, transient model retry).
 - `toolGroupRenderer.ts` groups native tool calls/results into compact UI messages and emits events/log entries.
 - `toolResultState.ts` tracks mutating tool success/failure and edit-recovery state.
 - `toolCallRecovery.ts` identifies malformed tool-input errors for the forced smaller-retry path and clamps out-of-range numeric tool arguments to the tool's declared JSON-Schema bounds. The forced retry must use `activeTools: [tool]` + `toolChoice: 'required'`, never the object tool-choice form: OpenAI-compatible servers such as LM Studio and llama.cpp accept only string `tool_choice` values (`none`/`auto`/`required`) and reject the object form with HTTP 400.
-- `turnRuntime.ts` contains token/usage extraction, retry delays, context-file memory, abortable delay, and response metrics helpers.
-- `turnOutcome.ts` is the authoritative terminal turn-status function (`complete`/`aborted`/`failed`) derived from runtime facts (abort, error, last tool `ok`, finish reason, step/tool budgets, substantive final text, and completion readiness: declared task counts plus post-mutation validation for implement/fix/test intents). `runAgentTurn` calls it once per turn; do not duplicate status inference elsewhere.
+- `turnRuntime.ts` contains token/usage extraction, retry delays, the per-turn log-entry helper, context-file memory, abortable delay, and response metrics helpers.
+- `attemptOutcome.ts` also hosts the authoritative terminal turn-status adapter (`terminalTurnStatus`, absorbing the former `turnOutcome.ts`): `complete`/`aborted`/`failed` derived from runtime facts (abort, error, last tool `ok`, finish reason, step/tool budgets, substantive final text, and completion readiness: declared task counts plus post-mutation validation for implement/fix/test intents). The pure policy stays in `core/agent/completionController.ts`; `finalizeAttemptOutcome` is its single call site; do not duplicate status inference elsewhere.
 - `goalCheckpoint.ts` is the leaf module for bounded continuation checkpoints: the `IncompleteGoalResume` payload on `TurnResult.resume`, the supervisor-level `GoalCheckpoint`, the cumulative progress signature, and the single checkpoint construction site (`buildIncompleteGoalResume`). Safe metadata only (reasons, counts, enums) — never commands, content, or credentials. It must stay import-cycle-free (imports core policy types only) because both `streaming.ts` and `goalSupervisor.ts` depend on it.
 - `goalSupervisor.ts` owns the logical goal across physical turns (`runAgentGoal`). It wraps `runAgentTurn`: a `recoverable-incomplete` physical turn — including step/tool budget boundaries that finish as `tool-calls` — automatically starts the next physical turn against the preserved conversation (no duplicate user message, attachments only on the first attempt, one shared turn scope/mutation lease, `goalContext` seeding carried evidence). It stops only for structured completion, hard blockers, user cancellation, the whole-goal deadline, or two consecutive no-progress cycles (cumulative signature: mutations, validation outcome, task counts; the first no-progress cycle is the allowed corrective). Per-turn limits are safety boundaries, not goal completion. It emits exactly one `goal_start`, `goal_continue` between turns, and one terminal `goal_end`; background-process teardown and headless `--timeout` apply at goal level, not per turn.
 
@@ -52,10 +58,11 @@ Maintainability focus:
 Use/update:
 
 - `tests/cli/streamingFragments.test.ts`
-- `tests/cli/streamingHelpers.test.ts`
+- `tests/cli/streamingHelpers.test.ts` (imports `core/agent/turnPolicy.js` directly)
 - `tests/cli/toolGroupCaption.test.ts`
 - `tests/cli/toolResultState.test.ts`
 - `tests/cli/turnRuntime.test.ts`
-- `tests/cli/turnOutcome.test.ts`
+- `tests/cli/commands/streaming/attemptOutcome.test.ts`
+- `tests/cli/commands/streaming/stallRecovery.test.ts` (idle timer)
 - `tests/cli/commands/streaming.test.ts` (turn stack, recovery, end-to-end goal continuation)
 - `tests/cli/commands/streaming/goalSupervisor.test.ts` (supervisor decisions)

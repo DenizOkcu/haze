@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {terminalTurnStatus} from '../../src/cli/commands/streaming/turnOutcome.js';
+import {terminalTurnStatus} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
 
 describe('terminalTurnStatus', () => {
   it('requires a substantive answer after tools and rejects final failures/budget stops', () => {

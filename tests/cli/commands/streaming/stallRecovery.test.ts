@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {createIdleTimer} from '../../../../src/cli/commands/streaming/idleTimer.js';
+import {createIdleTimer} from '../../../../src/cli/commands/streaming/stallRecovery.js';
 
 describe('createIdleTimer', () => {
   beforeEach(() => vi.useFakeTimers());
