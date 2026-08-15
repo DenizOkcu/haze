@@ -262,4 +262,3 @@ describe('StdioLspClient', () => {
     await client.close();
   });
 });
-
