@@ -158,13 +158,32 @@ describe('preset model limits', () => {
 
   it('resolves limits by provider URL and name without cross-preset leakage', () => {
     const byUrl = presetModelLimitsForModels({url: 'https://api.deepseek.com/v1'}, ['deepseek-v4-pro', 'kimi-k3']);
-    expect(byUrl).toEqual({'deepseek-v4-pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000}});
+    expect(byUrl['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 384_000});
+    expect(byUrl['deepseek-v4-pro']?.pricing).toMatchObject({inputPerMillionTokens: expect.any(Number), outputPerMillionTokens: expect.any(Number)});
     // The same model id on a different provider resolves to that provider's cap.
     const byRouter = presetModelLimitsForModels({url: 'https://api.together.ai/v1'}, ['deepseek-ai/DeepSeek-V4-Pro']);
     expect(byRouter['deepseek-ai/DeepSeek-V4-Pro']?.contextWindowTokens).toBe(512_000);
     const byName = presetModelLimitsForModels({name: 'OpenAI Subscription'}, ['gpt-5.5']);
-    expect(byName).toEqual({'gpt-5.5': {contextWindowTokens: 1_050_000, maxOutputTokens: 128_000}});
+    expect(byName['gpt-5.5']).toMatchObject({contextWindowTokens: 1_050_000, maxOutputTokens: 128_000});
     expect(presetModelLimitsForModels({url: 'http://localhost:8080/v1'}, ['qwen3-coder'])).toEqual({});
     expect(presetModelLimitsForModels({url: 'https://unknown.example/v1'}, ['gpt-5.5'])).toEqual({});
+  });
+
+  it('pricing, when present, is a plausible positive per-million rate (F-12)', () => {
+    let priced = 0;
+    for (const preset of PROVIDER_PRESETS) {
+      for (const [model, limits] of Object.entries(preset.modelLimits ?? {})) {
+        if (!limits.pricing) continue;
+        priced++;
+        expect(limits.pricing.inputPerMillionTokens, `${preset.id}:${model} input price`).toBeGreaterThan(0);
+        expect(limits.pricing.inputPerMillionTokens, `${preset.id}:${model} input price ceiling`).toBeLessThan(1000);
+        expect(limits.pricing.outputPerMillionTokens, `${preset.id}:${model} output price`).toBeGreaterThan(0);
+        expect(limits.pricing.outputPerMillionTokens, `${preset.id}:${model} output price ceiling`).toBeLessThan(1000);
+        if (limits.pricing.cacheReadPerMillionTokens != null) expect(limits.pricing.cacheReadPerMillionTokens).toBeLessThanOrEqual(limits.pricing.inputPerMillionTokens);
+        if (limits.pricing.cacheWritePerMillionTokens != null) expect(limits.pricing.cacheWritePerMillionTokens).toBeLessThan(1000);
+      }
+    }
+    // The curated catalog prices the vast majority of suggested models.
+    expect(priced).toBeGreaterThan(100);
   });
 });

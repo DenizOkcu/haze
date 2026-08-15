@@ -36,6 +36,7 @@ import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
 import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
 import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
+import {formatCostUsd} from '../../core/agent/costAccounting.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
@@ -709,6 +710,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       <Text color={theme.muted}>  in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
       <Text color={theme.muted}>  logical={formatTokenCount(tokenUsage.logicalInputEstimate)}{tokenUsage.effectiveNonCachedInput != null ? ` effective_non_cached=${formatTokenCount(tokenUsage.effectiveNonCachedInput)}` : ''}</Text>
       <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>
+      {tokenUsage.costUsd != null && <Text color={theme.muted}>  cost={formatCostUsd(tokenUsage.costUsd)} (estimated from configured model pricing)</Text>}
     </Box>}
     <Box flexShrink={0} justifyContent="space-between">
       <Box flexDirection="column" flexShrink={1} minWidth={0}>

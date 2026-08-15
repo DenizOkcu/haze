@@ -61,3 +61,15 @@ describe('chat metrics', () => {
     expect(statusBarMetrics({...base, backgroundProcessCount: 0}).statusDetailLabel).not.toContain(' bg');
   });
 });
+
+describe('status-bar cost estimate (F-12)', () => {
+  it('appends the estimated cost only when pricing produced one', () => {
+    const base = {
+      messages: [{role: 'assistant', text: 'answer'}],
+      tokenUsage: {...EMPTY_TOKEN_USAGE, inputTokens: 100, outputTokens: 50},
+      enabledSkillCount: 1,
+    };
+    expect(statusBarMetrics({...base, tokenUsage: {...base.tokenUsage, costUsd: 0.0123}}).statusDetailLabel).toContain('$0.012');
+    expect(statusBarMetrics(base).statusDetailLabel).not.toContain('$');
+  });
+});

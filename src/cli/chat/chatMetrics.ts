@@ -1,6 +1,7 @@
 import os from 'node:os';
 import type {ModelMessage} from 'ai';
 import {modelMessageText} from '../../core/agent/compaction.js';
+import {formatCostUsd} from '../../core/agent/costAccounting.js';
 import type {Message, TokenUsage} from '../commands/streaming.js';
 
 export function toolCallCount(messages: Message[]) {
@@ -64,7 +65,8 @@ export function statusBarMetrics(input: {messages: Message[]; tokenUsage: TokenU
   const inputEstimated = providerInput == null || effectiveInput !== providerInput;
   const outputEstimated = tokenUsage.outputTokens == null;
   const backgroundLabel = input.backgroundProcessCount ? ` / ⏵ ${input.backgroundProcessCount} bg` : '';
-  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkillCount} skill${enabledSkillCount === 1 ? '' : 's'}${backgroundLabel}`;
+  const costLabel = tokenUsage.costUsd != null ? ` / ${formatCostUsd(tokenUsage.costUsd)}` : '';
+  const statusDetailLabel = `${hazeMessages} haze message${hazeMessages === 1 ? '' : 's'} / ${toolsUsed} tool call${toolsUsed === 1 ? '' : 's'} / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkillCount} skill${enabledSkillCount === 1 ? '' : 's'}${backgroundLabel}${costLabel}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   return {hazeMessages, toolsUsed, effectiveInput, effectiveOutput, inputEstimated, outputEstimated, statusDetailLabel, hasTokenBreakdown};
 }

@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 import {customProfileSchema} from '../core/subagent/executionProfiles.js';
+import type {ModelPricing} from '../core/agent/costAccounting.js';
 
 /** Optional, explicitly user-controlled reasoning depth (provider/protocol gated). */
 export type ReasoningLevel = 'low' | 'medium' | 'high';
@@ -24,9 +25,10 @@ export interface HazeProviderSettings {
   /**
    * Optional per-model capacity metadata used for request budgeting (RH-005).
    * Absent entries fall back to a conservative default window. Preserved as
-   * passthrough so unknown metadata is not dropped.
+   * passthrough so unknown metadata is not dropped. `pricing` (USD per 1M
+   * tokens) feeds the optional cost estimate (F-12).
    */
-  modelLimits?: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>;
+  modelLimits?: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number; pricing?: ModelPricing}>;
 }
 
 export interface HazeLspServerSettings {
@@ -108,6 +110,13 @@ const providerCapabilitiesSchema = z.object({
   images: z.boolean().optional(),
 }).passthrough();
 
+const modelPricingSchema = z.object({
+  inputPerMillionTokens: z.number().positive(),
+  outputPerMillionTokens: z.number().positive(),
+  cacheReadPerMillionTokens: z.number().positive().optional(),
+  cacheWritePerMillionTokens: z.number().positive().optional(),
+});
+
 const providerSchema = z.object({
   name: z.string(),
   url: z.string(),
@@ -115,7 +124,7 @@ const providerSchema = z.object({
   models: z.array(z.string()),
   kind: z.enum(['openai-compatible', 'chatgpt-codex']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
-  modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
+  modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive(), pricing: modelPricingSchema}).partial()).optional(),
 }).passthrough();
 
 const lspServerSchema = z.object({

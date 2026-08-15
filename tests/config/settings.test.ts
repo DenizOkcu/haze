@@ -189,4 +189,13 @@ describe('settings', () => {
     await fs.writeJson(settingsFile, {providers: [{name: 'local', url: 'http://x/v1', models: ['qwen'], modelLimits: {qwen: {contextWindowTokens: -1}}}]});
     await expect(readSettings()).rejects.toThrow();
   });
+
+  it('preserves per-model pricing metadata and rejects malformed rates loudly (F-12)', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({providers: [{name: 'cloud', url: 'https://x/v1', models: ['m'], modelLimits: {m: {contextWindowTokens: 128_000, maxOutputTokens: 16_384, pricing: {inputPerMillionTokens: 5, outputPerMillionTokens: 30, cacheReadPerMillionTokens: 0.5}}}}]});
+    const settings = await readSettings();
+    expect(settings.providers?.[0]?.modelLimits?.['m']?.pricing).toMatchObject({inputPerMillionTokens: 5, outputPerMillionTokens: 30, cacheReadPerMillionTokens: 0.5});
+    await fs.writeJson(settingsFile, {providers: [{name: 'cloud', url: 'https://x/v1', models: ['m'], modelLimits: {m: {contextWindowTokens: 1, pricing: {inputPerMillionTokens: -5, outputPerMillionTokens: 2}}}}]});
+    await expect(readSettings()).rejects.toThrow();
+  });
 });

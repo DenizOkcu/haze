@@ -15,6 +15,8 @@ export interface TokenUsage {
   reasoningTokens: number;
   logicalInputEstimate: number;
   effectiveNonCachedInput: number | undefined;
+  /** Estimated USD cost when the active model carries pricing metadata (F-12). */
+  costUsd?: number;
 }
 
 export function retryDelayMs(attempt: number) {

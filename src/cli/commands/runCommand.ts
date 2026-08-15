@@ -31,6 +31,8 @@ export interface HeadlessUsage {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   reasoningTokens: number;
+  /** Estimated USD cost; present only when the model carries pricing metadata (F-12). */
+  costUsd?: number;
 }
 
 type HeadlessStreamEvent =
@@ -59,6 +61,7 @@ function pinnedUsage(usage: TokenUsage): HeadlessUsage {
     cacheReadTokens: usage.cacheReadTokens ?? 0,
     cacheWriteTokens: usage.cacheWriteTokens ?? 0,
     reasoningTokens: usage.reasoningTokens ?? 0,
+    ...(usage.costUsd !== undefined ? {costUsd: Math.round(usage.costUsd * 1e6) / 1e6} : {}),
   };
 }
 

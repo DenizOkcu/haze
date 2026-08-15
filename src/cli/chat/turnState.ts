@@ -21,5 +21,8 @@ export function accumulateTokenUsage(current: TokenUsage, usage: TokenUsage): To
     reasoningTokens: current.reasoningTokens + usage.reasoningTokens,
     logicalInputEstimate: current.logicalInputEstimate + usage.logicalInputEstimate,
     effectiveNonCachedInput: (current.effectiveNonCachedInput ?? 0) + (usage.effectiveNonCachedInput ?? 0) || usage.effectiveNonCachedInput,
+    // Undefined until the first priced report so unpriced models never surface $0
+    // as if it were a real estimate (F-12).
+    ...(current.costUsd !== undefined || usage.costUsd !== undefined ? {costUsd: (current.costUsd ?? 0) + (usage.costUsd ?? 0)} : {}),
   };
 }
