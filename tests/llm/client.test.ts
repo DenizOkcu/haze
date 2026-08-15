@@ -315,3 +315,82 @@ describe('modelWithConfig', () => {
     expect(await resolveWorkerRuntime({active, settings, selector: 'shared'})).toMatchObject({status: 'ambiguous'});
   });
 });
+
+describe('context window resolution', () => {
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-client-test-'));
+    settingsFile = path.join(tmp, 'settings.json');
+  });
+
+  afterEach(async () => {
+    await fs.remove(tmp);
+    vi.restoreAllMocks();
+  });
+
+  async function writeSettings(payload: unknown) {
+    await fs.ensureDir(path.dirname(settingsFile));
+    await fs.writeJson(settingsFile, payload, {spaces: 2});
+  }
+
+  it('uses configured modelLimits and reports the settings source', async () => {
+    await writeSettings({providers: [{name: 'local', url: 'https://x.test/v1', key: 'k', models: ['m'], modelLimits: {m: {contextWindowTokens: 65_536, maxOutputTokens: 8_192}}}], provider: 'local', model: 'm'});
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime?.config.contextWindowTokens).toBe(65_536);
+    expect(runtime?.config.contextWindowSource).toBe('settings');
+    expect(runtime?.config.maxOutputTokens).toBe(8_192);
+  });
+
+  it('falls back to 128K for unknown hosted models', async () => {
+    await writeSettings({providers: [{name: 'cloud', url: 'https://api.example.test/v1', key: 'k', models: ['mystery']}], provider: 'cloud', model: 'mystery'});
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime?.config.contextWindowTokens).toBe(128_000);
+    expect(runtime?.config.contextWindowSource).toBe('default-fallback');
+  });
+
+  it('falls back to the conservative local window for localhost servers', async () => {
+    await writeSettings({providers: [{name: 'ollama', url: 'http://localhost:11434/v1', models: ['qwen3-coder']}], provider: 'ollama', model: 'qwen3-coder'});
+    const {modelWithConfig, isLocalProviderUrl} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime?.config.contextWindowTokens).toBe(32_768);
+    expect(runtime?.config.contextWindowSource).toBe('default-fallback');
+    expect(isLocalProviderUrl('http://127.0.0.1:8080/v1')).toBe(true);
+    expect(isLocalProviderUrl('http://[::1]:8080/v1')).toBe(true);
+    expect(isLocalProviderUrl('http://mac.local:8080/v1')).toBe(true);
+    expect(isLocalProviderUrl('https://api.example.test/v1')).toBe(false);
+  });
+
+  it('uses the user-configured fallback settings and reports the user-fallback source', async () => {
+    await writeSettings({
+      contextWindowFallbackTokens: 200_000,
+      localContextWindowFallbackTokens: 131_072,
+      providers: [
+        {name: 'cloud', url: 'https://api.example.test/v1', key: 'k', models: ['mystery']},
+        {name: 'local', url: 'http://localhost:11434/v1', models: ['qwen3-coder']},
+      ],
+      provider: 'cloud',
+      model: 'mystery',
+    });
+    const {modelWithConfig} = await loadClient();
+    const hosted = await modelWithConfig();
+    expect(hosted?.config.contextWindowTokens).toBe(200_000);
+    expect(hosted?.config.contextWindowSource).toBe('user-fallback');
+    const local = await modelWithConfig({modelSelector: 'local:qwen3-coder'});
+    expect(local?.config.contextWindowTokens).toBe(131_072);
+    expect(local?.config.contextWindowSource).toBe('user-fallback');
+  });
+
+  it('per-model modelLimits still win over the user-configured fallback', async () => {
+    await writeSettings({
+      contextWindowFallbackTokens: 200_000,
+      providers: [{name: 'cloud', url: 'https://api.example.test/v1', key: 'k', models: ['m'], modelLimits: {m: {contextWindowTokens: 65_536}}}],
+      provider: 'cloud',
+      model: 'm',
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime?.config.contextWindowTokens).toBe(65_536);
+    expect(runtime?.config.contextWindowSource).toBe('settings');
+  });
+});

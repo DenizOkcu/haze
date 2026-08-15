@@ -69,6 +69,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'openai/gpt-5.6',
       'google/gemini-3.7-flash',
       'anthropic/claude-sonnet-5',
+      'qwen/qwen3.8-2.4t-a95b',
       // Fast
       'x-ai/grok-4.6',
       'openai/gpt-5.4-mini',
@@ -80,6 +81,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'openai/gpt-5.6': {contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
       'google/gemini-3.7-flash': {contextWindowTokens: 1_048_576, maxOutputTokens: 65_536},
       'anthropic/claude-sonnet-5': {contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
+      'qwen/qwen3.8-2.4t-a95b': {contextWindowTokens: 1_048_576, maxOutputTokens: 262_144},
       'x-ai/grok-4.6': {contextWindowTokens: 500_000, maxOutputTokens: 500_000},
       'openai/gpt-5.4-mini': {contextWindowTokens: 400_000, maxOutputTokens: 128_000},
       'google/gemini-3.5-flash': {contextWindowTokens: 1_048_576, maxOutputTokens: 65_536},
@@ -341,8 +343,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'moonshotai/Kimi-K2.7-Code',
       'zai-org/GLM-5.2',
       'MiniMaxAI/MiniMax-M3',
-    ],
-    // Router-specific caps: Together serves some models below the origin's window.
+    ],    // Router-specific caps: Together serves some models below the origin's window.
     modelLimits: {
       'moonshotai/Kimi-K3': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
       'deepseek-ai/DeepSeek-V4-Pro': {contextWindowTokens: 512_000, maxOutputTokens: 384_000},
@@ -367,6 +368,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'accounts/fireworks/routers/kimi-k3-fast',
       'accounts/fireworks/models/minimax-m3',
       'accounts/fireworks/models/deepseek-v4-flash',
+      'accounts/fireworks/models/deepseek-v4-pro-0813',
     ],
     modelLimits: {
       'accounts/fireworks/models/kimi-k3': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
@@ -374,6 +376,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'accounts/fireworks/routers/kimi-k3-fast': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
       'accounts/fireworks/models/minimax-m3': {contextWindowTokens: 512_000, maxOutputTokens: 512_000},
       'accounts/fireworks/models/deepseek-v4-flash': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
+      'accounts/fireworks/models/deepseek-v4-pro-0813': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
     },
     category: 'cloud',
   },
@@ -388,6 +391,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       // SOTA
       'moonshotai/Kimi-K3',
       'zai-org/GLM-5.2',
+      'thinkingmachines/Inkling',
       // Fast
       'deepseek-ai/DeepSeek-V4-Flash',
       'Qwen/Qwen3-Coder-Next',
@@ -395,6 +399,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     modelLimits: {
       'moonshotai/Kimi-K3': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
       'zai-org/GLM-5.2': {contextWindowTokens: 262_144, maxOutputTokens: 131_072},
+      'thinkingmachines/Inkling': {contextWindowTokens: 1_048_576, maxOutputTokens: 1_048_576},
       'deepseek-ai/DeepSeek-V4-Flash': {contextWindowTokens: 1_048_576, maxOutputTokens: 384_000},
       'Qwen/Qwen3-Coder-Next': {contextWindowTokens: 262_144, maxOutputTokens: 65_536},
     },
@@ -408,11 +413,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyEnvVar: 'NVIDIA_API_KEY',
     suggestedModels: [
       'nvidia/nemotron-3-ultra-550b-a55b',
+      'nvidia/nemotron-3.5-lightning-30b-a3b',
       'nvidia/nemotron-3-super-120b-a12b',
       'minimaxai/minimax-m3',
     ],
     modelLimits: {
       'nvidia/nemotron-3-ultra-550b-a55b': {contextWindowTokens: 1_000_000, maxOutputTokens: 65_536},
+      'nvidia/nemotron-3.5-lightning-30b-a3b': {contextWindowTokens: 262_144, maxOutputTokens: 262_144},
       'nvidia/nemotron-3-super-120b-a12b': {contextWindowTokens: 262_144, maxOutputTokens: 262_144},
       'minimaxai/minimax-m3': {contextWindowTokens: 1_000_000, maxOutputTokens: 16_384},
     },
@@ -427,17 +434,23 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     apiKeyEnvVar: 'QWEN_TOKEN_PLAN_API_KEY',
     suggestedModels: [
       // SOTA
+      'qwen3.8-max',
       'qwen3.7-max',
       'glm-5.2',
+      'deepseek-v4-pro',
       // Fast
       'qwen3.7-plus',
       'kimi-k2.7-code',
+      'deepseek-v4-flash',
     ],
     modelLimits: {
+      'qwen3.8-max': {contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
       'qwen3.7-max': {contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
       'glm-5.2': {contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
+      'deepseek-v4-pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
       'qwen3.7-plus': {contextWindowTokens: 1_000_000, maxOutputTokens: 65_536},
       'kimi-k2.7-code': {contextWindowTokens: 262_144, maxOutputTokens: 262_144},
+      'deepseek-v4-flash': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
     },
     category: 'cloud',
   },
@@ -568,6 +581,129 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'openai/gpt-5.4-mini': {contextWindowTokens: 400_000, maxOutputTokens: 128_000},
       'anthropic/claude-sonnet-4.6': {contextWindowTokens: 983_040, maxOutputTokens: 128_000},
       'novita/kimi-k2.5': {contextWindowTokens: 128_000, maxOutputTokens: 262_144},
+    },
+    category: 'cloud',
+  },
+
+  {
+    id: 'kilo',
+    name: 'Kilo Gateway',
+    baseUrl: 'https://api.kilo.ai/api/gateway',
+    needsApiKey: true,
+    apiKeyEnvVar: 'KILO_API_KEY',
+    suggestedModels: [
+      // SOTA
+      'anthropic/claude-opus-5',
+      'openai/gpt-5.6-sol',
+      'moonshotai/kimi-k3',
+      'z-ai/glm-5.2',
+      // Fast
+      'google/gemini-3.7-flash',
+      'x-ai/grok-4.6',
+      'deepseek/deepseek-v4-pro-0813',
+      'kilo-auto/frontier',
+    ],
+    modelLimits: {
+      'anthropic/claude-opus-5': {contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
+      'openai/gpt-5.6-sol': {contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+      'moonshotai/kimi-k3': {contextWindowTokens: 1_048_576, maxOutputTokens: 1_048_576},
+      'z-ai/glm-5.2': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
+      'google/gemini-3.7-flash': {contextWindowTokens: 1_048_576, maxOutputTokens: 65_536},
+      'x-ai/grok-4.6': {contextWindowTokens: 500_000, maxOutputTokens: 500_000},
+      'deepseek/deepseek-v4-pro-0813': {contextWindowTokens: 1_048_576, maxOutputTokens: 384_000},
+      'kilo-auto/frontier': {contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
+    },
+    category: 'cloud',
+  },
+  {
+    id: 'novita',
+    name: 'Novita AI',
+    baseUrl: 'https://api.novita.ai/openai',
+    needsApiKey: true,
+    apiKeyEnvVar: 'NOVITA_API_KEY',
+    suggestedModels: [
+      // SOTA
+      'moonshotai/kimi-k3',
+      'zai-org/glm-5.2',
+      'qwen/qwen3.7-max',
+      'deepseek/deepseek-v4-pro',
+      // Fast
+      'moonshotai/kimi-k2.7-code',
+    ],
+    modelLimits: {
+      'moonshotai/kimi-k3': {contextWindowTokens: 1_048_576, maxOutputTokens: 1_048_576},
+      'zai-org/glm-5.2': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
+      'qwen/qwen3.7-max': {contextWindowTokens: 1_000_000, maxOutputTokens: 65_536},
+      'deepseek/deepseek-v4-pro': {contextWindowTokens: 1_048_576, maxOutputTokens: 393_216},
+      'moonshotai/kimi-k2.7-code': {contextWindowTokens: 262_144, maxOutputTokens: 262_144},
+    },
+    category: 'cloud',
+  },
+  {
+    id: 'deep-infra',
+    name: 'Deep Infra',
+    baseUrl: 'https://api.deepinfra.com/v1/openai',
+    needsApiKey: true,
+    apiKeyEnvVar: 'DEEPINFRA_API_KEY',
+    suggestedModels: [
+      // SOTA
+      'moonshotai/Kimi-K3',
+      'thinkingmachines/Inkling',
+      // Fast
+      'deepseek-ai/DeepSeek-V4-Flash-0731',
+      'MiniMaxAI/MiniMax-M3',
+      'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    ],
+    modelLimits: {
+      'moonshotai/Kimi-K3': {contextWindowTokens: 1_048_576, maxOutputTokens: 131_072},
+      'thinkingmachines/Inkling': {contextWindowTokens: 524_288, maxOutputTokens: 1_048_576},
+      'deepseek-ai/DeepSeek-V4-Flash-0731': {contextWindowTokens: 1_048_576, maxOutputTokens: 384_000},
+      'MiniMaxAI/MiniMax-M3': {contextWindowTokens: 524_288, maxOutputTokens: 128_000},
+      'meta-llama/Llama-3.3-70B-Instruct-Turbo': {contextWindowTokens: 131_072, maxOutputTokens: 131_072},
+    },
+    category: 'cloud',
+  },
+  {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    baseUrl: 'https://api.siliconflow.com/v1',
+    needsApiKey: true,
+    apiKeyEnvVar: 'SILICONFLOW_API_KEY',
+    suggestedModels: [
+      // SOTA
+      'zai-org/GLM-5.2',
+      'deepseek-ai/DeepSeek-V4-Pro',
+      // Fast
+      'Qwen/Qwen3-Coder-480B-A35B-Instruct',
+      'moonshotai/Kimi-K2.6',
+    ],
+    modelLimits: {
+      'zai-org/GLM-5.2': {contextWindowTokens: 1_049_000, maxOutputTokens: 262_000},
+      'deepseek-ai/DeepSeek-V4-Pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
+      'Qwen/Qwen3-Coder-480B-A35B-Instruct': {contextWindowTokens: 262_000, maxOutputTokens: 262_000},
+      'moonshotai/Kimi-K2.6': {contextWindowTokens: 262_000, maxOutputTokens: 262_000},
+    },
+    category: 'cloud',
+  },
+  {
+    id: 'nebius',
+    name: 'Nebius AI Studio',
+    baseUrl: 'https://api.studio.nebius.com/v1',
+    needsApiKey: true,
+    apiKeyEnvVar: 'NEBIUS_API_KEY',
+    suggestedModels: [
+      // SOTA
+      'deepseek-ai/DeepSeek-V4-Pro',
+      'moonshotai/Kimi-K3',
+      // Fast
+      'zai-org/GLM-5.2',
+      'nvidia/nemotron-3-super-120b-a12b',
+    ],
+    modelLimits: {
+      'deepseek-ai/DeepSeek-V4-Pro': {contextWindowTokens: 1_000_000, maxOutputTokens: 384_000},
+      'moonshotai/Kimi-K3': {contextWindowTokens: 1_048_576, maxOutputTokens: 8_000},
+      'zai-org/GLM-5.2': {contextWindowTokens: 432_000, maxOutputTokens: 432_000},
+      'nvidia/nemotron-3-super-120b-a12b': {contextWindowTokens: 256_000, maxOutputTokens: 32_768},
     },
     category: 'cloud',
   },

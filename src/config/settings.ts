@@ -83,6 +83,14 @@ export interface HazeSettings {
   subagents?: HazeSubagentSettings;
   /** Optional reasoning depth; unset by default, mapped by supported provider protocol. */
   reasoning?: ReasoningLevel;
+  /**
+   * Context-window fallback for models without `modelLimits` metadata, in
+   * tokens. Unset means the built-in default (128K hosted / 32K local —
+   * see `contextBudget.ts`). The local variant applies to localhost inference
+   * servers, whose effective window is server-configured and silently truncated.
+   */
+  contextWindowFallbackTokens?: number;
+  localContextWindowFallbackTokens?: number;
   /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
   tips?: {enabled?: boolean};
 
@@ -137,6 +145,9 @@ const subagentSettingsSchema = z.object({
   profiles: z.record(z.string().min(1), customProfileSchema).optional(),
 }).passthrough();
 
+/** Fallback windows must be plausible positive token counts (not fractions/junk). */
+const contextWindowFallbackSchema = z.number().int().min(1_000).max(10_000_000);
+
 const settingsSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -146,6 +157,8 @@ const settingsSchema = z.object({
   skills: z.array(skillSettingSchema).optional(),
   subagents: subagentSettingsSchema.optional(),
   reasoning: reasoningLevelSchema.optional(),
+  contextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
+  localContextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),

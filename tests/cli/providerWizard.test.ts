@@ -40,6 +40,26 @@ describe('provider wizard helpers', () => {
     expect(appended.settingsPatch?.providers?.[0].modelLimits).not.toHaveProperty('deepseek-v4-flash');
   });
 
+  it('lets live /models discovery win over the preset catalog, user settings win over both', () => {
+    const discovered = {
+      // Live value differs from the curated catalog (e.g. provider lowered the cap).
+      'deepseek-v4-pro': {contextWindowTokens: 512_000, maxOutputTokens: 65_536},
+      // Harvested for a model the caller is not adding: must not be written.
+      'unrelated-model': {contextWindowTokens: 99_999},
+    };
+    const created = providerFinishAdd({}, {name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: 'k'}, 'deepseek-v4-pro', discovered);
+    expect(created.provider?.modelLimits).toEqual({
+      'deepseek-v4-pro': {contextWindowTokens: 512_000, maxOutputTokens: 65_536},
+    });
+
+    const withUserValue = {
+      provider: 'DeepSeek',
+      providers: [{name: 'DeepSeek', url: 'https://api.deepseek.com/v1', models: ['deepseek-v4-pro'], modelLimits: {'deepseek-v4-pro': {contextWindowTokens: 1, maxOutputTokens: 1}}}],
+    };
+    const appended = providerAppendModels(withUserValue, 'DeepSeek', 'deepseek-v4-pro', discovered);
+    expect(appended.settingsPatch?.providers?.[0].modelLimits?.['deepseek-v4-pro']).toEqual({contextWindowTokens: 1, maxOutputTokens: 1});
+  });
+
   it('removes models and updates active model when necessary', () => {
     const result = providerRemoveModels(settings, 'local', 'old, missing');
     expect(result.settingsPatch?.model).toBeUndefined();

@@ -5,6 +5,15 @@ import {PROVIDER_ACTIONS} from './wizardActions.js';
 import {commaList} from './wizardInput.js';
 import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
 import {presetModelLimitsForModels} from '../../config/providerPresets.js';
+import type {HarvestedModelLimits} from '../../config/modelDiscovery.js';
+
+/** Merge order for per-model limits on add: preset-curated < live-discovered < existing user settings. */
+function mergedModelLimits(curated: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
+  const discoveredSubset: HarvestedModelLimits = {};
+  for (const model of models) if (discovered?.[model]) discoveredSubset[model] = discovered[model];
+  const merged = {...curated, ...discoveredSubset, ...existing};
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
 
 type WizardPatch = {
   settingsPatch?: Partial<HazeSettings>;
@@ -14,17 +23,19 @@ type WizardPatch = {
   models?: string[];
 };
 
-export function providerAppendModels(settings: HazeSettings, providerName: string | undefined, modelsValue: string): WizardPatch {
+export function providerAppendModels(settings: HazeSettings, providerName: string | undefined, modelsValue: string, discoveredLimits?: HarvestedModelLimits): WizardPatch {
   const provider = providerName ? findProvider(settings, providerName) : undefined;
   const models = commaList(modelsValue);
   if (!provider) return {message: 'No provider selected.'};
   if (models.length === 0) return {provider, models, message: 'Enter at least one model name.'};
   // Preset-curated limits (models.dev) flow into settings so request budgeting
-  // uses the real window without the user configuring anything. Existing keys
-  // are never overwritten: user-configured limits always win.
+  // uses the real window without the user configuring anything. Live values the
+  // provider itself reported in /models discovery win over the static catalog
+  // (this is the only source that knows a local server's configured window);
+  // existing user-configured keys always win over both.
   const curatedLimits = presetModelLimitsForModels({name: provider.name, url: provider.url}, models);
-  const modelLimits = {...curatedLimits, ...provider.modelLimits};
-  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(Object.keys(modelLimits).length > 0 ? {modelLimits} : {})};
+  const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, provider.modelLimits);
+  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(modelLimits ? {modelLimits} : {})};
   return {
     provider,
     models,
@@ -33,7 +44,7 @@ export function providerAppendModels(settings: HazeSettings, providerName: strin
   };
 }
 
-export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazeProviderSettings>, modelsValue: string): WizardPatch {
+export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazeProviderSettings>, modelsValue: string, discoveredLimits?: HarvestedModelLimits): WizardPatch {
   const models = commaList(modelsValue);
   if (!draft.name || !draft.url || models.length === 0) {
     return {models, message: 'Provider name, URL, and at least one model are required.'};
@@ -42,13 +53,14 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
     return {models, message: error instanceof Error ? error.message : String(error)};
   }
   const curatedLimits = presetModelLimitsForModels({name: draft.name, url: draft.url}, models);
+  const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, undefined);
   const provider: HazeProviderSettings = {
     name: draft.name,
     url: draft.url,
     ...(draft.key ? {key: draft.key} : {}),
     ...(draft.kind ? {kind: draft.kind} : {}),
     models: [...new Set(models)],
-    ...(Object.keys(curatedLimits).length > 0 ? {modelLimits: curatedLimits} : {}),
+    ...(modelLimits ? {modelLimits} : {}),
   };
   return {
     provider,

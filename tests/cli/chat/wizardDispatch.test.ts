@@ -15,6 +15,9 @@ vi.mock('../../../src/config/modelDiscovery.js', () => ({
   discoverProviderModels: mocks.discoverProviderModels,
   modelsEndpointUrl: (url: string) => `${url}/models`,
   parseModelsBody: () => [],
+  // The wizard save path probes loopback URLs for native Ollama limits; tests
+  // run against non-Ollama fakes, so resolve to no enrichment.
+  ollamaModelLimits: async () => ({}),
 }));
 
 const {createWizardDispatch} = await import('../../../src/cli/chat/wizardDispatch.js');

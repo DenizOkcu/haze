@@ -5,6 +5,7 @@ import {activeModel, modelSelector, resolveModelSelector} from '../config/provid
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
 import {resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy} from '../core/agent/reasoningPolicy.js';
+import {FALLBACK_CONTEXT_WINDOW_TOKENS, FALLBACK_LOCAL_CONTEXT_TOKENS} from '../core/agent/contextBudget.js';
 import {createChatGptCodexFetch} from './openaiCodex.js';
 export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
 
@@ -23,8 +24,14 @@ export interface ModelRuntimeConfig {
   capabilities: ProviderCapabilities;
   /** Resolved reasoning policy (requested vs effective); observable, no secrets. */
   reasoningPolicy: ResolvedReasoningPolicy;
-  /** Optional context-window metadata for request budgeting (RH-005). */
-  contextWindowTokens?: number;
+  /**
+   * Effective context window for request budgeting (RH-005). Always set: the
+   * user-configured value when present, otherwise a class-aware fallback
+   * (128K hosted / 32K local) so `contextWindowSource` can flag the guess.
+   */
+  contextWindowTokens: number;
+  /** Where contextWindowTokens came from: per-model settings, a user-set fallback, or the built-in default. */
+  contextWindowSource: 'settings' | 'user-fallback' | 'default-fallback';
   /** Optional output-token limit metadata for request budgeting (RH-005). */
   maxOutputTokens?: number;
 }
@@ -58,6 +65,16 @@ function capabilities(providerName: string, baseURL: string, providerKind?: Haze
   };
 }
 
+/** True for loopback/local inference servers, whose effective window is server-configured (often far below the model's). */
+export function isLocalProviderUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0' || hostname.endsWith('.local');
+  } catch {
+    return false;
+  }
+}
+
 function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string): ModelRuntimeSelection {
   const baseURL = selection.provider.url;
   const providerKind = selection.provider.kind;
@@ -73,10 +90,33 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const openai = providerKind === 'chatgpt-codex'
     ? createOpenAI({apiKey: 'haze-oauth-placeholder', baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
     : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
+  const limits = modelLimitsFor(selection.provider, name);
+  // Class-aware fallback so unknown local models (server-configured window,
+  // silent truncation) stay conservative while unknown hosted models get the
+  // modern 128K floor. A user-set fallback setting overrides the built-in
+  // default; the source tag distinguishes an intentional guess (no warning)
+  // from the default guess (warned once per session) (RH-005).
+  const isLocal = isLocalProviderUrl(baseURL);
+  const userFallback = isLocal ? settings.localContextWindowFallbackTokens : settings.contextWindowFallbackTokens;
+  const fallbackTokens = userFallback ?? (isLocal ? FALLBACK_LOCAL_CONTEXT_TOKENS : FALLBACK_CONTEXT_WINDOW_TOKENS);
+  const contextWindowSource = limits.contextWindowTokens !== undefined
+    ? 'settings'
+    : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
   return {
     model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector: modelSelector(selection.provider, name),
-    config: {providerName: selection.provider.name, providerKind, baseURL, modelName: name, cacheKey, capabilities: caps, reasoningPolicy, ...modelLimitsFor(selection.provider, name)},
+    config: {
+      providerName: selection.provider.name,
+      providerKind,
+      baseURL,
+      modelName: name,
+      cacheKey,
+      capabilities: caps,
+      reasoningPolicy,
+      contextWindowTokens: limits.contextWindowTokens ?? fallbackTokens,
+      contextWindowSource,
+      ...(limits.maxOutputTokens !== undefined ? {maxOutputTokens: limits.maxOutputTokens} : {}),
+    },
   };
 }
 

@@ -180,6 +180,15 @@ async function runAgentAttempt(
     // Observable requested-vs-effective reasoning policy (safe: level strings + reason only).
     const reasoningPolicy = runtime.config.reasoningPolicy;
     if (reasoningPolicy) callbacks.onEvent?.(agentEvent({type: 'reasoning_policy', requested: reasoningPolicy.requested, effective: reasoningPolicy.effective, reason: reasoningPolicy.reason}));
+    // Make the context-budget guess observable: a stream event every turn
+    // (headless consumers can gate on it), and a once-per-session system
+    // message interactively when the built-in default was used — a user-set
+    // fallback setting is an intentional choice and is not warned about.
+    callbacks.onEvent?.(agentEvent({type: 'context_budget', contextWindowTokens: runtime.config.contextWindowTokens, source: runtime.config.contextWindowSource}));
+    if (runtime.config.contextWindowSource === 'default-fallback' && session && !session.contextFallbackWarned) {
+      session.contextFallbackWarned = true;
+      callbacks.addMessage({role: 'system', text: `No context-window data for ${runtime.config.providerName}:${runtime.config.modelName}; budgeting conservatively at ${runtime.config.contextWindowTokens.toLocaleString('en-US')} tokens. Set modelLimits for this model via /provider, or contextWindowFallbackTokens in settings, to use its real window.`});
+    }
 
     let activeContextFiles = contextFiles;
     const activeModel = runtime.model;

@@ -8,6 +8,9 @@ import {discoverProviderModels} from '../../config/modelDiscovery.js';
 import {removeLspServer} from '../../config/lspSettings.js';
 import {removeMcpServer} from '../../config/mcpSettings.js';
 import {findPreset, presetModelLimitsForModels, PROVIDER_PRESETS} from '../../config/providerPresets.js';
+import {ollamaModelLimits, type HarvestedModelLimits} from '../../config/modelDiscovery.js';
+import {isLocalProviderUrl} from '../../llm/client.js';
+import {FALLBACK_LOCAL_CONTEXT_TOKENS} from '../../core/agent/contextBudget.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../skills/builder/SkillBuilder.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
@@ -21,7 +24,7 @@ import {providerActionResult, providerAppendModels, providerFinishAdd, providerR
 import {selectSkillActionResult, selectSkillResult} from '../commands/skillWizard.js';
 import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from '../commands/skillCreation.js';
 import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillConfirmRemove.js';
-import {isYesConfirmation} from '../commands/wizardInput.js';
+import {commaList, isYesConfirmation} from '../commands/wizardInput.js';
 import {startupProviderInfo} from './startupInfo.js';
 import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
 import {openBrowser, startChatGptBrowserLogin} from '../../llm/openaiCodexOAuth.js';
@@ -88,6 +91,12 @@ export interface WizardDispatch {
 
 export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   const {setMode, setSettings, showMessage} = deps;
+
+  // Limits harvested from the provider's own /models listing during the most
+  // recent discovery. Written through with the models being added (provider-
+  // specific and fresher than the static preset catalog) and cleared when a
+  // flow restarts, so stale harvests never leak into a later add.
+  let lastDiscoveredLimits: HarvestedModelLimits = {};
 
   // Shared applier for the uniform wizard result shape (CR-006 / useSettingsPatch).
   async function applyResult(result: WizardResult) {
@@ -304,10 +313,12 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     if (result.status === 'ok') {
       deps.setDiscoveredModels(result.models);
+      lastDiscoveredLimits = result.modelLimits ?? {};
       setMode('modelPick');
       showMessage(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'} on ${target.name}. Choose one to add, or select "${MODEL_CHOICES.enterModelNames}".`);
       return;
     }
+    lastDiscoveredLimits = {};
     setMode(existing ? 'providerAppendModels' : 'providerAddModels');
     showMessage(`Could not list models on ${target.name} (${result.error}).\n${fallbackPrompt}`);
   }
@@ -357,6 +368,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (value === MODEL_CHOICES.enterModelNames) {
       deps.setDiscoveredModels([]);
       deps.setSuggestedModels([]);
+      lastDiscoveredLimits = {};
       if (provider) {
         setMode('providerAppendModels');
         showMessage(`Comma-separated model names to add to ${provider.name}?`);
@@ -387,11 +399,32 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     await discoverModelsFor({name: draft.name, url: draft.url, key: draft.key, kind: draft.kind}, `Comma-separated model names?${hint}`);
   }
 
+  /**
+   * Native Ollama enrichment at save time (the one place that knows the exact
+   * model ids being added): /v1/models reports nothing for Ollama, but /api/ps
+   * exposes the actually-loaded runtime context and /api/show the model's
+   * declared maximum. Probed only for the user's loopback server; the cap for
+   * a declared maximum (which may exceed the VRAM-sized effective window) is
+   * the user's own local fallback setting, defaulting to 32K. Failures are
+   * ignored — providers that are not Ollama simply 404 the /api/* paths.
+   */
+  async function localNativeLimits(url: string | undefined, models: readonly string[]): Promise<HarvestedModelLimits> {
+    if (!url || !isLocalProviderUrl(url) || models.length === 0) return {};
+    const conservativeCap = deps.settings.localContextWindowFallbackTokens ?? FALLBACK_LOCAL_CONTEXT_TOKENS;
+    return await ollamaModelLimits({baseUrl: url, models, conservativeCap}).catch(() => ({}));
+  }
+
   async function appendModelsToProvider(modelsValue: string) {
-    const result = providerAppendModels(deps.settings, deps.selectedProviderName, modelsValue);
+    const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
+    if (provider) {
+      const native = await localNativeLimits(provider.url, commaList(modelsValue));
+      if (Object.keys(native).length > 0) lastDiscoveredLimits = {...lastDiscoveredLimits, ...native};
+    }
+    const result = providerAppendModels(deps.settings, deps.selectedProviderName, modelsValue, lastDiscoveredLimits);
     if (!result.provider) {
       deps.setDiscoveredModels([]);
       deps.setSuggestedModels([]);
+      lastDiscoveredLimits = {};
       showMessage(result.message);
       setMode('chat');
       return;
@@ -405,19 +438,23 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     deps.setSelectedProviderName(undefined);
     deps.setDiscoveredModels([]);
     deps.setSuggestedModels([]);
+    lastDiscoveredLimits = {};
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
   }
 
   async function finishProviderAdd(modelsValue: string) {
-    const result = providerFinishAdd(deps.settings, deps.providerDraft, modelsValue);
+    const native = await localNativeLimits(deps.providerDraft.url, commaList(modelsValue));
+    if (Object.keys(native).length > 0) lastDiscoveredLimits = {...lastDiscoveredLimits, ...native};
+    const result = providerFinishAdd(deps.settings, deps.providerDraft, modelsValue, lastDiscoveredLimits);
     if (!result.provider || !result.settingsPatch) {
       showMessage(result.message);
       setMode('chat');
       deps.setProviderDraft({});
       deps.setDiscoveredModels([]);
       deps.setSuggestedModels([]);
+      lastDiscoveredLimits = {};
       return;
     }
     const next = await updateSettings(result.settingsPatch);
@@ -425,6 +462,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     deps.setProviderDraft({});
     deps.setDiscoveredModels([]);
     deps.setSuggestedModels([]);
+    lastDiscoveredLimits = {};
     deps.setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);

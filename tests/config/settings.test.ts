@@ -160,6 +160,24 @@ describe('settings', () => {
     expect(settings.plugin).toBe(true);
   });
 
+  it('parses optional context-window fallback settings and rejects implausible values loudly', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({contextWindowFallbackTokens: 200_000, localContextWindowFallbackTokens: 131_072});
+    const settings = await readSettings();
+    expect(settings.contextWindowFallbackTokens).toBe(200_000);
+    expect(settings.localContextWindowFallbackTokens).toBe(131_072);
+    // Unset by default (code defaults apply, nothing is written to disk).
+    await writeSettings({model: 'm'});
+    expect((await readSettings()).contextWindowFallbackTokens).toBeUndefined();
+    // Non-integer, fractional, and out-of-range values fail loudly.
+    await fs.writeJson(settingsFile, {contextWindowFallbackTokens: 512});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {localContextWindowFallbackTokens: 99_999_999});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {contextWindowFallbackTokens: 131_072.5});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
   it('preserves optional per-model context-window/output metadata and rejects malformed values', async () => {
     const {writeSettings, readSettings} = await loadSettings();
     await writeSettings({providers: [{name: 'local', url: 'http://x/v1', models: ['qwen'], modelLimits: {'qwen': {contextWindowTokens: 32_768, maxOutputTokens: 4_096}}, providerExtra: 'passthrough'}]});

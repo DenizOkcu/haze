@@ -6,12 +6,18 @@ import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachmen
 export const DEFAULT_CHARS_PER_TOKEN = 4;
 
 /**
- * Conservative fallback context window when a provider/model carries no
- * explicit metadata (RH-005). Chosen small enough that small local models do
- * not overflow on first request; large-context models should declare their
- * capacity via provider `modelLimits`.
+ * Conservative fallback context window for a hosted model with no metadata
+ * (RH-005). 128K is the floor for current capable hosted models (GPT-4o class,
+ * older Claude, fine-tunes); assuming more risks hard request failures on
+ * exactly-128K models, while assuming less only compacts earlier. Local
+ * servers use a smaller fallback (see FALLBACK_LOCAL_CONTEXT_TOKENS) because
+ * their effective window is set by server configuration (often 4–32K), not the
+ * model, and silent truncation there is undetectable.
  */
-export const FALLBACK_CONTEXT_WINDOW_TOKENS = 32_768;
+export const FALLBACK_CONTEXT_WINDOW_TOKENS = 128_000;
+
+/** Fallback window for unknown models on local (localhost) inference servers. */
+export const FALLBACK_LOCAL_CONTEXT_TOKENS = 32_768;
 
 /** Safety margin reserved below the computed budget to absorb estimate drift. */
 export const CONTEXT_SAFETY_MARGIN_TOKENS = 1_000;

@@ -94,6 +94,12 @@ describe('providerPresets', () => {
     expect(ids).toContain('atlas-cloud');
     expect(ids).toContain('openai-subscription');
     expect(ids).toContain('poe');
+    // Curated multi-model gateways added from the models.dev catalog.
+    expect(ids).toContain('kilo');
+    expect(ids).toContain('novita');
+    expect(ids).toContain('deep-infra');
+    expect(ids).toContain('siliconflow');
+    expect(ids).toContain('nebius');
     // Local
     expect(ids).toContain('ollama');
     expect(ids).toContain('llamacpp');
@@ -143,8 +149,9 @@ describe('preset model limits', () => {
         expect(limits.contextWindowTokens, `${preset.id}:${model} context ceiling`).toBeLessThanOrEqual(10_000_000);
         expect(limits.maxOutputTokens, `${preset.id}:${model} output`).toBeGreaterThan(0);
         // Output may exceed the provider's context cap upstream (e.g. Poe routes
-        // that clamp context but not output), so only bound it absolutely.
-        expect(limits.maxOutputTokens, `${preset.id}:${model} output ceiling`).toBeLessThanOrEqual(1_000_000);
+        // that clamp context but not output, or reasoning models with max output
+        // marginally above their context figure), so only bound it absolutely.
+        expect(limits.maxOutputTokens, `${preset.id}:${model} output ceiling`).toBeLessThanOrEqual(1_048_576);
       }
     }
   });
