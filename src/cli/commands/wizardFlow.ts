@@ -81,7 +81,7 @@ export const SKILL_ACTIONS = {
   removeSkill: 'remove skill',
 } as const;
 
-export const YES_CONFIRMATION = 'yes';
+const YES_CONFIRMATION = 'yes';
 
 // ── Input parsing helpers ───────────────────────────────────────────────────
 
@@ -297,7 +297,7 @@ export function lspActionSuggestions(settings: HazeSettings, selectedLspName: st
   return result;
 }
 
-export function lspPresetSuggestions(): TextInputSuggestion[] {
+function lspPresetSuggestions(): TextInputSuggestion[] {
   return [
     ...Object.values(LSP_PRESETS).map(preset => ({
       value: preset.name,
@@ -328,7 +328,7 @@ export function mcpActionSuggestions(settings: HazeSettings, selectedMcpName: st
   return result;
 }
 
-export function mcpPresetSuggestions(): TextInputSuggestion[] {
+function mcpPresetSuggestions(): TextInputSuggestion[] {
   return [
     ...presetIds().map(presetId => {
       const preset = findMcpPreset(presetId)!;
@@ -377,7 +377,7 @@ export function skillsActionSuggestions(settings: HazeSettings, skills: LoadedSk
 
 // ── The step table ──────────────────────────────────────────────────────────
 
-export type WizardStepKind = 'pick' | 'input' | 'masked-input' | 'confirm';
+type WizardStepKind = 'pick' | 'input' | 'masked-input' | 'confirm';
 
 /** Inputs available to a step's suggestion builder (mirrors the picker state). */
 export interface WizardSuggestionState {
@@ -457,7 +457,7 @@ export const WIZARD_STEPS = [
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number]['id'];
 
-export const WIZARD_STEP_BY_ID: Record<WizardStepId, WizardStepDef> = Object.fromEntries(
+const WIZARD_STEP_BY_ID: Record<WizardStepId, WizardStepDef> = Object.fromEntries(
   WIZARD_STEPS.map(step => [step.id, step]),
 ) as Record<WizardStepId, WizardStepDef>;
 

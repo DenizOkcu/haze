@@ -12,14 +12,14 @@ CLI and terminal UI orchestration instructions.
 - `commands/sessionPicker.ts` and `chat/sessionLifecycle.ts` own workspace session browsing, exact resume, and fork-from-snapshot behavior.
 - `chat/fileMentionSuggestions.ts` provides bounded, gitignore-aware `@` completion; `chat/tips.ts` is the data registry for busy-state tips.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
-- `commands/*Wizard.ts`, `wizardActions.ts`, `wizardPrompts.ts`, `wizardInput.ts`, `wizardSuggestions.ts`, and `wizardTransition.ts` implement provider/LSP/MCP/skill picker flows. Keep them mostly pure and covered by unit tests. `wizardTransition.ts` holds the pure typed field-transition/effect functions for provider and MCP flows; prefer extending it over adding more inline branching in `chat.tsx`.
-- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (table-driven picker/wizard submit dispatch with one shared settings-patch applier), `chatMetrics.ts` (token/status-bar math), and `messages.tsx` (ordered static/dynamic transcript partitioning and message views). Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
+- `commands/wizardFlow.ts` is the single source of truth for every picker/wizard step (kind, placeholder, optional-submit flag, suggestions, pure field captures); `chatModes.ts` derives the `Mode` union and picker/masked/empty-submit classification from its step table. `commands/providerWizard.ts`, `commands/serverWizard.ts`, and `commands/skillsWizard.ts` hold the pure per-domain result functions. Keep all of them mostly pure and covered by unit tests.
+- `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (wizard submit engine: per-mode handlers, field-transition effects, and the `WizardUiState` reducer that owns selection/drafts/model-discovery state), `chatMetrics.ts` (token/status-bar math), and `messages.tsx` (ordered static/dynamic transcript partitioning and message views). Turn-loop display/accounting helpers live under `commands/streaming/` (see its AGENTS.md), including the authoritative `turnOutcome.ts` status function.
 
 ## UI state rules
 
 Maintainability focus:
 
-- Treat `commands/chat.tsx` as orchestration glue; session and wizard behavior belong in `chat/sessionLifecycle.ts` / `chat/wizardDispatch.ts`. New picker modes should be added to the dispatch table there, not as inline branches in `submit()`.
+- Treat `commands/chat.tsx` as orchestration glue; session and wizard behavior belong in `chat/sessionLifecycle.ts` / `chat/wizardDispatch.ts`. New wizard steps are added as one entry in the `WIZARD_STEPS` table in `wizardFlow.ts` (plus a submit handler in the dispatch engine when the step mutates anything), not as inline branches in `submit()`.
 - Avoid dead React state. If a value is not rendered or passed to durable logic, remove it rather than keeping setter-only state.
 
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.

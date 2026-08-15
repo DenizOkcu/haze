@@ -85,38 +85,67 @@ export function transitionMcpField(input: {mode: Mode; value: string; settings: 
   ];
 }
 
+// ── Wizard UI state (one reducer for selection, drafts, model discovery) ────
+
+/**
+ * The wizard-related React state that used to live in twelve `useState`
+ * hooks in `chat.tsx`. Flat field names match the historical deps names so
+ * the dispatch body and its tests read the same way.
+ */
+export interface WizardUiState {
+  selectedSessionId?: string;
+  modelProviderFilter?: string;
+  discoveredModels: string[];
+  suggestedModels: string[];
+  selectedProviderName?: string;
+  providerDraft: Partial<HazeProviderSettings>;
+  skillDraft: {name?: string; scope?: SkillSource};
+  selectedSkillName?: string;
+  selectedLspName?: string;
+  lspDraft: Partial<HazeLspServer>;
+  selectedMcpName?: string;
+  mcpDraft: Partial<HazeMcpServer>;
+}
+
+export type WizardUiAction =
+  | {type: 'set'; key: 'selectedSessionId' | 'modelProviderFilter' | 'selectedProviderName' | 'selectedSkillName' | 'selectedLspName' | 'selectedMcpName'; value: string | undefined}
+  | {type: 'providerDraft'; value: Partial<HazeProviderSettings>}
+  | {type: 'skillDraft'; value: {name?: string; scope?: SkillSource}}
+  | {type: 'lspDraft'; value: Partial<HazeLspServer>}
+  | {type: 'mcpDraft'; value: Partial<HazeMcpServer>}
+  | {type: 'discoveredModels'; value: string[]}
+  | {type: 'suggestedModels'; value: string[]}
+  | {type: 'reset'};
+
+export function initialWizardUiState(): WizardUiState {
+  return {discoveredModels: [], suggestedModels: [], providerDraft: {}, skillDraft: {}, lspDraft: {}, mcpDraft: {}};
+}
+
+export function wizardUiReducer(state: WizardUiState, action: WizardUiAction): WizardUiState {
+  switch (action.type) {
+    case 'set': return {...state, [action.key]: action.value};
+    case 'providerDraft': return {...state, providerDraft: action.value};
+    case 'skillDraft': return {...state, skillDraft: action.value};
+    case 'lspDraft': return {...state, lspDraft: action.value};
+    case 'mcpDraft': return {...state, mcpDraft: action.value};
+    case 'discoveredModels': return {...state, discoveredModels: action.value};
+    case 'suggestedModels': return {...state, suggestedModels: action.value};
+    case 'reset': return initialWizardUiState();
+  }
+}
+
 export interface WizardDispatchDeps {
   settings: HazeSettings;
   skills: LoadedSkill[];
-  modelProviderFilter: string | undefined;
-  selectedProviderName: string | undefined;
-  selectedSkillName: string | undefined;
-  selectedLspName: string | undefined;
-  selectedMcpName: string | undefined;
   sessions?: SessionSummary[];
-  selectedSessionId?: string;
-  providerDraft: Partial<HazeProviderSettings>;
-  lspDraft: Partial<HazeLspServer>;
-  mcpDraft: Partial<HazeMcpServer>;
-  skillDraft: {name?: string; scope?: SkillSource};
+  /** Wizard flow UI state (selection, drafts, model discovery). */
+  wizard: WizardUiState;
+  updateWizard: (action: WizardUiAction) => void;
   setMode: (mode: Mode) => void;
   setSettings: (next: HazeSettings) => void;
-  setSelectedProviderName: (name: string | undefined) => void;
-  setSelectedSkillName: (name: string | undefined) => void;
-  setSelectedLspName: (name: string | undefined) => void;
-  setSelectedMcpName: (name: string | undefined) => void;
-  setSelectedSessionId?: (id: string | undefined) => void;
+  showMessage: (message: string | undefined) => void;
   resumeSessionById?: (id: string) => Promise<boolean>;
   forkSessionById?: (id: string) => Promise<boolean>;
-  setModelProviderFilter: (filter: string | undefined) => void;
-  setProviderDraft: (draft: Partial<HazeProviderSettings>) => void;
-  setSkillDraft: (draft: {name?: string; scope?: SkillSource}) => void;
-  setLspDraft: (draft: Partial<HazeLspServer>) => void;
-  setMcpDraft: (draft: Partial<HazeMcpServer>) => void;
-  setDiscoveredModels: (models: string[]) => void;
-  /** Curated preset models pinned atop discovered ones; cleared with discovered models. */
-  setSuggestedModels: (models: string[]) => void;
-  showMessage: (message: string | undefined) => void;
   refreshSkills: () => Promise<unknown>;
   setBusyLabel: (label: string) => void;
   setBusy: (busy: boolean) => void;
@@ -142,6 +171,22 @@ export interface WizardDispatch {
 export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   const {setMode, setSettings, showMessage} = deps;
 
+  // Setter shims over the single wizard-state reducer, so the handler bodies
+  // keep the historical per-field setter vocabulary (minimal diff; the
+  // dispatch tests mirror React state through updateWizard).
+  const setSelectedProviderName = (value: string | undefined) => deps.updateWizard({type: 'set', key: 'selectedProviderName', value});
+  const setSelectedSkillName = (value: string | undefined) => deps.updateWizard({type: 'set', key: 'selectedSkillName', value});
+  const setSelectedLspName = (value: string | undefined) => deps.updateWizard({type: 'set', key: 'selectedLspName', value});
+  const setSelectedMcpName = (value: string | undefined) => deps.updateWizard({type: 'set', key: 'selectedMcpName', value});
+  const setSelectedSessionId = (id: string | undefined) => deps.updateWizard({type: 'set', key: 'selectedSessionId', value: id});
+  const setModelProviderFilter = (value: string | undefined) => deps.updateWizard({type: 'set', key: 'modelProviderFilter', value});
+  const setProviderDraft = (value: Partial<HazeProviderSettings>) => deps.updateWizard({type: 'providerDraft', value});
+  const setSkillDraft = (value: {name?: string; scope?: SkillSource}) => deps.updateWizard({type: 'skillDraft', value});
+  const setLspDraft = (value: Partial<HazeLspServer>) => deps.updateWizard({type: 'lspDraft', value});
+  const setMcpDraft = (value: Partial<HazeMcpServer>) => deps.updateWizard({type: 'mcpDraft', value});
+  const setDiscoveredModels = (value: string[]) => deps.updateWizard({type: 'discoveredModels', value});
+  const setSuggestedModels = (value: string[]) => deps.updateWizard({type: 'suggestedModels', value});
+
   // Limits harvested from the provider's own /models listing during the most
   // recent discovery. Written through with the models being added (provider-
   // specific and fresher than the static preset catalog) and cleared when a
@@ -161,13 +206,13 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       setMode('chat');
       return;
     }
-    deps.setSelectedSessionId?.(id);
+    setSelectedSessionId(id);
     setMode('sessionAction');
     showMessage(`Session ${id}: press Enter to resume, or choose fork.`);
   }
 
   async function selectSessionAction(action: string) {
-    const id = deps.selectedSessionId;
+    const id = deps.wizard.selectedSessionId;
     if (!id) {
       showMessage('No session selected. Start over with /resume.');
       setMode('chat');
@@ -179,13 +224,13 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage(`Unknown session action: ${action}.`);
       return;
     }
-    deps.setSelectedSessionId?.(undefined);
+    setSelectedSessionId(undefined);
     setMode('chat');
   }
 
   async function selectProvider(providerName: string) {
     if (providerName === PROVIDER_CHOICES.addProvider) {
-      deps.setProviderDraft({});
+      setProviderDraft({});
       setMode('providerAddPreset');
       showMessage('Choose a provider preset, or select "custom" to enter details manually.');
       return;
@@ -196,7 +241,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       setMode('chat');
       return;
     }
-    deps.setSelectedProviderName(provider.name);
+    setSelectedProviderName(provider.name);
     setMode('providerAction');
     // Surface canonical-endpoint divergence for ChatGPT sign-in providers up
     // front: a hand-edited URL is silently ignored by the Codex fetch (F-14).
@@ -216,22 +261,22 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       await setProviderAuth(input.name, auth);
       if (input.existing) {
         showMessage(`ChatGPT sign-in updated for ${input.name}.`);
-        deps.setSelectedProviderName(undefined);
+        setSelectedProviderName(undefined);
         setMode('chat');
         return;
       }
       const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models, ...presetModelLimitsForModels({name: input.name, url: input.url}, input.models)};
       const next = await updateSettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
       setSettings(next);
-      deps.setProviderDraft({});
-      deps.setSuggestedModels([]);
-      deps.setModelProviderFilter(provider.name);
+      setProviderDraft({});
+      setSuggestedModels([]);
+      setModelProviderFilter(provider.name);
       setMode('model');
       showMessage(`ChatGPT connected as ${provider.name}. Choose a model explicitly.`);
     } catch (error) {
       await login?.close().catch(() => undefined);
       showMessage(`ChatGPT sign-in failed: ${error instanceof Error ? error.message : String(error)}`);
-      deps.setProviderDraft({});
+      setProviderDraft({});
       setMode('chat');
     } finally {
       deps.setBusy(false);
@@ -241,7 +286,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
 
   async function selectPreset(presetId: string) {
     if (presetId === PROVIDER_CHOICES.custom) {
-      deps.setProviderDraft({});
+      setProviderDraft({});
       setMode('providerAddName');
       showMessage('Provider name? Example: openrouter, local, lmstudio.');
       return;
@@ -259,12 +304,12 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (nameConflict) {
       showMessage(`Provider ${existingName} already exists. Use /provider to manage existing providers.`);
       setMode('chat');
-      deps.setProviderDraft({});
+      setProviderDraft({});
       return;
     }
 
-    deps.setProviderDraft({name: existingName, url: preset.baseUrl, ...(preset.auth === 'chatgpt-oauth' ? {kind: 'chatgpt-codex' as const} : {})});
-    deps.setSuggestedModels(preset.suggestedModels ?? []);
+    setProviderDraft({name: existingName, url: preset.baseUrl, ...(preset.auth === 'chatgpt-oauth' ? {kind: 'chatgpt-codex' as const} : {})});
+    setSuggestedModels(preset.suggestedModels ?? []);
 
     if (preset.auth === 'chatgpt-oauth') {
       await loginWithChatGpt({name: existingName, url: preset.baseUrl, models: preset.suggestedModels ?? []});
@@ -284,43 +329,43 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (!provider) {
       showMessage(`No provider named ${providerName}.`);
       setMode('chat');
-      deps.setSelectedProviderName(undefined);
+      setSelectedProviderName(undefined);
       return;
     }
     const next = await updateSettings({provider: provider.name});
     setSettings(next);
-    deps.setSelectedProviderName(undefined);
-    deps.setModelProviderFilter(provider.name);
+    setSelectedProviderName(undefined);
+    setModelProviderFilter(provider.name);
     setMode('model');
     showMessage(`Provider set to ${provider.name}. Choose a model.`);
   }
 
   async function selectProviderAction(action: string) {
-    if (!deps.selectedProviderName) {
+    if (!deps.wizard.selectedProviderName) {
       setMode('provider');
       return;
     }
-    const provider = findProvider(deps.settings, deps.selectedProviderName);
+    const provider = findProvider(deps.settings, deps.wizard.selectedProviderName);
     if (!provider) {
-      showMessage(`Provider ${deps.selectedProviderName} not found.`);
+      showMessage(`Provider ${deps.wizard.selectedProviderName} not found.`);
       setMode('chat');
-      deps.setSelectedProviderName(undefined);
+      setSelectedProviderName(undefined);
       return;
     }
     if (action === PROVIDER_ACTIONS.useProvider) {
-      await useProvider(deps.selectedProviderName);
+      await useProvider(deps.wizard.selectedProviderName);
       return;
     }
     if (action === PROVIDER_ACTIONS.markImageCapable || action === PROVIDER_ACTIONS.clearImageCapable) {
-      const result = providerSetImageCapable(deps.settings, deps.selectedProviderName, action === PROVIDER_ACTIONS.markImageCapable);
+      const result = providerSetImageCapable(deps.settings, deps.wizard.selectedProviderName, action === PROVIDER_ACTIONS.markImageCapable);
       if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-      deps.setSelectedProviderName(undefined);
+      setSelectedProviderName(undefined);
       setMode('chat');
       showMessage(result.message);
       return;
     }
     if (action === PROVIDER_ACTIONS.addModels) {
-      deps.setSelectedProviderName(provider.name);
+      setSelectedProviderName(provider.name);
       if (provider.kind === 'chatgpt-codex') {
         setMode('providerAppendModels');
         showMessage(`Comma-separated supported Codex model names to add to ${provider.name}?`);
@@ -332,7 +377,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       return;
     }
     const actionResult = providerActionResult(action, provider);
-    if ('selectedName' in actionResult) deps.setSelectedProviderName(actionResult.selectedName);
+    if ('selectedName' in actionResult) setSelectedProviderName(actionResult.selectedName);
     if (actionResult.mode) setMode(actionResult.mode);
     showMessage(actionResult.message);
   }
@@ -350,7 +395,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     const existing = findProvider(deps.settings, target.name);
     if (target.kind === 'chatgpt-codex' || existing?.kind === 'chatgpt-codex') {
-      deps.setSelectedProviderName(target.name);
+      setSelectedProviderName(target.name);
       setMode(existing ? 'providerAppendModels' : 'providerAddModels');
       showMessage(fallbackPrompt);
       return;
@@ -365,7 +410,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       deps.setBusyLabel(deps.idleBusyLabel);
     }
     if (result.status === 'ok') {
-      deps.setDiscoveredModels(result.models);
+      setDiscoveredModels(result.models);
       lastDiscoveredLimits = result.modelLimits ?? {};
       setMode('modelPick');
       showMessage(`Found ${result.models.length} model${result.models.length === 1 ? '' : 's'} on ${target.name}. Choose one to add, or select "${MODEL_CHOICES.enterModelNames}".`);
@@ -378,9 +423,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
 
   async function selectModel(selector: string) {
     if (selector === MODEL_CHOICES.addModels) {
-      const filteredProvider = deps.modelProviderFilter ? findProvider(deps.settings, deps.modelProviderFilter) : undefined;
+      const filteredProvider = deps.wizard.modelProviderFilter ? findProvider(deps.settings, deps.wizard.modelProviderFilter) : undefined;
       if (filteredProvider) {
-        deps.setSelectedProviderName(filteredProvider.name);
+        setSelectedProviderName(filteredProvider.name);
         await discoverModelsFor(filteredProvider, `Comma-separated model names to add to ${filteredProvider.name}?`);
         return;
       }
@@ -388,7 +433,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage('Choose a provider to add models to.');
       return;
     }
-    const scopedSelector = deps.modelProviderFilter ? `${deps.modelProviderFilter}:${selector}` : selector;
+    const scopedSelector = deps.wizard.modelProviderFilter ? `${deps.wizard.modelProviderFilter}:${selector}` : selector;
     const resolved = resolveModelSelector(deps.settings, scopedSelector);
     if (resolved.status === 'ambiguous') {
       showMessage(`Model ${resolved.model} exists on multiple providers: ${resolved.providers.map(provider => modelSelector(provider, resolved.model)).join(', ')}`);
@@ -400,7 +445,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     const next = await updateSettings({provider: resolved.provider.name, model: resolved.model});
     setSettings(next);
-    deps.setModelProviderFilter(undefined);
+    setModelProviderFilter(undefined);
     setMode('chat');
     showMessage(`Model set to ${resolved.model} on ${resolved.provider.name}.\n\n${startupProviderInfo(next)}`);
   }
@@ -412,15 +457,15 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       setMode('chat');
       return;
     }
-    deps.setSelectedProviderName(provider.name);
+    setSelectedProviderName(provider.name);
     await discoverModelsFor(provider, `Comma-separated model names to add to ${provider.name}?`);
   }
 
   async function pickModelToAdd(value: string) {
-    const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
+    const provider = deps.wizard.selectedProviderName ? findProvider(deps.settings, deps.wizard.selectedProviderName) : undefined;
     if (value === MODEL_CHOICES.enterModelNames) {
-      deps.setDiscoveredModels([]);
-      deps.setSuggestedModels([]);
+      setDiscoveredModels([]);
+      setSuggestedModels([]);
       lastDiscoveredLimits = {};
       if (provider) {
         setMode('providerAppendModels');
@@ -468,15 +513,15 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   }
 
   async function appendModelsToProvider(modelsValue: string) {
-    const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
+    const provider = deps.wizard.selectedProviderName ? findProvider(deps.settings, deps.wizard.selectedProviderName) : undefined;
     if (provider) {
       const native = await localNativeLimits(provider.url, commaList(modelsValue));
       if (Object.keys(native).length > 0) lastDiscoveredLimits = {...lastDiscoveredLimits, ...native};
     }
-    const result = providerAppendModels(deps.settings, deps.selectedProviderName, modelsValue, lastDiscoveredLimits);
+    const result = providerAppendModels(deps.settings, deps.wizard.selectedProviderName, modelsValue, lastDiscoveredLimits);
     if (!result.provider) {
-      deps.setDiscoveredModels([]);
-      deps.setSuggestedModels([]);
+      setDiscoveredModels([]);
+      setSuggestedModels([]);
       lastDiscoveredLimits = {};
       showMessage(result.message);
       setMode('chat');
@@ -488,41 +533,41 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
-    deps.setSelectedProviderName(undefined);
-    deps.setDiscoveredModels([]);
-    deps.setSuggestedModels([]);
+    setSelectedProviderName(undefined);
+    setDiscoveredModels([]);
+    setSuggestedModels([]);
     lastDiscoveredLimits = {};
-    deps.setModelProviderFilter(result.provider.name);
+    setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
   }
 
   async function finishProviderAdd(modelsValue: string) {
-    const native = await localNativeLimits(deps.providerDraft.url, commaList(modelsValue));
+    const native = await localNativeLimits(deps.wizard.providerDraft.url, commaList(modelsValue));
     if (Object.keys(native).length > 0) lastDiscoveredLimits = {...lastDiscoveredLimits, ...native};
-    const result = providerFinishAdd(deps.settings, deps.providerDraft, modelsValue, lastDiscoveredLimits);
+    const result = providerFinishAdd(deps.settings, deps.wizard.providerDraft, modelsValue, lastDiscoveredLimits);
     if (!result.provider || !result.settingsPatch) {
       showMessage(result.message);
       setMode('chat');
-      deps.setProviderDraft({});
-      deps.setDiscoveredModels([]);
-      deps.setSuggestedModels([]);
+      setProviderDraft({});
+      setDiscoveredModels([]);
+      setSuggestedModels([]);
       lastDiscoveredLimits = {};
       return;
     }
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
-    deps.setProviderDraft({});
-    deps.setDiscoveredModels([]);
-    deps.setSuggestedModels([]);
+    setProviderDraft({});
+    setDiscoveredModels([]);
+    setSuggestedModels([]);
     lastDiscoveredLimits = {};
-    deps.setModelProviderFilter(result.provider.name);
+    setModelProviderFilter(result.provider.name);
     setMode('model');
     showMessage(result.message);
   }
 
   async function providerSetKeyMode(value: string) {
-    const result = providerSetKey(deps.settings, deps.selectedProviderName, value);
+    const result = providerSetKey(deps.settings, deps.wizard.selectedProviderName, value);
     if (!result.provider) {
       showMessage(result.message);
       setMode('chat');
@@ -533,13 +578,13 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       return;
     }
     setSettings(await updateSettings(result.settingsPatch));
-    deps.setSelectedProviderName(undefined);
+    setSelectedProviderName(undefined);
     setMode('chat');
     showMessage(result.message);
   }
 
   async function providerRemoveModelsMode(value: string) {
-    const result = providerRemoveModels(deps.settings, deps.selectedProviderName, value);
+    const result = providerRemoveModels(deps.settings, deps.wizard.selectedProviderName, value);
     if (!result.provider) {
       showMessage(result.message);
       setMode('chat');
@@ -551,13 +596,13 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     const next = await updateSettings(result.settingsPatch);
     setSettings(next);
-    deps.setSelectedProviderName(undefined);
+    setSelectedProviderName(undefined);
     setMode('chat');
     showMessage(result.message);
   }
 
   async function providerConfirmRemoveMode(value: string) {
-    const provider = deps.selectedProviderName ? findProvider(deps.settings, deps.selectedProviderName) : undefined;
+    const provider = deps.wizard.selectedProviderName ? findProvider(deps.settings, deps.wizard.selectedProviderName) : undefined;
     if (!provider) {
       showMessage('No provider selected.');
       setMode('chat');
@@ -565,31 +610,31 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     if (!isYesConfirmation(value)) {
       showMessage('Cancelled. Provider not removed.');
-      deps.setSelectedProviderName(undefined);
+      setSelectedProviderName(undefined);
       setMode('chat');
       return;
     }
-    const result = providerRemove(deps.settings, deps.selectedProviderName);
+    const result = providerRemove(deps.settings, deps.wizard.selectedProviderName);
     const next = await updateSettings(result.settingsPatch ?? {});
     await removeProviderAuth(provider.name);
     setSettings(next);
-    deps.setSelectedProviderName(undefined);
+    setSelectedProviderName(undefined);
     setMode('chat');
     showMessage(result.message);
   }
 
   async function selectSkill(name: string) {
     const result = selectSkillResult(deps.skills, name);
-    if (result.clearDraft) deps.setSkillDraft({});
-    if ('selectedName' in result) deps.setSelectedSkillName(result.selectedName);
+    if (result.clearDraft) setSkillDraft({});
+    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
 
   async function selectSkillAction(action: string) {
-    const result = selectSkillActionResult(deps.settings, deps.skills, deps.selectedSkillName, action);
+    const result = selectSkillActionResult(deps.settings, deps.skills, deps.wizard.selectedSkillName, action);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) deps.setSelectedSkillName(result.selectedName);
+    if ('selectedName' in result) setSelectedSkillName(result.selectedName);
     if (result.mode) setMode(result.mode);
     if (result.validate && result.skill) {
       const {loadSkill} = await import('../../skills/SkillLoader.js');
@@ -611,7 +656,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage('Skill name must contain at least one letter or number. Try again, or press ESC to cancel.');
       return;
     }
-    deps.setSkillDraft({...deps.skillDraft, name: dirName});
+    setSkillDraft({...deps.wizard.skillDraft, name: dirName});
     setMode('skillsAddScope');
     showMessage(`Where should "${dirName}" be created? Choose this project or global explicitly.`);
   }
@@ -623,9 +668,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage('Choose "this project" or "global".');
       return;
     }
-    const name = deps.skillDraft.name;
+    const name = deps.wizard.skillDraft.name;
     if (!name) {
-      deps.setSkillDraft({});
+      setSkillDraft({});
       setMode('chat');
       showMessage('Skill wizard lost the name. Start over with /skills.');
       return;
@@ -635,23 +680,23 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage(`A ${scope} skill named "${name}" already exists. Choose another scope or press ESC to cancel.`);
       return;
     }
-    deps.setSkillDraft({...deps.skillDraft, scope});
+    setSkillDraft({...deps.wizard.skillDraft, scope});
     setMode('skillsAddDescription');
     showMessage(`Describe what "${name}" should do. This is the work the LLM will expand into the skill body.`);
   }
 
   async function captureSkillDescription(value: string) {
-    const result = captureSkillDescriptionResult(value, deps.skillDraft.name);
+    const result = captureSkillDescriptionResult(value, deps.wizard.skillDraft.name);
     if (result.message) showMessage(result.message);
     if (result.mode === 'chat') setMode('chat');
-    if (result.clearDraft) deps.setSkillDraft({});
+    if (result.clearDraft) setSkillDraft({});
     if (result.description && result.draftName) {
       const name = result.draftName;
       const description = result.description;
       deps.setBusyLabel(result.busyLabel ?? 'Creating skill');
       deps.setBusy(true);
       try {
-        const created = await createSkill({name, description, scope: deps.skillDraft.scope ?? 'global'});
+        const created = await createSkill({name, description, scope: deps.wizard.skillDraft.scope ?? 'global'});
         showMessage(skillCreationMessage(created.name, created.file));
         await deps.refreshSkills();
       } catch (error) {
@@ -664,9 +709,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   }
 
   async function skillsConfirmRemoveMode(value: string) {
-    const result = skillConfirmRemove(deps.settings, deps.skills, deps.selectedSkillName, value);
+    const result = skillConfirmRemove(deps.settings, deps.skills, deps.wizard.selectedSkillName, value);
     if (result.message) showMessage(result.message);
-    if (result.selectedName === undefined) deps.setSelectedSkillName(undefined);
+    if (result.selectedName === undefined) setSelectedSkillName(undefined);
     if (result.mode === 'chat') setMode('chat');
     if (result.removedDir) await fs.remove(result.removedDir);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
@@ -675,31 +720,31 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
 
   async function selectLspServer(serverName: string) {
     const result = selectLspServerResult(deps.settings, serverName);
-    if (result.clearDraft) deps.setLspDraft({});
+    if (result.clearDraft) setLspDraft({});
     if (serverName === SERVER_CHOICES.addServer) setMode('lspAddPreset');
     else if (result.mode) setMode(result.mode);
-    if (result.selectedName !== undefined) deps.setSelectedLspName(result.selectedName);
+    if (result.selectedName !== undefined) setSelectedLspName(result.selectedName);
     showMessage(result.message);
   }
 
   async function selectLspPreset(presetId: string) {
     const result = selectLspPresetResult(deps.settings, presetId);
-    if (result.clearDraft) deps.setLspDraft({});
+    if (result.clearDraft) setLspDraft({});
     await applyResult(result);
   }
 
   async function selectLspAction(action: string) {
-    const result = selectLspActionResult(deps.settings, deps.selectedLspName, action);
+    const result = selectLspActionResult(deps.settings, deps.wizard.selectedLspName, action);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) deps.setSelectedLspName(result.selectedName);
+    if ('selectedName' in result) setSelectedLspName(result.selectedName);
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
 
   async function finishLspCustom(commandLine: string) {
-    const result = finishLspCustomResult(deps.settings, deps.lspDraft.name, commandLine);
+    const result = finishLspCustomResult(deps.settings, deps.wizard.lspDraft.name, commandLine);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if (result.clearDraft) deps.setLspDraft({});
+    if (result.clearDraft) setLspDraft({});
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
@@ -710,7 +755,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
       showMessage(result.message);
       return;
     }
-    if (result.draft) deps.setLspDraft({name: result.draft.name});
+    if (result.draft) setLspDraft({name: result.draft.name});
     if (result.nextMode) setMode(result.nextMode as Mode);
     showMessage(result.systemMessage);
   }
@@ -740,9 +785,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   }
 
   const lspConfirmRemoveMode = confirmRemoveStep({
-    selectedName: () => deps.selectedLspName,
+    selectedName: () => deps.wizard.selectedLspName,
     cancelMessage: 'Cancelled. LSP server not removed.',
-    clearSelection: () => deps.setSelectedLspName(undefined),
+    clearSelection: () => setSelectedLspName(undefined),
     remove: async name => {
       const next = await updateSettings({lspServers: removeLspServer(deps.settings, name)});
       setSettings(next);
@@ -751,9 +796,9 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   });
 
   const mcpConfirmRemoveMode = confirmRemoveStep({
-    selectedName: () => deps.selectedMcpName,
+    selectedName: () => deps.wizard.selectedMcpName,
     cancelMessage: 'Cancelled. MCP server not removed.',
-    clearSelection: () => deps.setSelectedMcpName(undefined),
+    clearSelection: () => setSelectedMcpName(undefined),
     remove: async name => {
       const next = await updateSettings({mcpServers: removeMcpServer(deps.settings, name)});
       setSettings(next);
@@ -763,41 +808,41 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
 
   async function selectMcpServer(serverName: string) {
     const result = selectMcpServerResult(deps.settings, serverName);
-    if (result.clearDraft) deps.setMcpDraft({});
+    if (result.clearDraft) setMcpDraft({});
     if (serverName === SERVER_CHOICES.addServer) setMode('mcpAddPreset');
     else if (result.mode) setMode(result.mode);
-    if (result.selectedName !== undefined) deps.setSelectedMcpName(result.selectedName);
+    if (result.selectedName !== undefined) setSelectedMcpName(result.selectedName);
     showMessage(result.message);
   }
 
   async function selectMcpPreset(presetId: string) {
     const result = selectMcpPresetResult(deps.settings, presetId);
-    if (result.clearDraft) deps.setMcpDraft({});
-    if (result.draft) deps.setMcpDraft(result.draft);
+    if (result.clearDraft) setMcpDraft({});
+    if (result.draft) setMcpDraft(result.draft);
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
 
   async function selectMcpAction(action: string) {
-    const result = selectMcpActionResult(deps.settings, deps.selectedMcpName, action);
+    const result = selectMcpActionResult(deps.settings, deps.wizard.selectedMcpName, action);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) deps.setSelectedMcpName(result.selectedName);
+    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
 
-  async function finishMcpCustom(keyValue?: string, draft = deps.mcpDraft) {
+  async function finishMcpCustom(keyValue?: string, draft = deps.wizard.mcpDraft) {
     const result = finishMcpCustomResult(deps.settings, draft, keyValue);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if (result.clearDraft) deps.setMcpDraft({});
+    if (result.clearDraft) setMcpDraft({});
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
 
   async function setMcpServerKey(keyValue: string) {
-    const result = setMcpServerKeyResult(deps.settings, deps.selectedMcpName, keyValue);
+    const result = setMcpServerKeyResult(deps.settings, deps.wizard.selectedMcpName, keyValue);
     if (result.settingsPatch) setSettings(await updateSettings(result.settingsPatch));
-    if ('selectedName' in result) deps.setSelectedMcpName(result.selectedName);
+    if ('selectedName' in result) setSelectedMcpName(result.selectedName);
     if (result.mode) setMode(result.mode);
     showMessage(result.message);
   }
@@ -841,8 +886,8 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     if (effect.type === 'message') showMessage(effect.text);
     else if (effect.type === 'mode') setMode(effect.mode);
     else if (effect.type === 'provider-draft') {
-      if (effect.replace) deps.setProviderDraft(effect.patch);
-      else deps.setProviderDraft({...deps.providerDraft, ...effect.patch});
+      if (effect.replace) setProviderDraft(effect.patch);
+      else setProviderDraft({...deps.wizard.providerDraft, ...effect.patch});
     } else if (effect.type === 'discover-provider-models') {
       // The draft patch above is still pending React state, so discovery
       // receives the merged draft explicitly (same pattern as MCP stdio).
@@ -853,19 +898,19 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
   async function applyMcpEffect(effect: McpWizardEffect) {
     if (effect.type === 'message') showMessage(effect.text);
     else if (effect.type === 'mode') setMode(effect.mode);
-    else if (effect.type === 'mcp-draft') deps.setMcpDraft({...deps.mcpDraft, ...effect.patch});
+    else if (effect.type === 'mcp-draft') setMcpDraft({...deps.wizard.mcpDraft, ...effect.patch});
     else if (effect.type === 'finish-mcp-stdio') await finishMcpCustom(undefined, effect.draft);
   }
 
   return {
     async dispatch(mode, value) {
       // Field-capture steps first (same order chat.tsx used), then the submit table.
-      const providerEffects = transitionProviderField({mode, value, settings: deps.settings, draft: deps.providerDraft});
+      const providerEffects = transitionProviderField({mode, value, settings: deps.settings, draft: deps.wizard.providerDraft});
       if (providerEffects) {
         for (const effect of providerEffects) await applyProviderEffect(effect);
         return true;
       }
-      const mcpEffects = transitionMcpField({mode, value, settings: deps.settings, draft: deps.mcpDraft});
+      const mcpEffects = transitionMcpField({mode, value, settings: deps.settings, draft: deps.wizard.mcpDraft});
       if (mcpEffects) {
         for (const effect of mcpEffects) await applyMcpEffect(effect);
         return true;

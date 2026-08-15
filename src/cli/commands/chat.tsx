@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useReducer, useRef, useState} from 'react';
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
 import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
@@ -10,9 +10,8 @@ import {checkForUpdate} from '../../config/updateCheck.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
-import {readSettings, updateSettings, type HazeMcpServer, type HazeProviderSettings, type HazeSettings} from '../../config/settings.js';
+import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
 import {activeModel, activeProvider} from '../../config/providers.js';
-import {type HazeLspServer} from '../../config/lspSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
@@ -26,14 +25,14 @@ import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} f
 import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
-import type {LoadedSkill, SkillSource} from '../../skills/types.js';
+import type {LoadedSkill} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages, type TranscriptStaticItem} from '../chat/messages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
-import {createWizardDispatch} from '../chat/wizardDispatch.js';
+import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
 import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
@@ -150,7 +149,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [backgroundCount, setBackgroundCount] = useState(backgroundProcessCount);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
@@ -171,17 +169,11 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
-  const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
-  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
-  const [suggestedModels, setSuggestedModels] = useState<string[]>([]);
-  const [selectedProviderName, setSelectedProviderName] = useState<string | undefined>();
-  const [providerDraft, setProviderDraft] = useState<Partial<HazeProviderSettings>>({});
-  const [skillDraft, setSkillDraft] = useState<{name?: string; scope?: SkillSource}>({});
-  const [selectedSkillName, setSelectedSkillName] = useState<string | undefined>();
-  const [selectedLspName, setSelectedLspName] = useState<string | undefined>();
-  const [lspDraft, setLspDraft] = useState<Partial<HazeLspServer>>({});
-  const [selectedMcpName, setSelectedMcpName] = useState<string | undefined>();
-  const [mcpDraft, setMcpDraft] = useState<Partial<HazeMcpServer>>({});
+
+  // Wizard flow state (selection, drafts, model discovery) in one reducer;
+  // this replaced twelve individual useState hooks.
+  const [wizardState, updateWizard] = useReducer(wizardUiReducer, undefined, initialWizardUiState);
+  const {modelProviderFilter, discoveredModels, suggestedModels, selectedProviderName, providerDraft, selectedSkillName, selectedLspName, selectedMcpName} = wizardState;
 
   // Wrap setBusy so the busy indicator knows when the turn started, and tick a
   // heartbeat every second while busy so elapsed time keeps rolling. This keeps
@@ -336,7 +328,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
     const next = await listSessions();
     setSessions(next);
-    setSelectedSessionId(undefined);
+    updateWizard({type: 'set', key: 'selectedSessionId', value: undefined});
     if (next.length === 0) {
       setMessages(m => [...m, {role: 'system', text: 'No saved sessions found for this workspace.'}]);
       setMode('chat');
@@ -370,18 +362,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     if (mode !== 'chat') {
       setMode('chat');
       setSessions([]);
-      setSelectedSessionId(undefined);
-      setModelProviderFilter(undefined);
-      setDiscoveredModels([]);
-      setSuggestedModels([]);
-      setSelectedProviderName(undefined);
-      setProviderDraft({});
-      setSkillDraft({});
-      setSelectedSkillName(undefined);
-      setSelectedLspName(undefined);
-      setLspDraft({});
-      setSelectedMcpName(undefined);
-      setMcpDraft({});
+      updateWizard({type: 'reset'});
     }
   }
 
@@ -393,15 +374,12 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // shared settings-patch applier (CR-006). Rebuilt every render so handlers
   // see current state without new React state.
   const wizard = createWizardDispatch({
-    settings, skills, modelProviderFilter, selectedProviderName, selectedSkillName, selectedLspName, selectedMcpName,
-    sessions, selectedSessionId,
-    providerDraft, lspDraft, mcpDraft, skillDraft,
+    settings, skills, sessions,
+    wizard: wizardState, updateWizard,
     setMode, setSettings,
-    setSelectedProviderName, setSelectedSkillName, setSelectedLspName, setSelectedMcpName, setSelectedSessionId,
+    showMessage: showWizardMessage, refreshSkills,
     resumeSessionById: sessionLifecycle.resumeSessionById,
     forkSessionById: sessionLifecycle.forkSessionById,
-    setModelProviderFilter, setProviderDraft, setSkillDraft, setLspDraft, setMcpDraft, setDiscoveredModels, setSuggestedModels,
-    showMessage: showWizardMessage, refreshSkills,
     setBusyLabel, setBusy: setBusyWithHeartbeat,
     idleBusyLabel: thinkingLabelForSettings(settings),
   });
@@ -441,7 +419,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       settings,
       contextFiles,
       setMode,
-      setModelProviderFilter,
+      setModelProviderFilter: (filter: string | undefined) => updateWizard({type: 'set', key: 'modelProviderFilter', value: filter}),
       addSystemMessage: text => setMessages(m => [...m, {role: 'system', text}]),
       clearConversation,
       newSession: async () => {
