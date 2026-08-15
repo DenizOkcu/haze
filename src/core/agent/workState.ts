@@ -49,6 +49,14 @@ export interface WorkState {
    * earlier turn must not block completion).
    */
   taskProgress?: WorkTaskProgress;
+  /**
+   * Validation evidence carried from earlier physical turns of the same
+   * logical goal (see the goal supervisor). Used by `deriveValidationOutcome`
+   * only while this turn itself has recorded no validation; a fresh
+   * validation this turn supersedes it. Bounded to status/kind — never a
+   * command or output.
+   */
+  carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -98,6 +106,28 @@ export function taskProgressFromOutput(output: unknown, revision: number): WorkT
   const completed = boundedTaskCount(counts.completed);
   if (pending === undefined || inProgress === undefined || completed === undefined) return undefined;
   return {total, pending, inProgress, completed, revision};
+}
+
+/**
+ * Seed a fresh per-turn work state with cumulative evidence from earlier
+ * physical turns of the same logical goal, so a new turn cannot complete while
+ * previously-declared tasks remain or previously-made edits still lack fresh
+ * validation. Seq baselines keep `deriveValidationOutcome` truthful across the
+ * boundary: a carried `stale`/`absent` outcome keeps demanding validation, a
+ * carried `passed`/`failed` outcome stands until this turn mutates or validates.
+ */
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress}) {
+  if (carried.taskProgress && carried.taskProgress.total > 0) {
+    state.taskProgress = {...carried.taskProgress, revision: 1};
+  }
+  if (carried.mutationCount > 0) {
+    state.mutationCount = carried.mutationCount;
+    state.mutationSeq = 1;
+  }
+  if (carried.validationOutcome === 'passed' || carried.validationOutcome === 'failed') {
+    state.validationSeq = 1;
+    state.carriedValidation = carried.validationOutcome === 'passed' ? {status: 'passed'} : {status: 'failed'};
+  }
 }
 
 export interface WorkToolEvent {
@@ -245,10 +275,11 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   }
   // A validation is stale when a mutation happened after it. `mutationSeq === 0`
   // means no mutation occurred (e.g. a pure test/run request), so the latest
-  // validation stands on its own.
+  // validation stands on its own. With no validation this turn, a carried
+  // outcome from an earlier physical turn of the same logical goal stands in.
   const stale = state.mutationSeq > 0 && state.validationSeq < state.mutationSeq;
   if (stale) return 'stale';
-  const latest = state.validations.at(-1);
+  const latest = state.validations.at(-1) ?? state.carriedValidation;
   return latest?.status === 'passed' ? 'passed' : 'failed';
 }
 

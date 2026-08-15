@@ -23,15 +23,16 @@ import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnP
 export {latestRepeatedToolNames, uniqueRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
-import {createTurnExecutionState, assessCompletionReadiness, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, normalizeFinishReason, recordGoalContinuation, rescueEligibleRequest, RESCUE_BOUNDARY, toCompletionEvidence, type CompletionEvidence, type CompletionReadiness, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
+import {createTurnExecutionState, assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, normalizeFinishReason, recordGoalContinuation, rescueEligibleRequest, RESCUE_BOUNDARY, toCompletionEvidence, type CompletionEvidence, type TerminalClassification, type TurnCompletionEvidence, type TurnExecutionState} from '../../core/agent/completionController.js';
 export type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {clampSlice, mainTurnBudget, remainingSteps, remainingToolCalls, type TurnBudget} from '../../core/agent/turnBudget.js';
 import {createToolExecutionBudget, isToolBudgetBlocked, withToolExecutionBudget, type ToolExecutionBudgetState} from '../../core/agent/toolExecutionBudget.js';
 import {createAbsoluteDeadline, isToolDeadlineExceeded, withToolDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../core/agent/toolCapabilities.js';
-import {deriveValidationOutcome} from '../../core/agent/workState.js';
+import {deriveValidationOutcome, seedCarriedGoalEvidence, type ValidationOutcome, type WorkTaskProgress} from '../../core/agent/workState.js';
 import {createSessionGoal, formatGoalStatus, observeGoalToolEvent, type SessionGoal} from '../../core/goal/sessionGoal.js';
 import type {WorkState} from '../../core/agent/workState.js';
+import {buildIncompleteGoalResume, type IncompleteGoalResume} from './streaming/goalCheckpoint.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream, isHiddenAssistantFragment, isHiddenUnstartedFinalText, isShortLeadInBeforeTool, isShortUnfinishedLeadIn} from './streaming/assistantText.js';
 import {createToolGroupRenderer, toolDiffFromResult, type NativeToolCall, type ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
 import {applyStepToolResultState, initialToolResultState} from './streaming/toolResultState.js';
@@ -63,16 +64,25 @@ export interface TurnResult {
    * - `model-stream-idle`: the model stream stalled past the idle window and
    *   bounded retries could not continue. The conversation keeps completed
    *   steps; resume continues the same logical turn's retry pool.
-   * - `incomplete-goal`: the model's voluntary finals were rejected by
-   *   completion-readiness evidence (pending tasks or missing/stale/failed
-   *   validation), and autonomous continuation cannot proceed (global budget
-   *   exhausted or the no-progress guard tripped). Completed mutations stay in
-   *   the conversation; resume starts a fresh logical turn against it and never
-   *   replays finished tool work.
+   * - `incomplete-goal`: the attempt ended `recoverable-incomplete` (declared
+   *   tasks or post-edit validation outstanding) with no same-turn recovery
+   *   available — including step/tool budget boundaries that finish as
+   *   `tool-calls`. A goal supervisor (or the interactive R key) continues the
+   *   logical goal in a fresh physical turn against the preserved
+   *   conversation; completed mutations are never replayed.
    */
-  resume?:
-    | {kind: 'model-stream-idle'; request: string; retryAttempt: number}
-    | {kind: 'incomplete-goal'; request: string; reason: CompletionReadiness; stepsUsed: number; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; validationOutcome?: import('../../core/agent/workState.js').ValidationOutcome};
+  resume?: {kind: 'model-stream-idle'; request: string; retryAttempt: number} | IncompleteGoalResume;
+}
+
+/** Supervisor-provided logical-goal context: tags checkpoints and seeds cumulative evidence. */
+export interface TurnGoalContext {
+  goalId: string;
+  /** 1-based physical-turn counter for the logical goal. */
+  cycle: number;
+  /** Cumulative evidence carried from earlier physical turns. */
+  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress};
+  /** Consecutive no-progress physical turns at goal level (diagnostics). */
+  noProgressCount: number;
 }
 
 export interface TurnExecutionOptions {
@@ -86,6 +96,10 @@ export interface TurnExecutionOptions {
   recoverySlice?: {kind: 'length' | 'rescue' | 'goal'; maxSteps: number; maxToolCalls: number};
   /** Absolute turn deadline in milliseconds (headless `--timeout`); defaults to DEFAULT_TURN_DEADLINE_MS. */
   turnDeadlineMs?: number;
+  /** Logical-goal context from the goal supervisor; hydrates cumulative evidence so a fresh physical turn cannot complete while carried work remains. */
+  goalContext?: TurnGoalContext;
+  /** Shared turn scope (coordinator admission + workspace mutation lease) reused across a logical goal's physical turns. */
+  sharedTurnScope?: {executionScope?: TurnExecutionScope};
 }
 
 type NativeToolFinish = {toolCall: NativeToolCall; success: boolean; output?: unknown; error?: unknown; durationMs: number};
@@ -706,19 +720,20 @@ async function runAgentAttempt(
     // here so the turn-wide state is the single source of runtime evidence).
     turnState.validationOutcome = deriveValidationOutcome(goal);
     turnState.mutationCount = goal.mutationCount;
-    turnState.validationKind = goal.validations.at(-1)?.kind;
+    turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
     turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
     turnState.taskProgress = goal.taskProgress;
     turnState.budgetBoundary = isBudgetExhausted(turnState, turnBudget);
     const completionEvidence: CompletionEvidence = {sawToolCall: latestToolCalls.size > 0, assistantText, lastToolOk, unresolvedToolInputError: unresolvedMalformedToolName != null};
     const readiness = assessCompletionReadiness(turnState, completionEvidence);
+    const classification: TerminalClassification = classifyTerminalOutcome(turnState, completionEvidence);
     turnStatus = terminalTurnStatus({aborted: false, assistantText, sawToolCall: latestToolCalls.size > 0, lastToolOk, finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: unresolvedMalformedToolName != null, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress});
     if (unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
     goal.phase = 'done';
     // Goal status reflects completion readiness, not the shallow text status:
-    // unfinished-but-recoverable work is waiting on the user (paused/failed),
-    // while tool/input failures are concrete blockers. Prose alone can never
-    // turn pending work into 'complete'.
+    // unfinished-but-recoverable work is waiting on continuation (supervisor or
+    // the user), while tool/input failures are concrete blockers. Prose alone
+    // can never turn pending work into 'complete'.
     goal.status = turnStatus === 'aborted' ? 'aborted'
       : turnStatus === 'complete' ? 'complete'
         : readiness === 'tool_failure' || readiness === 'unresolved_tool_input' ? 'blocked'
@@ -727,37 +742,42 @@ async function runAgentAttempt(
     callbacks.setWorkState?.(goal);
     callbacks.setGoalStatus?.(undefined);
 
-    // Bounded recovery (Increment 2 + goal continuation). Length/rescue credits
-    // are single-use and only the main flow proposes them; goal continuation is
-    // repeatable across its own slices while measurable progress continues, and
-    // pauses honestly when the global budget or the no-progress guard stops it.
-    const inGoalFlow = turnOptions.recoverySlice == null || turnOptions.recoverySlice.kind === 'goal';
-    if (inGoalFlow && !abortController.signal.aborted) {
+    // Bounded recovery + the goal-level invariant. Length/rescue credits are
+    // single-use and only the main flow proposes them; goal continuation is
+    // repeatable while measurable progress continues. The invariant: when the
+    // attempt classified `recoverable-incomplete` and no same-turn recovery can
+    // run (budget/deadline boundary, exhausted slice, no-progress guard), the
+    // attempt returns an `incomplete-goal` checkpoint — never a silent failure,
+    // and never `complete`. The goal supervisor turns checkpoints into fresh
+    // physical turns; a bare runAgentTurn caller surfaces them as resume info.
+    const goalId = turnOptions.goalContext?.goalId ?? goal.id;
+    const goalCycle = turnOptions.goalContext?.cycle ?? 1;
+    const checkpointResult = (): AgentAttemptResult => ({status: 'failed', resume: buildIncompleteGoalResume(value, goalId, goalCycle, turnState, readiness)});
+    if (!abortController.signal.aborted) {
       const lengthDecision = decideLengthRecovery(turnState, turnBudget);
-      const goalDecision = decideGoalContinuation(turnState, completionEvidence, turnBudget);
-      const pauseIncompleteGoal = (stopReason: string): AgentAttemptResult => {
-        goal.status = 'needs-user';
-        callbacks.setWorkState?.(goal);
-        callbacks.addMessage({role: 'system', text: `Unfinished task paused: ${describeCompletionReadiness(readiness, turnState.taskProgress)} (${stopReason}). Completed steps are preserved in the conversation. Press R to resume, or send a follow-up to continue.`});
-        callbacks.debugLog(`goal continuation paused: ${stopReason}; readiness=${readiness}`);
-        return {status: 'failed', resume: {kind: 'incomplete-goal', request: value, reason: readiness, stepsUsed: turnState.stepsUsed, ...(turnState.taskProgress ? {taskCounts: {total: turnState.taskProgress.total, pending: turnState.taskProgress.pending, inProgress: turnState.taskProgress.inProgress, completed: turnState.taskProgress.completed}} : {}), ...(turnState.validationOutcome !== 'not_applicable' ? {validationOutcome: turnState.validationOutcome} : {})}};
-      };
       if (lengthDecision.action === 'continue') {
         const clamped = clampSlice(lengthDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
         if (clamped.steps > 0) recovery = {kind: 'length', control: lengthContinuationPrompt(), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
-      } else if (goalDecision.action === 'continue' && remainingTurnDeadlineMs() > 0) {
-        const clamped = clampSlice(goalDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
-        if (clamped.steps > 0) recovery = {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress)), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
-      } else if (goalDecision.action === 'continue') {
-        return pauseIncompleteGoal('turn deadline exhausted');
-      } else if (goalDecision.pause) {
-        return pauseIncompleteGoal(goalDecision.reason);
-      } else if (turnOptions.recoverySlice == null) {
-        const isMutatingRequest = rescueEligibleRequest(goal.intent);
-        const rescueDecision = decideRescue(turnState, completionEvidence, turnBudget, isMutatingRequest);
-        if (rescueDecision.action === 'continue') {
-          const clamped = clampSlice(rescueDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)});
-          if (clamped.steps > 0) recovery = {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: clamped.steps, maxToolCalls: clamped.toolCalls}};
+      } else {
+        const goalDecision = decideGoalContinuation(turnState, completionEvidence, turnBudget);
+        const rescueDecision = turnOptions.recoverySlice == null
+          ? decideRescue(turnState, completionEvidence, turnBudget, rescueEligibleRequest(goal.intent))
+          : undefined;
+        const goalSlice = goalDecision.action === 'continue' && remainingTurnDeadlineMs() > 0
+          ? clampSlice(goalDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)})
+          : undefined;
+        const rescueSlice = goalSlice && goalSlice.steps > 0 ? undefined : rescueDecision?.action === 'continue'
+          ? clampSlice(rescueDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)})
+          : undefined;
+        if (goalSlice && goalSlice.steps > 0) {
+          recovery = {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress)), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}};
+        } else if (rescueSlice && rescueSlice.steps > 0) {
+          recovery = {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}};
+        } else if (classification === 'recoverable-incomplete') {
+          // Budget boundary (`tool-calls`), exhausted slice, deadline, or no-progress
+          // guard: end the physical turn with a resumable checkpoint.
+          callbacks.debugLog(`goal checkpoint: readiness=${readiness}; goalDecision=${goalDecision.reason}; rescueDecision=${rescueDecision?.reason ?? 'not proposed from a recovery slice'}`);
+          return checkpointResult();
         }
       }
     }
@@ -868,16 +888,22 @@ export async function runAgentTurn(
   const turnDeadlineMs = turnOptions.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
   try {
     // Retries are one logical turn and therefore share coordinator admission and
-    // the workspace mutation lease, including quarantined lingering work.
-    const turnScope: {executionScope?: TurnExecutionScope} = {};
+    // the workspace mutation lease, including quarantined lingering work. A
+    // goal supervisor may pass one shared scope so every physical turn of the
+    // logical goal shares the same lease.
+    const turnScope: {executionScope?: TurnExecutionScope} = turnOptions.sharedTurnScope ?? {};
     const turnBudget = mainTurnBudget();
     // Turn-wide execution budget (RH-003): one authoritative counter of
     // underlying tool executions, shared across retries and recovery slices so
     // the global limit cannot be reset or exceeded.
     const globalBudget = createToolExecutionBudget();
     // Turn-wide work state: persists across provider retries and recovery
-    // slices so mutation/validation evidence accumulates correctly.
+    // slices so mutation/validation evidence accumulates correctly. When the
+    // goal supervisor continues a logical goal, cumulative evidence (tasks,
+    // mutations, carried validation) is hydrated so a fresh physical turn
+    // cannot complete while carried work remains.
     const goal = createSessionGoal(value);
+    if (turnOptions.goalContext) seedCarriedGoalEvidence(goal, turnOptions.goalContext.carried);
     // Completion policy is intent-sensitive (implement/fix/test expect
     // post-mutation validation); the turn-wide state carries the classified intent.
     turnState.intent = goal.intent;

@@ -12,6 +12,9 @@ export interface AgentStepUsage {
 export type AgentEvent =
   | {type: 'turn_start'; request: string; at: string}
   | {type: 'turn_end'; request: string; at: string; status: 'complete' | 'aborted' | 'failed'; evidence?: TurnCompletionEvidence}
+  | {type: 'goal_start'; goalId: string; request: string; at: string}
+  | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
+  | {type: 'goal_end'; goalId: string; at: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: AgentStepUsage; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}

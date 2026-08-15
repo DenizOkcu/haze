@@ -18,7 +18,9 @@ import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
 import {theme} from '../../ui/theme.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
-import {runAgentTurn, type Message, type TokenUsage} from './streaming.js';
+import {runAgentGoal} from './streaming/goalSupervisor.js';
+import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
+import {type Message, type TokenUsage} from './streaming.js';
 import {formatElapsedTimeWhole, imageAttachmentLine} from './formatters.js';
 import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} from '../../core/attachments/imageAttachments.js';
 import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
@@ -27,8 +29,6 @@ import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill, SkillSource} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
-import {describeCompletionReadiness, type CompletionReadiness} from '../../core/agent/completionController.js';
-import {goalContinuationPrompt} from '../../core/goal/completionPolicy.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages, type TranscriptStaticItem} from '../chat/messages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
@@ -163,11 +163,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
-  // A turn paused with recoverable work unfinished: either a model-stream idle
-  // stall (bounded retries exhausted) or an incomplete goal (a voluntary final
-  // rejected by completion evidence, with continuation budget/guard exhausted).
-  // Carries what a one-key resume needs; any new submission clears it.
-  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; reason?: CompletionReadiness} | undefined>(undefined);
+  // A genuinely paused goal (no measurable progress, deadline, or a stalled
+  // model stream) — automatic continuation has already been attempted by the
+  // goal supervisor. Carries what a one-key resume needs; any new submission
+  // clears it.
+  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
@@ -575,15 +575,21 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
    * retry pool; an incomplete-goal resume starts a fresh logical turn (its
    * budget was exhausted) nudged to pick up the remaining concrete work.
    */
+  /**
+   * Explicitly resume a genuinely paused goal (automatic continuation already
+   * ran): an idle-stall resume continues the bounded retry pool; an
+   * incomplete-goal resume restarts the supervisor from the stored checkpoint.
+   * Both ride the preserved conversation — no completed mutations are replayed.
+   */
   async function resumePausedTask() {
     const resume = pausedResume;
     if (!resume || busy) return;
     setPausedResume(undefined);
-    setMessages(m => [...m, {role: 'system', text: resume.kind === 'incomplete-goal' ? 'Resuming the unfinished task; completed work is preserved in the conversation.' : 'Resuming the unfinished task from where the model stream stalled.'}]);
-    const options = resume.kind === 'incomplete-goal'
-      ? {ephemeralControl: goalContinuationPrompt(describeCompletionReadiness(resume.reason ?? 'pending_tasks'))}
-      : {};
-    await runSingleAgentTurn(resume.request, undefined, options, {retryAttempt: resume.retryAttempt});
+    setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished goal; completed work is preserved in the conversation.'}]);
+    const resumeFrom = resume.kind === 'incomplete-goal' && resume.checkpoint
+      ? {kind: 'incomplete-goal' as const, checkpoint: resume.checkpoint}
+      : {kind: 'model-stream-idle' as const, retryAttempt: resume.retryAttempt};
+    await runSingleAgentTurn(resume.request, undefined, {}, resumeFrom);
   }
 
   /**
@@ -599,7 +605,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     return promptSessionRef.current.value;
   }
 
-  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {retryAttempt: number}) {
+  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint}) {
     const sessionRecorder = sessionRecorderRef.current!;
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
@@ -608,7 +614,16 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       sessionRecorder.recordUiMessage(ordered);
     };
 
-    const result = await runAgentTurn(value, displayValue, contextFiles, {
+    // The logical-goal supervisor owns this submission: recoverable-incomplete
+    // physical turns (including step/tool budget boundaries) continue
+    // automatically; per-turn limits stay safety boundaries. An explicit
+    // resumeFrom restarts a genuinely paused goal from its checkpoint/pool.
+    const goalResult = await runAgentGoal({
+      request: value,
+      displayValue,
+      contextFiles,
+      session: currentPromptSession(),
+      callbacks: {
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);
         if (ordered.streaming) {
@@ -656,16 +671,18 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, resumeExisting?.retryAttempt ?? 0, resumeExisting != null, false, currentPromptSession(), undefined, turnOptions);
+    },
+    ...(resumeExisting ? {resumeFrom: resumeExisting} : {}),
+    ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})});
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
-    // A model-stream stall or an incomplete goal pauses the turn with progress
-    // preserved; expose the one-key resume affordance until the user submits
-    // something else.
-    if (result.resume?.kind === 'model-stream-idle') setPausedResume({kind: 'model-stream-idle', request: result.resume.request, retryAttempt: result.resume.retryAttempt});
-    else if (result.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: result.resume.request, retryAttempt: 0, reason: result.resume.reason});
+    // Only a genuinely paused goal (supervisor already attempted automatic
+    // continuation) exposes the one-key resume affordance; it stays until the
+    // user submits something else.
+    if (goalResult.resume?.kind === 'model-stream-idle') setPausedResume({kind: 'model-stream-idle', request: goalResult.resume.request, retryAttempt: goalResult.resume.retryAttempt});
+    else if (goalResult.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: goalResult.resume.checkpoint.request, retryAttempt: 0, checkpoint: goalResult.resume.checkpoint});
     else setPausedResume(undefined);
-    return result;
+    return goalResult;
   }
 
   const visible = messages.filter(message => !message.hidden);
@@ -745,7 +762,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal' ? 'Unfinished task paused (work remains)' : 'Unfinished task paused (model stream stalled)'} · </Text>
+      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal' ? 'Unfinished goal paused (no measurable progress)' : 'Unfinished goal paused (model stream stalled)'} · </Text>
       <Text color={theme.command} bold>Press R to {pausedResume.kind === 'incomplete-goal' ? 'resume' : 'retry'}</Text>
       <Text color={theme.muted}> or type a follow-up</Text>
     </Box>}

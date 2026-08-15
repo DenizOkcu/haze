@@ -1,6 +1,7 @@
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
-import {runAgentTurn, type Message, type StreamCallbacks, type TokenUsage, type TurnCompletionEvidence, type TurnStatus} from './streaming.js';
+import {runAgentGoal, type GoalRunResult} from './streaming/goalSupervisor.js';
+import {type Message, type StreamCallbacks, type TokenUsage, type TurnCompletionEvidence, type TurnStatus} from './streaming.js';
 import type {EffectiveReasoning, ReasoningLevel} from '../../core/agent/reasoningPolicy.js';
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
@@ -40,6 +41,9 @@ export interface HeadlessUsage {
 type HeadlessStreamEvent =
   | {type: 'turn_start'; request: string; at: string}
   | {type: 'turn_end'; request: string; status: TurnStatus; evidence?: TurnCompletionEvidence; at: string}
+  | {type: 'goal_start'; goalId: string; request: string; at: string}
+  | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
+  | {type: 'goal_end'; goalId: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
@@ -93,6 +97,12 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'turn_start', request: event.request, at: event.at};
     case 'turn_end':
       return {...(event.evidence ? {evidence: event.evidence} : {}), type: 'turn_end', request: event.request, status: event.status, at: event.at};
+    case 'goal_start':
+      return {type: 'goal_start', goalId: event.goalId, request: event.request, at: event.at};
+    case 'goal_continue':
+      return {type: 'goal_continue', goalId: event.goalId, cycle: event.cycle, reason: event.reason, at: event.at};
+    case 'goal_end':
+      return {...(event.stopReason ? {stopReason: event.stopReason} : {}), ...(event.evidence ? {evidence: event.evidence} : {}), type: 'goal_end', goalId: event.goalId, status: event.status, cycles: event.cycles, at: event.at};
     case 'step_start':
       return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
     case 'step_end':
@@ -260,10 +270,23 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   let status: TurnStatus;
   let result: string;
   let evidence: TurnCompletionEvidence | undefined;
+  let goal: {cycles: number; stopReason: string; mutations: number; validationOutcome?: string; taskProgress?: {total: number; pending: number; inProgress: number; completed: number}} | undefined;
   let persistenceError: string | undefined;
   let backgroundTeardownError: string | undefined;
   try {
-    ({status, evidence} = await runAgentTurn(options.prompt, options.prompt, contextFiles, callbacks, 0, false, false, session, options.modelOverride, turnDeadlineMs != null ? {turnDeadlineMs} : {}));
+    // The logical-goal supervisor owns the whole request: `--timeout` bounds
+    // the entire goal, and per-turn budgets merely end physical turns that
+    // continue automatically while recoverable work and progress remain.
+    const goalResult: GoalRunResult = await runAgentGoal({request: options.prompt, displayValue: options.prompt, contextFiles, callbacks, session, modelOverride: options.modelOverride, ...(turnDeadlineMs != null ? {goalDeadlineMs: turnDeadlineMs} : {})});
+    status = goalResult.status;
+    evidence = goalResult.evidence;
+    goal = {
+      cycles: goalResult.cycles,
+      stopReason: goalResult.stopReason,
+      mutations: goalResult.evidence?.mutationCount ?? 0,
+      ...(goalResult.evidence && goalResult.evidence.validationOutcome !== 'not_applicable' ? {validationOutcome: goalResult.evidence.validationOutcome} : {}),
+      ...(goalResult.evidence?.taskProgress ? {taskProgress: goalResult.evidence.taskProgress} : {}),
+    };
     result = segments.filter((s) => !s.hidden && s.text).map((s) => s.text).join('\n');
   } catch (error) {
     status = 'failed';
@@ -284,7 +307,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     // them before the terminal result so ordering is preserved under backpressure.
     if (streamSink) await streamSink.flush().catch(() => undefined);
     // This terminal line is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
-    const resultLine = {type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {})};
+    const resultLine = {type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {}), ...(goal ? {goal} : {})};
     if (streamSink) await streamSink.write(resultLine).catch(() => undefined);
     else writeNdjson(resultLine);
     if (streamSink) await streamSink.flush().catch(() => undefined);

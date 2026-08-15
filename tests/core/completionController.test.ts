@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
   assessCompletionReadiness,
+  classifyTerminalOutcome,
   createTurnExecutionState,
   decideGoalContinuation,
   decideLengthRecovery,
@@ -287,20 +288,47 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
     expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budget).action).toBe('stop');
   });
 
-  it('stops without pause when ready, aborted, empty-text, or a non-voluntary finish', () => {
+  it('stops (checkpoint is the caller\'s decision) when ready, aborted, empty-text, or a non-recoverable finish', () => {
     expect(decideGoalContinuation(state({finishCause: 'stop'}), evidence({assistantText: 'Done.', lastToolOk: true}), budget).action).toBe('stop');
     expect(decideGoalContinuation(state({finishCause: 'stop', aborted: true, taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
     expect(decideGoalContinuation(state({finishCause: 'stop', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: '', lastToolOk: true}), budget).action).toBe('stop');
-    expect(decideGoalContinuation(state({finishCause: 'tool-calls', taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
+    expect(decideGoalContinuation(state({finishCause: 'error', taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
+    expect(decideGoalContinuation(state({finishCause: 'content-filter', taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
   });
 
-  it('pauses (never completes) when the global budget is exhausted with recoverable work remaining', () => {
+  it('classifies budget-boundary tool-calls finishes as recoverable-incomplete, not silent failures', () => {
+    // The reproduced field failure: step/tool budget exhaustion ends the stream
+    // with finishCause 'tool-calls' while tasks remain — recoverable, even with
+    // the global budget fully spent.
+    const s = state({finishCause: 'tool-calls', intent: 'implement', stepsUsed: budget.stepLimit, toolCallsUsed: budget.toolCallLimit, taskProgress: pendingTasks});
+    const ev = evidence({sawToolCall: true, assistantText: 'Next unfinished action remains.', lastToolOk: true});
+    expect(classifyTerminalOutcome(s, ev)).toBe('recoverable-incomplete');
+    // No same-turn budget remains, so in-turn continuation declines and the
+    // caller must emit an incomplete-goal checkpoint.
+    expect(decideGoalContinuation(s, ev, budget).action).toBe('stop');
+  });
+
+  it('classifies terminal outcomes against the logical goal', () => {
+    const ready = state({finishCause: 'stop', intent: 'implement', mutationCount: 1, validationOutcome: 'passed'});
+    expect(classifyTerminalOutcome(ready, evidence({assistantText: 'Done.', lastToolOk: true}))).toBe('goal-complete');
+    // Ready evidence but no answer, or a non-stop finish, is not goal-complete.
+    expect(classifyTerminalOutcome(ready, evidence({assistantText: '', lastToolOk: true}))).toBe('hard-blocked');
+    expect(classifyTerminalOutcome({...ready, finishCause: 'unknown'}, evidence({assistantText: 'Done.', lastToolOk: true}))).toBe('hard-blocked');
+    // Hard failures stay terminal.
+    expect(classifyTerminalOutcome(state({finishCause: 'stop', taskProgress: pendingTasks}), evidence({assistantText: 'Done.', lastToolOk: false}))).toBe('hard-blocked');
+    expect(classifyTerminalOutcome(state({aborted: true}), evidence({assistantText: ''}))).toBe('user-aborted');
+    // Recoverable finishes include length and unknown.
+    expect(classifyTerminalOutcome(state({finishCause: 'length', intent: 'implement', mutationCount: 1, validationOutcome: 'stale'}), evidence({assistantText: 'partial', lastToolOk: true}))).toBe('recoverable-incomplete');
+    expect(classifyTerminalOutcome(state({finishCause: 'unknown', taskProgress: pendingTasks}), evidence({assistantText: 'x', lastToolOk: true}))).toBe('recoverable-incomplete');
+  });
+
+  it('declines in-turn continuation when the global budget is exhausted (checkpoint path)', () => {
     const decision = decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', stepsUsed: budget.stepLimit, taskProgress: pendingTasks}), finalText, budget);
     expect(decision.action).toBe('stop');
-    expect(decision.pause).toEqual({readiness: 'pending_tasks'});
+    expect(decision.pause).toBeUndefined();
   });
 
-  it('allows one corrective nudge with no progress, then pauses', () => {
+  it('allows one corrective nudge with no progress, then declines in-turn (checkpoint path)', () => {
     const s = state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks});
     // First continuation issued at this progress signature.
     recordGoalContinuation(s);
@@ -310,10 +338,8 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
     expect(decideGoalContinuation(s, finalText, budget).action).toBe('continue');
     recordGoalContinuation(s);
     expect(s.goalContinuationCorrectiveUsed).toBe(true);
-    // Still no progress: pause instead of looping.
-    const paused = decideGoalContinuation(s, finalText, budget);
-    expect(paused.action).toBe('stop');
-    expect(paused.pause).toEqual({readiness: 'pending_tasks'});
+    // Still no progress: stop — the goal supervisor\'s no-progress guard takes over.
+    expect(decideGoalContinuation(s, finalText, budget).action).toBe('stop');
   });
 
   it('keeps allowing cycles while measurable progress continues', () => {

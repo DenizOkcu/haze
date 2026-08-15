@@ -43,7 +43,8 @@ describe('SessionGoal', () => {
 describe('completionPrompts', () => {
   it('uses autonomous-friendly tool slice wording', () => {
     const prompt = toolLoopBudgetPrompt();
-    expect(prompt).toMatch(/haze can continue/i);
+    expect(prompt).toMatch(/haze continues the active goal automatically/i);
+    expect(prompt).toMatch(/progress checkpoint/i);
     expect(prompt).not.toContain('You cannot call tools now');
   });
 

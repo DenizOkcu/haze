@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, taskProgressFromOutput, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
+import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, seedCarriedGoalEvidence, taskProgressFromOutput, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
 
 function passedSummary(text = 'tests passed') {
   return {kind: 'test', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
@@ -127,6 +127,51 @@ describe('taskProgressFromOutput', () => {
     const progress = taskProgressFromOutput({ok: true, taskCount: 1, counts: {pending: 1, in_progress: 0, completed: 0}, summary: 'Tasks: 1 pending.'}, 2);
     expect(JSON.stringify(progress)).not.toContain('summary');
     expect(JSON.stringify(progress)).not.toContain('title');
+  });
+});
+
+describe('seedCarriedGoalEvidence (cross-physical-turn hydration)', () => {
+  it('keeps demanding validation when edits from earlier turns lack it', () => {
+    const state = createWorkState('fix it', 'fix', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 14, validationOutcome: 'stale'});
+    expect(state.mutationCount).toBe(14);
+    expect(deriveValidationOutcome(state)).toBe('absent');
+    // A fresh validation this turn (no new edits) clears the carried debt.
+    observeWorkToolEvent(state, {toolName: 'bash', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('passed');
+    // New edits invalidate it again.
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    expect(deriveValidationOutcome(state)).toBe('stale');
+    expect(state.mutationCount).toBe(15);
+  });
+
+  it('carries a passed outcome so an already-validated goal may finish with a summary-only turn', () => {
+    const state = createWorkState('fix it', 'fix', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 3, validationOutcome: 'passed'});
+    expect(deriveValidationOutcome(state)).toBe('passed');
+    expect(state.carriedValidation).toEqual({status: 'passed'});
+    // A fresh failing validation this turn supersedes the carried one.
+    observeWorkToolEvent(state, {toolName: 'bash', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
+  it('seeds carried task counts so an undeclared list still gates completion', () => {
+    const state = createWorkState('do it', 'implement', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 0, validationOutcome: 'not_applicable', taskProgress: {total: 7, pending: 6, inProgress: 1, completed: 0, revision: 4}});
+    expect(state.taskProgress).toMatchObject({total: 7, pending: 6, inProgress: 1});
+    // Re-declaring all completed clears the gate.
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 7, counts: {pending: 0, in_progress: 0, completed: 7}, summary: 'x'}});
+    expect(state.taskProgress).toMatchObject({pending: 0, completed: 7});
+  });
+
+  it('is a no-op for a fresh goal (no carried evidence)', () => {
+    const state = createWorkState('fresh', 'implement', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 0, validationOutcome: 'not_applicable'});
+    expect(state.mutationSeq).toBe(0);
+    expect(state.validationSeq).toBe(0);
+    expect(state.carriedValidation).toBeUndefined();
+    expect(state.taskProgress).toBeUndefined();
+    expect(deriveValidationOutcome(state)).toBe('absent');
   });
 });
 

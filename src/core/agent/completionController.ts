@@ -314,13 +314,9 @@ export interface GoalContinuationDecision {
   reason: string;
   /** Slice size to request when action is 'continue'. */
   slice: RecoverySlice;
-  /**
-   * Set when stopping with autonomously recoverable work remaining but no way
-   * to continue (global budget exhausted or the no-progress guard tripped):
-   * the honest pause path (status `failed`, never `complete`).
-   */
-  pause?: {readiness: CompletionReadiness};
 }
+
+/** Readiness reasons a bounded continuation can plausibly resolve with more work. */
 
 /** Readiness reasons a bounded continuation can plausibly resolve with more work. */
 export function goalContinuationRecoverable(readiness: CompletionReadiness): boolean {
@@ -328,6 +324,42 @@ export function goalContinuationRecoverable(readiness: CompletionReadiness): boo
     || readiness === 'validation_failed'
     || readiness === 'validation_stale'
     || readiness === 'validation_absent_after_mutation';
+}
+
+/**
+ * Normal provider finishes that can still represent recoverable unfinished
+ * work. `stop` is a voluntary final; `tool-calls` is a step/slice budget
+ * boundary (often with a runtime-forced progress line); `length` is output
+ * truncation; `unknown` is an unmapped but non-erroneous finish. `error` and
+ * `content-filter` stay hard: they are provider failures, not work states.
+ */
+const RECOVERABLE_FINISH_CAUSES: ReadonlySet<FinishCause> = new Set(['stop', 'tool-calls', 'length', 'unknown'] as const);
+
+export function isRecoverableFinishCause(finishCause: FinishCause | undefined): boolean {
+  return finishCause != null && RECOVERABLE_FINISH_CAUSES.has(finishCause);
+}
+
+/**
+ * Terminal classification of a finished attempt against the logical goal.
+ *  - `goal-complete`: readiness satisfied, substantive answer, clean stop.
+ *  - `recoverable-incomplete`: structured readiness shows declared work
+ *    remaining (pending tasks, missing/stale/failed validation after edits)
+    *    and the finish shape can still be continued — regardless of turn
+ *    budget. A budget boundary ends a physical turn, not the goal.
+ *  - `hard-blocked`: concrete tool/input failure, provider error, or a
+ *    readiness that more work cannot resolve.
+ *  - `user-aborted`.
+ */
+export type TerminalClassification = 'goal-complete' | 'recoverable-incomplete' | 'hard-blocked' | 'user-aborted';
+
+export function classifyTerminalOutcome(state: TurnExecutionState, evidence: CompletionEvidence): TerminalClassification {
+  if (state.aborted) return 'user-aborted';
+  const readiness = assessCompletionReadiness(state, evidence);
+  if (readiness === 'ready') {
+    return evidence.assistantText.trim().length > 0 && state.finishCause === 'stop' ? 'goal-complete' : 'hard-blocked';
+  }
+  if (!goalContinuationRecoverable(readiness)) return 'hard-blocked';
+  return isRecoverableFinishCause(state.finishCause) ? 'recoverable-incomplete' : 'hard-blocked';
 }
 
 /** Compact signature of measurable work: mutations, validation outcome/kind, task counts. */
@@ -350,26 +382,25 @@ export function recordGoalContinuation(state: TurnExecutionState) {
 }
 
 /**
- * Goal-continuation decision. Fires when the model voluntarily stopped with a
- * substantive final while structured evidence shows unfinished work (declared
- * tasks, or missing/stale/failed validation after edits). Distinct from length
- * recovery (truncated output) and rescue (tool boundary with no answer): it is
- * repeatable while measurable progress continues, never resets the global
- * budget, and pauses honestly (via `pause`) when the budget is exhausted or the
- * model twice produces no measurable progress.
+ * Goal-continuation decision for a `recoverable-incomplete` attempt with a
+ * substantive answer to reject: continue in-turn with a slice when the global
+ * budget and progress guard allow it. Any other outcome is the caller's signal
+ * to end the physical turn — the goal-level invariant (failed + recoverable +
+ * no same-turn recovery → `incomplete-goal` checkpoint) is enforced by the
+ * caller via `classifyTerminalOutcome`, not here. Never resets budgets.
  */
 export function decideGoalContinuation(state: TurnExecutionState, evidence: CompletionEvidence, budget: TurnBudget): GoalContinuationDecision {
-  const stop = (reason: string, pause?: {readiness: CompletionReadiness}): GoalContinuationDecision => ({action: 'stop', reason, slice: GOAL_CONTINUATION_SLICE, ...(pause ? {pause} : {})});
+  const stop = (reason: string): GoalContinuationDecision => ({action: 'stop', reason, slice: GOAL_CONTINUATION_SLICE});
   if (state.aborted) return stop('turn aborted');
-  if (state.finishCause !== 'stop') return stop('finish is not a voluntary final');
+  if (!isRecoverableFinishCause(state.finishCause)) return stop('finish shape is not recoverable');
   if (evidence.assistantText.trim().length === 0) return stop('no substantive final to reject');
   if (evidence.lastToolOk === false || evidence.unresolvedToolInputError) return stop('unresolved tool failure');
   const readiness = assessCompletionReadiness(state, evidence);
   if (readiness === 'ready') return stop('completion readiness satisfied');
   if (!goalContinuationRecoverable(readiness)) return stop(`readiness '${readiness}' is not autonomously recoverable`);
-  if (!hasRemainingRecoveryBudget(state, budget)) return stop('global budget exhausted', {readiness});
+  if (!hasRemainingRecoveryBudget(state, budget)) return stop('global budget exhausted');
   if (state.goalContinuationProgress != null && goalProgressSignature(state) === state.goalContinuationProgress && state.goalContinuationCorrectiveUsed) {
-    return stop('no measurable progress after the corrective nudge', {readiness});
+    return stop('no measurable progress after the corrective nudge');
   }
   return {action: 'continue', reason: `premature final rejected: ${readiness}`, slice: GOAL_CONTINUATION_SLICE};
 }

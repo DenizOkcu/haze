@@ -1,5 +1,5 @@
 export function toolLoopBudgetPrompt() {
-  return 'Tool slice reached for this model step — tools are no longer callable in this turn. Stop attempting to describe or announce tool calls (e.g. "Let me install", "Now I\'ll run", "Let me X"); those phrases imply tool use you cannot perform. Answer once: either the final status template (current-turn changes + validation evidence) or, if incomplete, a single short line stating the next concrete unfinished action so haze can continue in a fresh tool slice. Do not repeat yourself, do not loop, do not emit XML/JSON tool-call syntax.';
+  return 'Tool slice reached for this model step — tools are no longer callable in this turn. Stop attempting to describe or announce tool calls (e.g. "Let me install", "Now I\'ll run", "Let me X"); those phrases imply tool use you cannot perform. Answer once with a bounded progress checkpoint: what is done so far (changes + validation evidence) and, if work remains, the single next concrete unfinished action. haze continues the active goal automatically from that line — do not manufacture a completion summary and do not treat this as the end of the task. Do not repeat yourself, do not loop, do not emit XML/JSON tool-call syntax.';
 }
 
 export function repeatedToolCallPrompt(toolNames: string[]) {
@@ -34,11 +34,15 @@ export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
 }
 
 /**
- * Ephemeral control for a goal-continuation slice. The model volunteered a
- * final message while structured evidence (declared task counts, post-edit
- * validation) shows unfinished work; this nudge rejects that stop and requires
- * resuming concrete work rather than summarizing again. One-request nudge only.
+ * Ephemeral control for a goal-continuation slice or a fresh continuation
+ * turn. The model's stop was rejected (or its physical turn hit a budget
+ * boundary) while structured evidence — declared task counts, post-edit
+ * validation — shows unfinished work; this nudge requires resuming concrete
+ * work rather than summarizing again. One-request nudge only.
  */
-export function goalContinuationPrompt(reason: string) {
-  return `Your final message was rejected: haze's structured evidence shows this turn is not complete (${reason}). Do not summarize again or restate what remains — resume the next concrete unfinished task now. If you declared a task list with writeTasks, its pending and in-progress items are commitments for this turn: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+export function goalContinuationPrompt(reason: string, taskCounts?: {total: number; pending: number; inProgress: number; completed: number}) {
+  const taskLine = taskCounts
+    ? ` The task list currently shows ${taskCounts.pending + taskCounts.inProgress} open item${taskCounts.pending + taskCounts.inProgress === 1 ? '' : 's'} of ${taskCounts.total}; update writeTasks as you complete them.`
+    : '';
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}). Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }

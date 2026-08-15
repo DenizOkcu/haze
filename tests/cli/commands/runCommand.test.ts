@@ -11,13 +11,25 @@ function fullUsage(partial: {inputTokens?: number; outputTokens?: number; cacheR
   };
 }
 
-async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; evidence?: unknown; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
+async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; evidence?: unknown; goal?: {cycles?: number; stopReason?: string}; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
   const status = opts.status ?? 'complete';
-  const runAgentTurn = vi.fn(async (_value: unknown, _display: unknown, _ctx: unknown, callbacks: any) => {
-    await opts.runAgentTurnImpl?.(callbacks);
-    return {status, ...(opts.evidence ? {evidence: opts.evidence} : {})};
+  // runCommand drives the logical-goal supervisor; mock it with the same knobs
+  // the old per-turn mock had (status/evidence/callbacks) plus goal metadata.
+  const runAgentGoal = vi.fn(async (options: unknown) => {
+    if (opts.runAgentTurnImpl) await opts.runAgentTurnImpl((options as {callbacks: any}).callbacks);
+    const evidence = opts.evidence as {mutationCount?: number; taskProgress?: unknown; validationOutcome?: string} | undefined;
+    const stopReason = status === 'complete' ? 'completed' : (opts.goal?.stopReason ?? 'blocked');
+    const cycles = opts.goal?.cycles ?? 1;
+    return {
+      status,
+      stopReason,
+      cycles,
+      ...(evidence ? {evidence} : {}),
+      ...(evidence ? {goal: {cycles, stopReason, mutations: evidence.mutationCount ?? 0, ...(evidence.validationOutcome && evidence.validationOutcome !== 'not_applicable' ? {validationOutcome: evidence.validationOutcome} : {}), ...(evidence.taskProgress ? {taskProgress: evidence.taskProgress} : {})}} : {}),
+    };
   });
-  vi.doMock('../../../src/cli/commands/streaming.js', () => ({runAgentTurn}));
+  vi.doMock('../../../src/cli/commands/streaming/goalSupervisor.js', () => ({runAgentGoal}));
+  vi.doMock('../../../src/cli/commands/streaming.js', () => ({runAgentTurn: vi.fn()}));
   vi.doMock('../../../src/config/contextFiles.js', () => ({readContextFiles: async () => []}));
   vi.doMock('../../../src/config/settings.js', () => ({readSettings: async () => opts.settings ?? PROVIDER_SETTINGS}));
   vi.doMock('../../../src/core/log/llmLog.js', () => ({createLog: async () => ({file: '/tmp/stub-llm.jsonl'}), endLog: async () => undefined}));
@@ -27,7 +39,7 @@ async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void
   }));
   vi.resetModules();
   const mod = await import('../../../src/cli/commands/runCommand.js');
-  return {...mod, runAgentTurn};
+  return {...mod, runAgentGoal};
 }
 
 function captureStdout() {
@@ -98,6 +110,19 @@ describe('runHeadless: output', () => {
     for (const forbidden of ['command', 'stdout', 'stderr', 'error', 'key', 'token']) {
       expect(json).not.toContain(forbidden);
     }
+  });
+
+  it('includes cumulative goal evidence (cycles, stop reason, totals) in the JSON envelope', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      status: 'complete',
+      goal: {cycles: 3, stopReason: 'completed'},
+      evidence: {validationOutcome: 'passed', validationKind: 'test', validationAfterMutation: true, mutationCount: 5, taskProgress: {total: 4, pending: 0, inProgress: 0, completed: 4}, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 2}, budgetBoundary: false},
+    });
+    await runHeadless({prompt: 'implement the roadmap', output: 'json'});
+    const parsed = JSON.parse(writes.join(''));
+    expect(parsed.goal).toEqual({cycles: 3, stopReason: 'completed', mutations: 5, validationOutcome: 'passed', taskProgress: {total: 4, pending: 0, inProgress: 0, completed: 4}});
+    expect(parsed.status).toBe('complete');
   });
 
   it('exits non-zero for an incomplete-goal pause so CI fails loudly', async () => {
@@ -208,7 +233,7 @@ describe('runHeadless: exact session resume', () => {
   it('loads a selected session as the initial one-turn context without writing it (F02)', async () => {
     captureStdout();
     const saved = [{role: 'user', content: 'saved request'}, {role: 'assistant', content: 'saved answer'}];
-    const {runHeadless, runAgentTurn} = await loadRunCommand({
+    const {runHeadless, runAgentGoal} = await loadRunCommand({
       sessionMessages: saved,
       runAgentTurnImpl: cb => {
         expect(cb.getConversation()).toEqual(saved);
@@ -217,17 +242,17 @@ describe('runHeadless: exact session resume', () => {
     });
     const code = await runHeadless({prompt: 'next', resumeSessionId: 'session-1', output: 'text'});
     expect(code).toBe(0);
-    expect(runAgentTurn).toHaveBeenCalledTimes(1);
+    expect(runAgentGoal).toHaveBeenCalledTimes(1);
   });
 
   it('fails loudly for an unknown selected session before invoking the model (F02)', async () => {
     captureStdout();
     const errs = captureStderr();
-    const {runHeadless, runAgentTurn} = await loadRunCommand({sessionFound: false});
+    const {runHeadless, runAgentGoal} = await loadRunCommand({sessionFound: false});
     const code = await runHeadless({prompt: 'next', resumeSessionId: 'missing', output: 'text'});
     expect(code).toBe(1);
     expect(errs.join('')).toContain('No session named missing exists for this workspace.');
-    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(runAgentGoal).not.toHaveBeenCalled();
   });
 });
 
@@ -239,27 +264,27 @@ describe('runHeadless: model pre-resolution', () => {
   it('errors with a non-zero exit and never invokes the agent when no provider is configured', async () => {
     const errs = captureStderr();
     captureStdout();
-    const {runHeadless, runAgentTurn} = await loadRunCommand({settings: {providers: []}});
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: {providers: []}});
     const code = await runHeadless({prompt: 'hi', output: 'text'});
     expect(code).toBe(1);
     expect(errs.join('')).toMatch(/No model provider configured/);
-    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(runAgentGoal).not.toHaveBeenCalled();
   });
 
   it('reports a precise "no configured model" error for an unknown --model selector', async () => {
     const errs = captureStderr();
     captureStdout();
-    const {runHeadless, runAgentTurn} = await loadRunCommand({settings: PROVIDER_SETTINGS});
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: PROVIDER_SETTINGS});
     const code = await runHeadless({prompt: 'hi', modelOverride: 'nonexistent', output: 'text'});
     expect(code).toBe(1);
     expect(errs.join('')).toMatch(/No configured model named nonexistent/);
-    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(runAgentGoal).not.toHaveBeenCalled();
   });
 
   it('reports an ambiguous --model selector across multiple providers', async () => {
     const errs = captureStderr();
     captureStdout();
-    const {runHeadless, runAgentTurn} = await loadRunCommand({
+    const {runHeadless, runAgentGoal} = await loadRunCommand({
       settings: {providers: [
         {name: 'a', url: 'https://a/v1', models: ['shared']},
         {name: 'b', url: 'https://b/v1', models: ['shared']},
@@ -268,7 +293,7 @@ describe('runHeadless: model pre-resolution', () => {
     const code = await runHeadless({prompt: 'hi', modelOverride: 'shared', output: 'text'});
     expect(code).toBe(1);
     expect(errs.join('')).toMatch(/exists on multiple providers/);
-    expect(runAgentTurn).not.toHaveBeenCalled();
+    expect(runAgentGoal).not.toHaveBeenCalled();
   });
 });
 

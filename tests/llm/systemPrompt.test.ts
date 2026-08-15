@@ -56,10 +56,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Keep the final answer concise');
   });
 
-  it('frames a declared task list as a commitment for the current turn', () => {
+  it('frames a declared task list as a commitment for the current goal', () => {
     const prompt = buildSystemPrompt();
-    expect(prompt).toContain('commitments for the current turn');
-    expect(prompt).toContain('A "next unfinished action" line is valid only in a runtime-forced pause, never as a voluntary final');
+    expect(prompt).toContain('commitments for the current goal');
+    expect(prompt).toContain('haze continues the active goal automatically from that line');
     expect(prompt).toContain('complete them, or update the list when scope genuinely changes, before your final synthesis');
   });
 

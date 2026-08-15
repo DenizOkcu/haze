@@ -238,7 +238,11 @@ async function loadStreaming(config: MocksConfig) {
   });
 
   vi.resetModules();
-  return import('../../../src/cli/commands/streaming.js');
+  const streamingModule = await import('../../../src/cli/commands/streaming.js');
+  // The goal supervisor imports runAgentTurn from streaming.js; load it from
+  // the same mocked registry so E2E tests exercise the real turn stack.
+  const supervisorModule = await import('../../../src/cli/commands/streaming/goalSupervisor.js');
+  return {...streamingModule, runAgentGoal: supervisorModule.runAgentGoal};
 }
 
 function makeCallbacks() {
@@ -1077,10 +1081,10 @@ describe('runAgentTurn: autonomous goal continuation', () => {
       ],
     });
     const cb = makeCallbacks();
-    await runAgentTurn('implement the roadmap feature', undefined, [], cb);
+    const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
     // The partial final was rejected: a continuation attempt started automatically.
     expect(mocks.streamedMessages.length).toBeGreaterThanOrEqual(2);
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/final message was rejected/);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/Continue the active goal/);
     expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/pending or in progress/);
   });
 
@@ -1112,7 +1116,7 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     expect(outcome.resume).toBeUndefined();
   });
 
-  it('pauses as failed with bounded retries after repeated no-progress partial finals', async () => {
+  it('returns an incomplete-goal checkpoint after repeated in-turn no-progress partial finals', async () => {
     const partial = [
       {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
       {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
@@ -1127,11 +1131,13 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     });
     const cb = makeCallbacks();
     const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
-    // Main attempt + one corrective nudge + pause: bounded, no loop.
+    // Main attempt + one corrective slice, then the in-turn guard trips and the
+    // attempt ends with a resumable checkpoint (the goal supervisor pauses on
+    // the second consecutive no-progress physical turn).
     expect(mocks.streamedMessages).toHaveLength(3);
-    expect(cb.messages.some(m => m.role === 'system' && /Unfinished task paused/.test(m.text))).toBe(true);
-    expect(cb.messages.some(m => m.role === 'system' && /Press R to resume/.test(m.text))).toBe(true);
     expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'incomplete-goal', reason: 'pending_tasks', taskCounts: {total: 5, pending: 5}}});
+    expect(outcome.resume?.goalId).toBeTruthy();
+    expect(outcome.resume?.cycle).toBe(1);
   });
 
   it('keeps continuing across cycles while measurable progress accumulates', async () => {
@@ -1168,7 +1174,7 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     expect(outcome).toMatchObject({status: 'complete', evidence: {recoveryUsed: {goal: 2}}});
   });
 
-  it('pauses (never completes) when the global step budget is exhausted with tasks pending', async () => {
+  it('returns an incomplete-goal checkpoint (never silent failure) when the step budget ends a tool-calls finish with tasks pending', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle,
       availableTools: tools,
@@ -1177,15 +1183,16 @@ describe('runAgentTurn: autonomous goal continuation', () => {
         {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
         {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: pendingTasksOutput},
         {type: 'text-delta', text: 'Next unfinished action remains.'},
-        {type: 'finish', finishReason: 'stop'},
+        {type: 'finish', finishReason: 'tool-calls'},
       ],
     });
     const cb = makeCallbacks();
     const outcome = await runAgentTurn('implement the roadmap feature', undefined, [], cb);
-    // Budget was consumed by the main attempt; continuation cannot reset it.
+    // Budget was consumed by the main attempt; the tool-calls boundary must not
+    // discard the recoverable goal — it ends the physical turn with a checkpoint.
     expect(mocks.streamedMessages).toHaveLength(1);
     expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'incomplete-goal', reason: 'pending_tasks'}, evidence: {budgetBoundary: true}});
-    expect(cb.messages.some(m => m.role === 'system' && /Unfinished task paused/.test(m.text))).toBe(true);
+    expect(outcome.evidence?.taskProgress).toEqual({total: 5, pending: 5, inProgress: 0, completed: 0});
   });
 
   it('does not continue when the declared task list is already complete', async () => {
@@ -1277,5 +1284,107 @@ describe('runAgentTurn: completion evidence', () => {
     await runAgentTurn('write a long doc', undefined, [], cb);
     const turnEnd = cb.events.find(event => event.type === 'turn_end') as {evidence?: {recoveryUsed?: {length?: boolean}}};
     expect(turnEnd?.evidence?.recoveryUsed?.length).toBe(true);
+  });
+});
+
+describe('runAgentGoal: end-to-end across the real turn stack', () => {
+  const modelHandle = {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}};
+  const tools = {
+    readFile: {description: 'read', execute: async () => ({ok: true})},
+    editFile: {description: 'edit', execute: async () => ({ok: true})},
+    bash: {description: 'bash', execute: async () => ({ok: true})},
+    writeTasks: {description: 'tasks', execute: async () => ({ok: true})},
+  };
+
+  // The reproduced field failure: the turn exhausts its step budget with a
+  // tool-calls finish, one task in progress, six pending, stale validation,
+  // and a runtime-forced "next unfinished action" line. The supervisor must
+  // start the next physical turn automatically and drive the goal to completion.
+  it('auto-continues a tool-calls budget boundary with pending tasks and completes', async () => {
+    const {runAgentGoal} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      // Turn 1 exhausts the step budget; turn 2 runs with an empty step script.
+      callStepEnds: [Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: [{id: `c${stepNumber}`}], response: {messages: []}})), []],
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 7, counts: {pending: 6, in_progress: 1, completed: 0}, summary: 'x'}},
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'text-delta', text: 'Next unfinished action: wire the tool.'},
+          {type: 'finish', finishReason: 'tool-calls'},
+        ],
+        [
+          {type: 'tool-call', toolCallId: 'e2', toolName: 'editFile', input: {path: 'b.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e2', toolName: 'editFile', input: {path: 'b.ts'}, output: {ok: true}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'tool-call', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 7, counts: {pending: 0, in_progress: 0, completed: 7}, summary: 'x'}},
+          {type: 'text-delta', text: 'All seven tasks are complete and validation passes.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const result = await runAgentGoal({request: 'implement the roadmap feature', contextFiles: [], callbacks: cb});
+    expect(result).toMatchObject({status: 'complete', stopReason: 'completed', cycles: 2});
+    // The original user message is never duplicated: each physical turn's
+    // request carries it exactly once (the synthetic control is a separate
+    // runtime-injected user message), and the second turn rides the preserved
+    // conversation with the continuation control.
+    for (const request of mocks.streamedMessages) {
+      const realUserMessages = (request as Array<{role: string; content?: unknown}>).filter(message => message.role === 'user' && !String(message.content ?? '').includes('<haze_control>'));
+      expect(realUserMessages).toHaveLength(1);
+    }
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/Continue the active goal/);
+    // Goal lifecycle events: one start, one continue between turns, one terminal end.
+    expect(cb.events.filter(event => event.type === 'goal_start')).toHaveLength(1);
+    expect(cb.events.filter(event => event.type === 'goal_continue')).toHaveLength(1);
+    expect(cb.events.filter(event => event.type === 'goal_end')).toHaveLength(1);
+    expect(cb.events.find(event => event.type === 'goal_end')).toMatchObject({status: 'complete', cycles: 2});
+    // Cumulative mutations (1 + 1) and terminal task counts in the goal evidence.
+    expect(result.evidence).toMatchObject({mutationCount: 2, taskProgress: {total: 7, pending: 0, inProgress: 0, completed: 7}, validationOutcome: 'passed'});
+    expect(cb.messages.some(m => m.role === 'system' && /Continuing unfinished goal — cycle 2/.test(m.text))).toBe(true);
+    expect(cb.messages.some(m => /Press R/.test(m.text))).toBe(false);
+  });
+
+  it('carries stale validation across the boundary: the next turn cannot complete until fresh validation runs', async () => {
+    const {runAgentGoal} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStepEnds: [Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: [{id: `c${stepNumber}`}], response: {messages: []}})), []],
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 2, counts: {pending: 0, in_progress: 0, completed: 2}, summary: 'x'}},
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          {type: 'text-delta', text: 'Next unfinished action: validate.'},
+          {type: 'finish', finishReason: 'tool-calls'},
+        ],
+        // Cycle 2 tries to stop with tasks done but no fresh validation — the
+        // carried stale/absent evidence must reject it and continue once more.
+        [{type: 'text-delta', text: 'Tasks are done; stopping here.'}, {type: 'finish', finishReason: 'stop'}],
+        // Cycle 3: validation lands and the goal completes.
+        [
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'text-delta', text: 'Validation passes after the edits.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const result = await runAgentGoal({request: 'fix the roadmap feature', contextFiles: [], callbacks: cb});
+    // Cycle 2's voluntary stop ("tasks done, no validation") is rejected by the
+    // carried evidence; the turn continues in-budget with a goal slice that
+    // runs the fresh validation, so the goal still completes in 2 physical turns.
+    expect(result).toMatchObject({status: 'complete', stopReason: 'completed', cycles: 2});
+    expect(mocks.streamedMessages).toHaveLength(3);
+    expect(JSON.stringify(mocks.streamedMessages[2])).toMatch(/Continue the active goal/);
+    expect(result.evidence).toMatchObject({mutationCount: 1, validationOutcome: 'passed'});
   });
 });

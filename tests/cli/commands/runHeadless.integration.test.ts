@@ -154,7 +154,9 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     // Every line is standalone valid JSON (true NDJSON — pipeable through `jq -c .`).
     const parsed = lines.map((l) => JSON.parse(l) as {type: string; status?: string; result?: string; attempt?: number; step?: number; finishReason?: string; toolCallCount?: number; usage?: Record<string, number>});
     expect(parsed.length).toBeGreaterThan(2);
-    expect(parsed[0]).toMatchObject({type: 'turn_start'});
+    // The logical goal opens the stream, then the first physical turn starts.
+    expect(parsed[0]).toMatchObject({type: 'goal_start'});
+    expect(parsed[1]).toMatchObject({type: 'turn_start'});
     const types = parsed.map((p) => p.type);
     expect(types).toContain('step_start');
     expect(types).toContain('step_end');
@@ -208,9 +210,10 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     const code = await runHeadless({prompt: 'go', output: 'stream-json'});
     const lines = writes.join('').split('\n').filter(Boolean);
     const parsed = lines.map((l) => JSON.parse(l) as {type: string; status?: string});
-    // Events streamed before the failure, then one public turn_end and a terminal result envelope.
-    expect(parsed[0]).toMatchObject({type: 'turn_start'});
-    expect(parsed[parsed.length - 2]).toMatchObject({type: 'turn_end', status: 'failed'});
+    // Events streamed before the failure, then one public turn_end/goal_end and a terminal result envelope.
+    expect(parsed[0]).toMatchObject({type: 'goal_start'});
+    expect(parsed[parsed.length - 3]).toMatchObject({type: 'turn_end', status: 'failed'});
+    expect(parsed[parsed.length - 2]).toMatchObject({type: 'goal_end', status: 'failed'});
     expect(parsed[parsed.length - 1]).toMatchObject({type: 'result', status: 'failed'});
     expect(code).toBe(1);
   });
