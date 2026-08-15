@@ -33,7 +33,8 @@
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "clean": "node -e \"require('node:fs').rmSync('dist', {recursive: true, force: true})\"",
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && node scripts/write-build-info.mjs",
+    "dev:link": "node scripts/dev-link.mjs",
     "start": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
