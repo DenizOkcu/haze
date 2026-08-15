@@ -9,6 +9,7 @@ Helpers for `src/cli/commands/streaming.ts`.
 This subtree keeps the main agent loop readable by isolating display, accounting, and per-turn helper logic.
 
 - `assistantText.ts` sanitizes and filters streamed assistant fragments.
+- `abortCause.ts` tracks why a turn's shared AbortController fired (`user` / `turn-deadline` / `model-stream-idle`) so the attempt catch can classify instead of guessing from error strings.
 - `toolGroupRenderer.ts` groups native tool calls/results into compact UI messages and emits events/log entries.
 - `toolResultState.ts` tracks mutating tool success/failure and edit-recovery state.
 - `turnRuntime.ts` contains token/usage extraction, retry delays, context-file memory, abortable delay, and response metrics helpers.
@@ -28,6 +29,14 @@ Maintainability focus:
 - Token estimates are approximate display/control inputs, not billing truth. Preserve provider usage fields when available.
 - Context files discovered from tool outputs should be remembered for the active turn only; durable context loading belongs in `config/contextFiles.ts`.
 - Turn options separate durable user value from ephemeral synthetic control and subagent overrides. Reapply control on retry, strip it before conversation/session writes, and share one workspace mutation scope across main and worker tools. User-attached images (F03) ride along as `attachments` on the first attempt only; `userTurnMessage` keeps text-only turns as a plain string payload.
+
+### Abort causes and idle-stall recovery
+
+- The idle timer, the absolute turn deadline, and user cancel share one AbortController; the cause is recorded in the per-turn `TurnAbortCause` holder (`abortCause.ts`) by whichever internal site aborts first. A user abort never sets it.
+- A model-stream idle stall is a retryable transport failure, but only while the stalled step emitted nothing visible (`stallEmission === 'none'`): partial text or an in-flight tool is never auto-retried. Idle stalls share one bounded retry pool (`MAX_MODEL_RETRIES`) with transient model errors.
+- An idle-stall retry salvages the conversation from the last fully completed step (via `onStepEnd`'s accumulated response messages) so completed — possibly mutating — tool work is never re-run, and requires a fresh AbortController (`retry.freshController`) because the stall aborted the old one.
+- When bounded retries are exhausted or the stall is not retryable, the turn pauses (status `failed`, not `aborted`) with the active goal preserved and `TurnResult.resume` carrying the original request plus where the retry pool stopped. The interactive UI offers a one-key R resume; headless consumers ignore it and the system message suggests a follow-up.
+- Stall diagnostics (provider/model, last stream-event time/type, stall emission, work phase, retry eligibility) go to the `timeout` agent event, the `--debug` LLM log, and the debug panel as safe metadata only — never prompt content or credentials.
 
 ## Tests
 

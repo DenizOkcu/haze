@@ -40,6 +40,7 @@ import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {terminalTurnStatus} from './streaming/turnOutcome.js';
 import {createIdleTimer} from './streaming/idleTimer.js';
+import {abortForTurn, createUserAbortCause, type TurnAbortCause} from './streaming/abortCause.js';
 import {isMalformedToolInputError} from './streaming/toolCallRecovery.js';
 import {WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 export type {TokenUsage} from './streaming/turnRuntime.js';
@@ -53,6 +54,14 @@ export interface TurnResult {
   status: TurnStatus;
   /** Bounded, safe completion evidence (no raw commands/output). Additive. */
   evidence?: TurnCompletionEvidence;
+  /**
+   * The model stream stalled past the idle window and bounded retries could not
+   * continue. The turn pauses with completed work preserved in the conversation;
+   * this carries what a one-key/automatic resume needs (the original request and
+   * where the bounded retry pool stopped) instead of forcing the user to restate
+   * the task.
+   */
+  resume?: {kind: 'model-stream-idle'; request: string; retryAttempt: number};
 }
 
 export interface TurnExecutionOptions {
@@ -123,10 +132,23 @@ export interface StreamCallbacks {
 }
 
 type AgentAttemptResult = TurnResult & {
-  retry?: {attempt: number; contextOverflowRecovered: boolean; delayMs: number};
+  retry?: {attempt: number; contextOverflowRecovered: boolean; delayMs: number; /** The retry aborts the previous controller (idle stall); hand the loop a fresh one. */ freshController?: boolean};
   /** When set, run one bounded recovery slice next (length-continuation or rescue). */
   recovery?: {kind: 'length' | 'rescue'; control: string; slice: {maxSteps: number; maxToolCalls: number}};
 };
+
+/** Shared bounded retry pool for transient model errors and idle-stream stalls (per turn). */
+const MAX_MODEL_RETRIES = 2;
+
+function formatIdleMinutes(milliseconds: number) {
+  const minutes = Math.round(milliseconds / 60_000);
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
+/** Auto-retry an idle stall only while the stalled step emitted nothing visible (no partial text or in-flight tool). */
+function idleStallAutoRetryEligible(retryAttempt: number, stallEmission: 'none' | 'text' | 'tool') {
+  return stallEmission === 'none' && retryAttempt < MAX_MODEL_RETRIES;
+}
 
 async function runAgentAttempt(
   value: string,
@@ -144,6 +166,7 @@ async function runAgentAttempt(
   turnBudget: TurnBudget,
   globalBudget: ToolExecutionBudgetState,
   goal: SessionGoal,
+  abortCause: TurnAbortCause,
 ): Promise<AgentAttemptResult> {
   let thinkingLabel = modelThinkingLabel(undefined);
   callbacks.setBusyLabel?.(thinkingLabel);
@@ -155,13 +178,48 @@ async function runAgentAttempt(
   // minutes with no stream parts; that is activity, not a dead stream, so the
   // idle timer defers while any tool is in flight (see streaming/idleTimer.ts).
   const inFlightTools = new Set<string>();
+  // Hoisted stall/abort state: the idle timer's onTimeout and the catch below
+  // must classify a stall from stream state that is otherwise scoped to the try
+  // block below. requestMessages/accumulated responses enable the salvage that
+  // lets an idle retry resume from the last fully completed step.
+  let activeProviderName: string | undefined;
+  let activeModelName: string | undefined;
+  let lastStreamEventAt: number | undefined;
+  let lastStreamEventType: string | undefined;
+  let idleStallEmission: 'none' | 'text' | 'tool' = 'none';
+  let idleStallRetryEligible = false;
+  let requestMessages: ModelMessage[] = [];
+  let latestAccumulatedResponseMessages: ModelMessage[] = [];
+  let currentAssistantText = '';
+  let assistantStarted = false;
   const idleTimer = createIdleTimer({
     timeoutMs: IDLE_TIMEOUT_MS,
     isBusy: () => inFlightTools.size > 0,
     onTimeout: () => {
       if (abortController.signal.aborted) return;
-      callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'model-stream', timeoutMs: IDLE_TIMEOUT_MS}));
-      abortController.abort('haze model stream was idle for the configured timeout.');
+      // What the stalled step had emitted when the stream went quiet. Retrying
+      // after partial output could duplicate or mangle it, so only 'none' is
+      // automatically retryable.
+      idleStallEmission = currentAssistantText.trim().length > 0 || assistantStarted ? 'text' : inFlightTools.size > 0 ? 'tool' : 'none';
+      idleStallRetryEligible = idleStallAutoRetryEligible(retryAttempt, idleStallEmission);
+      const lastEventAtIso = lastStreamEventAt != null ? new Date(lastStreamEventAt).toISOString() : undefined;
+      // Safe metadata only (names, timestamps, enums, phases): never prompt
+      // content or credentials.
+      callbacks.onEvent?.(agentEvent({
+        type: 'timeout',
+        phase: 'model-stream',
+        timeoutMs: IDLE_TIMEOUT_MS,
+        provider: activeProviderName,
+        model: activeModelName,
+        lastStreamEventAt: lastEventAtIso,
+        lastStreamEventType: lastStreamEventType,
+        stallEmission: idleStallEmission,
+        workPhase: goal.phase,
+        retryEligible: idleStallRetryEligible,
+      }));
+      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', error: `model-stream idle ${IDLE_TIMEOUT_MS}ms: provider=${activeProviderName ?? 'unknown'} model=${activeModelName ?? 'unknown'} lastEvent=${lastStreamEventType ?? 'none'}@${lastEventAtIso ?? 'never'} stallEmission=${idleStallEmission} workPhase=${goal.phase} retryEligible=${idleStallRetryEligible} stepsUsed=${turnState.stepsUsed}`});
+      callbacks.debugLog(`model stream idle for ${IDLE_TIMEOUT_MS}ms (last event: ${lastStreamEventType ?? 'none'}); ${idleStallRetryEligible ? 'retryable stall' : 'stall not retryable'}`);
+      abortForTurn(abortCause, {kind: 'model-stream-idle', timeoutMs: IDLE_TIMEOUT_MS}, abortController, 'haze model stream was idle for the configured timeout.');
     },
   });
 
@@ -179,6 +237,8 @@ async function runAgentAttempt(
     }
 
     thinkingLabel = modelThinkingLabel(runtime.config.modelName);
+    activeProviderName = runtime.config.providerName;
+    activeModelName = runtime.config.modelName;
     callbacks.setBusyLabel?.(thinkingLabel);
     // Observable requested-vs-effective reasoning policy (safe: level strings + reason only).
     const reasoningPolicy = runtime.config.reasoningPolicy;
@@ -228,7 +288,7 @@ async function runAgentAttempt(
     // A context-overflow retry progressively shrinks the target so it cannot loop
     // at an unchanged budget; further overflows get even smaller (RH-005).
     const overflowTargetTokens = contextOverflowRecovered ? Math.floor(requestBudget.messageTokens * 0.6) : requestBudget.messageTokens;
-    let requestMessages = durableRequestMessages;
+    requestMessages = durableRequestMessages;
     if (estimateMessagesTokens(requestMessages) > overflowTargetTokens) {
       requestMessages = compactModelMessages(requestMessages, {tokenBudget: overflowTargetTokens, workState: goal}).messages;
     }
@@ -254,12 +314,9 @@ async function runAgentAttempt(
     const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead: path => toolDisplay.addContextFileRead(path), mutationPolicy, blessedPaths: turnOptions.blessedPaths};
     const startedTools = new Map<string, number>();
     const latestToolCalls = new Map<string, NativeToolCall>();
-    let latestAccumulatedResponseMessages: ModelMessage[] = [];
     let currentAssistantId = `assistant-${Date.now()}`;
-    let assistantStarted = false;
     let assistantStartedAt = Date.now();
     let assistantText = '';
-    let currentAssistantText = '';
     let streamError: unknown;
     let streamFinished = false;
     let finishReason: string | undefined;
@@ -460,6 +517,8 @@ async function runAgentAttempt(
 
     for await (const part of result.stream) {
       idleTimer.reset();
+      lastStreamEventAt = Date.now();
+      lastStreamEventType = part.type;
       switch (part.type) {
         case 'text-delta': {
           callbacks.setBusyLabel?.(thinkingLabel);
@@ -662,10 +721,46 @@ async function runAgentAttempt(
     }
   } catch (error) {
     if (abortController.signal.aborted) {
-      turnState.aborted = true;
-      turnStatus = 'aborted';
-      callbacks.debugLog('request aborted');
-      callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
+      if (abortCause.kind === 'model-stream-idle') {
+        // Transport stall, not a user cancel. Preserve completed work first: the
+        // conversation is salvaged from the last fully completed step so an
+        // automatic retry (or a user-triggered resume) continues from there
+        // instead of re-running — possibly mutating — tool work.
+        if (latestAccumulatedResponseMessages.length > 0) {
+          callbacks.setConversation(compactToolHistory([...stripSyntheticControls(requestMessages), ...latestAccumulatedResponseMessages]).messages);
+        }
+        if (idleStallRetryEligible) {
+          const delay = retryDelayMs(retryAttempt);
+          callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: MAX_MODEL_RETRIES, delayMs: delay, error: `model stream idle for ${formatSeconds(IDLE_TIMEOUT_MS)}`}));
+          callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; retrying attempt ${retryAttempt + 1}/${MAX_MODEL_RETRIES} in ${formatSeconds(delay)}. Completed steps are preserved.`});
+          turnStatus = 'failed';
+          // freshController: this stall aborted the controller to kill the hung
+          // stream; the retry needs a live signal.
+          return {status: turnStatus, retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay, freshController: true}};
+        }
+        // Bounded retries exhausted, or the stalled step emitted partial output.
+        // Pause with the active goal preserved (work state is untouched by this
+        // path) instead of discarding progress; the interactive UI offers a
+        // one-key resume from TurnResult.resume.
+        turnStatus = 'failed';
+        const afterStep = turnState.stepsUsed > 0 ? ` after step ${turnState.stepsUsed}` : '';
+        callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; unfinished task paused${afterStep}. Press R to retry, or send a follow-up message to continue.`});
+        return {status: turnStatus, resume: {kind: 'model-stream-idle', request: value, retryAttempt}};
+      }
+      if (abortCause.kind === 'turn-deadline') {
+        // Absolute turn budget exhausted — distinct from a user cancel: the turn
+        // ran out of time, not patience. No retry by definition (the deadline is
+        // the bound), but completed-step progress stays in the conversation.
+        turnState.aborted = true;
+        turnStatus = 'aborted';
+        callbacks.debugLog('turn exceeded the absolute deadline');
+        callbacks.addMessage({role: 'system', text: `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? DEFAULT_TURN_DEADLINE_MS)} turn budget elapsed before the model finished. Completed steps are preserved in the conversation; send a follow-up to continue.`});
+      } else {
+        turnState.aborted = true;
+        turnStatus = 'aborted';
+        callbacks.debugLog('request aborted');
+        callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
+      }
     } else {
       const text = error instanceof Error ? error.message : String(error);
       callbacks.debugLog(`error: ${text}`);
@@ -683,11 +778,12 @@ async function runAgentAttempt(
           ? 'Context overflow detected, but there was not enough conversation history to compact automatically.'
           : 'Context overflow detected, and this mode does not attempt automatic compaction. Resume the session interactively or retry with a smaller request.'});
       }
-      const maxRetries = 2;
-      if (retryAttempt < maxRetries && isRetryableModelError(error)) {
+      // Transient model errors share the bounded retry pool with idle-stream
+      // stalls, so a turn can never retry more than MAX_MODEL_RETRIES times total.
+      if (retryAttempt < MAX_MODEL_RETRIES && isRetryableModelError(error)) {
         const delay = retryDelayMs(retryAttempt);
-        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
-        callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
+        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: MAX_MODEL_RETRIES, delayMs: delay, error: text}));
+        callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${MAX_MODEL_RETRIES} in ${formatSeconds(delay)}: ${text}`});
         return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay}};
       }
       callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
@@ -714,27 +810,21 @@ export async function runAgentTurn(
   modelOverride?: string,
   turnOptions: TurnExecutionOptions = {},
 ): Promise<TurnResult> {
-  const abortController = new AbortController();
+  // The controller is replaced when an idle-stall retry needs a live signal
+  // after aborting a hung stream, so both it and the cause are mutable.
+  let abortController = new AbortController();
+  let abortCause = createUserAbortCause();
   let status: TurnStatus = 'failed';
+  let resume: TurnResult['resume'];
   const turnState = createTurnExecutionState();
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
   callbacks.setBusy(true);
   callbacks.setAbortController?.(abortController);
   if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayValue ?? value});
   let turnDeadline: AbsoluteDeadline | undefined;
+  const turnStartedAt = Date.now();
+  const turnDeadlineMs = turnOptions.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
   try {
-    // Absolute main-turn deadline (RH-004): distinct from the idle timer, it
-    // bounds total turn elapsed time so a stream of busy tools cannot defer it.
-    const turnDeadlineMs = turnOptions.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
-    turnDeadline = createAbsoluteDeadline({
-      timeoutMs: turnDeadlineMs,
-      signal: abortController.signal,
-      onTimeout: () => {
-        if (abortController.signal.aborted) return;
-        callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'turn', timeoutMs: turnDeadlineMs}));
-        abortController.abort(`haze turn exceeded the ${turnDeadlineMs}ms absolute deadline.`);
-      },
-    });
     // Retries are one logical turn and therefore share coordinator admission and
     // the workspace mutation lease, including quarantined lingering work.
     const turnScope: {executionScope?: TurnExecutionScope} = {};
@@ -751,12 +841,36 @@ export async function runAgentTurn(
     let overflowRecovered = contextOverflowRecovered;
     let retrying = retryingExistingRequest;
     while (true) {
-      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, activeOptions, turnScope, turnState, turnBudget, globalBudget, goal);
+      // Absolute main-turn deadline (RH-004): distinct from the idle timer, it
+      // bounds total turn elapsed time so a stream of busy tools cannot defer
+      // it. Recreated per attempt with the remaining wall-clock budget and bound
+      // to the current attempt's controller — an idle-stall retry replaces the
+      // controller and must not trip this deadline early via the old signal.
+      turnDeadline = createAbsoluteDeadline({
+        timeoutMs: Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)),
+        signal: abortController.signal,
+        onTimeout: () => {
+          if (abortController.signal.aborted) return;
+          callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'turn', timeoutMs: turnDeadlineMs}));
+          abortForTurn(abortCause, {kind: 'turn-deadline', timeoutMs: turnDeadlineMs}, abortController, `haze turn exceeded the ${turnDeadlineMs}ms absolute deadline.`);
+        },
+      });
+      const result = await runAgentAttempt(value, contextFiles, callbacks, attempt, retrying, overflowRecovered, session, modelOverride, abortController, activeOptions, turnScope, turnState, turnBudget, globalBudget, goal, abortCause);
+      turnDeadline.clear();
+      turnDeadline = undefined;
       status = result.status;
+      resume = result.resume;
       if (result.retry) {
         attempt = result.retry.attempt;
         overflowRecovered = result.retry.contextOverflowRecovered;
         retrying = true;
+        if (result.retry.freshController) {
+          // The idle stall aborted the previous controller to kill the hung
+          // stream; the retry needs a live one (and a fresh 'user' cause).
+          abortController = new AbortController();
+          abortCause = createUserAbortCause();
+          callbacks.setAbortController?.(abortController);
+        }
         if (result.retry.delayMs > 0) await abortableDelay(result.retry.delayMs, abortController.signal);
         if (abortController.signal.aborted) { status = 'aborted'; break; }
         continue;
@@ -775,7 +889,7 @@ export async function runAgentTurn(
       break;
     }
     const evidence = toCompletionEvidence(turnState);
-    return {status, evidence};
+    return {status, evidence, ...(resume ? {resume} : {})};
   } finally {
     turnDeadline?.clear();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState)}));

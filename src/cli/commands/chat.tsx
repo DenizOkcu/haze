@@ -155,6 +155,9 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
   const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
+  // A turn paused by a model-stream idle stall, when bounded retries could not
+  // continue. Carries what a one-key resume needs; any new submission clears it.
+  const [pausedResume, setPausedResume] = useState<{request: string; retryAttempt: number} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [modelProviderFilter, setModelProviderFilter] = useState<string | undefined>();
@@ -402,6 +405,8 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       if (mode === 'chat') queueFollowUp(value);
       return;
     }
+    // Any new submission supersedes a paused-task resume affordance.
+    if (pausedResume) setPausedResume(undefined);
 
     const providerEffects = transitionProviderField({mode, value, settings, draft: providerDraft});
     if (providerEffects) {
@@ -554,7 +559,20 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
     }
   }
 
-  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
+  /**
+   * Resume a turn paused by a model-stream idle stall: re-run the original
+   * request against the preserved conversation (no re-added user message) and
+   * continue the bounded retry pool from where it stopped.
+   */
+  async function resumePausedTask() {
+    const resume = pausedResume;
+    if (!resume || busy) return;
+    setPausedResume(undefined);
+    setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished task from where the model stream stalled.'}]);
+    await runSingleAgentTurn(resume.request, undefined, {}, {retryAttempt: resume.retryAttempt});
+  }
+
+  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {retryAttempt: number}) {
     const sessionRecorder = sessionRecorderRef.current!;
     const finalizeMessage = (msg: Message) => {
       if (msg.hidden) return;
@@ -563,7 +581,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       sessionRecorder.recordUiMessage(ordered);
     };
 
-    await runAgentTurn(value, displayValue, contextFiles, {
+    const result = await runAgentTurn(value, displayValue, contextFiles, {
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);
         if (ordered.streaming) {
@@ -611,9 +629,14 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
-    }, 0, false, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
+    }, resumeExisting?.retryAttempt ?? 0, resumeExisting != null, false, {start: sessionStartRef.current, cwd: process.cwd()}, undefined, turnOptions);
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
+    // A model-stream stall pauses the turn with progress preserved; expose the
+    // one-key resume affordance until the user submits something else.
+    if (result.resume?.kind === 'model-stream-idle') setPausedResume({request: result.resume.request, retryAttempt: result.resume.retryAttempt});
+    else setPausedResume(undefined);
+    return result;
   }
 
   const visible = messages.filter(message => !message.hidden);
@@ -669,6 +692,11 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
       <Text color={theme.muted}>Queued follow-ups:</Text>
       {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
+    {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
+      <Text color={theme.muted}>Unfinished task paused (model stream stalled) · </Text>
+      <Text color={theme.command} bold>Press R to retry</Text>
+      <Text color={theme.muted}> or type a follow-up</Text>
+    </Box>}
     {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} />
     </Box>}
@@ -699,6 +727,7 @@ function ChatScreen({debug = false, version, continueSession = false, resumeSess
             }
           }}
           onCancel={cancelThinking}
+          onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
           onEscape={() => {
             if (busy) cancelThinking();
             else closeInputList();

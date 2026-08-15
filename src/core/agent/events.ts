@@ -23,7 +23,19 @@ export type AgentEvent =
   | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
   | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'user-fallback' | 'default-fallback'; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
-  | {type: 'timeout'; phase: 'turn' | 'tool' | 'model-stream'; timeoutMs: number; at: string}
+  | {type: 'timeout'; phase: 'turn' | 'tool' | 'model-stream'; timeoutMs: number;
+    /**
+     * Model-stream stall diagnostics (phase 'model-stream' only). Safe metadata
+     * only — provider/model names, timestamps, enums, work phase — never prompt
+     * content or credentials.
+     */
+    provider?: string; model?: string; lastStreamEventAt?: string; lastStreamEventType?: string;
+    /** What the stalled step had emitted when the stream went quiet. Only 'none' is auto-retryable. */
+    stallEmission?: 'none' | 'text' | 'tool';
+    /** Active work-state phase when the stall was detected. */
+    workPhase?: string;
+    /** Whether the stall rides the bounded model-retry pool. */
+    retryEligible?: boolean; at: string}
   | {type: 'subagent_state'; id: string; state: 'queued' | 'started' | 'terminal' | 'settled'; mode: string; queued?: number; running: number; queueMs?: number; durationMs?: number; termination?: string; execution?: 'settled' | 'quarantined'; at: string};
 
 export type AgentEventSink = (event: AgentEvent) => void;

@@ -33,11 +33,13 @@ interface MocksConfig {
   failFirstNAgents?: number;
   idle?: boolean;
   hangUntilAbort?: boolean;
-  stepEnds?: Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string}>;
+  stepEnds?: Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string; response?: {messages: unknown[]}}>;
   /** Per-call stream parts, indexed by agent call number (1-based). Enables recovery-slice scenarios. */
   callStreams?: FakeFullStreamPart[][];
   /** Per-call step ends, indexed by agent call number (1-based). */
-  callStepEnds?: Array<Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string}>>;
+  callStepEnds?: Array<Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string; response?: {messages: unknown[]}}>>;
+  /** 1-based agent call numbers whose stream yields its parts, then hangs with no further events until aborted (model-stream idle stall). */
+  stallCalls?: number[];
 }
 
 const mocks = vi.hoisted(() => {
@@ -182,10 +184,42 @@ async function loadStreaming(config: MocksConfig) {
         const callIndex = agentCallCount - 1;
         const activeParts = config.callStreams ? config.callStreams[Math.min(callIndex, config.callStreams.length - 1)] : parts;
         const stepEnds = config.callStepEnds ? config.callStepEnds[Math.min(callIndex, config.callStepEnds.length - 1)] : (config.stepEnds ?? []);
+        if (config.stallCalls?.includes(agentCallCount)) {
+          let onAbort: (() => void) | undefined;
+          const waitForAbort = new Promise<void>(resolve => {
+            onAbort = () => resolve();
+            if (abortSignal.aborted) resolve();
+            else abortSignal.addEventListener('abort', onAbort);
+          });
+          const cleanup = () => {
+            if (onAbort && !abortSignal.aborted) abortSignal.removeEventListener('abort', onAbort);
+          };
+          void waitForAbort.then(cleanup, cleanup);
+          return {
+            stream: (async function* () {
+              for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: step.response?.messages ?? []}});
+              for (const part of activeParts) {
+                if (typeof part.testNow === 'number') vi.setSystemTime(part.testNow);
+                yield part;
+              }
+              // Model stream hangs: no further parts until the idle timer aborts.
+              await waitForAbort;
+              throw new Error('aborted');
+            })(),
+            response: waitForAbort.then(() => {
+              cleanup();
+              return {messages: []};
+            }),
+            responseMessages: waitForAbort.then(() => {
+              cleanup();
+              return [];
+            }),
+          };
+        }
         return {
           ...this._fake,
           stream: (async function* () {
-            for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: []}});
+            for (const step of stepEnds) onStepEnd?.({...step, toolResults: step.toolResults ?? [], finishReason: step.finishReason ?? 'tool-calls', usage: {}, response: {messages: step.response?.messages ?? []}});
             for (const part of activeParts) {
               if (typeof part.testNow === 'number') vi.setSystemTime(part.testNow);
               yield part;
@@ -228,7 +262,7 @@ function makeCallbacks() {
     debugLog: (line: string) => {
       debug.push(line);
     },
-    getConversation: () => [],
+    getConversation: () => conversationSets.at(-1) ?? [],
     getLastAssistantText: () => lastAssistantText,
     setLastAssistantText: (text: string) => {
       lastAssistantText = text;
@@ -687,6 +721,108 @@ describe('runAgentTurn: abort', () => {
     abortControllerRef?.abort();
     const outcome = await promise;
     expect(cb.messages.some((m) => m.role === 'system' && /aborted/i.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'aborted'});
+  });
+});
+
+describe('runAgentTurn: model-stream idle timeout', () => {
+  const stallModelHandle = {
+    model: {modelId: 'test'},
+    config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
+  };
+
+  // Integration scenario from the field report: successful tool steps, then the
+  // next stream hangs, the idle timer fires, a bounded retry resumes from the
+  // salvaged step, and the turn ends with exactly one turn_end.
+  it('treats an idle stall as retryable, resumes from the salvaged step, and completes', async () => {
+    vi.useFakeTimers();
+    const salvagedStep = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'bash', output: {ok: true, stdout: 'src'}}]},
+    ];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      stallCalls: [1],
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'bash'}], response: {messages: salvagedStep}}],
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'src'}},
+        ],
+        [{type: 'text-delta', text: 'The inspection finished and the requested summary is complete.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('inspect the project', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(cb.events.filter(event => event.type === 'turn_start')).toHaveLength(1);
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+    expect(cb.events.find(event => event.type === 'timeout')).toMatchObject({phase: 'model-stream', stallEmission: 'none', retryEligible: true});
+    expect(cb.events.find(event => event.type === 'retry')).toMatchObject({attempt: 1});
+    expect(cb.messages.some(m => m.role === 'system' && /Model stream stalled for 5 minutes; retrying attempt 1\/2/.test(m.text))).toBe(true);
+    // The retry resumed from the salvaged conversation: exactly one user message
+    // and the completed step's tool messages ride along instead of being re-run.
+    expect(mocks.streamedMessages).toHaveLength(2);
+    const retryMessages = mocks.streamedMessages[1] as Array<{role: string}>;
+    expect(retryMessages.filter(message => message.role === 'user')).toHaveLength(1);
+    expect(retryMessages.some(message => message.role === 'tool')).toBe(true);
+    expect(outcome).toMatchObject({status: 'complete'});
+    expect(outcome.resume).toBeUndefined();
+  });
+
+  it('pauses with a resume affordance when idle retries are exhausted', async () => {
+    vi.useFakeTimers();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      stallCalls: [1, 2, 3],
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'bash'}]}],
+      callStreams: [[{type: 'finish', finishReason: 'tool-calls'}]],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('plan the feature', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    // Two bounded retries (three stalled attempts), then pause — never a retry loop.
+    expect(mocks.streamedMessages).toHaveLength(3);
+    expect(cb.events.filter(event => event.type === 'retry')).toHaveLength(2);
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+    expect(cb.messages.some(m => m.role === 'system' && /Model stream stalled for 5 minutes; unfinished task paused after step \d+\. Press R to retry/.test(m.text))).toBe(true);
+    expect(cb.messages.some(m => /Thinking aborted/.test(m.text))).toBe(false);
+    expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'model-stream-idle', request: 'plan the feature', retryAttempt: 2}});
+  });
+
+  it('does not auto-retry an idle stall after the stalled step emitted partial text', async () => {
+    vi.useFakeTimers();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      stallCalls: [1],
+      callStreams: [[{type: 'text-delta', text: 'Half of an answ'}]],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('explain the module', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(cb.events.find(event => event.type === 'retry')).toBeUndefined();
+    expect(cb.events.find(event => event.type === 'timeout')).toMatchObject({stallEmission: 'text', retryEligible: false});
+    expect(cb.messages.some(m => m.role === 'system' && /unfinished task paused\. Press R to retry/.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'model-stream-idle'}});
+  });
+
+  it('distinguishes the absolute turn deadline from a user abort', async () => {
+    vi.useFakeTimers();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      hangUntilAbort: true,
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('long work', undefined, [], cb, 0, false, false, undefined, undefined, {turnDeadlineMs: 5_000});
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(cb.events.find(event => event.type === 'timeout')).toMatchObject({phase: 'turn'});
+    expect(cb.messages.some(m => m.role === 'system' && /turn budget elapsed/.test(m.text))).toBe(true);
+    expect(cb.messages.some(m => /Thinking aborted/.test(m.text))).toBe(false);
     expect(outcome).toMatchObject({status: 'aborted'});
   });
 });

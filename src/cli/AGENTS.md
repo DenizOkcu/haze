@@ -45,8 +45,8 @@ Maintainability focus:
 ## Agent-turn integration
 
 - `runAgentTurn` is called with callbacks from `chat.tsx`; keep callback contracts stable.
-- Interactive and headless paths should both inspect `TurnResult.status` instead of sniffing assistant text.
-- Abort should stop the current turn cleanly and restore user control without corrupting session snapshots.
+- Interactive and headless paths should both inspect `TurnResult.status` instead of sniffing assistant text. `TurnResult.resume` (model-stream idle stall pause) is interactive-only; headless treats it as `failed` with the pause system message.
+- Abort should stop the current turn cleanly and restore user control without corrupting session snapshots. User cancel, the absolute turn deadline, and model-stream idle stalls are distinguished causes (see `streaming/AGENTS.md`): only idle stalls retry, and an exhausted one pauses the turn with a one-key R resume affordance in chat.
 - Scoped context files discovered by tools are injected into the next model step through `runAgentTurn`; keep startup context display, signature maps, and tool UI “understanding:” rows in sync.
 - Announce discovered project skills as untrusted repository content. Slash-command suggestions and invocation must use the enabled project-over-global winner; disabling a project collision re-surfaces the enabled global skill.
 - Follow-up queue behavior must preserve user-submitted text and not lose messages during busy turns.

@@ -50,6 +50,7 @@ export function TextInput({
   onCancel,
   onEscape,
   onToggleTasks,
+  onResumeKey,
   onSubmit
 }: {
   placeholder?: string;
@@ -66,6 +67,13 @@ export function TextInput({
   onCancel?: () => void;
   onEscape?: () => void;
   onToggleTasks?: () => void;
+  /**
+   * One-key resume affordance: when provided and the input is empty, a bare
+   * R/R resumes the paused task instead of typing the character. The caller
+   * (chat) only provides it while a paused turn is pending and renders the
+   * matching hint line, so ordinary typing is unaffected.
+   */
+  onResumeKey?: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -198,6 +206,11 @@ export function TextInput({
       draft.current = '';
       nextPasteId.current = 1;
       onEscape?.();
+      return;
+    }
+
+    if (onResumeKey && value.length === 0 && !key.ctrl && !key.meta && (input === 'r' || input === 'R')) {
+      onResumeKey();
       return;
     }
 
