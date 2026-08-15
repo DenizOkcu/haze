@@ -10,7 +10,7 @@ import {
   userTurnMessage,
   type ImageAttachment,
 } from '../../../src/core/attachments/imageAttachments.js';
-import {IMAGE_ATTACHMENT_BYTES, IMAGE_ATTACHMENTS_PER_MESSAGE} from '../../../src/core/limits/byteBudgets.js';
+import {IMAGE_ATTACHMENT_BYTES, IMAGE_ATTACHMENTS_PER_MESSAGE} from '../../../src/core/limits.js';
 
 // 1x1 transparent PNG: valid header bytes are enough for extension-based
 // media typing; content is never decoded by haze.

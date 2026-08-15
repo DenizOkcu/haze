@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {loadSkill} from '../../src/skills/SkillLoader.js';
-import {SKILL_MARKDOWN_BYTES} from '../../src/core/limits/byteBudgets.js';
+import {SKILL_MARKDOWN_BYTES} from '../../src/core/limits.js';
 
 function skillMarkdown(frontmatter: string, body = 'Use this skill.') {
   return `---\n${frontmatter}\n---\n\n${body}\n`;

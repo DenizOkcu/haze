@@ -16,7 +16,7 @@ import {
   toDiagnostic,
   toUri,
 } from '../../src/llm/lsp.js';
-import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../src/core/limits/byteBudgets.js';
+import {LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../src/core/limits.js';
 import type {HazeLspServer} from '../../src/config/lspSettings.js';
 import type {ChildProcessWithoutNullStreams} from 'node:child_process';
 

@@ -1,7 +1,7 @@
 import {createReadStream, type Stats} from 'node:fs';
 import fs from 'node:fs/promises';
 import {StringDecoder} from 'node:string_decoder';
-import {TEXT_LINE_BYTES} from '../limits/byteBudgets.js';
+import {TEXT_LINE_BYTES} from '../limits.js';
 
 export interface BoundedUtf8Line {
   line: string;

@@ -33,7 +33,7 @@ Keep this order intentional: earlier reducers have more semantic knowledge.
 - Reducers should return `undefined` when they are not confident, not low-quality rewrites.
 - Do not inflate output. `registry.ts` protects against inflation for large filtered content; new reducers should still avoid it.
 - Preserve errors, failing test names, file paths, line numbers, exit-code context, and next-action hints.
-- Strip ANSI only where appropriate; `ansi.ts` centralizes ANSI handling.
+- Strip ANSI only where appropriate; the shared `stripAnsi` in `lineFilter.ts` centralizes ANSI handling.
 - Include metrics via `reductionMetrics` and set `contentKind`, `lossy`, `parseTier`, `reducerName`/`filterName` accurately.
 - If a reducer mixes stdout/stderr, ensure the non-primary stream is handled consistently so display does not duplicate content.
 

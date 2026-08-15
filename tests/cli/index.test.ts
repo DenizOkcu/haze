@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {STDIN_PROMPT_BYTES} from '../../src/core/limits/byteBudgets.js';
+import {STDIN_PROMPT_BYTES} from '../../src/core/limits.js';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 

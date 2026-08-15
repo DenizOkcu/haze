@@ -24,7 +24,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `toolOutput/` — shared token/char reduction metrics.
 - `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `bash`, `grep`, and LSP teardown.
 - `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
-- `limits/` — centralized byte budgets referenced by every collector/reader/storage module.
+- `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.
 
 ## Contracts

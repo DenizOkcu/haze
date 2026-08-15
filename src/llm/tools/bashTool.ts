@@ -9,8 +9,7 @@ import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
-import {BASH_STREAM_BYTES} from '../../core/limits/byteBudgets.js';
-import {SHORT_VALIDATION_CHARS} from '../../core/limits/textBudgets.js';
+import {BASH_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
 
 /** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */

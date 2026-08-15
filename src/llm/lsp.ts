@@ -5,7 +5,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import type {HazeLspServer} from '../config/lspSettings.js';
 import {assertRealPathInsideWorkspace, workspaceRelativePath, workspaceRoot} from '../utils/path.js';
 import {prepareWorkspaceRead} from './tools/workspaceFile.js';
-import {LSP_BUFFER_BYTES, LSP_DOCUMENT_BYTES, LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../core/limits/byteBudgets.js';
+import {LSP_BUFFER_BYTES, LSP_DOCUMENT_BYTES, LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../core/limits.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
 import {signalProcessTree} from '../core/process/runBoundedProcess.js';
 
@@ -41,7 +41,7 @@ export function fromUri(uri: string): string {
   try { return workspaceRelativePath(fileURLToPath(uri)); } catch { return uri; }
 }
 
-export function isObject(value: unknown): value is Record<string, unknown> {
+function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
 }
 

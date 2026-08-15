@@ -7,7 +7,7 @@ import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
 import {prepareSessionEntryForWrite} from './sessionSlimming.js';
 import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
-import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
+import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export type SessionEntry =

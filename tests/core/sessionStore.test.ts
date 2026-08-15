@@ -5,7 +5,7 @@ import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
-import {JSONL_LINE_BYTES} from '../../src/core/limits/byteBudgets.js';
+import {JSONL_LINE_BYTES} from '../../src/core/limits.js';
 
 describe('sessionStore', () => {
   let tmp: string;

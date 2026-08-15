@@ -4,7 +4,7 @@ import {reductionMetrics} from '../../core/toolOutput/reduction.js';
 import {fetchUrlContent, BlockedUrlError} from '../webFetch.js';
 import {structuredToolFailure} from './failures.js';
 import {compactStoredOutput} from './outputCap.js';
-import {MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
+import {MAX_OUTPUT_CHARS} from '../../core/limits.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 
 export const fetchTool = tool({

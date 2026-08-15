@@ -1,6 +1,6 @@
 import type {ModelMessage} from 'ai';
 import type {SessionEntry} from './sessionStore.js';
-import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits/textBudgets.js';
+import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits.js';
 import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
 import {formatBytes} from '../../utils/format.js';
 
@@ -67,7 +67,7 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   return next;
 }
 
-export function slimConversationSnapshot(messages: ModelMessage[]): ModelMessage[] {
+function slimConversationSnapshot(messages: ModelMessage[]): ModelMessage[] {
   return slimUnknown(messages) as ModelMessage[];
 }
 
@@ -119,5 +119,3 @@ export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry |
 
   return entry;
 }
-
-export const SESSION_INLINE_VALUE_BYTES = INLINE_VALUE_BYTES;

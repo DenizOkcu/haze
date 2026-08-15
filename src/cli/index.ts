@@ -5,7 +5,7 @@ import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 import {findSession} from '../core/session/sessionStore.js';
 import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
-import {STDIN_PROMPT_BYTES} from '../core/limits/byteBudgets.js';
+import {STDIN_PROMPT_BYTES} from '../core/limits.js';
 import {readPackageVersion} from '../utils/version.js';
 import {formatVersionVerbose, readBuildInfo} from '../utils/buildInfo.js';
 import {runDoctor} from './commands/doctor.js';

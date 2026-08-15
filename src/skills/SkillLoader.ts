@@ -3,7 +3,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter, SkillSource} from './types.js';
 import {assertRealPathInsideRoot} from '../utils/path.js';
-import {SKILL_MARKDOWN_BYTES} from '../core/limits/byteBudgets.js';
+import {SKILL_MARKDOWN_BYTES} from '../core/limits.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
 
 const MAX_REFERENCE_BYTES = 50_000;
@@ -71,5 +71,3 @@ export async function loadSkill(dir: string, source: SkillSource = 'global'): Pr
   const references = await Promise.all(referencedPaths(body).map(ref => loadReference(dir, ref)));
   return {dir, path: realSkillPath, name: frontmatter.name, description: frontmatter.description, body, references, source};
 }
-
-export const internals = {parseSkillMarkdown, referencedPaths};

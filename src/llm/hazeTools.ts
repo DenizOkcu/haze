@@ -23,7 +23,7 @@ import {processTool} from './tools/processTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 import {createIgnoreClassifier} from './tools/gitIgnore.js';
 import {runRipgrepBounded} from './tools/grepRunner.js';
-import {EXACT_MUTATION_BYTES} from '../core/limits/byteBudgets.js';
+import {EXACT_MUTATION_BYTES} from '../core/limits.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
 import {assertReadableTextFile, readFailureRecovery} from './tools/readRecovery.js';
@@ -459,5 +459,3 @@ export const hazeTools = {
   process: processTool,
 
 };
-
-export type HazeTools = typeof hazeTools;

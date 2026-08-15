@@ -1,7 +1,7 @@
 import type {ModelMessage} from 'ai';
 import {estimateModelMessageTokens} from './contextBudget.js';
 import {workStatePrompt, type WorkState} from './workState.js';
-import {COMPACTION_LLM_TRANSCRIPT_CHARS, COMPACTION_OLDER_CHARS} from '../limits/textBudgets.js';
+import {COMPACTION_LLM_TRANSCRIPT_CHARS, COMPACTION_OLDER_CHARS} from '../limits.js';
 
 export interface CompactionResult {
   compacted: boolean;

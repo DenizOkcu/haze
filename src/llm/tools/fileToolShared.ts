@@ -1,4 +1,4 @@
-import {MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
+import {MAX_OUTPUT_CHARS} from '../../core/limits.js';
 import {HazeToolError} from './failures.js';
 import {checkGitIgnored, isGitIgnored} from './gitIgnore.js';
 

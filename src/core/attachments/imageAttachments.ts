@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
-import {IMAGE_ATTACHMENT_BYTES, IMAGE_ATTACHMENTS_PER_MESSAGE} from '../limits/byteBudgets.js';
+import {IMAGE_ATTACHMENT_BYTES, IMAGE_ATTACHMENTS_PER_MESSAGE} from '../limits.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {formatBytes} from '../../utils/format.js';
 

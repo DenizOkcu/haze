@@ -5,7 +5,7 @@ import type {ModelMessage} from 'ai';
 import type {ContextBreakdown} from '../agent/contextBudget.js';
 import {appendPrivateFile, ensurePrivateFile, ensurePrivateDir, tightenPrivateFile} from '../../config/privateStorage.js';
 import {OrderedFileWriter} from '../persistence/orderedFileWriter.js';
-import {JSONL_LINE_BYTES} from '../limits/byteBudgets.js';
+import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
 export interface LlmLogEntry {

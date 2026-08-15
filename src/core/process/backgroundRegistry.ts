@@ -2,11 +2,11 @@ import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
 import {BACKGROUND_PROCESS_HISTORY_LIMIT, BACKGROUND_PROCESS_MAX_CONCURRENCY} from '../agent/budgets.js';
 import {registerDynamicToolOutput, unregisterDynamicToolOutput} from '../agent/toolOutputStore.js';
-import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits/byteBudgets.js';
+import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits.js';
 import {signalProcessTree} from './runBoundedProcess.js';
 import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
-export type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
+type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
 
 export interface BackgroundProcessSummary {
   backgroundId: string;
@@ -218,7 +218,7 @@ export function installBackgroundProcessSignalHandlers() {
 }
 
 /** Best-effort synchronous safety net for process.exit and otherwise unawaitable exits. */
-export function terminateBackgroundProcessesSync() {
+function terminateBackgroundProcessesSync() {
   for (const record of activeRecords()) signalProcessTree(record.child, 'SIGTERM');
 }
 

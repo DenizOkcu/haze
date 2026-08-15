@@ -4,7 +4,7 @@ import {
   readToolOutput,
   clearToolOutputs,
 } from '../../../src/core/agent/toolOutputStore.js';
-import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../../../src/core/limits/byteBudgets.js';
+import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../../../src/core/limits.js';
 
 // The store is a module-level singleton shared across tests; reset between cases.
 beforeEach(() => {

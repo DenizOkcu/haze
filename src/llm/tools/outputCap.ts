@@ -1,7 +1,7 @@
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
-import {COMPACT_COMMAND_CHARS, GREP_MAX_LINE_CHARS, GREP_MAX_OUTPUT_CHARS} from '../../core/limits/textBudgets.js';
+import {COMPACT_COMMAND_CHARS, GREP_MAX_LINE_CHARS, GREP_MAX_OUTPUT_CHARS} from '../../core/limits.js';
 
-export {COMPACT_COMMAND_CHARS, GREP_MAX_OUTPUT_CHARS, GREP_MAX_LINE_CHARS};
+export {COMPACT_COMMAND_CHARS};
 
 /**
  * Cap a string to `maxChars` characters, keeping a head + tail and storing the
@@ -21,7 +21,7 @@ export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHA
 }
 
 /** Truncate a single over-long line in place. */
-export function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
+function compactLine(text: string, maxChars = GREP_MAX_LINE_CHARS) {
   if (text.length <= maxChars) return {text, truncated: false};
   return {text: `${text.slice(0, Math.max(0, maxChars - 22))}[line truncated]`, truncated: true};
 }

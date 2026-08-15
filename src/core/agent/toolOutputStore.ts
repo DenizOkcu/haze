@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../limits/byteBudgets.js';
+import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../limits.js';
 import {truncateUtf8AtBytes} from '../../utils/utf8.js';
 
 export interface StoredToolOutputPage {

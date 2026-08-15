@@ -6,7 +6,7 @@ import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {BACKGROUND_PROCESS_MAX_CONCURRENCY} from '../../../src/core/agent/budgets.js';
 import {readToolOutput} from '../../../src/core/agent/toolOutputStore.js';
-import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../../../src/core/limits/byteBudgets.js';
+import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../../../src/core/limits.js';
 import {getBackgroundProcess, killBackgroundProcess, listBackgroundProcesses, resetBackgroundProcessesForTests, startBackgroundProcess} from '../../../src/core/process/backgroundRegistry.js';
 
 const dirs: string[] = [];

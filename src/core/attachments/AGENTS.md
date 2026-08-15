@@ -46,7 +46,7 @@ bare-path extraction; routing is by extension and stat result.
   image-extension paths that are not regular files (e.g. a directory named
   `foo.png`) still fail loudly — that is a genuine attach-intent mismatch.
 - Size (`IMAGE_ATTACHMENT_BYTES`) and per-message count
-  (`IMAGE_ATTACHMENTS_PER_MESSAGE`) live in `core/limits/byteBudgets.ts`;
+  (`IMAGE_ATTACHMENTS_PER_MESSAGE`) live in `core/limits.ts`;
   errors must keep naming the limit.
 - Image capability is explicit per provider (`capabilities.images`), never
   inferred from URL or model names; `imageCapabilityError` takes the provider

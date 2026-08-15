@@ -1,6 +1,6 @@
 import {StringDecoder} from 'node:string_decoder';
 import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
-import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../core/limits/byteBudgets.js';
+import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../core/limits.js';
 
 /**
  * Line-oriented bounded ripgrep runner built on the shared bounded-process

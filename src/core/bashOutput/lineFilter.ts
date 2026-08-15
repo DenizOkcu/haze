@@ -1,5 +1,14 @@
-import {stripAnsi as stripAnsiCodes} from './ansi.js';
 import {commandMatches} from './command.js';
+
+/* eslint-disable no-control-regex */
+
+/** Strip common CSI/OSC escape sequences emitted by CLIs (central ANSI handling for reducers/filters). */
+function stripAnsi(text: string) {
+  return text
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '')
+    .replace(/[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[a-zA-Z\d]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g, '');
+}
+/* eslint-enable no-control-regex */
 
 export type LineFilterDefinition = {
   name: string;
@@ -49,7 +58,7 @@ export function applyLineFilter(definition: LineFilterDefinition, command: strin
   if (!matchesCommand(definition, command)) return undefined;
   try {
     let next = text;
-    if (definition.stripAnsi) next = stripAnsiCodes(next);
+    if (definition.stripAnsi) next = stripAnsi(next);
     for (const replacement of definition.replace ?? []) next = next.replace(replacement.pattern, replacement.replacement);
 
     const matched = definition.matchOutput?.test(next) ?? false;
