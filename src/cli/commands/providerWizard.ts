@@ -166,7 +166,7 @@ export function providerActionResult(action: string, provider: HazeProviderSetti
   if (!provider) return {message: '', mode: 'provider'};
   if (action === PROVIDER_ACTIONS.useProvider) return {message: '', selectedName: undefined, mode: 'model'};
   if (action === PROVIDER_ACTIONS.addModels) return {message: `Comma-separated model names to add to ${provider.name}?`, mode: 'providerAppendModels'};
-  if (action === PROVIDER_ACTIONS.setApiKey) return {message: `New API key for ${provider.name}? (current: ${provider.key ? 'saved' : 'not set'})`, mode: 'providerSetKey'};
+  if (action === PROVIDER_ACTIONS.manageAccess) return {message: `New API key for ${provider.name}? (current: ${provider.key ? 'saved' : 'not set'})`, mode: 'providerSetKey'};
   if (action === PROVIDER_ACTIONS.removeModels) return {message: `Comma-separated model names to remove from ${provider.name}?\nCurrent models: ${provider.models.join(', ')}`, mode: 'providerRemoveModels'};
   if (action === PROVIDER_ACTIONS.removeProvider) return {message: `Remove provider ${provider.name}? Type "yes" to confirm. Esc to cancel.`, mode: 'providerConfirmRemove'};
   return {message: `Unknown provider action: ${action}`};

@@ -6,7 +6,7 @@ export const PROVIDER_CHOICES = {
 export const PROVIDER_ACTIONS = {
   useProvider: 'use provider',
   addModels: 'add models',
-  setApiKey: 'set API key',
+  manageAccess: 'set API key',
   signInChatGpt: 'sign in with ChatGPT',
   markImageCapable: 'mark image-capable',
   clearImageCapable: 'clear image-capable',
@@ -34,7 +34,7 @@ export const LSP_ACTIONS = {
 } as const;
 
 export const MCP_ACTIONS = {
-  setApiKey: 'set API key',
+  manageAccess: 'set API key',
   removeServer: 'remove server',
 } as const;
 

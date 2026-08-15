@@ -35,7 +35,7 @@ export function providerActionSuggestions(settings: HazeSettings, selectedProvid
     {value: PROVIDER_ACTIONS.addModels, description: provider?.kind === 'chatgpt-codex' ? 'Add a supported Codex model name' : 'Fetch the provider model list and add models', kind: 'provider' as const},
     ...(provider?.kind === 'chatgpt-codex'
       ? [{value: PROVIDER_ACTIONS.signInChatGpt, description: 'Sign in again or switch ChatGPT account', kind: 'provider' as const}]
-      : [{value: PROVIDER_ACTIONS.setApiKey, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const}]),
+      : [{value: PROVIDER_ACTIONS.manageAccess, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const}]),
     provider
       ? (providerImageCapable(provider)
         ? {value: PROVIDER_ACTIONS.clearImageCapable, description: 'Stop sending attached images to this provider', kind: 'provider' as const}
@@ -154,7 +154,7 @@ export function mcpActionSuggestions(settings: HazeSettings, selectedMcpName: st
   const result: TextInputSuggestion[] = [];
   if (server) {
     result.push({value: server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable, description: `${server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable} this server`, kind: 'mcp' as const});
-    if (server.transport !== 'stdio') result.push({value: MCP_ACTIONS.setApiKey, description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
+    if (server.transport !== 'stdio') result.push({value: MCP_ACTIONS.manageAccess, description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
   }
   result.push({value: MCP_ACTIONS.removeServer, description: 'remove this server', kind: 'mcp' as const});
   return result;

@@ -5,7 +5,7 @@ import {COMMON_ACTIONS, LSP_ACTIONS, MCP_ACTIONS, MCP_TRANSPORTS, PROVIDER_ACTIO
 describe('wizard action constants', () => {
   it('backs provider action suggestions', () => {
     const values = providerActionSuggestions({providers: [{name: 'p', url: 'http://localhost/v1', models: ['m']}]}, 'p').map(item => item.value);
-    expect(values).toEqual([PROVIDER_ACTIONS.useProvider, PROVIDER_ACTIONS.addModels, PROVIDER_ACTIONS.setApiKey, PROVIDER_ACTIONS.markImageCapable, PROVIDER_ACTIONS.removeModels, PROVIDER_ACTIONS.removeProvider]);
+    expect(values).toEqual([PROVIDER_ACTIONS.useProvider, PROVIDER_ACTIONS.addModels, PROVIDER_ACTIONS.manageAccess, PROVIDER_ACTIONS.markImageCapable, PROVIDER_ACTIONS.removeModels, PROVIDER_ACTIONS.removeProvider]);
   });
 
   it('offers clear image-capable once a provider is image-capable', () => {
@@ -16,7 +16,7 @@ describe('wizard action constants', () => {
 
   it('backs LSP and MCP action suggestions', () => {
     expect(lspActionSuggestions({lspServers: [{name: 'ts', command: 'typescript-language-server'}]}, 'ts').map(item => item.value)).toEqual([COMMON_ACTIONS.disable, LSP_ACTIONS.removeServer]);
-    expect(mcpActionSuggestions({mcpServers: [{name: 'ctx', transport: 'http', url: 'https://example.com'}]}, 'ctx').map(item => item.value)).toEqual([COMMON_ACTIONS.disable, MCP_ACTIONS.setApiKey, MCP_ACTIONS.removeServer]);
+    expect(mcpActionSuggestions({mcpServers: [{name: 'ctx', transport: 'http', url: 'https://example.com'}]}, 'ctx').map(item => item.value)).toEqual([COMMON_ACTIONS.disable, MCP_ACTIONS.manageAccess, MCP_ACTIONS.removeServer]);
   });
 
   it('backs MCP transport and skill action suggestions', () => {

@@ -40,7 +40,7 @@ export function selectMcpActionResult(settings: HazeSettings, selectedName: stri
     const enabled = action === COMMON_ACTIONS.enable;
     return {mode: 'chat', selectedName: undefined, settingsPatch: {mcpServers: toggleMcpServer(settings, selectedName, enabled) ?? []}, message: `MCP server ${selectedName} ${enabled ? 'enabled' : 'disabled'}.`};
   }
-  if (action === MCP_ACTIONS.setApiKey) {
+  if (action === MCP_ACTIONS.manageAccess) {
     if (server.transport === 'stdio') return {mode: 'chat', selectedName: undefined, message: 'Stdio MCP authentication must be handled by its command or wrapper; HTTP headers do not apply.'};
     return {mode: 'mcpSetKey', message: `New API key for ${selectedName}? (current: ${server.headers?.length ? 'saved' : 'not set'}) Sent as Authorization: Bearer <value>.`};
   }
