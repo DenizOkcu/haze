@@ -28,7 +28,7 @@ export type ToolDisplayDiff = {
   previousContentOmittedBytes?: number;
 };
 
-export type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number; showResult?: boolean; diff?: ToolDisplayDiff};
+type ToolDisplayItem = {id: string; summary: string; status: 'running' | 'success' | 'error'; result?: string; startedAt: number; finishedAt?: number; durationMs?: number; showResult?: boolean; diff?: ToolDisplayDiff};
 type ToolDisplayGroup = {id: string; items: ToolDisplayItem[]; started: boolean; finalized: boolean; caption?: string};
 
 export interface ToolGroupRendererDeps {

@@ -38,7 +38,7 @@ export interface FetchOptions {
  * caller). When `pinnedIp` is undefined (literal-IP URL), the transport falls
  * back to the global fetch — no DNS-rebinding surface exists for a literal IP.
  */
-export type PinnedFetcher = (
+type PinnedFetcher = (
   url: URL,
   pinnedIp: string | undefined,
   init: RequestInit,

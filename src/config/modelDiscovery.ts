@@ -62,7 +62,7 @@ function firstHarvested(...values: unknown[]): number | undefined {
  *      (auto-sized to VRAM), so it is capped at the conservative local
  *      fallback rather than trusted outright (silent truncation guard).
  */
-export const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
+const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
 /** Bound the per-save /api/show probe loop so bulk pastes stay cheap. */
 const OLLAMA_PROBE_MAX_MODELS = 8;
 

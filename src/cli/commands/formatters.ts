@@ -197,35 +197,9 @@ export function formatElapsedTimeWhole(milliseconds: number) {
   return `${seconds}s`;
 }
 
-export function toolOutputDetails(value: unknown) {
-  if (!value || typeof value !== 'object') return '';
-  const output = value as {
-    cwd?: string;
-    classification?: {riskLevel?: string; reason?: string; traits?: string[]};
-    validationSummary?: {summaryText?: string; suggestedNextStep?: string};
-    stdout?: {text?: string; truncated?: boolean};
-    stderr?: {text?: string; truncated?: boolean};
-  };
-  const stdout = output.stdout?.text?.trim();
-  const stderr = output.stderr?.text?.trim();
-  const meta = [
-    output.cwd ? `cwd: ${output.cwd}` : '',
-    output.classification?.riskLevel ? `classification: ${output.classification.riskLevel}${output.classification.reason ? ` — ${output.classification.reason}` : ''}` : '',
-    output.validationSummary?.summaryText ? `validation: ${output.validationSummary.summaryText}${output.validationSummary.suggestedNextStep ? `\nnext: ${output.validationSummary.suggestedNextStep}` : ''}` : '',
-  ].filter(Boolean).join('\n');
-  const parts = [
-    meta,
-    stdout ? `stdout:\n${compact(stdout, 1200)}` : '',
-    stderr ? `stderr:\n${compact(stderr, 1200)}` : '',
-  ].filter(Boolean);
-  if (parts.length === 0) return '';
-  const truncated = output.stdout?.truncated || output.stderr?.truncated;
-  return `${parts.join('\n\n')}${truncated ? '\n… output truncated' : ''}`;
-}
+type ContextReportCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
 
-export type ContextReportCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
-
-export interface ContextReportTool {
+interface ContextReportTool {
   name: string;
   tokens: number;
   category: ContextReportCategory;

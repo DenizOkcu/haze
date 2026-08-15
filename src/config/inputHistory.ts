@@ -4,7 +4,7 @@ import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 const HISTORY_DIR = path.join(HAZE_DIR, 'history');
-export const INPUT_HISTORY_FILE = path.join(HISTORY_DIR, 'input-history.json');
+const INPUT_HISTORY_FILE = path.join(HISTORY_DIR, 'input-history.json');
 const MAX_HISTORY_ITEMS = 500;
 
 function normalizeHistory(value: unknown): string[] {

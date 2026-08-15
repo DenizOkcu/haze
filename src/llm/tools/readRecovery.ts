@@ -49,7 +49,7 @@ async function existingAncestor(candidate: string, root: string): Promise<string
 }
 
 /** Return a few close, non-ignored siblings without walking the workspace. */
-export async function nearbyReadablePaths(filePath: string): Promise<string[]> {
+async function nearbyReadablePaths(filePath: string): Promise<string[]> {
   let candidate: string;
   try {
     candidate = resolveWorkspacePath(filePath);

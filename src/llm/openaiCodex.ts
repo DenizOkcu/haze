@@ -42,8 +42,3 @@ export function createChatGptCodexFetch(providerName: string, fetchImpl: typeof 
     return fetchImpl(CHATGPT_CODEX_RESPONSES_URL, {...init, headers: authenticatedHeaders(init, auth)});
   };
 }
-
-/** Test-only reset for process-global refresh deduplication. */
-export function clearChatGptRefreshes(): void {
-  refreshes.clear();
-}

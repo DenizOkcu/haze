@@ -241,7 +241,7 @@ export const MessageView = React.memo(function MessageView({message, width, show
   </Box>;
 });
 
-export function messageKey(message: Message, index: number) {
+function messageKey(message: Message, index: number) {
   return message.id ?? `${index}-${message.role}-${message.text}`;
 }
 
@@ -310,7 +310,7 @@ export function partitionDisplayMessages(messages: Message[]): {staticItems: Tra
   return {staticItems, streamingItems};
 }
 
-export function orderedDisplayMessages(messages: Message[]) {
+function orderedDisplayMessages(messages: Message[]) {
   return messages
     .map((message, index) => ({message, index}))
     .sort((a, b) => {

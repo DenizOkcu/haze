@@ -1,8 +1,6 @@
 import {classifyRequestIntent} from './requestClassifier.js';
-import {createWorkState, observeWorkToolEvent, type WorkState, type WorkStatus, type WorkValidationStatus} from '../agent/workState.js';
+import {createWorkState, observeWorkToolEvent, type WorkState} from '../agent/workState.js';
 
-export type SessionGoalStatus = WorkStatus;
-export type ValidationStatus = WorkValidationStatus;
 export type SessionGoal = WorkState;
 export type GoalToolEvent = Parameters<typeof observeWorkToolEvent>[1];
 

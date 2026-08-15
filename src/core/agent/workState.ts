@@ -4,8 +4,8 @@ import {toolInputField, toolOutputOk} from './toolResults.js';
 
 export type WorkFileAction = 'read' | 'created' | 'modified';
 export type WorkValidationStatus = 'pending' | 'passed' | 'failed';
-export type WorkStatus = 'active' | 'needs-user' | 'blocked' | 'complete' | 'aborted';
-export type WorkPhase = 'starting' | 'inspecting' | 'editing' | 'validating' | 'summarizing' | 'done';
+type WorkStatus = 'active' | 'needs-user' | 'blocked' | 'complete' | 'aborted';
+type WorkPhase = 'starting' | 'inspecting' | 'editing' | 'validating' | 'summarizing' | 'done';
 
 /**
  * Derived validation outcome for a turn, used as bounded completion evidence.

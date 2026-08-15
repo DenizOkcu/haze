@@ -15,7 +15,7 @@ export const GIT_IGNORE_BATCH = 256;
  */
 const CHECK_IGNORE_MAX_BYTES = 8 * 1024 * 1024;
 
-export interface IgnoreClassification {
+interface IgnoreClassification {
   /** Subset of the submitted paths Git reports as ignored. */
   ignored: Set<string>;
   /**

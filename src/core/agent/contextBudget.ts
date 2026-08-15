@@ -3,7 +3,7 @@ import type {ModelMessage} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
 
-export const DEFAULT_CHARS_PER_TOKEN = 4;
+const DEFAULT_CHARS_PER_TOKEN = 4;
 
 /**
  * Conservative fallback context window for a hosted model with no metadata
@@ -20,7 +20,7 @@ export const FALLBACK_CONTEXT_WINDOW_TOKENS = 128_000;
 export const FALLBACK_LOCAL_CONTEXT_TOKENS = 32_768;
 
 /** Safety margin reserved below the computed budget to absorb estimate drift. */
-export const CONTEXT_SAFETY_MARGIN_TOKENS = 1_000;
+const CONTEXT_SAFETY_MARGIN_TOKENS = 1_000;
 
 /**
  * Rough vision estimate for attached images: providers bill images by
@@ -45,7 +45,7 @@ export function estimateTextTokens(text: string) {
   return Math.ceil(text.length / DEFAULT_CHARS_PER_TOKEN);
 }
 
-export function estimateImagePartTokens(part: unknown) {
+function estimateImagePartTokens(part: unknown) {
   if (!isImageFilePart(part)) return 0;
   const bytes = imageFilePartBytes(part.data);
   return bytes > 0 ? Math.max(1, Math.ceil(bytes / IMAGE_BYTES_PER_TOKEN_ESTIMATE)) : 1;

@@ -9,10 +9,10 @@ import {
   SUBAGENT_SCOPE_ITEMS,
 } from '../agent/budgets.js';
 
-export const workerModes = ['inspect', 'research', 'implement', 'validate'] as const;
+const workerModes = ['inspect', 'research', 'implement', 'validate'] as const;
 export type WorkerMode = typeof workerModes[number];
 
-export const subagentTaskInputV2Schema = z.object({
+const subagentTaskInputV2Schema = z.object({
   objective: z.string().trim().min(1).max(SUBAGENT_OBJECTIVE_CHARS).describe('Self-contained outcome for the worker. Keep it under 1000 characters; do not paste conversation history or file contents.'),
   deliverable: z.string().trim().min(1).max(SUBAGENT_DELIVERABLE_CHARS).describe('Exact compact result the worker must return to the main agent.'),
   mode: z.enum(workerModes).describe('inspect/research are read-only; implement may edit; validate may run commands.'),
@@ -127,7 +127,7 @@ export function normalizeSubagentInput(input: SubagentToolInput, id: string): Su
   return {id, objective: input.objective, deliverable: input.deliverable, mode: input.mode, scope: input.scope ?? [], acceptanceCriteria: input.acceptanceCriteria ?? []};
 }
 
-export function legacyStatus(termination: WorkerTermination): SubagentExecutionResult['status'] {
+function legacyStatus(termination: WorkerTermination): SubagentExecutionResult['status'] {
   if (termination === 'completed' || termination === 'no_output') return 'ok';
   if (termination === 'cancelled') return 'cancelled';
   if (termination === 'step_limit' || termination === 'tool_limit' || termination === 'deadline_exceeded') return 'timeout';

@@ -9,7 +9,7 @@ import type {ToolDiffLine} from '../toolResultTypes.js';
  */
 
 /** Strip a readFile-style `  123 | ` prefix from each line. */
-export function stripLineNumberPrefixes(text: string) {
+function stripLineNumberPrefixes(text: string) {
   return text.replace(/^\s*\d+\s+\| ?/gm, '');
 }
 

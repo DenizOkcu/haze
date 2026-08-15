@@ -2,9 +2,9 @@ import type {ModelMessage} from 'ai';
 import {estimateValueTokens} from './contextBudget.js';
 import {isFailedToolOutput} from './toolResults.js';
 
-export const SYNTHETIC_CONTROL_OPEN = '<haze_control>';
+const SYNTHETIC_CONTROL_OPEN = '<haze_control>';
 
-export function isSyntheticControlMessage(message: ModelMessage) {
+function isSyntheticControlMessage(message: ModelMessage) {
   return message.role === 'user'
     && typeof message.content === 'string'
     && message.content.startsWith(SYNTHETIC_CONTROL_OPEN);

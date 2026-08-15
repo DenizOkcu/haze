@@ -13,7 +13,7 @@ export function toolCallCount(messages: Message[]) {
   }, 0);
 }
 
-export function estimateTokens(text: string) {
+function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
 }
 

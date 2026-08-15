@@ -1,4 +1,4 @@
-export function errorText(error: unknown) {
+function errorText(error: unknown) {
   return (error instanceof Error ? `${error.name} ${error.message}` : String(error)).toLowerCase();
 }
 

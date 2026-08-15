@@ -1,7 +1,7 @@
 import type {TurnCompletionEvidence} from './completionController.js';
 import type {EffectiveReasoning, ReasoningLevel} from './reasoningPolicy.js';
 
-export interface AgentStepUsage {
+interface AgentStepUsage {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

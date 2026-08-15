@@ -15,7 +15,7 @@ const SEARCH_COMMAND = /^(?:rg|grep|git\s+grep|ag|ack)(?:\s|$)/;
 const SIGNAL_LINE = /\b(error|fail(?:ed|ure)?|warn(?:ing)?|exception|panic|fatal|todo|fixme)\b/i;
 const MATCH_LINE = /^(.+?)([:-])(\d+)\2(.*)$/;
 
-export function isSearchCommand(command: string) {
+function isSearchCommand(command: string) {
   return commandMatches(command, SEARCH_COMMAND);
 }
 

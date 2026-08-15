@@ -24,7 +24,7 @@ export function workspaceRelativePath(absolutePath: string) {
   return path.relative(workspaceRoot(), absolutePath) || '.';
 }
 
-export function assertPathInsideRoot(root: string, candidate: string, inputPath: string, label = 'workspace') {
+function assertPathInsideRoot(root: string, candidate: string, inputPath: string, label = 'workspace') {
   const relative = path.relative(root, candidate);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Path is outside the ${label}: ${inputPath}`);

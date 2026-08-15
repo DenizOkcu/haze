@@ -8,7 +8,7 @@ import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 const execFile = promisify(execFileCallback);
 
-export const UPDATE_CHECK_FILE = path.join(HAZE_DIR, 'updateCheck.json');
+const UPDATE_CHECK_FILE = path.join(HAZE_DIR, 'updateCheck.json');
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
 const DEFAULT_TIMEOUT_MS = 5000;
 

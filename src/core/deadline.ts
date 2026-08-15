@@ -1,10 +1,4 @@
-export const TOOL_DEADLINE_EXCEEDED = '__hazeToolDeadlineExceeded';
-
-export interface ToolDeadlineResult {
-  ok: false;
-  [TOOL_DEADLINE_EXCEEDED]: true;
-  error: string;
-}
+const TOOL_DEADLINE_EXCEEDED = '__hazeToolDeadlineExceeded';
 
 /** True when a tool result is the structured "deadline exceeded" placeholder. */
 export function isToolDeadlineExceeded(output: unknown): boolean {

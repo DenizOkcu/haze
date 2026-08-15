@@ -1,4 +1,4 @@
-export type GrepMatchItem = {file: string; line: number; content: string; isContext: boolean};
+type GrepMatchItem = {file: string; line: number; content: string; isContext: boolean};
 
 type RgEvent = {type?: string; data?: {path?: {text?: string}; line_number?: number; lines?: {text?: string}}};
 

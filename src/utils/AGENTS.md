@@ -10,7 +10,7 @@ Maintainability focus:
 
 - Prefer small single-purpose helpers reused from domain modules over generic utility abstractions that hide product policy.
 
-- Keep utilities dependency-light and side-effect-light.
+- Keep utilities dependency-light and side-effect-light. YAML is read/written with the `yaml` package directly at the call sites that need it.
 - Do not put product policy here if it belongs in `config/`, `core/`, or `llm/`.
 - Path helpers must preserve workspace confinement guarantees; changes can affect every file tool.
 - Filesystem walking should continue skipping `.git` and `node_modules` where documented and should remain pagination-friendly.
@@ -25,7 +25,6 @@ Maintainability focus:
 - `version.ts` — cached package-version loading and dependency-free version comparison helpers.
 - `utf8.ts` — shared UTF-8-safe prefix and rolling-tail byte truncation.
 - `openPath.ts` — one platform opener for local paths and browser URLs.
-- `yaml.ts` — YAML read/write utilities.
 
 ## Tests
 

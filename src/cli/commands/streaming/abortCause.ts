@@ -8,7 +8,7 @@
  * mutable holder set by whichever internal site aborts first. A user abort
  * never sets it and therefore stays `'user'` (the default).
  */
-export type TurnAbortCauseKind = 'user' | 'turn-deadline' | 'model-stream-idle';
+type TurnAbortCauseKind = 'user' | 'turn-deadline' | 'model-stream-idle';
 
 export interface TurnAbortCause {
   kind: TurnAbortCauseKind;

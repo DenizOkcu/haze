@@ -21,7 +21,7 @@ export interface LoadedSkill {
   source: SkillSource;
 }
 
-export interface SkillRegistryError {
+interface SkillRegistryError {
   directory: string;
   message: string;
   source?: SkillSource;

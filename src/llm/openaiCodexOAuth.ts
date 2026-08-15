@@ -3,14 +3,14 @@ import {createServer, type Server} from 'node:http';
 import type {OAuthProviderAuth} from '../config/providerAuth.js';
 import {openPath} from '../utils/openPath.js';
 
-export const CHATGPT_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-export const CHATGPT_OAUTH_ISSUER = 'https://auth.openai.com';
+const CHATGPT_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+const CHATGPT_OAUTH_ISSUER = 'https://auth.openai.com';
 export const CHATGPT_CODEX_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CHATGPT_CODEX_RESPONSES_URL = `${CHATGPT_CODEX_BASE_URL}/responses`;
 // Fixed by the registered ChatGPT OAuth client: the redirect_uri must match
 // exactly. Do not switch to an ephemeral port — the auth server would reject
 // the callback.
-export const CHATGPT_OAUTH_CALLBACK_PORT = 1455;
+const CHATGPT_OAUTH_CALLBACK_PORT = 1455;
 
 const CALLBACK_PATH = '/auth/callback';
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;

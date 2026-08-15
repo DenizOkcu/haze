@@ -2,7 +2,7 @@ import type {BashClassification} from '../safety/bashClassifier.js';
 import type {ValidationSummary} from '../../llm/toolResultTypes.js';
 import type {ReductionContentKind, ReductionParseTier} from '../toolOutput/reduction.js';
 
-export type ParseTier = ReductionParseTier;
+type ParseTier = ReductionParseTier;
 
 export interface BashOutputFilterInput {
   command: string;

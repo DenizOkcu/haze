@@ -8,7 +8,7 @@ import {reduceSearchOutput} from './reducers/search.js';
 import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from './reducers/content.js';
 import {capOutputForProcessing, isInflating, reductionMetrics, retrievalHint, type ReductionContentKind} from '../toolOutput/reduction.js';
 
-export const builtInLineFilters: LineFilterDefinition[] = [
+const builtInLineFilters: LineFilterDefinition[] = [
   {name: 'markdownlint', matchCommand: /(^|[;&|]\s*)markdownlint\b/, stripAnsi: true, truncateLinesAt: 200, maxLines: 80, onEmpty: 'markdownlint: ok'},
   {name: 'shellcheck', matchCommand: /(^|[;&|]\s*)shellcheck\b/, stripAnsi: true, stripLinesMatching: [/^In .* line \d+:/], truncateLinesAt: 200, maxLines: 100, onEmpty: 'shellcheck: ok'},
   {name: 'docker-list', matchCommand: /(^|[;&|]\s*)docker\s+(?:ps|images)\b/, stripAnsi: true, truncateLinesAt: 180, maxLines: 40, onEmpty: 'docker: no rows'},

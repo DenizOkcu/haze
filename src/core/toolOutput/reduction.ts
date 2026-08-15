@@ -1,5 +1,3 @@
-export type ReductionPressure = 'conservative' | 'normal' | 'aggressive';
-
 export const PROCESSING_OUTPUT_CHAR_LIMIT = 200_000;
 const PROCESSING_TRUNCATION_MARKER = '\n[... output truncated for processing ...]\n';
 export type ReductionContentKind = 'validation' | 'log' | 'search' | 'diff' | 'json' | 'table' | 'web' | 'source-outline' | 'generic';
@@ -14,18 +12,7 @@ export interface ReductionMetrics {
   savingsPct: number;
 }
 
-export interface ToolOutputReductionMetadata extends ReductionMetrics {
-  reducerName: string;
-  contentKind: ReductionContentKind;
-  lossy: boolean;
-  parseTier: ReductionParseTier;
-  rawHandle?: string;
-  handle?: string;
-  omittedChars: number;
-  warning?: string;
-}
-
-export function estimateReductionTokens(text: string) {
+function estimateReductionTokens(text: string) {
   return Math.ceil(text.length / 4);
 }
 

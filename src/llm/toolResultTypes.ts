@@ -52,25 +52,8 @@ export type ValidationSummary = {
   rawOutputTruncated: boolean;
 };
 
-export type StructuredToolFailure = {
-  ok: false;
-  toolName: string;
-  path?: string;
-  error: string;
-  reasonCode?: ToolFailureReasonCode;
-  recoverable: boolean;
-  suggestedNextStep: string;
-  recoveryTool?: string;
-  recoveryInput?: unknown;
-  suggestedPaths?: string[];
-};
-
-export function isObject(value: unknown): value is Record<string, unknown> {
+function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null;
-}
-
-export function isStructuredToolFailure(value: unknown): value is StructuredToolFailure {
-  return isObject(value) && value.ok === false && typeof value.toolName === 'string';
 }
 
 export function isValidationSummary(value: unknown): value is ValidationSummary {

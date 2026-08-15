@@ -5,12 +5,6 @@ import {isPathBlessed} from '../../core/attachments/readBlessings.js';
 import {assertNotIgnored} from './fileToolShared.js';
 import {discoverScopedContext, hazeContext, scopedContextMutationStop, type ToolExecutionContext} from './toolContext.js';
 
-export async function prepareWorkspaceExisting(filePath: string) {
-  const absolutePath = resolveWorkspacePath(filePath);
-  await assertRealPathInsideWorkspace(absolutePath, filePath);
-  return absolutePath;
-}
-
 /**
  * Resolve a read path and confine it to the workspace — unless the user
  * explicitly mentioned it (or a parent directory) in the prompt this turn.
