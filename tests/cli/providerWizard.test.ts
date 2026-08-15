@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../../src/cli/commands/providerWizard.js';
+import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../../src/cli/commands/providerWizard.js';
 
 const settings = {
   provider: 'local',
@@ -120,5 +120,24 @@ describe('provider wizard helpers', () => {
     expect(providerActionResult('remove provider', {...provider, models: ['a', 'b']})).toMatchObject({mode: 'providerConfirmRemove'});
     expect(providerActionResult('bogus', {...provider, models: ['a', 'b']})).toMatchObject({message: 'Unknown provider action: bogus'});
     expect(providerActionResult('use provider', undefined)).toMatchObject({mode: 'provider'});
+  });
+});
+
+describe('chatgpt-codex URL divergence warning (F-14)', () => {
+  it('warns when a ChatGPT sign-in provider points somewhere other than the canonical endpoint', () => {
+    const canonical = {name: 'codex', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex' as const, models: ['gpt-5.6-sol']};
+    expect(chatgptCodexUrlWarning(canonical)).toBeUndefined();
+    const diverged = {...canonical, url: 'https://my-proxy.example/v1'};
+    expect(chatgptCodexUrlWarning(diverged)).toContain('always sends requests to https://chatgpt.com/backend-api/codex');
+    expect(chatgptCodexUrlWarning(diverged)).toContain('my-proxy.example');
+  });
+
+  it('never warns for ordinary OpenAI-compatible providers', () => {
+    expect(chatgptCodexUrlWarning({name: 'local', url: 'http://localhost:1234/v1', models: ['m']})).toBeUndefined();
+  });
+
+  it('appends the divergence warning when finishing a chatgpt-codex add', () => {
+    const result = providerFinishAdd({providers: []}, {name: 'codex', url: 'https://my-proxy.example/v1', kind: 'chatgpt-codex'}, 'gpt-5.6-sol');
+    expect(result.message).toContain('always sends requests to');
   });
 });

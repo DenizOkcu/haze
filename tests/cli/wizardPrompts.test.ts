@@ -32,3 +32,14 @@ describe('wizard capture helpers', () => {
     expect(captureMcpCommand('node x.js').draft).toEqual({command: 'node', args: ['x.js']});
   });
 });
+describe('provider URL capture canonical-endpoint guidance (F-14)', () => {
+  it('points the canonical Codex endpoint at the OpenAI Subscription preset', () => {
+    const result = captureProviderUrl('https://chatgpt.com/backend-api/codex');
+    expect(result.nextMode).toBe('providerAddKey');
+    expect(result.systemMessage).toContain('OpenAI Subscription preset');
+  });
+
+  it('keeps the ordinary prompt for every other URL', () => {
+    expect(captureProviderUrl('https://openrouter.ai/api/v1').systemMessage).not.toContain('OpenAI Subscription');
+  });
+});

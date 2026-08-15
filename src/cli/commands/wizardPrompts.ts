@@ -1,6 +1,7 @@
 import type {HazeMcpServer, HazeSettings} from '../../config/settings.js';
 import {configuredLspServers} from '../../config/lspSettings.js';
 import {findMcpServer} from '../../config/mcpSettings.js';
+import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import {MCP_TRANSPORTS} from './wizardActions.js';
 import {commandParts, isValidUrl} from './wizardInput.js';
 
@@ -41,7 +42,12 @@ export type FieldCaptureResult = {
 
 export function captureProviderUrl(value: string): FieldCaptureResult {
   if (!isValidUrl(value)) return {message: 'Enter a valid URL, for example http://localhost:1234/v1.'};
-  return {draft: {url: value.trim()}, nextMode: 'providerAddKey', systemMessage: 'API key? Leave blank for local/keyless providers.'};
+  // The Codex endpoint only accepts ChatGPT sign-in, never API keys; point
+  // users at the preset instead of a custom provider that cannot work (F-14).
+  const codexHint = value.trim() === CHATGPT_CODEX_BASE_URL
+    ? `\nNote: ${CHATGPT_CODEX_BASE_URL} serves ChatGPT sign-in only. To use it, add the OpenAI Subscription preset via /provider instead of a custom API-key provider.`
+    : '';
+  return {draft: {url: value.trim()}, nextMode: 'providerAddKey', systemMessage: `API key? Leave blank for local/keyless providers.${codexHint}`};
 }
 
 export function captureMcpUrl(value: string): FieldCaptureResult {

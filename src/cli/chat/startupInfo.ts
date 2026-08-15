@@ -3,6 +3,7 @@ import {configuredLspServers} from '../../config/lspSettings.js';
 import {configuredMcpServers} from '../../config/mcpSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
 import type {ContextFile} from '../../config/contextFiles.js';
+import {chatgptCodexUrlWarning} from '../commands/providerWizard.js';
 
 export function startupContextInfo(contextFiles: ContextFile[]) {
   const lines = contextFiles.map(file => `- ${file.path}`);
@@ -48,12 +49,14 @@ export function startupProviderInfo(settings: HazeSettings) {
   const authLine = selection.provider.kind === 'chatgpt-codex'
     ? '- Authentication: ChatGPT OAuth credentials stored separately'
     : `- API key: ${apiKeySource === 'missing' ? 'not configured; local providers may not need one' : `configured via ${apiKeySource}`}`;
+  const divergence = chatgptCodexUrlWarning(selection.provider);
 
   return [
     'Provider configuration',
     `- Provider: ${provider}`,
     `- Model: ${model} (${modelSource})`,
     `- Base URL: ${baseURL} (settings)`,
+    ...(divergence ? [divergence] : []),
     authLine,
     `- Configured providers: ${configuredCount}`,
     lspLine,

@@ -20,7 +20,7 @@ import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES} from 
 import {captureLspName} from '../commands/wizardPrompts.js';
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult} from '../commands/lspWizard.js';
 import {finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/mcpWizard.js';
-import {providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
+import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
 import {selectSkillActionResult, selectSkillResult} from '../commands/skillWizard.js';
 import {captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage} from '../commands/skillCreation.js';
 import {skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillConfirmRemove.js';
@@ -148,7 +148,10 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     }
     deps.setSelectedProviderName(provider.name);
     setMode('providerAction');
-    showMessage(`${provider.name}: choose an action.`);
+    // Surface canonical-endpoint divergence for ChatGPT sign-in providers up
+    // front: a hand-edited URL is silently ignored by the Codex fetch (F-14).
+    const divergence = chatgptCodexUrlWarning(provider);
+    showMessage(`${provider.name}: choose an action.${divergence ? `\n${divergence}` : ''}`);
   }
 
   async function loginWithChatGpt(input: {name: string; url: string; models: string[]; existing?: HazeProviderSettings}) {

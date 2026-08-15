@@ -5,10 +5,21 @@ import {PROVIDER_ACTIONS} from './wizardActions.js';
 import {commaList} from './wizardInput.js';
 import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
 import {presetModelLimitsForModels} from '../../config/providerPresets.js';
+import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {HarvestedModelLimits} from '../../config/modelDiscovery.js';
 
+/**
+ * Warning when a `chatgpt-codex` provider's configured URL diverges from the
+ * canonical endpoint (F-14): requests always route to the registered OAuth
+ * client's endpoint, so a hand-edited URL (e.g. a proxy) is silently ignored.
+ */
+export function chatgptCodexUrlWarning(provider: HazeProviderSettings): string | undefined {
+  if (provider.kind !== 'chatgpt-codex' || provider.url === CHATGPT_CODEX_BASE_URL) return undefined;
+  return `Note: ${provider.name} uses ChatGPT sign-in, which always sends requests to ${CHATGPT_CODEX_BASE_URL}. The configured URL (${provider.url}) is ignored for requests.`;
+}
+
 /** Merge order for per-model limits on add: preset-curated < live-discovered < existing user settings. */
-function mergedModelLimits(curated: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
+function mergedModelLimits(curated: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number; pricing?: {inputPerMillionTokens: number; outputPerMillionTokens: number; cacheReadPerMillionTokens?: number; cacheWritePerMillionTokens?: number}}>, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
   const discoveredSubset: HarvestedModelLimits = {};
   for (const model of models) if (discovered?.[model]) discoveredSubset[model] = discovered[model];
   const merged = {...curated, ...discoveredSubset, ...existing};
@@ -62,11 +73,12 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
     models: [...new Set(models)],
     ...(modelLimits ? {modelLimits} : {}),
   };
+  const divergence = chatgptCodexUrlWarning(provider);
   return {
     provider,
     models,
     settingsPatch: {providers: upsertProvider(settings, provider), provider: provider.name},
-    message: `Added provider ${provider.name}. Choose a model.`,
+    message: `Added provider ${provider.name}. Choose a model.${divergence ? ` ${divergence}` : ''}`,
   };
 }
 
