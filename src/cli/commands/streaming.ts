@@ -15,7 +15,7 @@ import {isPlanOnlyRequest} from '../../core/goal/requestClassifier.js';
 import {userTurnMessage, type ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, lengthContinuationPrompt, completionRescuePrompt} from '../../core/goal/completionPolicy.js';
-import {calculateRequestTokenBudget, estimateValueTokens} from '../../core/agent/contextBudget.js';
+import {calculateRequestTokenBudget, estimateMessagesTokens, estimateValueTokens} from '../../core/agent/contextBudget.js';
 import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../core/agent/requestAssembly.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../core/agent/toolResults.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../core/agent/turnPolicy.js';
@@ -228,7 +228,7 @@ async function runAgentAttempt(
     // at an unchanged budget; further overflows get even smaller (RH-005).
     const overflowTargetTokens = contextOverflowRecovered ? Math.floor(requestBudget.messageTokens * 0.6) : requestBudget.messageTokens;
     let requestMessages = durableRequestMessages;
-    if (estimateValueTokens(requestMessages) > overflowTargetTokens) {
+    if (estimateMessagesTokens(requestMessages) > overflowTargetTokens) {
       requestMessages = compactModelMessages(requestMessages, {tokenBudget: overflowTargetTokens, workState: goal}).messages;
     }
     requestMessages = withoutSystemMessages(requestMessages);
@@ -357,7 +357,7 @@ async function runAgentAttempt(
         // Re-evaluate the accumulated request size before each provider call and
         // compact old tool history when it exceeds the model-aware budget, so a
         // long multi-step turn compacts before overflowing (RH-005).
-        if (estimateValueTokens(scopedMessages) > requestBudget.messageTokens) {
+        if (estimateMessagesTokens(scopedMessages) > requestBudget.messageTokens) {
           const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal}).messages;
           scopedMessages = compacted;
           messagesChanged = true;

@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {tool} from 'ai';
+import {tool, type ModelMessage} from 'ai';
 import {z} from 'zod';
-import {cacheHitRatio, calculateRequestTokenBudget, contextBreakdown, effectiveNonCachedInput, estimateTextTokens, estimateValueTokens, FALLBACK_CONTEXT_WINDOW_TOKENS, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
+import {cacheHitRatio, calculateRequestTokenBudget, contextBreakdown, effectiveNonCachedInput, estimateMessagesTokens, estimateTextTokens, estimateValueTokens, FALLBACK_CONTEXT_WINDOW_TOKENS, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
 
 describe('context budget', () => {
   it('accounts for system, messages, project context, and exact tool schemas', () => {
@@ -82,5 +82,23 @@ describe('calculateRequestTokenBudget', () => {
     const lean = calculateRequestTokenBudget({contextWindowTokens: 32_768, requestedOutputTokens: 4_096, system: 's', tools: {}});
     const heavy = calculateRequestTokenBudget({contextWindowTokens: 32_768, requestedOutputTokens: 4_096, system: 's', tools});
     expect(heavy.messageTokens).toBeLessThan(lean.messageTokens);
+  });
+});
+
+describe('memoized message estimation (F-07)', () => {
+  it('sums per-message estimates identically to whole-array estimation', () => {
+    const messages: ModelMessage[] = [
+      {role: 'user', content: 'hello world, this is a request'},
+      {role: 'assistant', content: [{type: 'text', text: 'an answer with some length to it'}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'c1', toolName: 'bash', output: {type: 'json', value: {ok: true}}}]},
+    ];
+    expect(estimateMessagesTokens(messages)).toBe(estimateValueTokens(messages));
+  });
+
+  it('re-estimating the same message objects is stable across calls', () => {
+    const messages: ModelMessage[] = [{role: 'user', content: 'stable '.repeat(50)}];
+    const first = estimateMessagesTokens(messages);
+    expect(estimateMessagesTokens([...messages, {role: 'user', content: 'more'}])).toBeGreaterThan(first);
+    expect(estimateMessagesTokens(messages)).toBe(first);
   });
 });

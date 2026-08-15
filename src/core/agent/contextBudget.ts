@@ -71,6 +71,38 @@ export function estimateValueTokens(value: unknown): number {
   }
 }
 
+/**
+ * Per-message token estimates memoized by object identity (F-07). History
+ * messages are treated as immutable everywhere in haze (compaction and
+ * synthetic-control wrapping produce new objects; response messages arrive
+ * fresh from the SDK), so a `prepareStep` that re-estimates the full history
+ * every provider call re-uses cached per-message values instead of
+ * re-stringifying the whole array each step.
+ */
+const messageTokenEstimates = new WeakMap<object, number>();
+
+export function estimateModelMessageTokens(message: ModelMessage): number {
+  const cached = messageTokenEstimates.get(message);
+  if (cached !== undefined) return cached;
+  const tokens = estimateValueTokens(message);
+  messageTokenEstimates.set(message, tokens);
+  return tokens;
+}
+
+/** Sum of per-message estimates for a history array, memoized per message object. */
+export function estimateMessagesTokens(messages: readonly ModelMessage[]): number {
+  let total = 0;
+  for (const message of messages) total += estimateModelMessageTokens(message);
+  return total;
+}
+
+export function estimateToolSchemas(tools: Record<string, unknown> = {}) {
+  return Object.entries(tools).map(([name, value]) => ({
+    name,
+    tokens: estimateTextTokens(toolSchemaText(value)),
+  }));
+}
+
 function toolSchemaText(toolValue: unknown) {
   if (typeof toolValue !== 'object' || toolValue == null) return '';
   const value = toolValue as {description?: unknown; inputSchema?: unknown};
@@ -84,13 +116,6 @@ function toolSchemaText(toolValue: unknown) {
     description: typeof value.description === 'string' ? value.description : undefined,
     inputSchema: schema,
   });
-}
-
-export function estimateToolSchemas(tools: Record<string, unknown> = {}) {
-  return Object.entries(tools).map(([name, value]) => ({
-    name,
-    tokens: estimateTextTokens(toolSchemaText(value)),
-  }));
 }
 
 function contentParts(message: ModelMessage) {
@@ -123,7 +148,7 @@ export function contextBreakdown(input: {
   let syntheticControl = 0;
 
   for (const message of input.messages) {
-    const tokens = estimateValueTokens(message);
+    const tokens = estimateModelMessageTokens(message);
     messagesByRole[message.role] = (messagesByRole[message.role] ?? 0) + tokens;
     if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith('<haze_control>')) {
       syntheticControl += tokens;
