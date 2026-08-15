@@ -7,15 +7,17 @@ import {findSession} from '../core/session/sessionStore.js';
 import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
 import {STDIN_PROMPT_BYTES} from '../core/limits/byteBudgets.js';
 import {readPackageVersion} from '../utils/version.js';
+import {formatVersionVerbose, readBuildInfo} from '../utils/buildInfo.js';
+import {runDoctor} from './commands/doctor.js';
 
 installBackgroundProcessSignalHandlers();
 const version = readPackageVersion() ?? '0.0.0';
-
 const program = new Command();
 program
   .name('haze')
   .description('A pragmatic, intentionally limited agentic CLI.')
-  .version(version)
+  .option('-V, --version', 'print the haze version (add --verbose for build provenance: commit, runtime paths, capabilities)')
+  .option('--verbose', 'with --version: also print commit, runtime/executable paths, and the capability registry')
   .option('--debug', 'show model/tool debug logs and write a detailed JSONL log to ~/.haze/logs/')
   .option('-c, --continue', 'resume the latest saved session for this workspace')
   .addOption(new Option('--resume <id>', 'resume an exact saved session id for this workspace').conflicts(['continue', 'session']))
@@ -90,8 +92,20 @@ async function readStdinPrompt(): Promise<string | undefined> {
   return undefined;
 }
 
+program.command('doctor')
+  .description('print runtime provenance (version, commit, executable/runtime paths), verify build integrity, and show the capability registry')
+  .action(async () => {
+    process.exitCode = await runDoctor();
+  });
+
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string; version?: boolean; verbose?: boolean}>();
+  if (opts.version) {
+    // Handled here (not via commander's built-in .version()) so --verbose can
+    // enrich it and the bin launcher can answer without loading dist.
+    process.stdout.write(opts.verbose ? `${formatVersionVerbose()}\n` : `${version}\n`);
+    return;
+  }
   // Name the terminal tab for the run; no-op unless stdout is a real TTY.
   installTerminalTitle(terminalTitleLabel(process.cwd()));
   // -p takes precedence; otherwise fall back to piped stdin. An empty stdin yields no prompt.
@@ -116,8 +130,15 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
-  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version});
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version, build: sessionBuildProvenance()});
 });
+
+/** Safe build provenance recorded into session headers (commit + build time only). */
+function sessionBuildProvenance(): {commit?: string; builtAt?: string} | undefined {
+  const info = readBuildInfo();
+  if (!info?.commit && !info?.builtAt) return undefined;
+  return {...(info?.commit ? {commit: info.commit} : {}), ...(info?.builtAt ? {builtAt: info.builtAt} : {})};
+}
 
 program.parseAsync().catch(async (error) => {
   console.error(error instanceof Error ? error.message : error);
