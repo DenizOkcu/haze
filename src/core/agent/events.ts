@@ -16,7 +16,7 @@ export type AgentEvent =
   | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
   | {type: 'goal_end'; goalId: string; at: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence}
   | {type: 'step_start'; attempt: number; step: number; at: string}
-  | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: AgentStepUsage; at: string}
+  | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: AgentStepUsage; responseModel?: string; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
   | {type: 'message_update'; id: string; text: string; at: string}
   | {type: 'message_end'; id: string; text: string; at: string; hidden?: boolean}

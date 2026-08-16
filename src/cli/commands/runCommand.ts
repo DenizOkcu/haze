@@ -45,7 +45,7 @@ type HeadlessStreamEvent =
   | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
   | {type: 'goal_end'; goalId: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
-  | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; at: string}
+  | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; responseModel?: string; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
   | {type: 'message_update'; id: string; delta: string; offset: number; at: string}
   | {type: 'message_end'; id: string; text: string; hidden?: boolean; at: string}
@@ -105,7 +105,7 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
     case 'step_start':
       return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
     case 'step_end':
-      return {type: 'step_end', attempt: event.attempt, step: event.step, finishReason: event.finishReason, toolCallCount: event.toolCallCount, usage: event.usage, at: event.at};
+      return {type: 'step_end', attempt: event.attempt, step: event.step, finishReason: event.finishReason, toolCallCount: event.toolCallCount, usage: event.usage, ...(event.responseModel ? {responseModel: event.responseModel} : {}), at: event.at};
     case 'message_start':
       return {type: 'message_start', id: event.id, role: event.role, at: event.at};
     case 'message_update':
