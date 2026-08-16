@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-08-16 for the 0.11.0 release.
+Last updated: 2026-08-17 for the 1.0.0 release.
 
 CLI and terminal UI orchestration instructions.
 

@@ -303,6 +303,85 @@
       background: var(--panel);
     }
 
+    .benchmark-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--rule-strong);
+    }
+
+    .benchmark-cell {
+      background: var(--panel);
+      padding: 1.1rem 1.25rem 1.25rem;
+    }
+
+    .benchmark-cell h3 {
+      margin: 0 0 0.2rem;
+      color: var(--ink);
+      font-size: 0.86rem;
+      font-weight: 500;
+    }
+
+    .benchmark-cell .bench-sub {
+      margin: 0 0 1rem;
+      color: var(--ink-3);
+      font-size: 0.72rem;
+    }
+
+    .bench-row {
+      display: grid;
+      grid-template-columns: 6.2rem 1fr 4.6rem;
+      align-items: center;
+      gap: 0.7rem;
+      margin: 0.55rem 0;
+    }
+
+    .bench-row .bench-label {
+      color: var(--ink-2);
+      font-size: 0.74rem;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .bench-row .bench-label strong { color: var(--ink); }
+
+    .bench-track {
+      height: 0.85rem;
+      background: var(--panel-2, rgba(255, 255, 255, 0.04));
+      border: 1px solid var(--rule);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bench-track .bench-fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      background: var(--terminal-muted);
+      opacity: 0.55;
+    }
+
+    .bench-row.is-haze .bench-fill {
+      background: var(--terminal-success);
+      opacity: 0.9;
+    }
+
+    .bench-row .bench-value {
+      color: var(--ink-2);
+      font-size: 0.74rem;
+      white-space: nowrap;
+    }
+
+    .bench-row.is-haze .bench-value { color: var(--ink); }
+
+    .bench-footnote {
+      margin: 0;
+      padding: 0.8rem 1.25rem 0.9rem;
+      color: var(--ink-3);
+      font-size: 0.72rem;
+      line-height: 1.6;
+      border-top: 1px solid var(--rule-strong);
+    }
+
     .capability-grid h3 {
       margin: 0 0 0.7rem;
       color: var(--accent-strong);
@@ -645,6 +724,7 @@
       .shell { padding-top: 1.5rem; }
       .brand { align-items: flex-start; }
       .top-links { flex-wrap: wrap; justify-content: flex-end; gap: 0.55rem 1rem; }
+      .benchmark-grid { grid-template-columns: 1fr; }
       .hero { padding-block: 2.5rem; }
       .copy-command { justify-content: space-between; width: 100%; }
       .capability-grid,
@@ -688,7 +768,7 @@
         <a href="skills.html">Skills</a>
         <a href="workflows.html">Workflows</a>
         <a class="resource-pill" href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v0.11.0</a>
+        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v1.0.0</a>
       </nav>
     </header>
 
@@ -752,6 +832,47 @@
         </div>
       </div>
 
+    </section>
+
+    <section class="section" aria-labelledby="benchmark-title">
+      <h2 class="section-title" id="benchmark-title">Measured against the harnesses you know</h2>
+      <div class="section-box">
+        <div class="benchmark-grid">
+          <div class="benchmark-cell">
+            <h3>Input tokens per solved task</h3>
+            <p class="bench-sub">lower is better · cache reads included · lower context per step means cheaper long sessions</p>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder used 90,422 input tokens"><i class="bench-fill" style="width: 16%"></i></span><span class="bench-value">90,422</span></div>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze used 92,320 input tokens"><i class="bench-fill" style="width: 17%"></i></span><span class="bench-value">92,320</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi used 101,817 input tokens"><i class="bench-fill" style="width: 19%"></i></span><span class="bench-value">101,817</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code used 549,062 input tokens"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">549,062</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Agent wall time per solved task</h3>
+            <p class="bench-sub">seconds · same task, same model, same backend for all four harnesses</p>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi finished in 149 seconds"><i class="bench-fill" style="width: 51%"></i></span><span class="bench-value">149 s</span></div>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze finished in 187 seconds"><i class="bench-fill" style="width: 64%"></i></span><span class="bench-value">187 s</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder finished in 233 seconds"><i class="bench-fill" style="width: 80%"></i></span><span class="bench-value">233 s</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code finished in 290 seconds"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">290 s</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Tool calls per solved task</h3>
+            <p class="bench-sub">total calls · haze reached the same result with 6 distinct tools, the others with 3–4</p>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze used 11 tool calls"><i class="bench-fill" style="width: 58%"></i></span><span class="bench-value">11</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi used 13 tool calls"><i class="bench-fill" style="width: 68%"></i></span><span class="bench-value">13</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder used 14 tool calls"><i class="bench-fill" style="width: 74%"></i></span><span class="bench-value">14</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code used 19 tool calls"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">19</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Shell invocations</h3>
+            <p class="bench-sub">shell calls only · in haze, file tools did the implementation and shell only validated</p>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze ran 3 shell commands"><i class="bench-fill" style="width: 25%"></i></span><span class="bench-value">3</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi ran 7 shell commands"><i class="bench-fill" style="width: 58%"></i></span><span class="bench-value">7</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder ran 9 shell commands"><i class="bench-fill" style="width: 75%"></i></span><span class="bench-value">9</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code ran 12 shell commands"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">12</span></div>
+          </div>
+        </div>
+        <p class="bench-footnote">Harbor differential benchmark, <code>csv-query</code> task (RFC-4180 CSV CLI, 17 verifier tests), 2026-08-16: haze 1.0.0 passed 17/17 like claude-code, nanocoder, and pi — every harness ran the identical <code>glm-5.3</code> model on the same backend, so differences isolate the harness. haze's 11 calls were readFile×3, listFiles×2, writeFile×1, editFile×1, shell×3, readToolOutput×1 — the bash-driven harnesses leaned on the terminal for both implementation and testing. haze completed in one goal cycle with structured passing validation and zero stalls. Full report with the per-step trajectory: <a href="https://github.com/DenizOkcu/haze/tree/main/benchmarks/harbor/results" target="_blank" rel="noopener">benchmarks/harbor/results</a>.</p>
+      </div>
     </section>
 
     <section class="section" aria-labelledby="capabilities-title">

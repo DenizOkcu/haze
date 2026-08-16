@@ -76,9 +76,11 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
   });
   const salvage: AttemptSalvage = {requestMessages: [], accumulated: []};
   let stallGuard: StreamStallGuard | undefined;
+  let setup: Awaited<ReturnType<typeof prepareAttempt>> | undefined;
   try {
-    const setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path)});
+    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path)});
     if (!setup) return {status: 'failed'};
+    const attemptSetupResult = setup;
     loadedMcp = setup.loadedMcp;
     lspPool = setup.lspPool;
     salvage.requestMessages = setup.requestMessages;
@@ -88,10 +90,11 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
       controller: abortController,
       abortCause,
       retryAttempt,
+      maxRetries: attemptSetupResult.modelRetries,
       classifyEmission: () => loopState.currentAssistantText.trim().length > 0 || loopState.assistantStarted ? 'text' : loopState.inFlightTools.size > 0 ? 'tool' : 'none',
       isToolInFlight: () => loopState.inFlightTools.size > 0,
-      provider: () => setup.runtime.config.providerName,
-      model: () => setup.runtime.config.modelName,
+      provider: () => attemptSetupResult.runtime.config.providerName,
+      model: () => attemptSetupResult.runtime.config.modelName,
       workPhase: () => goal.phase,
       stepsUsed: () => turnState.stepsUsed,
       onEvent: callbacks.onEvent,
@@ -102,7 +105,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
     const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage});
     return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream});
   } catch (error) {
-    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error});
+    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries});
   } finally {
     await cleanup.closeOnce(ATTEMPT_TEARDOWN_BOUND_MS);
     toolDisplay.finalizeToolGroup();

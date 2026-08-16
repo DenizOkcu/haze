@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.0 - 2026-08-16
+
+The first stable release. The CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape are now covered by the 1.x compatibility promise: breaking changes to them require a new major version.
+
+This release was validated with a differential Harbor benchmark (`local/csv-query`, glm-5.3, four harnesses — claude-code, nanocoder, pi, haze — same model and backend): haze 1.0.0 passed 17/17 verifier tests with the fewest input tokens of the reporting harnesses, a clean goal envelope (1 cycle, structured passing validation), and zero stalls; the four defects the benchmark surfaced earlier were all fixed on this line. Full report: `benchmarks/harbor/results/20260816-224944-glm53-differential.html`.
+
+### Added
+
+- Configurable model-retry pool (`modelRetries` setting, integer 0–10, default 2): the shared bounded pool that retries transient model errors and idle-stream stalls is no longer hardcoded. Providers that terminate long streams aggressively (Z.ai's OpenAI-compatible endpoint repeatedly stalled or terminated long streams, exhausting the old fixed pool of 2 and failing a 28-minute benchmark run) can now be given more headroom, and `0` disables automatic retries entirely (stalls pause with the goal preserved for an interactive resume). The effective pool size is reported in `timeout` and `retry` stream events (`maxRetries`) and in stall diagnostics, so headless consumers can see the configured bound.
+
+### Fixed
+
+All four defects below were surfaced by the csv-query differential benchmark (same model across harnesses isolates the harness) and carry regression coverage:
+
+- `writeFile` no longer shadows its own chunking guidance with a cryptic `AI_TypeValidationError`: the input schema previously capped `content` at 16 KiB, so an oversized single-chunk write died at Zod validation before `execute` could return the actionable `write_chunk_too_large` advice (write the first chunk, then `append=true`). Size policy now lives only in `execute`.
+- Reads fail open in Git-less workspaces again, restoring the documented contract: `readFile` threw `ignore_check_unavailable` when Git was absent (common in benchmark and container environments) instead of tolerating `unknown` ignore status. Mutations keep failing closed when ignore status is unverifiable.
+- The shell validation classifier is no longer JS-toolchain-biased: common Python, Go, Rust, Make, Maven, Gradle, Ruby, .NET, Deno, Bun, and Node test commands now count as bounded validation evidence, and direct, unchained execution of a file changed during the active goal also counts — so a successful `node tool.js … data.csv` run satisfies completion without crediting unrelated shell commands.
+- Custom checks are now visible to the completion gate: `shell` accepts `purpose=validation`, producing structured evidence from the real exit result for ad hoc assertion scripts. Missing-validation repair gets one focused slice, rejected summaries leave active model context, and mutation/revision churn no longer extends the goal. Deadline exits preserve cumulative evidence and report `goal-deadline`, not `user-aborted`.
+
+### Changed
+
+- `SECURITY.md` supported-series table now tracks the `1.x` major (security fixes for the latest published release; pre-1.0 versions require an upgrade).
+
 ## 0.11.0 - 2026-08-15
 
 ### Added

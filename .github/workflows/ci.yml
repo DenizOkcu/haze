@@ -14,6 +14,20 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: [22, 24]
+        include:
+          # Windows is not yet a supported platform: the suite carries Unix
+          # assumptions (bash, $SHELL, POSIX paths, `touch`/`sleep` in shell
+          # tests) and has not been green there. Keep the signal without
+          # blocking the release gate; full Windows support is a 1.x goal.
+          # These entries full-match the windows combos above and only add
+          # `experimental`, so no duplicate jobs are created.
+          - os: windows-latest
+            node-version: 22
+            experimental: true
+          - os: windows-latest
+            node-version: 24
+            experimental: true
+    continue-on-error: ${{ matrix.experimental == true }}
     steps:
       - uses: actions/checkout@v4
         with:

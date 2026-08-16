@@ -1,6 +1,6 @@
 # src/core/safety/AGENTS.md
 
-Last updated: 2026-08-15 for the 0.11.0 release.
+Last updated: 2026-08-17 for the 1.0.0 release.
 
 Safety classifiers and guards.
 

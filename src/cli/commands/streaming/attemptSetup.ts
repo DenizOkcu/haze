@@ -1,6 +1,7 @@
 import type {ModelMessage, ToolSet} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
+import {DEFAULT_MODEL_RETRIES} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy.js';
@@ -63,6 +64,8 @@ export interface AttemptSetup {
   contextFiles: ContextFile[];
   /** Tool category map from request assembly (builtin/lsp/subagent/skill/mcp). */
   toolCategories: Map<string, ToolCategory>;
+  /** Retry-pool size for this attempt's turn, from the `modelRetries` setting (default 2). */
+  modelRetries: number;
 }
 
 export interface AttemptSetupDeps {
@@ -220,5 +223,6 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     lspPool,
     contextFiles: activeContextFiles,
     toolCategories,
+    modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
   };
 }

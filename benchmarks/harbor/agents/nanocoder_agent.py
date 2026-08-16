@@ -80,13 +80,23 @@ class NanocoderAgent(BaseInstalledAgent):
             command="apt-get update && apt-get install -y curl bash procps",
             env={"DEBIAN_FRONTEND": "noninteractive"},
         )
-        version_spec = f"@{self._version}" if self._version else "@latest"
+        # A local tarball (mounted into the container, e.g. via harbor --mounts)
+        # takes precedence over the npm registry — used to benchmark unreleased
+        # local builds (e.g. the plain-mode token-telemetry work that reports
+        # usage.inputTokens/outputTokens in the JSON result).
+        local_tarball = (self._get_env("NANOCODER_LOCAL_TARBALL") or "").strip()
+        if local_tarball:
+            install_spec = local_tarball
+        elif self._version:
+            install_spec = f"@nanocollective/nanocoder@{self._version}"
+        else:
+            install_spec = "@nanocollective/nanocoder@latest"
         await self.exec_as_agent(
             environment,
             command=(
                 "set -euo pipefail; "
                 f"{nvm_node_install_snippet()} && "
-                f"npm install -g @nanocollective/nanocoder{version_spec} && "
+                f"npm install -g {install_spec} && "
                 "nanocoder --version"
             ),
         )
@@ -99,6 +109,8 @@ class NanocoderAgent(BaseInstalledAgent):
           NANOCODER_BASE_URL  Base URL of the OpenAI-compatible provider
         Optional env:
           NANOCODER_PROVIDER_NAME  Display name (default: "benchmark")
+          NANOCODER_LOCAL_TARBALL  Container path to a local .tgz build that
+                                   overrides the npm registry install
         """
         api_key = (self._get_env("NANOCODER_API_KEY") or "").strip()
         base_url = (self._get_env("NANOCODER_BASE_URL") or "").strip()

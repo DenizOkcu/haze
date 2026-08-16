@@ -51,6 +51,11 @@ export const SUBAGENT_MAX_DEADLINE_MS = 30 * 60_000;
 export const SUBAGENT_MAX_CONCURRENCY = 10;
 export const SUBAGENT_MAX_RETRIES = 5;
 
+/** Default size of the shared bounded model-retry pool for transient model errors and idle-stream stalls, per turn. Configurable via the `modelRetries` setting (0 disables automatic retries). */
+export const DEFAULT_MODEL_RETRIES = 2;
+/** Upper bound accepted for the `modelRetries` setting (mirrors the settings schema). */
+export const MAX_MODEL_RETRIES_SETTING = 10;
+
 // ── Turn-wide budget envelope ───────────────────────────────────────────────
 // Values are the existing global limits — recovery slices count against these
 // and must never increase them.

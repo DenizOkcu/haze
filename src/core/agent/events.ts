@@ -38,7 +38,9 @@ export type AgentEvent =
     /** Active work-state phase when the stall was detected. */
     workPhase?: string;
     /** Whether the stall rides the bounded model-retry pool. */
-    retryEligible?: boolean; at: string}
+    retryEligible?: boolean;
+    /** Size of the bounded model-retry pool in effect (`modelRetries` setting). */
+    maxRetries?: number; at: string}
   | {type: 'subagent_state'; id: string; state: 'queued' | 'started' | 'terminal' | 'settled'; mode: string; queued?: number; running: number; queueMs?: number; durationMs?: number; termination?: string; execution?: 'settled' | 'quarantined'; at: string};
 
 export type AgentEventSink = (event: AgentEvent) => void;

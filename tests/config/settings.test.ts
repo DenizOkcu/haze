@@ -198,4 +198,22 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow();
   });
 
+  it('parses the model retry-pool size and rejects implausible values loudly', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({modelRetries: 5});
+    expect((await readSettings()).modelRetries).toBe(5);
+    // Unset by default (DEFAULT_MODEL_RETRIES applies, nothing is written to disk).
+    await writeSettings({model: 'm'});
+    expect((await readSettings()).modelRetries).toBeUndefined();
+    // Negative, fractional, and absurd values fail loudly; 0 (disable retries) is legal.
+    await writeSettings({modelRetries: 0});
+    expect((await readSettings()).modelRetries).toBe(0);
+    await fs.writeJson(settingsFile, {modelRetries: -1});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {modelRetries: 1.5});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {modelRetries: 99});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
 });

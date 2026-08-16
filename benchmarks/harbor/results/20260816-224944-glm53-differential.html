@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Harbor differential benchmark report: haze (local build 7e66d7b) vs claude-code, nanocoder and pi, all on glm-5.3, csv-query task.">
+  <title>Harbor Differential Report / glm-5.3 / haze 7e66d7b / 20260816-224944</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0b0b;
+      --panel: #111313;
+      --panel-2: #171919;
+      --ink: #e8e9e5;
+      --muted: #9a9e99;
+      --faint: #5e625e;
+      --line: #353936;
+      --line-strong: #777c76;
+      --accent: #ff3b30;
+      --haze: #7fd4ff;
+      --pass: #4af626;
+      --warn: #ffb020;
+      --max: 1480px;
+      --sans: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+      opacity: 0.15;
+      background: repeating-linear-gradient(0deg, transparent 0, transparent 3px, rgba(0,0,0,.42) 3px, rgba(0,0,0,.42) 4px);
+    }
+    a { color: inherit; }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 0 28px 80px; }
+    header { border-bottom: 1px solid var(--line-strong); padding: 34px 0 22px; margin-bottom: 34px; }
+    .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .22em; color: var(--accent); text-transform: uppercase; margin: 0 0 10px; }
+    h1 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.03; margin: 0 0 14px; text-transform: uppercase; letter-spacing: .01em; }
+    h1 .dim { color: var(--faint); }
+    .sub { color: var(--muted); font-size: 17px; max-width: 980px; }
+    .sub code, td code, li code, p code { font-family: var(--mono); font-size: .92em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; }
+    h2 { font-family: var(--mono); font-size: 13px; letter-spacing: .24em; text-transform: uppercase; color: var(--ink); border-bottom: 1px solid var(--line-strong); padding-bottom: 8px; margin: 52px 0 20px; }
+    h2 .idx { color: var(--accent); margin-right: 10px; }
+    h3 { font-size: 19px; margin: 30px 0 10px; letter-spacing: .02em; }
+    table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 14px 0 8px; }
+    th { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); text-align: left; border-bottom: 1px solid var(--line-strong); padding: 8px 12px 8px 0; }
+    td { border-bottom: 1px solid var(--line); padding: 9px 12px 9px 0; vertical-align: top; }
+    tr.hl td { background: linear-gradient(90deg, rgba(127,212,255,.07), transparent 70%); }
+    .num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+    th.num { text-align: right; padding-right: 12px; }
+    .ok { color: var(--pass); font-family: var(--mono); }
+    .bad { color: var(--accent); font-family: var(--mono); }
+    .warn { color: var(--warn); font-family: var(--mono); }
+    .hz { color: var(--haze); }
+    .verdict { border: 1px solid var(--line-strong); background: var(--panel); padding: 18px 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 30px; font-size: 15px; }
+    .verdict b { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); display: block; font-weight: 400; margin-bottom: 2px; }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 22px; }
+    .card { border: 1px solid var(--line-strong); background: var(--panel); padding: 0 0 14px; }
+    .card > .head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); padding: 12px 18px; margin-bottom: 6px; }
+    .card > .head .t { font-size: 20px; letter-spacing: .02em; }
+    .card > .head .r { font-family: var(--mono); font-size: 13px; }
+    .card .body { padding: 8px 18px 0; font-size: 15px; color: var(--muted); }
+    .card .body strong { color: var(--ink); }
+    .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 18px; font-size: 14.5px; margin: 8px 0; }
+    .kv b { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 400; padding-top: 2px; }
+    .bars { margin: 10px 0 4px; }
+    .bar-row { display: grid; grid-template-columns: 120px 1fr 110px; gap: 12px; align-items: center; margin: 7px 0; font-size: 14.5px; }
+    .bar-row .lbl { font-family: var(--mono); font-size: 12.5px; color: var(--muted); text-align: right; }
+    .bar-row .bar { background: var(--panel-2); border: 1px solid var(--line); height: 20px; position: relative; }
+    .bar-row .bar i { position: absolute; inset: 1px auto 1px 1px; background: var(--line-strong); }
+    .bar-row.haze .bar i { background: var(--haze); }
+    .bar-row.haze .lbl { color: var(--haze); }
+    .bar-row .val { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+    .note { border-left: 3px solid var(--line-strong); background: var(--panel); padding: 12px 18px; margin: 16px 0; color: var(--muted); font-size: 15px; }
+    .note.finding { border-left-color: var(--warn); }
+    .note.defect { border-left-color: var(--accent); }
+    .note.good { border-left-color: var(--pass); }
+    .note b { color: var(--ink); }
+    .timeline { font-family: var(--mono); font-size: 13px; border: 1px solid var(--line); background: var(--panel); padding: 14px 18px; overflow-x: auto; white-space: pre; line-height: 1.75; }
+    .timeline .t { color: var(--faint); }
+    .timeline .tool { color: var(--haze); }
+    .timeline .fail { color: var(--accent); }
+    .timeline .pass { color: var(--pass); }
+    footer { border-top: 1px solid var(--line-strong); margin-top: 60px; padding-top: 18px; color: var(--faint); font-family: var(--mono); font-size: 12px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+    .pill { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .1em; border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 10px; margin: 0 6px 6px 0; color: var(--muted); }
+    .pill.hz { border-color: var(--haze); color: var(--haze); }
+    ul { padding-left: 22px; } li { margin: 6px 0; }
+    .sm { font-size: 13.5px; color: var(--faint); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="kicker">harbor differential benchmark · csv-query · glm-5.3 · 2026-08-16 22:49</p>
+  <h1>haze <span class="dim">vs</span> claude-code <span class="dim">·</span> nanocoder <span class="dim">·</span> pi</h1>
+  <p class="sub">Four agent harnesses ran the identical <code>local/csv-query</code> task against the identical model backend
+  (Z.ai Coding Subscription, served <code>glm-5.3</code>), four workers in parallel. The harness under test,
+  <strong>haze 0.11.0 built from commit <code>7e66d7b</code></strong>, ran as a read-only mounted local tarball.
+  Differences in outcome therefore isolate the harness, not the model.</p>
+</header>
+
+<div class="verdict">
+  <div><b>Verdict</b><span class="ok">CLEAN CELL — 4/4 pass</span></div>
+  <div><b>haze reward</b><span class="ok">1.0 · 17/17 verifier tests</span></div>
+  <div><b>haze-only failures</b><span class="ok">none</span></div>
+  <div><b>haze infra failures</b><span class="ok">none (clean exit envelope)</span></div>
+  <div><b>Release 1.0.0 blockers found</b><span class="ok">0</span></div>
+  <div><b>Signal quality</b><span class="warn">1 attempt per harness (anecdotal)</span></div>
+</div>
+
+<h2><span class="idx">01</span>Run configuration</h2>
+<table>
+  <tr><th>parameter</th><th>value</th></tr>
+  <tr><td>Task</td><td><code>local/csv-query</code> — dependency-free Node.js CSV filtering CLI (<code>--where</code>/<code>--select</code>/<code>--sort</code>), RFC-4180 quoted fields, exact output formatting, exit-code contracts. 17 deterministic pytest cases.</td></tr>
+  <tr><td>Model (requested / served)</td><td><code>glm-5.3</code> / provider reported <code>glm-5.3</code> in every haze step. Single backend for all four harnesses.</td></tr>
+  <tr><td>haze under test</td><td><strong class="hz">local build, commit <code>7e66d7b</code></strong> (“Add fixed-build run report…”), <code>0.11.0 @ 7e66d7b</code> build info, <code>npm pack</code> tarball (392,474 B, sha256 <code>8348b075…</code>) bind-mounted read-only at <code>/tmp/haze-7e66d7b.tgz</code>, installed via <code>HAZE_LOCAL_TARBALL</code>.</td></tr>
+  <tr><td>Baselines (pinned)</td><td>claude-code <code>2.1.233</code> · nanocoder <code>1.29.0</code> · pi <code>0.73.1</code></td></tr>
+  <tr><td>Endpoints</td><td>claude-code → <code>api.z.ai/api/anthropic</code>; nanocoder &amp; haze → <code>api.z.ai/api/coding/paas/v4/</code>; pi → built-in <code>zai</code> provider.</td></tr>
+  <tr><td>Execution</td><td>4 harbor jobs in parallel (one worker process per harness), 1 attempt each, agent timeout 900 s (haze goal deadline <code>--timeout 13m</code>), Docker environments deleted after each trial.</td></tr>
+  <tr><td>Job dirs</td><td><code>benchmarks/harbor/jobs/csv-query-{haze,claude-code,nanocoder}-glm53-20260816-224944</code>, <code>csv-query-pi-glm53-r2</code></td></tr>
+</table>
+
+<h2><span class="idx">02</span>Results matrix</h2>
+<table>
+  <tr>
+    <th>harness</th><th class="num">reward</th><th class="num">agent time</th><th class="num">steps</th>
+    <th class="num">tool calls</th><th class="num">in tokens¹</th><th class="num">· cache read</th>
+    <th class="num">out tokens</th><th class="num">cost</th><th>notes</th>
+  </tr>
+  <tr class="hl">
+    <td><strong class="hz">haze</strong> <span class="sm">0.11.0+7e66d7b</span></td>
+    <td class="num ok">1.0</td><td class="num">187 s</td><td class="num">11</td><td class="num">11</td>
+    <td class="num">92,320</td><td class="num">61,760</td><td class="num">11,388²</td><td class="num">n/a</td>
+    <td>1 goal cycle · structured validation passed · 0 stalls</td>
+  </tr>
+  <tr>
+    <td>pi <span class="sm">0.73.1</span></td>
+    <td class="num ok">1.0³</td><td class="num">149 s</td><td class="num">12 turns</td><td class="num">13</td>
+    <td class="num">101,817</td><td class="num">(incl.)</td><td class="num">8,934</td><td class="num">n/a</td>
+    <td>fastest; rerun after adapter auth fix (§06)</td>
+  </tr>
+  <tr>
+    <td>nanocoder <span class="sm">1.29.0</span></td>
+    <td class="num ok">1.0</td><td class="num">233 s</td><td class="num">15</td><td class="num">14</td>
+    <td class="num bad">n/a</td><td class="num bad">n/a</td><td class="num bad">n/a</td><td class="num">n/a</td>
+    <td>provider reports no token telemetry</td>
+  </tr>
+  <tr>
+    <td>claude-code <span class="sm">2.1.233</span></td>
+    <td class="num ok">1.0</td><td class="num">290 s</td><td class="num">17</td><td class="num">19</td>
+    <td class="num">549,062</td><td class="num">525,248</td><td class="num">16,448</td><td class="num">$0.79</td>
+    <td>slowest &amp; most token-heavy; bash-exploration style</td>
+  </tr>
+</table>
+<p class="sm">¹ Input-token accounting differs per harness (cache reads included where reported); columns are not directly comparable across harnesses — see §08.
+² Includes 5,831 reasoning tokens. ³ First pi attempt failed on benchmark infrastructure (auth), not the harness or model — see §06.</p>
+
+<h2><span class="idx">03</span>Comparisons</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="head"><span class="t">Agent wall time</span><span class="r">seconds · lower is better</span></div>
+    <div class="body">
+      <div class="bars">
+        <div class="bar-row haze"><span class="lbl">haze</span><span class="bar"><i style="width:64%"></i></span><span class="val">187 s</span></div>
+        <div class="bar-row"><span class="lbl">pi</span><span class="bar"><i style="width:51%"></i></span><span class="val">149 s</span></div>
+        <div class="bar-row"><span class="lbl">nanocoder</span><span class="bar"><i style="width:80%"></i></span><span class="val">233 s</span></div>
+        <div class="bar-row"><span class="lbl">claude-code</span><span class="bar"><i style="width:100%"></i></span><span class="val">290 s</span></div>
+      </div>
+      <p><strong>Reading:</strong> haze is second-fastest at 187 s while doing more verifier-relevant work per step
+      (11 steps for 11 tools, two steps batched two tools in parallel). pi wins raw speed with a lean read→write→edit→bash loop.
+      claude-code pays for a 19-call, 12×-Bash exploration strategy.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">Input tokens (cache incl.)</span><span class="r">as reported · see caveat</span></div>
+    <div class="body">
+      <div class="bars">
+        <div class="bar-row haze"><span class="lbl">haze</span><span class="bar"><i style="width:17%"></i></span><span class="val">92,320</span></div>
+        <div class="bar-row"><span class="lbl">pi</span><span class="bar"><i style="width:19%"></i></span><span class="val">101,817</span></div>
+        <div class="bar-row"><span class="lbl">nanocoder</span><span class="bar"><i style="width:4%"></i></span><span class="val">no data</span></div>
+        <div class="bar-row"><span class="lbl">claude-code</span><span class="bar"><i style="width:100%"></i></span><span class="val">549,062</span></div>
+      </div>
+      <p><strong>Reading:</strong> haze consumed the fewest input tokens of the reporting harnesses — 17% of claude-code’s
+      volume — despite one extra failed-validation round trip. Fresh (non-cached) input is a fairer cross-harness measure:
+      haze ~30.6K fresh vs claude-code ~23.8K fresh, with haze carrying a bigger, more diverse tool schema surface.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">Output tokens</span><span class="r">as reported</span></div>
+    <div class="body">
+      <div class="bars">
+        <div class="bar-row haze"><span class="lbl">haze</span><span class="bar"><i style="width:69%"></i></span><span class="val">11,388</span></div>
+        <div class="bar-row"><span class="lbl">pi</span><span class="bar"><i style="width:54%"></i></span><span class="val">8,934</span></div>
+        <div class="bar-row"><span class="lbl">nanocoder</span><span class="bar"><i style="width:4%"></i></span><span class="val">no data</span></div>
+        <div class="bar-row"><span class="lbl">claude-code</span><span class="bar"><i style="width:100%"></i></span><span class="val">16,448</span></div>
+      </div>
+      <p><strong>Reading:</strong> haze’s output includes 5.8K reasoning tokens (thinking budget) plus the full CLI
+      implementation (single 6.5K-token write step) and two validation narratives — efficiency is in the same class as pi.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">Tool-call profiles</span><span class="r">distinct tools in parentheses</span></div>
+    <div class="body">
+      <table>
+        <tr><th>harness</th><th class="num">calls</th><th>profile</th></tr>
+        <tr class="hl"><td class="hz">haze</td><td class="num">11 <span class="sm">(6)</span></td><td>readFile×3 · listFiles×2 · writeFile×1 · editFile×1 · shell×3 · readToolOutput×1</td></tr>
+        <tr><td>pi</td><td class="num">13 <span class="sm">(4)</span></td><td>read×3 · bash×7 · write×1 · edit×2</td></tr>
+        <tr><td>nanocoder</td><td class="num">14 <span class="sm">(3)</span></td><td>read_file×3 · write_file×2 · execute_bash×9</td></tr>
+        <tr><td>claude-code</td><td class="num">19 <span class="sm">(4)</span></td><td>Read×3 · Write×1 · Edit×3 · Bash×12</td></tr>
+      </table>
+      <p><strong>Reading:</strong> haze is the only harness that used directory discovery (<code>listFiles</code>) and
+      raw-output retrieval (<code>readToolOutput</code> — its bounded-output escape hatch). It needed the fewest shell
+      calls (3) to reach a passing state: file tools did the implementation work, shell did validation only.
+      The bash-heavy harnesses (12×, 9×, 7×) lean on the terminal for both.</p>
+    </div>
+  </div>
+</div>
+
+<h2><span class="idx">04</span>haze deep dive <span class="sm hz">(the build under test)</span></h2>
+
+<div class="grid2">
+  <div class="card">
+    <div class="head"><span class="t">Goal lifecycle envelope</span><span class="r ok">clean</span></div>
+    <div class="body">
+      <div class="kv">
+        <b>stop reason</b><span><span class="ok">completed</span> (structured, evidence-gated)</span>
+        <b>goal cycles</b><span>1 — no continuation turns needed</span>
+        <b>validation</b><span><span class="ok">passed</span> · kind=generic · afterMutation=<span class="ok">true</span></span>
+        <b>mutations</b><span>2 (writeFile + editFile)</span>
+        <b>recovery used</b><span>length=false · rescue=false · budgetBoundary=false</span>
+        <b>stalls / retries</b><span><span class="ok">0</span> timeout/retry/stall events</span>
+        <b>stream events</b><span>11 step_start/end · 744 message_update deltas · 1 result</span>
+        <b>exit</b><span><span class="ok">complete</span> — clean final envelope, no SIGKILL</span>
+      </div>
+      <p><strong>Interpretation:</strong> the completion gate accepted the final only after real validation evidence
+      existed (a passing ad-hoc assertion script run through <code>shell</code>), exactly the 0.11.0 contract.
+      No rescue slices, no budget continuation, no deadline pressure — the supervisor stayed out of the way.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">Verifier detail</span><span class="r ok">17/17 passed · 0.84 s</span></div>
+    <div class="body">
+      <p>All edge cases green, including the ones that historically break CSV implementations:</p>
+      <ul class="sm" style="columns:2">
+        <li>default all-columns row order</li>
+        <li>quoted field with spaces</li>
+        <li>value containing <code>=</code></li>
+        <li>multiple <code>--where</code> ANDed</li>
+        <li>no-match → header only</li>
+        <li>select reorder/duplicate</li>
+        <li>select multi-flag concat</li>
+        <li>lexicographic stable sort</li>
+        <li>embedded newline in quoted field</li>
+        <li>trailing newline ≠ empty row</li>
+        <li>unknown --where col → exit 2</li>
+        <li>unknown --select col → exit 2</li>
+        <li>unknown --sort col → exit 2</li>
+        <li>missing file → exit 2</li>
+        <li>unreadable file → exit 2</li>
+        <li>unclosed quote → exit 2</li>
+        <li>quoted <code>""</code> escapes</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h3>Step-by-step timeline (from the NDJSON stream)</h3>
+<div class="timeline"><span class="t">   0.0s</span> goal_start · turn_start
+<span class="t">   5.6s</span> step 1  <span class="tool">readFile + listFiles</span> (parallel batch)        in= 3,476  out=   41
+<span class="t">  10.4s</span> step 2  <span class="tool">readFile ×2</span> (SPEC + fixture, parallel)          in= 4,799  out=   79
+<span class="t">  94.4s</span> step 3  <span class="tool">writeFile</span> — full CLI implementation (~84s think)  in= 5,157  out=6,553
+<span class="t"> 102.5s</span> step 4  <span class="tool">editFile</span> — refinement                          in= 7,061  out=  424
+<span class="t"> 107.1s</span> step 5  <span class="tool">shell</span> — first validation run                     in= 7,651  out=   58
+<span class="t"> 133.7s</span> step 6  <span class="tool">shell</span> — broader assertion script    <span class="fail">success=false (260ms)</span>
+<span class="t"> 138.2s</span> step 7  <span class="tool">readToolOutput</span> — retrieve full failure output  in=11,567  out=   44
+<span class="t"> 144.5s</span> step 8  <span class="tool">listFiles</span> — re-scan workspace                     in=11,727  out=  135
+<span class="t"> 155.4s</span> step 9  (message only — analysis)                            in=11,680  out=  443
+<span class="t"> 170.9s</span> step 10 <span class="tool">shell</span> — corrected validation       <span class="pass">success=true</span>
+<span class="t"> 181.4s</span> step 11 final summary                                 in=11,963  out=  430
+<span class="t"> 181.4s</span> goal_end · result: <span class="pass">complete</span> · validation <span class="pass">passed</span></div>
+
+<div class="note good">
+  <b>The failed shell call (134.0 s) is the recovery loop working, not a defect.</b> The model wrote a 23-case scratch
+  assertion script; one case compared against a literal placeholder in the script itself. haze surfaced the non-zero
+  exit as structured failure (260 ms), the model pulled the full output via <code>readToolOutput</code> (bounded-output
+  retrieval doing its job), diagnosed its own script bug, re-ran corrected validation at 170.9 s — and the completion
+  gate only accepted the final after that passing evidence. Verifier later confirmed 17/17 independently.
+</div>
+<div class="note">
+  <b>Context discipline:</b> per-step input stays in a 3.5K–12K band across 11 steps (total 92K cumulative, 67% served
+  from cache). The 84-second step-3 “think” produced the whole implementation in one writeFile — no thrashing, no
+  rewrite cycles, one surgical editFile afterward. Mutation count for the whole goal: 2.
+</div>
+
+<h2><span class="idx">05</span>Per-harness notes</h2>
+<div class="grid2">
+  <div class="card">
+    <div class="head"><span class="t">claude-code 2.1.233</span><span class="r ok">1.0 · 290 s · $0.79</span></div>
+    <div class="body">
+      <p>17 steps, 19 tool calls: Read×3, Write×1, Edit×3, <strong>Bash×12</strong>. Largest token footprint by far
+      (549K in / 526K cache / 16.4K out) — its loop re-feeds a large cached context per step while iterating through
+      bash-driven testing (12 shell invocations vs haze’s 3). Only harness with cost telemetry. Correct result,
+      slowest path to it.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">nanocoder 1.29.0</span><span class="r ok">1.0 · 233 s</span></div>
+    <div class="body">
+      <p>15 steps, 14 calls: read_file×3, write_file×2, execute_bash×9. Correct result, middle of the pack on time.
+      Reports <strong>no token telemetry</strong> through its provider, so efficiency comparisons are impossible —
+      a persistent gap every run of this benchmark has recorded.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">pi 0.73.1</span><span class="r ok">1.0 · 149 s (rerun)</span></div>
+    <div class="body">
+      <p>12 turns, 13 calls: read×3, bash×7, write×1, edit×2. Fastest harness; lean output (8.9K). Its first attempt
+      this run never started (benchmark infra — see §06); the rerun with the auth overlay was clean end-to-end and
+      produced a correct CLI on the first write.</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="head"><span class="t">haze 0.11.0+7e66d7b</span><span class="r ok">1.0 · 187 s</span></div>
+    <div class="body">
+      <p>Fewest total tokens of reporting harnesses, fewest tool calls (11), most diverse tool use (6 distinct),
+      fewest shell calls (3), only clean structured-evidence envelope. One self-recovered validation failure.
+      <strong>Zero stalls/retries</strong> — notable because Z.ai stream termination cost haze a 28-minute failed
+      run on 2026-08-16 (see §07).</p>
+    </div>
+  </div>
+</div>
+
+<h2><span class="idx">06</span>Incident log · pi first attempt (benchmark infra, not pi)</h2>
+<div class="note finding">
+  <b>harbor 0.20.0’s built-in pi adapter does not forward <code>ZAI_API_KEY</code>.</b> Its provider→env-key allowlist
+  (anthropic, openai, groq, google, …) has no <code>zai</code> entry, so the key never reached pi’s container.
+  pi exited in ~1 s with <code>No API key found for zai</code> → trial recorded reward 0.0 via
+  <code>NonZeroAgentExitCodeError</code>. This is a false negative for pi, so the cell was rerun with the known
+  workaround (a docker-compose overlay injecting <code>ZAI_API_KEY</code>, matching the earlier
+  <code>csv-query-pi-key</code> job): rerun passed 1.0 in 149 s.
+  <br><br><b>Action item:</b> patch <code>run-benchmark.sh</code> to attach the pi auth overlay permanently, and/or
+  upstream the <code>zai</code> key mapping to harbor. Classified provider/infra-side; excluded from the harness
+  failure matrix.
+</div>
+
+<h2><span class="idx">07</span>Historical context · what this task already caught</h2>
+<p>csv-query is kept as a permanent regression task because it found four real haze defects on 2026-08-16
+(all fixed before this run — the tested <code>7e66d7b</code> contains the fixes):</p>
+<table>
+  <tr><th>#</th><th>defect (glm-5.2 era)</th><th>status</th><th>this run’s evidence</th></tr>
+  <tr><td>1</td><td><code>writeFile</code> schema shadowed its own chunking error (<code>AI_TypeValidationError</code> before actionable guidance)</td><td class="ok">fixed</td><td>entire CLI delivered in a single <code>writeFile</code> (6,553-token step) — no chunking/schema errors</td></tr>
+  <tr><td>2</td><td>reads failed closed in Git-less containers (<code>ignore_check_unavailable</code>)</td><td class="ok">fixed</td><td>5 read operations in a no-Git container, all success</td></tr>
+  <tr><td>3</td><td>validation classifier was JS-toolchain-biased</td><td class="ok">fixed</td><td>validation evidence formed from shell + direct node runs</td></tr>
+  <tr><td>4</td><td>custom checks invisible to the completion gate</td><td class="ok">fixed</td><td>goal completed only after structured <code>passed</code> validation evidence</td></tr>
+</table>
+<h3>Same cell, previous model (2026-08-16, glm-5.2, one attempt each)</h3>
+<table>
+  <tr><th>harness</th><th class="num">reward</th><th class="num">time</th><th class="num">in</th><th class="num">out</th><th>notes</th></tr>
+  <tr><td>claude-code</td><td class="num ok">1.0</td><td class="num">~249 s</td><td class="num">328,990</td><td class="num">10,797</td><td>clean</td></tr>
+  <tr><td>nanocoder</td><td class="num ok">1.0</td><td class="num">~242 s</td><td class="num bad">n/a</td><td class="num bad">n/a</td><td>no telemetry</td></tr>
+  <tr><td>pi</td><td class="num ok">1.0</td><td class="num">196 s</td><td class="num">108,701</td><td class="num">13,142</td><td>clean</td></tr>
+  <tr><td>haze <span class="sm">0.11.0+fixes</span></td><td class="num ok">1.0</td><td class="num">165 s</td><td class="num">57,538</td><td class="num">9,314</td><td>1 turn · 8 model calls · 9 tools</td></tr>
+</table>
+<p class="sm">glm-5.3 shifts every harness toward more steps/tokens (a chattier model); relative ordering is unchanged.
+Note: on that glm-5.2 run the provider already served <code>glm-5.3</code> — the “model drift” recorded then is
+confirmed normal behavior of the endpoint, not a one-off.</p>
+<div class="note defect">
+  <b>Still open from that era:</b> <code>MAX_MODEL_RETRIES = 2</code> is hardcoded in <code>stallRecovery.ts</code> —
+  small for Z.ai’s stream-termination behavior (one 28-minute failed run on 08-16). Making it configurable remains
+  the top pre-1.0.0 candidate. This run had zero stalls, so it validates the happy path only.
+</div>
+
+<h2><span class="idx">08</span>Interpretations &amp; caveats</h2>
+<ul>
+  <li><strong>No differential signal against haze.</strong> All four harnesses passed; no haze-only failure, no missing
+  envelope, no infra failure attributable to haze. Under the benchmark protocol this cell produces <strong>zero fixes</strong> for 1.0.0.</li>
+  <li><strong>Efficiency class:</strong> haze’s token discipline (fewest input tokens, 67% cache hit, no rewrite
+  thrash, 2 mutations total) is genuine harness behavior — same model, same task as the 549K-token claude-code run.
+  Its wall-time is second, not first, because step 3 spent 84 s composing the entire implementation in one pass
+  (a correctness-friendly trade: one write + one edit vs nanocoder/pi/cc’s multi-bash iteration).</li>
+  <li><strong>Architecture visible in the trajectory:</strong> parallel tool batching (steps 1–2), bounded output +
+  retrieval (step 7), evidence-gated completion (final accepted only after step 10’s passing shell), goal supervisor
+  idle as designed (1 cycle). All 0.11.0 headline behaviors exercised, none misfired.</li>
+  <li><strong>Token columns are not cross-harness comparable:</strong> cache-read inclusion differs (haze/pi/cc include
+  it; nanocoder reports nothing; cc additionally bills $0.79). Compare deltas within a harness across runs, not
+  absolute numbers across harnesses.</li>
+  <li><strong>n = 1 per harness.</strong> Per the protocol, differences at this sample size are anecdotal; the release
+  gate requires 3 attempts per cell plus two consecutive clean weekly differentials before tagging 1.0.0.</li>
+  <li><strong>Model attribution:</strong> provider served <code>glm-5.3</code> for a <code>glm-5.3</code> request in
+  every haze step (per-step <code>responseModel</code> recorded) — no drift this time.</li>
+</ul>
+
+<h2><span class="idx">09</span>Reproduce</h2>
+<div class="timeline">cd benchmarks/harbor
+# build + stage the local tarball (commit 7e66d7b)
+npm run build && npm pack && cp denizokcu-haze-0.11.0.tgz .run/haze-7e66d7b.tgz
+
+# four parallel workers (one per harness); haze mounts the tarball via
+#   --mounts '[{"type":"bind","source":".run/haze-7e66d7b.tgz","target":"/tmp/haze-7e66d7b.tgz","read_only":true}]'
+#   with HAZE_LOCAL_TARBALL=/tmp/haze-7e66d7b.tgz in the env file
+PYTHONPATH=agents .venv/bin/harbor run --path tasks --agent haze_agent:HazeAgent \
+  --model glm-5.3 --ak version=0.11.0 --env-file .run/diff.env \
+  --n-attempts 1 --n-concurrent 1 --jobs-dir jobs --yes --delete \
+  --job-name csv-query-haze-glm53-&lt;stamp&gt; --mounts '…'
+
+# pi needs the zai auth overlay until harbor forwards ZAI_API_KEY:
+#   --extra-docker-compose .run/pi-zai-compose.yml   (keys: ZAI_API_KEY)
+
+harbor view jobs/&lt;job-name&gt;        # trajectory browser</div>
+
+<footer>
+  <span>harbor 0.20.0 · docker · glm-5.3 via z.ai coding subscription</span>
+  <span>haze 0.11.0 @ 7e66d7b · 2026-08-16 22:49–23:03 CEST · report generated 2026-08-16</span>
+</footer>
+
+</div>
+</body>
+</html>

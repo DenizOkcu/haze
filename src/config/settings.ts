@@ -92,6 +92,13 @@ export interface HazeSettings {
   contextWindowFallbackTokens?: number;
   localContextWindowFallbackTokens?: number;
   /**
+   * Size of the shared bounded model-retry pool for transient model errors and
+   * idle-stream stalls, per turn. Unset means the built-in default of 2. Raise
+   * it for providers that terminate long streams aggressively (e.g. some
+   * OpenAI-compatible gateways); 0 disables automatic retries.
+   */
+  modelRetries?: number;
+  /**
    * Manual `/compact` mode (F-09): `llm-summary` (default) asks the active
    * model to summarize the older history; `heuristic` keeps the bounded
    * excerpt without a model call. Automatic mid-turn compaction is always
@@ -155,6 +162,9 @@ const subagentSettingsSchema = z.object({
 /** Fallback windows must be plausible positive token counts (not fractions/junk). */
 const contextWindowFallbackSchema = z.number().int().min(1_000).max(10_000_000);
 
+/** Retry-pool size must be a small non-negative count (0 disables retries). */
+const modelRetriesSchema = z.number().int().min(0).max(10);
+
 const settingsSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -166,6 +176,7 @@ const settingsSchema = z.object({
   reasoning: reasoningLevelSchema.optional(),
   contextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   localContextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
+  modelRetries: modelRetriesSchema.optional(),
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   apiKey: z.string().optional(),

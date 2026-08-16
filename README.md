@@ -2,19 +2,18 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 0.11.0
+## What's new in 1.0.0
 
-haze 0.11.0 turns per-turn budgets into goal-level autonomy and hardens long-running headless work. It keeps the Node.js 22 support floor and the documented CLI, settings, session, skill, and tool-result contracts.
+haze 1.0.0 is the first stable release: the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape are now covered by the 1.x compatibility promise. It also lands a configurable model-retry pool and the four benchmark-driven reliability fixes below.
 
-- Autonomous goal continuation across physical turns: a voluntary final that arrives while the turn's declared task list still has pending items or post-edit validation is missing/stale/failed is rejected (prose is never completion evidence), and a logical-goal supervisor wraps each request, so a turn that stops with unfinished work — at any budget boundary, including `tool-calls` finishes — automatically starts the next continuation turn against the preserved conversation. One mutation lease and cumulative task/validation/mutation evidence carry across the boundary, so completed work is never replayed and nothing resets. It continues while measurable progress occurs and stops only for structured completion, concrete external blockers, user cancellation, the goal deadline, or one corrective physical turn without measurable outcome progress. Interactively, continuation is automatic with a visible cycle status; headless `--timeout` bounds the whole logical goal, `stream-json` gains `goal_start`/`goal_continue`/`goal_end` events, the JSON result envelope gains cumulative `goal` evidence, and the exit code stays non-zero unless the goal structurally completed.
-- Runtime provenance and stale-install protection: builds embed `dist/buildInfo.json`, the launcher refuses incomplete or stale builds with an actionable rebuild hint, `haze --version --verbose` prints executing version/commit/runtime paths, and the new `haze doctor` command verifies artifacts, capabilities, and nearby-checkout mismatches. Session headers record the executing build so saved failures tie to the code that actually ran.
-- Model-aware context budgeting: the message allowance is the model's real context window (curated per-preset limits, live provider discovery, or a configurable fallback of 128K) minus system prompt, tool schemas, output reserve, and safety margin. Long turns compact accumulated tool history before each provider request, and provider context overflows self-heal in interactive and headless runs by compacting and retrying once.
-- Long-running hardening: headless `--timeout <duration>` bounds total elapsed time with `timeout` stream events, per-tool execution deadlines (10m; 20m for subagents) quarantine abort-ignoring tools, main tool-call budgets are enforced atomically at the execution boundary, and `--output stream-json` emits linear `message_update` deltas through a backpressure-aware ordered sink. Model-stream idle stalls are distinguished from user cancels: they retry through the bounded model-retry pool (salvaging work to the last completed step) and, when exhausted, pause the turn with a one-key `R` resume instead of discarding it.
-- Performance: `listFiles` batches Git ignore checks and prunes ignored directories, LSP navigation reuses one initialized server per turn, session snapshots are coalesced and vacuumed (no more quadratic session-file growth), per-step request estimates are memoized, the transcript caches settled Markdown chunks, streaming renders incrementally (no flicker), and the live region is clamped to the viewport so a long live tail never wipes terminal scrollback.
-- Manual `/compact` asks the active model for a continuity summary (goal, decisions, files, validation results, next action) and keeps the recent tail verbatim; set `manualCompaction: "heuristic"` for the previous bounded excerpt. Mutation tools fail closed when Git ignore checks cannot run, and the completion-rescue slice covers `test`-intent requests.
+- Configurable model-retry pool: the `modelRetries` setting (integer 0–10, default 2) sizes the shared bounded pool that retries transient model errors and idle-stream stalls. Raise it for providers that terminate long streams aggressively; `0` disables automatic retries (stalls pause with the goal preserved for a one-key resume). The effective pool size is visible in `timeout`/`retry` stream events (`maxRetries`) and stall diagnostics.
+- Benchmark-hardened completion evidence (found by the csv-query differential benchmark — same model across four harnesses isolates the harness): `writeFile` chunking guidance can no longer be shadowed by schema validation, reads fail open in Git-less workspaces while mutations still fail closed, the shell validation classifier recognizes Python/Go/Rust/Make/Maven/Gradle/Ruby/.NET/Deno/Bun test commands plus direct runs of files changed this goal, and `shell` accepts `purpose=validation` so ad hoc assertion scripts become structured completion evidence.
+- Validated with a differential Harbor benchmark on glm-5.3 (claude-code, nanocoder, pi, haze): haze passed 17/17 verifier tests with the fewest input tokens of the reporting harnesses, a clean goal envelope (1 cycle, structured passing validation), and zero stalls. Full report under [`benchmarks/harbor/results`](https://github.com/DenizOkcu/haze/tree/main/benchmarks/harbor/results).
+- Carried from 0.11.0: autonomous goal continuation across physical turns, runtime provenance and stale-install protection, model-aware context budgeting, headless `--timeout`, per-tool deadlines, incremental streaming, and model-written `/compact` summaries.
 
 Previous releases:
 
+- `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
 - `0.10.1`: OpenAI Subscription OAuth preset, SECURITY.md and the attended-use threat model, bounded completion recovery, compact colorized diffs, prompt-injection framing, hardened fetch/stdin/sessions, and a multi-page docs site.
 
 - `0.10.0`: image input, read-only path blessings, isolated fleet workers, managed background processes, session browsing and forking, model discovery, project skills, and rotating tips.
@@ -49,6 +48,8 @@ haze keeps guardrails light. The LLM can work from the terminal with access clos
 There is **no sandbox and no permission layer**: the shell tool runs unsupervised in your login shell (its classification is informational only), and only the file tools are confined to the workspace. Claude Code gates tools behind permissions, plan mode, and hooks; Codex CLI runs in an OS sandbox with approval modes; haze, like pi, replaces those mechanisms with your supervision. That trade-off is deliberate and keeps the agent fast and transparent, but it also means haze is **not an unattended automation runtime** — run it where you would run a shell session yourself. If a CI job runs haze headless, treat the job the way you would treat any script with shell access. SECURITY.md documents the attended-use threat model in full.
 
 ## Getting started
+
+haze runs on macOS and Linux with Node.js 22 or newer. Windows is not yet a supported platform (the toolchain assumes a POSIX shell); it is on the 1.x roadmap.
 
 Install haze:
 
@@ -373,6 +374,14 @@ haze loads project instructions from:
 At the same scope, `AGENTS.md` overrides `CLAUDE.md`; global haze guidance in `~/.haze/AGENTS.md` overrides global Claude guidance in `~/.claude/CLAUDE.md`. Nested `CLAUDE.md` / `AGENTS.md` files below the workspace are scoped: haze surfaces them only when file tools operate inside that directory or its subdirectories, injects newly discovered scoped guidance into the next model step, and mutating tools stop once so the model can review it before editing. Scoped context files are tracked by signature, so changed nested guidance can be read again later in the same session.
 
 Use `AGENTS.md` for project conventions, commands, architecture notes, and anything you do not want to explain again. Because context files are added to every request, `/init` keeps its discovery pass small, preserves useful existing guidance, and asks for a compact file.
+
+## Optional settings
+
+Most haze behaviour needs no configuration; a few optional keys in `~/.haze/settings.json` tune reliability and context handling. All are validated loudly — malformed values fail with a clear settings error instead of being silently ignored.
+
+- `modelRetries` (integer 0–10, default 2): size of the shared bounded retry pool for transient model errors and idle-stream stalls. Raise it for providers that terminate long streams aggressively; `0` disables automatic retries (a stalled stream pauses with the goal preserved for a one-key resume). The effective value is reported in `timeout` and `retry` stream events as `maxRetries`.
+- `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
+- `manualCompaction` (`"llm-summary"` default, or `"heuristic"`): whether manual `/compact` asks the active model for a continuity summary or keeps the model-free bounded excerpt.
 
 ## Safety model
 

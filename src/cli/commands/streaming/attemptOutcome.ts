@@ -3,13 +3,13 @@ import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification} from '../../../core/agent/completionController.js';
-import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
+import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, DEFAULT_MODEL_RETRIES, type TurnBudget} from '../../../core/agent/budgets.js';
 import {deriveValidationOutcome} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume} from './goalCheckpoint.js';
 import {formatSeconds} from '../formatters.js';
 import {retryDelayMs} from './turnRuntime.js';
-import {formatIdleMinutes, MAX_MODEL_RETRIES, salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
+import {formatIdleMinutes, salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
 import type {TurnAbortCause} from './abortCause.js';
 import type {AttemptStreamOutcome} from './streamLoop.js';
 import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
@@ -172,6 +172,8 @@ export interface AttemptFailureDeps {
   stallGuard: StreamStallGuard | undefined;
   salvage: AttemptSalvage;
   error: unknown;
+  /** Retry-pool size for this turn (`modelRetries` setting); defaults to DEFAULT_MODEL_RETRIES. */
+  maxRetries?: number;
 }
 
 /**
@@ -182,6 +184,7 @@ export interface AttemptFailureDeps {
  */
 export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResult {
   const {value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error} = deps;
+  const maxRetries = deps.maxRetries ?? DEFAULT_MODEL_RETRIES;
   if (abortController.signal.aborted) {
     if (abortCause.kind === 'model-stream-idle') {
       // Transport stall, not a user cancel. Preserve completed work first: the
@@ -191,8 +194,8 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       salvageConversationToLastStep(callbacks, salvage);
       if (stallGuard?.retryEligible) {
         const delay = retryDelayMs(retryAttempt);
-        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: MAX_MODEL_RETRIES, delayMs: delay, error: `model stream idle for ${formatSeconds(IDLE_TIMEOUT_MS)}`}));
-        callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; retrying attempt ${retryAttempt + 1}/${MAX_MODEL_RETRIES} in ${formatSeconds(delay)}. Completed steps are preserved.`});
+        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: `model stream idle for ${formatSeconds(IDLE_TIMEOUT_MS)}`}));
+        callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}. Completed steps are preserved.`});
         // freshController: this stall aborted the controller to kill the hung
         // stream; the retry needs a live signal.
         return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay, freshController: true}};
@@ -236,11 +239,11 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       : 'Context overflow detected, and this mode does not attempt automatic compaction. Resume the session interactively or retry with a smaller request.'});
   }
   // Transient model errors share the bounded retry pool with idle-stream
-  // stalls, so a turn can never retry more than MAX_MODEL_RETRIES times total.
-  if (retryAttempt < MAX_MODEL_RETRIES && isRetryableModelError(error)) {
+  // stalls, so a turn can never retry more than its configured total.
+  if (retryAttempt < maxRetries && isRetryableModelError(error)) {
     const delay = retryDelayMs(retryAttempt);
-    callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: MAX_MODEL_RETRIES, delayMs: delay, error: text}));
-    callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${MAX_MODEL_RETRIES} in ${formatSeconds(delay)}: ${text}`});
+    callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
+    callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
     return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay}};
   }
   callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});

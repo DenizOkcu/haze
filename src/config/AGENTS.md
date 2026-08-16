@@ -1,13 +1,13 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-08-15 for the 0.11.0 release.
+Last updated: 2026-08-17 for the 1.0.0 release.
 
 Runtime configuration, paths, context files, and provider/server settings.
 
 ## Responsibilities
 
 - `paths.ts` defines haze's user-data roots such as `~/.haze` and global skills paths.
-- `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types.
+- `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types. Optional tunables (`modelRetries`, `contextWindowFallbackTokens`, `localContextWindowFallbackTokens`, `manualCompaction`, …) are validated loudly at parse time and left unset on disk when defaulted.
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
 - `providerPresets.ts` contains UI presets for provider setup; do not make presets active implicitly. `modelDiscovery.ts` performs bounded OpenAI-compatible `/models` discovery for pickers and falls back to manual entry on failure.
 - `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.
