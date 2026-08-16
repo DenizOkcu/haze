@@ -296,14 +296,14 @@ haze has a small built-in toolset:
 - `editFile` makes unique text replacements, tolerates accidental line-number prefixes, and returns a structured diff.
 - `replaceLines` edits line ranges when exact replacements are awkward, clamps ranges that extend slightly past EOF, and returns a structured diff.
 - `writeFile` creates, overwrites, or appends files and parent directories, returning a diff for each successful content change.
-- `bash` runs tests, builds, git and gh commands, scripts, installs, and other shell work. It trims output according to the command type while keeping useful failure details. A timeout or abort kills the process tree, escalates if necessary, and returns even when an escaped child keeps stdout or stderr open.
+- `shell` runs tests, builds, git and gh commands, scripts, installs, and other command-line work in your configured login shell. Set `HAZE_SHELL` to an explicit executable for deterministic CI or service accounts. Its schema identifies the active shell dialect. Output is trimmed according to the command type while preserving useful failure details. A timeout or abort kills the process tree, escalates if necessary, and returns even when an escaped child keeps stdout or stderr open.
 - `readToolOutput` pages through retained raw output omitted from oversized or reduced results, subject to in-memory budgets.
 - `fetch` reads public `http(s)` URLs as Markdown, formatted JSON, or text. It rejects non-HTTP schemes, private and loopback addresses, metadata hosts, and malformed IPv6-like hosts. Bounded output remains available through `readToolOutput`.
 - `writeTasks` replaces the task list at meaningful phase changes. Completed lists clear on the next user turn.
 - `skill` loads an installed Markdown workflow or one of its references.
 - `lspWorkspaceSymbols`, `lspSymbols`, `lspDefinition`, and `lspReferences` provide optional read-only navigation through configured language servers. They appear only when an enabled server command is installed.
 
-Tool calls are grouped in the transcript so you can see what happened without reading a novella. Every successful `editFile`, `replaceLines`, and `writeFile` content change shows colored additions and removals with line numbers and context. Large diffs keep an eight-row preview—the first four and last four rows, separated by an omission marker—and expose the complete retained diff through `readToolOutput`; no-op mutations are labeled explicitly. File-tool failures include a reason code and a recovery hint. Large bash, search, and fetch results stay behind an in-memory handle. Later model calls see a compact summary tailored to validation, git, search, diffs, JSON, logs, or the head and tail of the output.
+Tool calls are grouped in the transcript so you can see what happened without reading a novella. Every successful `editFile`, `replaceLines`, and `writeFile` content change shows colored additions and removals with line numbers and context. Large diffs keep an eight-row preview—the first four and last four rows, separated by an omission marker—and expose the complete retained diff through `readToolOutput`; no-op mutations are labeled explicitly. File-tool failures include a reason code and a recovery hint. Large shell, search, and fetch results stay behind an in-memory handle. Later model calls see a compact summary tailored to validation, git, search, diffs, JSON, logs, or the head and tail of the output.
 
 ### Optional LSP navigation
 
@@ -326,7 +326,7 @@ A subagent is a disposable worker with its own context. It is useful for a repos
 
 The worker receives a bounded description of its objective, deliverable, mode, and scope. It does not see the main conversation or sibling conversations, and it loads the relevant `AGENTS.md` or `CLAUDE.md` files itself. Only its compact result returns to the parent model. Tool logs, timings, usage, and estimated context savings stay out of that context.
 
-The available modes are `inspect` (read-only), `research` (read-only with public fetch), `implement` (file changes and coordinated bash), and `validate` (reads and coordinated bash). Read-only modes cannot change files. Workers that can make changes are serialized with each other and with changes from the main turn. This coordination is not a shell sandbox.
+The available modes are `inspect` (read-only), `research` (read-only with public fetch), `implement` (file changes and coordinated shell access), and `validate` (reads and coordinated shell access). Read-only modes cannot change files. Workers that can make changes are serialized with each other and with changes from the main turn. This coordination is not a shell sandbox.
 
 Tool-call budgets apply to each execution, including calls submitted together. At the deadline, haze returns a terminal result and aborts the worker. If the underlying code ignores the abort, haze quarantines it and keeps its actual concurrency and mutation slot occupied until it settles. Retries stay within the same turn scope. Result handles exist only in the current process and are not durable, so each compact deliverable must stand on its own.
 
@@ -380,7 +380,7 @@ haze is designed for attended use by an experienced developer on a single-user m
 
 Ordinary file and tool output is data, not instructions. The system prompt says that fetched content, MCP/LSP output, and files outside the workspace cannot override its rules. Project context files and project skills are the exceptions: haze loads them as designated instruction sources, labels them as repository-provided content, and keeps them below system and user instructions in priority. Prompt injection cannot be eliminated by labeling alone, so user supervision remains part of the security boundary.
 
-Bash classification is informational. haze does not ask for confirmation before running commands, including commands that can mutate or delete data. This is an intentional trade-off for attended expert use, not a sandbox or permission boundary.
+Shell classification is informational. haze does not ask for confirmation before running commands, including commands that can mutate or delete data. This is an intentional trade-off for attended expert use, not a sandbox or permission boundary.
 
 - Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
 - A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access.

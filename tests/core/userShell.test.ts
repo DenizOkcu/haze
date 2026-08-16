@@ -1,7 +1,7 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {resolveUserShell, shellInvocation} from '../../src/core/process/userShell.js';
+import {resolveUserShell, shellDialect, shellInvocation, shellSyntaxGuidance} from '../../src/core/process/userShell.js';
 
 const run = promisify(execFile);
 
@@ -15,9 +15,31 @@ describe('user shell resolution', () => {
     expect(resolveUserShell()).toBe('/bin/zsh');
   });
 
+  it('uses an explicit HAZE_SHELL override for deterministic automation', () => {
+    vi.stubEnv('SHELL', '/usr/local/bin/fish');
+    vi.stubEnv('HAZE_SHELL', '/bin/bash');
+    expect(resolveUserShell()).toBe('/bin/bash');
+  });
+
   it('falls back to /bin/bash without $SHELL', () => {
+    vi.stubEnv('HAZE_SHELL', '');
     vi.stubEnv('SHELL', '');
     expect(resolveUserShell()).toBe('/bin/bash');
+  });
+});
+
+describe('shell dialect guidance', () => {
+  it('identifies supported syntax families', () => {
+    expect(shellDialect('/bin/zsh')).toBe('posix');
+    expect(shellDialect('/usr/local/bin/fish')).toBe('fish');
+    expect(shellDialect('/bin/tcsh')).toBe('csh');
+    expect(shellDialect('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe('powershell');
+    expect(shellDialect('C:\\Windows\\System32\\cmd.exe')).toBe('cmd');
+  });
+
+  it('warns non-POSIX shells not to use POSIX assignment syntax', () => {
+    expect(shellSyntaxGuidance('/bin/tcsh')).toContain('do not use POSIX variable-assignment syntax');
+    expect(shellSyntaxGuidance('/usr/local/bin/fish')).toContain('do not use POSIX variable-assignment syntax');
   });
 });
 

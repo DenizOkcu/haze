@@ -723,7 +723,7 @@
               <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">readFile</span> src/middleware/session.ts · 142 lines</div>
               <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">editFile</span> src/middleware/session.ts · +6 -2</div>
               <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">writeFile</span> tests/session-eviction.test.ts · new file</div>
-              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">bash</span> npm test · 128 passed</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">shell</span> npm test · 128 passed</div>
             </div>
 
             <div class="terminal-message">
@@ -793,7 +793,7 @@
           <li>
             <h3>Commands that stay alive</h3>
             <p>Run tests and builds in the foreground, or keep up to five managed dev servers and watchers alive while the agent works.</p>
-            <pre class="mini-terminal" aria-label="Background process example"><span class="success">✓</span> bash     npm run dev
+            <pre class="mini-terminal" aria-label="Background process example"><span class="success">✓</span> shell    npm run dev
   <span class="prompt">background-1</span> <span class="muted">running on :3000</span>
 <span class="success">✓</span> process  output background-1</pre>
           </li>
@@ -814,7 +814,7 @@
       <div class="section-box principle-grid">
         <article>
           <h3>Workspace boundaries without approval loops</h3>
-          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: bash runs with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
+          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: shell commands run with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
           <pre class="mini-terminal" aria-label="Workspace guardrail example"><span class="prompt">workspace</span>   current directory
 <span class="prompt">.gitignore</span>  respected by default
 <span class="prompt">@ui.png</span>    attached for vision</pre>

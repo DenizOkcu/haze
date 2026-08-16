@@ -1,13 +1,13 @@
 import {describe, expect, it} from 'vitest';
-import {filterBashOutput} from '../../../src/core/bashOutput/registry.js';
+import {filterShellOutput} from '../../../src/core/shellOutput/registry.js';
 
 function compact(text: string, maxChars = 12000) {
   if (text.length <= maxChars) return {text, truncated: false};
   return {text: text.slice(0, maxChars), truncated: true, omittedChars: text.length - maxChars, handle: 'compact-handle'};
 }
 
-function base(input: Partial<Parameters<typeof filterBashOutput>[0]> = {}) {
-  return filterBashOutput({
+function base(input: Partial<Parameters<typeof filterShellOutput>[0]> = {}) {
+  return filterShellOutput({
     command: 'echo ok',
     code: 0,
     stdout: '',
@@ -20,7 +20,7 @@ function base(input: Partial<Parameters<typeof filterBashOutput>[0]> = {}) {
   });
 }
 
-describe('bash output filter registry', () => {
+describe('shell output filter registry', () => {
   it('applies language-neutral line filters and keeps raw handle for lossy output', () => {
     const rows = Array.from({length: 70}, (_, index) => `container-${index} image-${index} running`).join('\n');
     const result = base({command: 'docker ps', stdout: `CONTAINER ID IMAGE STATUS\n${rows}\n`});

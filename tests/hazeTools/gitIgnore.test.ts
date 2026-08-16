@@ -41,18 +41,60 @@ describe('in-process ignore classifier', () => {
   });
 
   it('handles paths with spaces and unusual names', async () => {
-    await fs.writeFile(path.join(tmp, '.gitignore'), 'my file.txt\n');
+    const backslashName = `back${String.fromCharCode(92)}slash`;
+    await fs.writeFile(path.join(tmp, '.gitignore'), `my file.txt\nback${String.fromCharCode(92)}${String.fromCharCode(92)}slash\n`);
     await fs.writeFile(path.join(tmp, 'my file.txt'), 'x');
     await fs.writeFile(path.join(tmp, 'normal.txt'), 'x');
+    if (path.sep !== String.fromCharCode(92)) await fs.writeFile(path.join(tmp, backslashName), 'x');
 
-    const ignored = await classifyGitIgnored(['my file.txt', 'normal.txt'], tmp);
+    const candidates = path.sep === String.fromCharCode(92) ? ['my file.txt', 'normal.txt'] : ['my file.txt', backslashName, 'normal.txt'];
+    const ignored = await classifyGitIgnored(candidates, tmp);
     expect(ignored.has('my file.txt')).toBe(true);
+    if (path.sep !== String.fromCharCode(92)) expect(ignored.has(backslashName)).toBe(true);
     expect(ignored.has('normal.txt')).toBe(false);
   });
 
   it('reports nothing ignored when no ignore file exists anywhere', async () => {
     await fs.writeFile(path.join(tmp, 'a.txt'), 'x');
     expect((await classifyGitIgnored(['a.txt'], tmp)).size).toBe(0);
+  });
+
+  it('applies repository rules when the workspace is below the repository root', async () => {
+    const repository = await makeTmp('haze-parent-repo-');
+    const workspace = path.join(repository, 'packages', 'app');
+    try {
+      await fs.ensureDir(path.join(repository, '.git', 'info'));
+      await fs.ensureDir(workspace);
+      await fs.writeFile(path.join(repository, '.gitignore'), 'packages/app/root-secret.txt\n');
+      await fs.writeFile(path.join(repository, '.git', 'info', 'exclude'), 'packages/app/local-secret.txt\n');
+      await fs.writeFile(path.join(workspace, 'root-secret.txt'), 'x');
+      await fs.writeFile(path.join(workspace, 'local-secret.txt'), 'x');
+
+      const ignored = await classifyGitIgnored(['root-secret.txt', 'local-secret.txt'], workspace);
+      expect(ignored).toEqual(new Set(['root-secret.txt', 'local-secret.txt']));
+    } finally {
+      await fs.remove(repository);
+    }
+  });
+
+  it('resolves info/exclude through a linked-worktree git pointer', async () => {
+    const repository = await makeTmp('haze-worktree-repo-');
+    const workspace = path.join(repository, 'worktree');
+    const gitDir = path.join(repository, 'metadata', 'worktrees', 'app');
+    const commonDir = path.join(repository, 'metadata');
+    try {
+      await fs.ensureDir(workspace);
+      await fs.ensureDir(path.join(commonDir, 'info'));
+      await fs.ensureDir(gitDir);
+      await fs.writeFile(path.join(workspace, '.git'), `gitdir: ${gitDir}\n`);
+      await fs.writeFile(path.join(gitDir, 'commondir'), '../..\n');
+      await fs.writeFile(path.join(commonDir, 'info', 'exclude'), 'secret.txt\n');
+      await fs.writeFile(path.join(workspace, 'secret.txt'), 'x');
+
+      expect(await classifyGitIgnored(['secret.txt'], workspace)).toEqual(new Set(['secret.txt']));
+    } finally {
+      await fs.remove(repository);
+    }
   });
 
   it('a deeper .gitignore overrides a shallower one, including negations', async () => {

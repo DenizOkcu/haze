@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {classifyShellCommand} from '../../src/core/safety/shellClassifier.js';
 
-describe('bash classifier', () => {
+describe('shell classifier', () => {
   it('classifies validation commands as read-only', () => {
     const result = classifyShellCommand('npm run typecheck');
     expect(result.riskLevel).toBe('read_only');
@@ -26,6 +26,16 @@ describe('bash classifier', () => {
       'deno test',
       'bun test',
       'node --test',
+      'uv run pytest',
+      'poetry run pytest',
+      './mvnw verify',
+      './gradlew test',
+      'bundle exec rspec',
+      'phpunit',
+      'composer test',
+      'mix test',
+      'swift test',
+      'ctest',
     ]) {
       const result = classifyShellCommand(command);
       expect(result.traits, command).toContain('runs_tests');

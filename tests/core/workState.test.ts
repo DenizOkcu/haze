@@ -36,6 +36,26 @@ describe('work state', () => {
     expect(state.validationSeq).toBe(0);
   });
 
+  it('credits direct execution of an artifact changed during this goal', () => {
+    const state = createWorkState('implement the CLI', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'csv-query.js'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'node csv-query.js --help'}, success: true, output: {ok: true, code: 0}});
+    expect(state.validations).toEqual([expect.objectContaining({command: 'node csv-query.js --help', status: 'passed', kind: 'generic'})]);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('records a failed direct artifact execution and rejects masked or unrelated commands', () => {
+    const state = createWorkState('implement the CLI', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'cli.py'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'python other.py'}, success: true, output: {ok: true, code: 0}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'python cli.py | tail -1'}, success: true, output: {ok: true, code: 0}});
+    expect(state.validations).toEqual([]);
+
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'python cli.py'}, success: false, output: {ok: false, code: 1}});
+    expect(state.validations).toEqual([expect.objectContaining({command: 'python cli.py', status: 'failed'})]);
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
   it('counts mutations and sequences validation', () => {
     const state = createWorkState('edit', 'implement', []);
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});

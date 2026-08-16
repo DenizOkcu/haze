@@ -68,6 +68,29 @@ describe('listFiles tool', () => {
     expect(included.entries).toContain('secret.txt');
   });
 
+  it('uses workspace-relative identities when listing an ignored subtree', async () => {
+    await fs.outputFile(path.join(tmp, 'nested', '.gitignore'), 'secret.txt\n');
+    await fs.writeFile(path.join(tmp, 'nested', 'secret.txt'), 'hidden');
+    await fs.writeFile(path.join(tmp, 'nested', 'visible.txt'), 'shown');
+
+    const result = await listFiles({path: 'nested'});
+    expect(result.entries).toContain('visible.txt');
+    expect(result.entries).not.toContain('secret.txt');
+  });
+
+  it('applies repository-root rules when haze starts in a nested workspace', async () => {
+    const workspace = path.join(tmp, 'packages', 'app');
+    await fs.ensureDir(workspace);
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'packages/app/secret.txt\n');
+    await fs.writeFile(path.join(workspace, 'secret.txt'), 'hidden');
+    await fs.writeFile(path.join(workspace, 'visible.txt'), 'shown');
+    process.chdir(workspace);
+
+    const result = await listFiles({});
+    expect(result.entries).toContain('visible.txt');
+    expect(result.entries).not.toContain('secret.txt');
+  });
+
   it('appends byte sizes only when includeSizes is set', async () => {
     await fs.writeFile(path.join(tmp, 'data.txt'), '12345');
     const plain = await listFiles({});

@@ -1,14 +1,14 @@
-# src/core/bashOutput/AGENTS.md
+# src/core/shellOutput/AGENTS.md
 
 Last updated: 2026-08-15 for the 0.11.0 release.
 
-Command-aware reduction of bash stdout/stderr.
+Command-aware reduction of shell stdout/stderr.
 
 ## Goals
 
 Maintainability focus:
 
-- Bash risk classification is informational for tool results and reducers; do not rely on output reducers to enforce command permission.
+- Shell risk classification is informational for tool results and reducers; do not rely on output reducers to enforce command permission.
 
 - Preserve actionable failure information while keeping model context compact.
 - Prefer structured/semantic reducers over blind truncation.
@@ -47,6 +47,6 @@ Keep this order intentional: earlier reducers have more semantic knowledge.
 
 Update targeted tests under:
 
-- `tests/core/bashOutput/*.test.ts`
-- `tests/core/bashOutput/reducers/*.test.ts`
-- `tests/hazeTools/bash.test.ts` when bash tool result shape/display changes.
+- `tests/core/shellOutput/*.test.ts`
+- `tests/core/shellOutput/reducers/*.test.ts`
+- `tests/hazeTools/shell.test.ts` when shell tool result shape/display changes.

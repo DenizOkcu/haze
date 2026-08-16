@@ -4,7 +4,7 @@ import type {ReductionContentKind, ReductionParseTier} from '../toolOutput/reduc
 
 type ParseTier = ReductionParseTier;
 
-export interface BashOutputFilterInput {
+export interface ShellOutputFilterInput {
   command: string;
   code: number | null;
   stdout: string;
@@ -38,7 +38,7 @@ export interface StreamReduction {
   savingsPct?: number;
 }
 
-export interface BashOutputFilterResult {
+export interface ShellOutputFilterResult {
   stdout: StreamReduction;
   stderr: StreamReduction;
   summary?: ValidationSummary;

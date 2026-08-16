@@ -93,7 +93,7 @@
             <h2><span class="em">Shell</span> · 2 tools</h2>
             <table>
               <tbody>
-                <tr><td>bash</td><td>Run commands with capped, classification-aware output. Each result reports cwd, duration, and exit status; validation output (tests, typecheck, lint) is parsed into pass/fail summaries. Set <code>background=true</code> to register a dev server or watcher. On timeout or abort, haze kills the full process tree and never waits on orphaned pipes.</td></tr>
+                <tr><td>shell</td><td>Run commands in the user's login shell with capped, classification-aware output. Each result reports cwd, duration, and exit status; validation output (tests, typecheck, lint) is parsed into pass/fail summaries. Set <code>background=true</code> to register a dev server or watcher. On timeout or abort, haze kills the full process tree and never waits on orphaned pipes.</td></tr>
                 <tr><td>process</td><td>List registered background processes, read their rolling output (256 KB each, up to five processes), or kill them. A session reset or haze exit stops every registered process tree. Background processes are unavailable inside fleet workers.</td></tr>
               </tbody>
             </table>
@@ -137,7 +137,7 @@
               <li><strong>Untrusted output.</strong> Fetched pages, MCP/LSP output, and files outside the workspace are treated as data, not instructions.</li>
               <li><strong>Debug logs.</strong> <code>--debug</code> logs can contain secrets and file content. Review and redact them before sharing.</li>
             </ul>
-            <div class="callout"><strong>Trust model.</strong> haze is intended for attended expert use. Bash classification is informational and there are no command confirmation gates. Project skills and repository instructions are labeled as untrusted content, but user supervision remains part of the security boundary. Read the <a href="https://github.com/DenizOkcu/haze/blob/main/SECURITY.md" target="_blank" rel="noopener">security policy</a>.</div>
+            <div class="callout"><strong>Trust model.</strong> haze is intended for attended expert use. Shell classification is informational and there are no command confirmation gates. Project skills and repository instructions are labeled as untrusted content, but user supervision remains part of the security boundary. Read the <a href="https://github.com/DenizOkcu/haze/blob/main/SECURITY.md" target="_blank" rel="noopener">security policy</a>.</div>
           </section>
         </div>
       </div>

@@ -22,7 +22,7 @@ Implementation helpers for haze built-in tools.
 - Tracks only mutation failures that explicitly request `recoveryTool: 'readFile'` and forces a fresh read before retrying those paths. Argument-only failures remain directly retryable. Path state uses normalized lexical workspace identity so aliases such as `a.ts` and `./a.ts` agree.
 - Lazily discovers nested `CLAUDE.md`/`AGENTS.md` instructions for touched subtrees.
 - Tracks loaded context-file signatures, serializes concurrent scoped discovery, queues newly discovered scoped files in `pendingContextFiles`, and notifies the UI when instruction files are read.
-- Carries the turn-scoped workspace mutation policy/owner. File mutations and bash acquire it; worker owners are reentrant so a whole-worker lease cannot deadlock its internal tools. Bash coordination is conservative and is not a sandbox.
+- Carries the turn-scoped workspace mutation policy/owner. File mutations and shell calls acquire it; worker owners are reentrant so a whole-worker lease cannot deadlock its internal tools. Shell coordination is conservative and is not a sandbox.
 - Validates the runtime types of every known optional context field while allowing unknown future fields for compatibility.
 
 Do not persist this state; it is valid only for one agent turn. If scoped context behavior changes, keep `config/contextFiles.ts`, `streaming.ts`, and tool-result tests aligned.
@@ -34,19 +34,19 @@ Do not persist this state; it is valid only for one agent turn. If scoped contex
 - `replaceLines` is the recovery path when exact text is stale or ambiguous.
 - Diff output should be compact and line-limited by `INLINE_DIFF_LINE_LIMIT`.
 
-## Bash/fetch/output helpers
+## Shell/fetch/output helpers
 
 Current behavior:
 
-- `bashTool.ts` always executes commands and returns informational risk classification; `allowMutation` is compatibility-only and should not affect behavior.
+- `shellTool.ts` always executes commands and returns informational risk classification.
 - Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
-- `bashTool.ts` runs `bash -lc` through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`. With `background=true`, it instead registers a main-turn-only long-running process and returns immediately.
+- `shellTool.ts` runs the configured user login shell through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`. Its schema identifies the active dialect. With `background=true`, it instead registers a main-turn-only long-running process and returns immediately.
 - `processTool.ts` is the single control surface for listing, reading, and killing registered background processes. Output remains accessible through the same `readToolOutput` handle path; do not expose background spawning to fleet workers.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
 - `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer.
-- `gitIgnore.ts` batches candidates through `git check-ignore -z --stdin` (≤ `GIT_IGNORE_BATCH` per subprocess) and matches Git's NUL-delimited echo by exact submitted string, preserving spaces, embedded newlines, and POSIX backslash names. Every child is wall-clock bounded (`CHECK_IGNORE_DEADLINE_MS`): a stalled child is SIGKILLed and the batch rejects, so reads fail open (nothing reported ignored) while the tri-state path reports `unknown` and mutations fail closed (F-05). Output is byte-bounded; overflow resolves the batch fail-open. One classifier should own an entire listing operation so siblings/frontiers share subprocesses.
+- `gitIgnore.ts` evaluates `.gitignore` and `.git/info/exclude` rules in-process without requiring Git. It discovers parent repository boundaries and linked-worktree git directories, preserves POSIX backslash names, and caches rule files by mtime and size for one listing operation. Reads fail open when a rule source is unreadable; mutation guards report `unknown` and fail closed (F-05).
 
 ## Failure results
 

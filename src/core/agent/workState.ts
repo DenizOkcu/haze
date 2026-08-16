@@ -1,6 +1,7 @@
 import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
+import {workspacePathKey} from '../../utils/path.js';
 
 export type WorkFileAction = 'read' | 'created' | 'modified';
 export type WorkValidationStatus = 'pending' | 'passed' | 'failed';
@@ -169,6 +170,50 @@ function upsertValidation(state: WorkState, command: string, status: Exclude<Wor
   else state.validationCommands.push({command, status});
 }
 
+const ARTIFACT_LAUNCHERS = new Set(['node', 'python', 'python3', 'ruby', 'php', 'perl', 'sh', 'bash', 'zsh', 'fish', 'csh', 'tcsh', 'tsx', 'ts-node', 'rscript', 'lua']);
+
+function shellWords(command: string) {
+  return (command.match(/(?:[^\s"']+|"(?:\\.|[^"])*"|'(?:\\.|[^'])*')+/g) ?? [])
+    .map(word => ((word.startsWith('"') && word.endsWith('"')) || (word.startsWith("'") && word.endsWith("'")) ? word.slice(1, -1) : word));
+}
+
+/** Strictly recognize direct execution of one file changed during this goal. */
+export function executedMutatedArtifact(command: string, state: WorkState): string | undefined {
+  // Chaining and pipelines can mask the artifact's exit status, so they are not evidence.
+  if (/&&|\|\||[;|]/.test(command)) return undefined;
+  const words = shellWords(command.trim());
+  if (words.length === 0) return undefined;
+  const executable = words[0]!.replace(/^.*[\\/]/, '').toLowerCase();
+  let candidate: string | undefined;
+  if (ARTIFACT_LAUNCHERS.has(executable)) {
+    const args = words.slice(1);
+    if (args.some(word => ['-e', '--eval', '-c', '-m'].includes(word))) return undefined;
+    candidate = args.find(word => !word.startsWith('-'));
+  } else if (executable === 'go' && words[1] === 'run') {
+    candidate = words.slice(2).find(word => !word.startsWith('-'));
+  } else if (executable === 'pwsh' || executable === 'powershell') {
+    const fileIndex = words.findIndex(word => word.toLowerCase() === '-file');
+    candidate = fileIndex >= 0 ? words[fileIndex + 1] : undefined;
+  } else if (executable === 'deno' || executable === 'bun') {
+    const args = words[1] === 'run' ? words.slice(2) : words.slice(1);
+    candidate = args.find(word => !word.startsWith('-'));
+  } else if (executable === 'java') {
+    const jarIndex = words.indexOf('-jar');
+    candidate = jarIndex >= 0 ? words[jarIndex + 1] : undefined;
+  } else if (words[0]!.startsWith('./') || words[0]!.startsWith('../')) {
+    candidate = words[0];
+  }
+  if (!candidate) return undefined;
+  const candidateKey = workspacePathKey(candidate);
+  return state.files.find(file => file.action !== 'read' && workspacePathKey(file.path) === candidateKey)?.path;
+}
+
+function shellExitCode(output: unknown) {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const code = (output as {code?: unknown}).code;
+  return typeof code === 'number' || code === null ? code : undefined;
+}
+
 /** Extract a classifier-confirmed validation summary from a tool output, if any. */
 export function validationSummaryFromOutput(output: unknown): ValidationSummary | undefined {
   if (typeof output !== 'object' || output == null) return undefined;
@@ -230,15 +275,19 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
     }
   }
 
-  // Only a classifier-confirmed shell command is a validation step. An arbitrary
-  // shell call (inspection, mkdir, echo) is process work, not validation; the
-  // bash tool embeds a `validationSummary` exactly when the classifier says so.
+  // Classifier-confirmed test/build commands are validation. A direct execution
+  // of a file changed during this goal is also bounded runtime evidence, provided
+  // the command is not chained or piped (which could mask its exit status).
   if (event.toolName === 'shell') {
     const command = toolInputField(event.input, 'command');
     const summary = validationSummaryFromOutput(event.output);
-    if (command && summary) {
-      const status: Exclude<WorkValidationStatus, 'pending'> = summary.status === 'passed' ? 'passed' : 'failed';
-      upsertValidation(state, command, status, summary.summaryText, summary.kind);
+    const artifact = command && !summary ? executedMutatedArtifact(command, state) : undefined;
+    if (command && (summary || artifact)) {
+      const exitCode = shellExitCode(event.output);
+      const passed = summary ? summary.status === 'passed' : ok && exitCode === 0;
+      const status: Exclude<WorkValidationStatus, 'pending'> = passed ? 'passed' : 'failed';
+      const summaryText = summary?.summaryText ?? (passed ? `Executed changed artifact ${artifact} successfully.` : `Changed artifact ${artifact} exited unsuccessfully.`);
+      upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic');
       state.validationSeq = seq;
       state.phase = 'validating';
       state.lastProgressAt = now;

@@ -24,7 +24,7 @@ import {estimateInputBreakdown, logEntry} from './turnRuntime.js';
 
 /**
  * Restrict a tool set to the capabilities permitted in a completion-rescue
- * slice: mutation (edit/write/replace) and validation-capable (bash) built-in
+ * slice: mutation (edit/write/replace) and validation-capable (shell) built-in
  * tools only. Discovery, read, coordinate, and all third-party (MCP) tools are
  * dropped so the rescue cannot reopen exploration. May return an empty set
  * when no built-in mutation/validation tools exist (only possible if builtins

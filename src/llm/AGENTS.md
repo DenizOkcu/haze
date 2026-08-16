@@ -21,7 +21,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 
 - Tools are intentionally small, structured, and workspace-safe.
 - File tools are confined to `process.cwd()` via workspace path helpers and respect `.gitignore` unless explicit `allowIgnored`/`includeIgnored` options are used.
-- `listFiles`, `readFile`, `grep`, and `fetch` are deduplicated within a turn when no mutation occurred. `bash` is never deduplicated because commands may observe changed external state between identical calls.
+- `listFiles`, `readFile`, `grep`, and `fetch` are deduplicated within a turn when no mutation occurred. `shell` is never deduplicated because commands may observe changed external state between identical calls.
 - `editFile`, `replaceLines`, and `writeFile` are mutating; they must check scoped nested instructions before writing and pause if new applicable instructions are discovered.
 - Failed mutations force a fresh `readFile` only when the structured failure explicitly carries `recoveryTool: 'readFile'` (for example stale or ambiguous edit content). Argument-only failures such as invalid write modes can be retried directly with corrected input. Recovery compares normalized lexical workspace paths.
 - Tool outputs should be JSON-serializable, bounded, and include recovery hints on failure.
@@ -49,7 +49,7 @@ Current reliability contracts:
 
 - LSP stdio protocol errors must reject pending requests and isolate the failed server; malformed server output must not crash the CLI. Frame/header/aggregate-buffer sizes are capped (`core/limits`); overflow terminates the client and rejects pending requests without heap growth. On POSIX, LSP servers run detached in their own process group. Close and protocol-failure teardown reuse `core/process` tree signaling, send `SIGTERM`, escalate to `SIGKILL` after 500 ms, destroy owned stdio, and run at most once. Opened documents and returned locations are real-path-confined to the workspace; outside-workspace locations are omitted or labeled `external`.
 - Fetch byte limits are byte limits, including for UTF-8/multibyte content. Response bodies must be streamable; refuse transports that would require an unbounded fallback read.
-- Bash and grep run through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, and omitted bytes are reported.
+- Shell and grep run through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, and omitted bytes are reported.
 - MCP discovery has per-server deadlines, runs with bounded concurrency, accepts the turn abort signal, closes partial/late clients, and bounds cleanup. One hanging server never blocks a turn.
 
 - Do not invent default providers/models; honor `config/providers.ts` resolution.

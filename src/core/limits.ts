@@ -10,7 +10,7 @@
  * changes in `CHANGELOG.md` and docs.
  */
 
-export const BASH_STREAM_BYTES = 2 * 1024 * 1024;
+export const SHELL_STREAM_BYTES = 2 * 1024 * 1024;
 export const BACKGROUND_PROCESS_OUTPUT_BYTES = 256 * 1024;
 export const GREP_STREAM_BYTES = 8 * 1024 * 1024;
 export const PROCESS_STDERR_BYTES = 64 * 1024;
@@ -33,7 +33,7 @@ export const IMAGE_ATTACHMENTS_PER_MESSAGE = 4;
 
 /** Per-page cap for numbered file content returned by readFile/listFiles-style tools. */
 export const MAX_OUTPUT_CHARS = 50_000;
-/** Default compact cap for stored bash output shown to the model. */
+/** Default compact cap for stored shell output shown to the model. */
 export const COMPACT_COMMAND_CHARS = 12_000;
 /** Compact cap for passing-validation summaries. */
 export const SHORT_VALIDATION_CHARS = 2_000;

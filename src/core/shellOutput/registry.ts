@@ -1,4 +1,4 @@
-import type {BashOutputFilterInput, BashOutputFilterResult, StreamReduction} from './types.js';
+import type {ShellOutputFilterInput, ShellOutputFilterResult, StreamReduction} from './types.js';
 import type {LineFilterDefinition} from './lineFilter.js';
 import {applyLineFilter, findLineFilter} from './lineFilter.js';
 import {renderValidationReduction} from './reducers/validation.js';
@@ -18,7 +18,7 @@ const builtInLineFilters: LineFilterDefinition[] = [
   {name: 'system-list', matchCommand: /(^|[;&|]\s*)(?:du|df|ps)\b/, stripAnsi: true, truncateLinesAt: 180, maxLines: 50},
 ];
 
-function makeReduction(raw: string, text: string, filtered: boolean, filterName: string | undefined, input: BashOutputFilterInput, warning?: string, contentKind: ReductionContentKind = 'generic'): StreamReduction {
+function makeReduction(raw: string, text: string, filtered: boolean, filterName: string | undefined, input: ShellOutputFilterInput, warning?: string, contentKind: ReductionContentKind = 'generic'): StreamReduction {
   let finalText = text;
   let handle: string | undefined;
   let truncated = false;
@@ -49,7 +49,7 @@ function makeReduction(raw: string, text: string, filtered: boolean, filterName:
   };
 }
 
-function passthroughReduction(raw: string, input: BashOutputFilterInput): StreamReduction {
+function passthroughReduction(raw: string, input: ShellOutputFilterInput): StreamReduction {
   const compacted = input.fallbackCompact(raw, input.compactMaxChars);
   return {
     text: compacted.text,
@@ -65,7 +65,7 @@ function passthroughReduction(raw: string, input: BashOutputFilterInput): Stream
   };
 }
 
-export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilterResult {
+export function filterShellOutput(input: ShellOutputFilterInput): ShellOutputFilterResult {
   try {
     let stdout: StreamReduction | undefined;
     let stderr: StreamReduction | undefined;
@@ -129,7 +129,7 @@ export function filterBashOutput(input: BashOutputFilterInput): BashOutputFilter
     const warning = error instanceof Error ? error.message : String(error);
     const stdout = passthroughReduction(input.stdout, input);
     const stderr = passthroughReduction(input.stderr, input);
-    stdout.warning = `bash output filter failed: ${warning}`;
+    stdout.warning = `shell output filter failed: ${warning}`;
     stdout.parseTier = 'degraded';
     return {stdout, stderr, summary: input.validationSummary};
   }

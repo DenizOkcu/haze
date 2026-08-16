@@ -207,17 +207,17 @@ describe('runHeadless: debug output', () => {
     const errs = captureStderr();
     captureStdout();
     const {runHeadless} = await loadRunCommand({
-      runAgentTurnImpl: (cb) => cb.debugLog('tool start: bash ls'),
+      runAgentTurnImpl: (cb) => cb.debugLog('tool start: shell ls'),
     });
     await runHeadless({prompt: 'do it', output: 'text', debug: true});
-    expect(errs.some((line) => line.startsWith('[haze] tool start: bash ls'))).toBe(true);
+    expect(errs.some((line) => line.startsWith('[haze] tool start: shell ls'))).toBe(true);
   });
 
   it('keeps stderr clean without --debug (regression CR-003)', async () => {
     const errs = captureStderr();
     captureStdout();
     const {runHeadless} = await loadRunCommand({
-      runAgentTurnImpl: (cb) => cb.debugLog('tool start: bash ls'),
+      runAgentTurnImpl: (cb) => cb.debugLog('tool start: shell ls'),
     });
     const code = await runHeadless({prompt: 'do it', output: 'text'});
     expect(code).toBe(0);

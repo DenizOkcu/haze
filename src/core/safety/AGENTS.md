@@ -4,13 +4,13 @@ Last updated: 2026-08-15 for the 0.11.0 release.
 
 Safety classifiers and guards.
 
-## Bash classifier
+## Shell classifier
 
 Current contract:
 
-- Bash classification is metadata for display, logging, validation parsing, and output reduction. It does not block execution by itself.
+- Shell classification is metadata for display, logging, validation parsing, and output reduction. It does not block execution by itself.
 
-- `bashClassifier.ts` classifies commands for display/metadata. It is not a permission gate.
+- `shellClassifier.ts` classifies commands for display/metadata. It is not a permission gate.
 - Keep classification conservative but non-blocking.
 - Traits/risk labels should be explainable from the command text and stable enough for tests.
 - Do not add interactive confirmation behavior here; that belongs in UI/extensions if ever added.
@@ -38,6 +38,6 @@ Current contract:
 
 Update:
 
-- `tests/core/bashClassifier.test.ts`
+- `tests/core/shellClassifier.test.ts`
 - `tests/core/urlGuard.test.ts`
 - `tests/hazeTools/fetch.test.ts` for user-visible fetch behavior.

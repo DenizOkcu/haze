@@ -334,10 +334,10 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       return {
         ...actual,
         generateText: async () => genResult({
-          text: '# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts',
+          text: '# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts',
           steps: [
             {stepNumber: 0, text: 'Now let me look at the MCP/LSP settings.'},
-            {stepNumber: 1, text: '# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts'},
+            {stepNumber: 1, text: '# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts'},
           ],
         }),
       };
@@ -345,7 +345,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
     const result: SubagentResult = await runSubagent('security review', {model: noopModel, contextFiles: []});
-    expect(result.summary).toBe('# Findings\n- bash tool lacks timeout\n- fetch SSRF in webFetch.ts');
+    expect(result.summary).toBe('# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts');
     expect(result.summary.startsWith('Now let me')).toBe(false);
   });
 });

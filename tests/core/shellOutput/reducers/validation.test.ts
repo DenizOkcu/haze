@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {renderValidationReduction} from '../../../../src/core/bashOutput/reducers/validation.js';
+import {renderValidationReduction} from '../../../../src/core/shellOutput/reducers/validation.js';
 import type {ValidationSummary} from '../../../../src/llm/toolResultTypes.js';
 
 function summary(overrides: Partial<ValidationSummary> = {}): ValidationSummary {

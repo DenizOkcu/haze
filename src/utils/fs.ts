@@ -1,12 +1,10 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 
-// Only `.git` is unconditionally skipped: Git itself never traverses it and no
-// `.gitignore` rule can re-include it, so skipping it is faithful rule
-// evaluation, not an assumption about the workspace. Everything else —
-// including `node_modules` — is governed purely by ignore rules; a workspace
-// that does not ignore `node_modules` gets it listed.
-const SKIP_ENTRIES = new Set(['.git']);
+// Repository metadata and dependency trees are never useful discovery targets.
+// Skip both even when a project has no `.gitignore`: this keeps traversal bounded
+// and prevents dependency contents from crowding out workspace source files.
+const SKIP_ENTRIES = new Set(['.git', 'node_modules']);
 
 export interface WalkEntry {
   path: string;

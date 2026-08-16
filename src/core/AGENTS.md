@@ -13,15 +13,15 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 ## Important subtrees
 
 - `agent/` — context accounting, model-message compaction, request assembly, tool-result helpers, turn budgets, events, work state, and goal policy (intent classification, session-goal state, completion prompts).
-- `bashOutput/` — command-aware reduction of bash stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
+- `shellOutput/` — command-aware reduction of shell stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
 - `attachments/` — user-typed image attachment resolution and turn-scoped read blessings for explicit paths.
-- `safety/` — bash command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
+- `safety/` — shell command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
 - `session/` — lazy durable JSONL session storage, resumable-session summaries/restore helpers, and disk-size slimming for streaming events/large tool outputs.
 - `subagent/` — independent tool-loop runner, execution profiles, coordination, and mutation policy used by the `subagent` tool and `/fleet`.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.
 - `toolOutput/` — shared token/char reduction metrics.
-- `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `bash`, `grep`, and LSP teardown.
+- `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `shell`, `grep`, and LSP teardown.
 - `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
 - `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.
@@ -36,7 +36,7 @@ Maintainability focus:
 - Core should not require configured provider settings except where explicitly passed in.
 - Keep serialized shapes backward-tolerant: sessions and tasks may be read after upgrades. Session creation is deferred until resumable content exists, and old zero-message files remain readable but must be omitted from resume/latest listings.
 - Tool/result summaries must remain protocol-safe AI SDK `ModelMessage` values.
-- Safety classifiers provide metadata and blocking helpers where documented; bash classification is not a confirmation gate.
+- Safety classifiers provide metadata and blocking helpers where documented; shell classification is not a confirmation gate.
 - Output reduction should reduce context size without hiding actionable failures.
 
 ## Tests

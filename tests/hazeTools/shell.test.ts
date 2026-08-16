@@ -17,15 +17,21 @@ describe('shell tool safety', () => {
     await fs.remove(tmp);
   });
 
-  async function shell(command: string, allowMutation = false, abortSignal?: AbortSignal, background = false) {
+  async function shell(command: string, abortSignal?: AbortSignal, background = false) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.shell.execute({command, allowMutation, background}, {abortSignal});
+      return await hazeTools.shell.execute({command, background}, {abortSignal});
     } finally {
       process.chdir(originalCwd);
     }
   }
+
+  it('exposes the 1.0 schema without pre-release compatibility fields', () => {
+    const parsed = hazeTools.shell.inputSchema.safeParse({command: 'pwd', allowMutation: true});
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).not.toHaveProperty('allowMutation');
+  });
 
   it('runs read-only commands with classification metadata', async () => {
     const result = await shell('pwd');
@@ -36,7 +42,7 @@ describe('shell tool safety', () => {
 
   it('runs destructive commands without confirmation', async () => {
     await fs.outputFile(path.join(tmp, 'dist/file.txt'), 'temporary build output');
-    const result = await shell('rm -rf dist', true);
+    const result = await shell('rm -rf dist');
     expect(result.ok).toBe(true);
     expect(result.classification.riskLevel).toBe('destructive');
     await expect(fs.pathExists(path.join(tmp, 'dist'))).resolves.toBe(false);
@@ -84,7 +90,7 @@ describe('shell tool safety', () => {
   }, 15_000);
 
   it('starts background commands immediately and manages them through the process tool (F09)', async () => {
-    const result = await shell("node -e \"console.log('server ready');setInterval(()=>console.log('tick'),25)\"", false, undefined, true);
+    const result = await shell("node -e \"console.log('server ready');setInterval(()=>console.log('tick'),25)\"", undefined, true);
     expect(result).toMatchObject({ok: true, background: true, backgroundId: expect.any(String), pid: expect.any(Number), outputHandle: expect.stringMatching(/^output-/)});
     if (!('backgroundId' in result) || !('outputHandle' in result)) throw new Error('Expected a background result.');
     let output: Awaited<ReturnType<typeof hazeTools.process.execute>> | undefined;
@@ -106,13 +112,13 @@ describe('shell tool safety', () => {
   it('does not start background work after turn abort or inside a worker', async () => {
     const controller = new AbortController();
     controller.abort();
-    const aborted = await shell('sleep 30', false, controller.signal, true);
+    const aborted = await shell('sleep 30', controller.signal, true);
     expect(aborted).toMatchObject({ok: false, reasonCode: 'aborted'});
 
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      const worker = await hazeTools.shell.execute({command: 'sleep 30', allowMutation: false, background: true}, {context: {isSubagent: true}});
+      const worker = await hazeTools.shell.execute({command: 'sleep 30', background: true}, {context: {isSubagent: true}});
       expect(worker).toMatchObject({ok: false, reasonCode: 'background_not_allowed'});
     } finally {
       process.chdir(originalCwd);
@@ -121,7 +127,7 @@ describe('shell tool safety', () => {
 
   it('reports explicit abort separately from timeout', async () => {
     const controller = new AbortController();
-    const pending = shell("node -e 'setInterval(()=>{},1000)'", false, controller.signal);
+    const pending = shell("node -e 'setInterval(()=>{},1000)'", controller.signal);
     setTimeout(() => controller.abort(), 50);
     const result = await pending;
     expect(result).toMatchObject({ok: false, aborted: true, timedOut: false});

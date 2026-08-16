@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {commandCandidates, commandMatches} from '../../../src/core/bashOutput/command.js';
+import {commandCandidates, commandMatches} from '../../../src/core/shellOutput/command.js';
 
-describe('bash output command normalization', () => {
+describe('shell output command normalization', () => {
   it('matches through env assignments and sudo wrappers', () => {
     expect(commandMatches('NODE_ENV=test sudo -n docker ps', /(^|\s)docker\s+ps\b/)).toBe(true);
   });

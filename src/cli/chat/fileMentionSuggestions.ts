@@ -64,7 +64,7 @@ export interface FileMentionSuggestionsOptions {
  * List workspace paths matching the `@token` for tab completion. The token is
  * treated as `@<parent>/<prefix>`; the parent directory is listed (one level,
  * non-recursive) and children are filtered by the prefix. `.gitignored` paths
- * are excluded; `.git` is skipped by `walkDir` itself.
+ * are excluded; `.git` and `node_modules` are skipped by `walkDir` itself.
  *
  * Suggestion values include the leading `@` so the caller can replace the
  * `@token` range verbatim with the chosen suggestion.

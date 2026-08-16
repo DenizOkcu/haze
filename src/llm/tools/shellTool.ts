@@ -3,15 +3,15 @@ import {z} from 'zod';
 import {classifyShellCommand, isValidationClassification} from '../../core/safety/shellClassifier.js';
 import {detectMissingExecutable, missingExecutableFields} from '../../core/safety/missingExecutable.js';
 import {parseValidationOutput} from '../../core/validation/outputParser.js';
-import {filterBashOutput} from '../../core/bashOutput/registry.js';
+import {filterShellOutput} from '../../core/shellOutput/registry.js';
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
-import {BASH_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
+import {SHELL_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
-import {resolveUserShell, shellInvocation} from '../../core/process/userShell.js';
+import {resolveUserShell, shellInvocation, shellSyntaxGuidance} from '../../core/process/userShell.js';
 
 /** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */
 function streamByteStats(stream: BoundedStream) {
@@ -24,9 +24,8 @@ export const shellTool = tool({
   description: 'Run workspace tests, builds, validation, or inspection. Risk classification is informational; use file tools for edits.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
-    command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}`.trim()),
+    command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}. ${shellSyntaxGuidance(userShell)}`.trim()),
     timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
-    allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Commands run without confirmation; retained for compatibility.'),
     background: z.boolean().default(false).describe('Start a registered long-running process and return immediately. Use process to list, inspect output, or kill it.'),
   }),
   execute: async ({command, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, timeoutSeconds, background}, context, async () => {
@@ -48,7 +47,7 @@ export const shellTool = tool({
     }
     const timeoutMs = (timeoutSeconds ?? 60) * 1000;
     const startedAt = Date.now();
-    const processResult = await runBoundedProcess({...shellInvocation(command), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: BASH_STREAM_BYTES, maxStderrBytes: BASH_STREAM_BYTES});
+    const processResult = await runBoundedProcess({...shellInvocation(command), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES});
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;
@@ -56,7 +55,7 @@ export const shellTool = tool({
       ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: processResult.stdout.omittedBytes > 0, stderrTruncated: processResult.stderr.omittedBytes > 0, classification})
       : undefined;
     const validationPassed = validationSummary?.status === 'passed';
-    const output = filterBashOutput({command, code, stdout, stderr, timedOut, classification, validationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
+    const output = filterShellOutput({command, code, stdout, stderr, timedOut, classification, validationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
     // Generic, dependency-agnostic diagnostic for a missing executable. Only the
     // executable name and a generic next step are exposed (never raw stderr).
     const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;

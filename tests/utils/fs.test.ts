@@ -28,14 +28,14 @@ describe('walkDir', () => {
     expect(filePaths(entries)).toContain(path.join('src', 'b.txt'));
   });
 
-  it('skips .git unconditionally; node_modules is governed by ignore rules', async () => {
+  it('skips .git and node_modules unconditionally', async () => {
     await fs.ensureDir(path.join(tmp, 'node_modules', 'pkg'));
     await fs.ensureDir(path.join(tmp, '.git', 'objects'));
     await fs.writeFile(path.join(tmp, 'node_modules', 'pkg', 'index.js'), '');
     await fs.writeFile(path.join(tmp, '.git', 'objects', 'abc'), '');
     await fs.writeFile(path.join(tmp, 'real.txt'), 'content');
     const entries = await walkDir(tmp, {recursive: true});
-    expect(filePaths(entries)).toEqual([path.join('node_modules', 'pkg', 'index.js'), 'real.txt']);
+    expect(filePaths(entries)).toEqual(['real.txt']);
   });
 
   it('returns empty for nonexistent directory', async () => {

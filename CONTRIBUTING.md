@@ -38,7 +38,7 @@ pushing.
 src/
   cli/          CLI entrypoint, chat UI, streaming loop, and slash commands
   llm/          AI model client, built-in tools, and prompts
-  core/         Agent goal/completion logic, bash classification, validation parsing, and subagents
+  core/         Agent goal/completion logic, shell classification, validation parsing, and subagents
   skills/       Skill loading, registry, installer, and scaffold builder
   config/       Settings, paths, sessions, history, and context files
   ui/           React/Ink terminal UI components
@@ -70,7 +70,7 @@ Skill management commands also live here under `/skills ...`; do not add new top
 
 ## Adding a Tool
 
-haze is aimed at expert users. Do not add command-confirmation gates for normal bash execution; prefer transparent classification, structured output, and clear transcript rendering. Ask the user only when the requested product or implementation decision is ambiguous.
+haze is aimed at expert users. Do not add command-confirmation gates for normal shell execution; prefer transparent classification, structured output, and clear transcript rendering. Ask the user only when the requested product or implementation decision is ambiguous.
 
 1. Define tool in `src/llm/hazeTools.ts` using the Vercel AI SDK `tool()` function.
 2. Add or update the tool description in `src/llm/systemPrompt.ts`.

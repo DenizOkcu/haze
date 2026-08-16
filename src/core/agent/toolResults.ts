@@ -59,7 +59,7 @@ export function safeToolFailureDetails(output: unknown): SafeToolFailureDetails 
           : typeof value.signal === 'string' ? 'process_signal'
             : undefined);
   // Only the dedicated Haze failure shape guarantees that `error` is a bounded
-  // local diagnostic. Bash stderr and third-party fields may contain secrets.
+  // local diagnostic. Shell stderr and third-party fields may contain secrets.
   const error = structuredHazeFailure && typeof value.error === 'string' ? boundedSingleLine(value.error) : undefined;
   return {...(errorCode ? {errorCode} : {}), ...(error ? {error} : {}), ...(missingExecutable ? {missingExecutable} : {})};
 }

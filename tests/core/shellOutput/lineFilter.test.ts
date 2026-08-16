@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {applyLineFilter} from '../../../src/core/bashOutput/lineFilter.js';
+import {applyLineFilter} from '../../../src/core/shellOutput/lineFilter.js';
 
 const filter = {
   name: 'demo',

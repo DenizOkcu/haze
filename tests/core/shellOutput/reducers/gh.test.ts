@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {reduceGhOutput} from '../../../../src/core/bashOutput/reducers/gh.js';
+import {reduceGhOutput} from '../../../../src/core/shellOutput/reducers/gh.js';
 
 describe('reduceGhOutput', () => {
   it('returns undefined for non-gh commands', () => {

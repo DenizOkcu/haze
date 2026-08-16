@@ -83,9 +83,10 @@ export function classifyShellCommand(command: string): ShellClassification {
     return {riskLevel: 'unknown', traits: uniq(traits), confidence: 'low', reason: 'find -exec / xargs runs an embedded command'};
   }
 
-  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b|pytest\b|python3?\s+-m\s+(pytest|unittest|nose2?)\b|go\s+test\b|cargo\s+(test|nextest)\b|make\s+(test|check)\b|mvn\s+(test|verify)\b|gradle?w?\s+test\b|rspec\b|dotnet\s+test\b|deno\s+(test|lint)\b|bun\s+(test|lint)\b|node\s+--test\b)/)) {
+  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b|pytest\b|(?:uv|poetry)\s+run\s+pytest\b|python3?\s+-m\s+(pytest|unittest|nose2?)\b|go\s+test\b|cargo\s+(test|nextest)\b|make\s+(test|check)\b|(?:mvn|\.\/mvnw)\s+(test|verify)\b|(?:gradle|gradlew|\.\/gradlew)\s+test\b|rspec\b|bundle\s+exec\s+rspec\b|dotnet\s+test\b|deno\s+(test|lint)\b|bun\s+(test|lint)\b|node\s+--test\b|phpunit\b|composer\s+test\b|mix\s+test\b|swift\s+test\b|ctest\b|xcodebuild\b[^;&|]*\btest\b)/)) {
     if (has(lower, /test|vitest|jest|rspec|make\s+check|mvn\s+verify/)) traits.push('runs_tests');
     if (has(lower, /build|tsc|typecheck|lint|eslint/)) traits.push('runs_build');
+    if (traits.length === 0) traits.push('runs_tests');
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};
   }
 

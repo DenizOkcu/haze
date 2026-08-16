@@ -193,7 +193,7 @@ describe('live-region clamping', () => {
     const {lastFrame} = render(<MessageView width={40} maxVisibleLines={3} message={{
       id: 't1',
       role: 'tool',
-      text: '1 calls · 0s\n  ✓ bash npm test\n  ✓ readFile a.ts\n  ✓ readFile b.ts',
+      text: '1 calls · 0s\n  ✓ shell npm test\n  ✓ readFile a.ts\n  ✓ readFile b.ts',
       streaming: true,
       toolDiffs: [{
         id: 'edit-1', path: 'a.ts', addedLines: 1, removedLines: 0,
@@ -206,7 +206,7 @@ describe('live-region clamping', () => {
     expect(frame).toContain('⋯ +2 lines above');
     expect(frame).toContain('readFile a.ts');
     expect(frame).toContain('readFile b.ts');
-    expect(frame).not.toContain('bash npm test');
+    expect(frame).not.toContain('shell npm test');
     expect(frame).toContain('⋯ 1 diff preview hidden');
   });
 

@@ -5,7 +5,7 @@ import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../co
 /**
  * Line-oriented bounded ripgrep runner built on the shared bounded-process
  * primitive, so spawn/timeout/abort/process-group teardown behavior is
- * identical to bash (CR-004). Match counting and early-stop stay here.
+ * identical to shell execution (CR-004). Match counting and early-stop stay here.
  */
 export async function runRipgrepBounded(input: {executable: string; args: string[]; cwd: string; maxMatches: number; timeoutMs?: number; signal?: AbortSignal}): Promise<{stdout: string; stderr: string; code: number | null; capped: boolean; timedOut: boolean; aborted: boolean}> {
   const decoder = new StringDecoder('utf8');

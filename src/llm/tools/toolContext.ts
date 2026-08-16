@@ -160,7 +160,7 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
 }
 
 function isMutatingTool(toolName: string) {
-  // Bash is conservatively workspace-mutation-capable. Classification remains
+  // Shell execution is conservatively workspace-mutation-capable. Classification remains
   // informational and is not a sandbox boundary.
   return ['editFile', 'replaceLines', 'writeFile', 'shell'].includes(toolName);
 }
@@ -170,7 +170,7 @@ function isReadOnlyFileTool(toolName: string) {
 }
 
 // Read-only tools that participate in completed-call deduplication within a
-// turn (no side effects). Bash is deliberately excluded: commands can observe
+// turn (no side effects). Shell is deliberately excluded: commands can observe
 // external state changes between identical calls (CR-007).
 function isDeduplicableReadOnlyTool(toolName: string) {
   return isReadOnlyFileTool(toolName) || toolName === 'fetch';

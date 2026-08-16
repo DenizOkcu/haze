@@ -58,15 +58,15 @@ export const hazeTools = {
         const entries: string[] = [];
         let ignoredSkipped = 0;
 
-        // One persistent classifier owns the whole listing so a frontier of
-        // candidates collapses to O(visited directories) rule-file reads
-        // instead of one evaluation per walked entry (RH-001). Page-2 cursor
-        // resumes do not re-check entries preceding the cursor.
-        const ignoreBatch = includeIgnored ? undefined : (entries: WalkEntry[]) =>
-          createIgnoreClassifier(workspaceRoot()).classify(entries).then(ignored => {
+        // One persistent classifier owns the whole listing so rule files are
+        // cached across directory frontiers. Walk entries include absolute paths,
+        // allowing subtree listings to classify workspace-relative identities.
+        const ignoreClassifier = includeIgnored ? undefined : createIgnoreClassifier(workspaceRoot());
+        const ignoreBatch = ignoreClassifier ? (entries: WalkEntry[]) =>
+          ignoreClassifier.classify(entries).then(ignored => {
             ignoredSkipped += ignored.size;
             return ignored;
-          });
+          }) : undefined;
 
         const walked = await walkDir(absolutePath, {recursive, maxEntries: maxEntries + 1, cursor, ignoreBatch});
         const page = walked.slice(0, maxEntries);

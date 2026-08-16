@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from '../../../../src/core/bashOutput/reducers/content.js';
+import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from '../../../../src/core/shellOutput/reducers/content.js';
 
 describe('reduceJsonOutput', () => {
   it('returns undefined when stdout is not JSON', () => {

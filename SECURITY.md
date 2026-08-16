@@ -19,4 +19,4 @@ Include the affected version, operating system, reproduction steps, impact, and 
 
 haze is intended for attended use by an experienced developer on a single-user machine. It trusts the user and their global `~/.haze` configuration. Repository contents, project instructions and skills, fetched web content, MCP and LSP servers, and model output are untrusted inputs. A local attacker who already has access as the same operating-system user is outside the supported threat model.
 
-haze does not use command confirmation gates. Bash classification is informational, and relevant commands may mutate or delete data. Workspace confinement, bounded input and output, URL validation, private local storage, prompt-injection framing, and user supervision reduce risk, but haze is not a sandbox.
+haze does not use command confirmation gates. Shell classification is informational, and relevant commands may mutate or delete data. Workspace confinement, bounded input and output, URL validation, private local storage, prompt-injection framing, and user supervision reduce risk, but haze is not a sandbox.

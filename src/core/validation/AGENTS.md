@@ -6,15 +6,15 @@ Validation-output parsing.
 
 ## Purpose
 
-`outputParser.ts` turns noisy command output into compact `ValidationSummary` objects used by the bash tool and bash-output reducers.
+`outputParser.ts` turns noisy command output into compact `ValidationSummary` objects used by the shell tool and command-output reducers.
 
 ## Contracts
 
 Maintainability focus:
 
-- Validation parsing consumes bash classification metadata but must remain useful even when classification is conservative or unknown.
+- Validation parsing consumes shell classification metadata but must remain useful even when classification is conservative or unknown.
 
-- Infer validation kind from command text and bash classification traits: typecheck, lint, build, test, or generic.
+- Infer validation kind from command text and shell classification traits: typecheck, lint, build, test, or generic.
 - Parse common TypeScript, ESLint, Vitest/Jest, and generic `file:line:column` diagnostics.
 - Parsed failure evidence is authoritative even if shell pipelines mask a non-zero exit code.
 - Summaries should include compact failed files/tests/diagnostics and an actionable `suggestedNextStep` when failed.

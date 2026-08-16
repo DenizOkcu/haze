@@ -8,8 +8,8 @@
     {"role": "tool", "content": [{"type": "tool-result", "toolCallId": "grep-1", "toolName": "grep", "output": {"type": "json", "value": {"pattern": "normalizePath", "returnedMatches": 2, "truncated": false, "matches": [{"file": "src/parser.ts", "line": 88, "content": "normalizePath(input)", "isContext": false}]}}}]},
     {"role": "assistant", "content": [{"type": "tool-call", "toolCallId": "edit-1", "toolName": "editFile", "input": {"path": "src/parser.ts", "replacements": [{"oldText": "old parser", "newText": "new parser"}]}}]},
     {"role": "tool", "content": [{"type": "tool-result", "toolCallId": "edit-1", "toolName": "editFile", "output": {"type": "json", "value": {"ok": true, "path": "src/parser.ts", "replacements": 1, "diffLineCount": 4}}}]},
-    {"role": "assistant", "content": [{"type": "tool-call", "toolCallId": "test-1", "toolName": "bash", "input": {"command": "npm test"}}]},
-    {"role": "tool", "content": [{"type": "tool-result", "toolCallId": "test-1", "toolName": "bash", "output": {"type": "json", "value": {"ok": false, "command": "npm test", "code": 1, "validationSummary": {"summaryText": "One Windows path test failed"}, "stderr": {"text": "Expected C:\\\\work but received C:/work", "truncated": false}}}}]},
+    {"role": "assistant", "content": [{"type": "tool-call", "toolCallId": "test-1", "toolName": "shell", "input": {"command": "npm test"}}]},
+    {"role": "tool", "content": [{"type": "tool-result", "toolCallId": "test-1", "toolName": "shell", "output": {"type": "json", "value": {"ok": false, "command": "npm test", "code": 1, "validationSummary": {"summaryText": "One Windows path test failed"}, "stderr": {"text": "Expected C:\\\\work but received C:/work", "truncated": false}}}}]},
     {"role": "assistant", "content": "The parser migration is not complete. The Windows path assertion still needs a targeted fix."}
   ]
 }
