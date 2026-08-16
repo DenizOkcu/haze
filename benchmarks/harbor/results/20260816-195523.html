@@ -1,0 +1,1306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Detailed Harbor benchmark results for four agent harnesses running glm-5.2 on the csv-query task.">
+  <title>Harbor Benchmark Report / glm-5.2 / 20260816-195523</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0b0b;
+      --panel: #111313;
+      --panel-2: #171919;
+      --ink: #e8e9e5;
+      --muted: #9a9e99;
+      --faint: #5e625e;
+      --line: #353936;
+      --line-strong: #777c76;
+      --accent: #ff3b30;
+      --pass: #4af626;
+      --max: 1480px;
+      --sans: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.45;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+      opacity: 0.17;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 3px,
+        rgba(0, 0, 0, 0.42) 3px,
+        rgba(0, 0, 0, 0.42) 4px
+      );
+    }
+
+    a { color: inherit; }
+    a:focus-visible,
+    button:focus-visible,
+    summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 4px;
+    }
+
+    code, kbd, samp, data, time, .mono { font-family: var(--mono); }
+    button { font: inherit; }
+
+    .shell {
+      width: min(100%, var(--max));
+      margin: 0 auto;
+      border-inline: 1px solid var(--line);
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: grid;
+      grid-template-columns: minmax(220px, 1.3fr) auto;
+      min-height: 68px;
+      border-bottom: 1px solid var(--line-strong);
+      background: rgba(10, 11, 11, 0.96);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 24px;
+      min-width: 0;
+      text-decoration: none;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      flex: 0 0 auto;
+      border: 2px solid var(--accent);
+      color: var(--accent);
+      font: 700 18px/1 var(--mono);
+    }
+
+    .brand strong,
+    .brand small { display: block; }
+    .brand strong {
+      font: 800 15px/1 var(--sans);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .brand small {
+      margin-top: 5px;
+      color: var(--muted);
+      font: 11px/1 var(--mono);
+      letter-spacing: 0.05em;
+    }
+
+    nav {
+      display: flex;
+      align-items: stretch;
+      border-left: 1px solid var(--line);
+    }
+
+    nav a {
+      display: grid;
+      place-items: center;
+      min-width: 116px;
+      padding: 0 18px;
+      border-left: 1px solid var(--line);
+      color: var(--muted);
+      font: 700 11px/1 var(--mono);
+      letter-spacing: 0.09em;
+      text-decoration: none;
+      text-transform: uppercase;
+      transition: color 140ms ease, background 140ms ease;
+    }
+
+    nav a:first-child { border-left: 0; }
+    nav a:hover { color: var(--ink); background: var(--panel-2); }
+    nav a:active { transform: translateY(1px); }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr);
+      min-height: calc(100dvh - 68px);
+      border-bottom: 1px solid var(--line-strong);
+    }
+
+    .hero-main {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+      padding: clamp(32px, 5vw, 78px) clamp(24px, 5vw, 78px) 30px;
+      border-right: 1px solid var(--line-strong);
+    }
+
+    .kicker {
+      margin: 0;
+      color: var(--accent);
+      font: 700 12px/1.2 var(--mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 10ch;
+      margin: 32px 0 24px;
+      font-size: clamp(4rem, 10vw, 10.5rem);
+      font-weight: 900;
+      letter-spacing: -0.065em;
+      line-height: 0.82;
+      text-transform: uppercase;
+    }
+
+    .hero-copy {
+      max-width: 62ch;
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.5vw, 1.25rem);
+    }
+
+    .hero-copy strong { color: var(--ink); }
+
+    .hero-foot {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      margin: 46px calc(clamp(24px, 5vw, 78px) * -1) -30px;
+      background: var(--line);
+      border-top: 1px solid var(--line);
+    }
+
+    .hero-foot div {
+      min-height: 92px;
+      padding: 20px clamp(16px, 3vw, 30px);
+      background: var(--bg);
+    }
+
+    .hero-foot dt,
+    .metric dt,
+    .fact dt {
+      margin-bottom: 8px;
+      color: var(--muted);
+      font: 700 10px/1.2 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero-foot dd,
+    .metric dd,
+    .fact dd { margin: 0; }
+    .hero-foot dd { font: 700 14px/1.25 var(--mono); }
+
+    .scoreboard {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-width: 0;
+      background: var(--panel);
+    }
+
+    .score {
+      display: grid;
+      align-content: center;
+      justify-items: center;
+      padding: 38px 24px;
+      text-align: center;
+    }
+
+    .score-output {
+      display: flex;
+      align-items: baseline;
+      color: var(--ink);
+      font-family: var(--mono);
+      line-height: 0.8;
+    }
+
+    .score-output strong {
+      font-size: clamp(6rem, 13vw, 12rem);
+      letter-spacing: -0.1em;
+    }
+
+    .score-output span {
+      margin-left: 14px;
+      color: var(--faint);
+      font-size: clamp(2rem, 4vw, 4rem);
+      font-weight: 700;
+    }
+
+    .score p {
+      max-width: 30ch;
+      margin: 28px auto 0;
+      color: var(--muted);
+      font: 12px/1.5 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .hazard {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      height: 18px;
+      overflow: hidden;
+      border-block: 1px solid var(--accent);
+    }
+
+    .hazard i {
+      display: block;
+      border-right: 8px solid var(--bg);
+      background: var(--accent);
+      transform: skewX(-30deg) scaleX(1.4);
+    }
+
+    .score-notes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--line);
+    }
+
+    .score-notes div {
+      min-height: 104px;
+      padding: 22px;
+      background: var(--panel);
+    }
+
+    .score-notes span {
+      display: block;
+      color: var(--muted);
+      font: 10px/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .score-notes strong {
+      display: block;
+      margin-top: 12px;
+      font: 800 clamp(1.4rem, 3vw, 2.4rem)/1 var(--mono);
+    }
+
+    .score-notes .pass-value { color: var(--pass); }
+    .score-notes .alert-value { color: var(--accent); }
+
+    .section {
+      padding: clamp(54px, 7vw, 100px) clamp(20px, 4vw, 58px);
+      border-bottom: 1px solid var(--line-strong);
+    }
+
+    .section-head {
+      max-width: 860px;
+      margin-bottom: 44px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: clamp(2.4rem, 6vw, 6.5rem);
+      font-weight: 900;
+      letter-spacing: -0.055em;
+      line-height: 0.9;
+      text-transform: uppercase;
+    }
+
+    .section-head p {
+      max-width: 64ch;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr 1fr 1fr;
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .metric {
+      min-height: 150px;
+      padding: 24px;
+      background: var(--panel);
+    }
+
+    .metric:first-child { background: var(--ink); color: var(--bg); }
+    .metric:first-child dt { color: #4d504d; }
+    .metric dd {
+      margin-top: 25px;
+      font: 800 clamp(2rem, 4vw, 4.8rem)/0.95 var(--mono);
+      letter-spacing: -0.07em;
+    }
+
+    .metric small {
+      display: block;
+      margin-top: 12px;
+      color: var(--muted);
+      font: 11px/1.35 var(--mono);
+    }
+
+    .metric:first-child small { color: #4d504d; }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      margin: 34px 0 18px;
+    }
+
+    .filter-button {
+      min-height: 42px;
+      padding: 0 18px;
+      border: 1px solid var(--line-strong);
+      border-right: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: 700 11px/1 var(--mono);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .filter-button:last-child { border-right: 1px solid var(--line-strong); }
+    .filter-button:hover { color: var(--ink); background: var(--panel-2); }
+    .filter-button[aria-pressed="true"] { color: var(--bg); background: var(--ink); }
+    .filter-button:active { transform: translateY(1px); }
+
+    .harness-list {
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .harness {
+      display: grid;
+      grid-template-columns: minmax(175px, 0.75fr) minmax(260px, 1.25fr) 2fr;
+      min-height: 188px;
+      border-bottom: 1px solid var(--line-strong);
+    }
+
+    .harness[hidden] { display: none; }
+    .harness > div { padding: 26px; }
+    .harness > div + div { border-left: 1px solid var(--line); }
+
+    .harness-name {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 30px;
+    }
+
+    .harness-name h3 {
+      margin: 0;
+      font-size: clamp(1.8rem, 3vw, 3.4rem);
+      font-weight: 900;
+      letter-spacing: -0.045em;
+      line-height: 0.95;
+      text-transform: uppercase;
+    }
+
+    .harness-name code {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .status-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-content: flex-start;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 29px;
+      padding: 0 9px;
+      border: 1px solid currentColor;
+      font: 700 10px/1 var(--mono);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .status.pass { color: var(--pass); }
+    .status.fail,
+    .status.exception { color: var(--accent); }
+    .status.neutral { color: var(--muted); }
+
+    .harness-facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px 14px;
+      align-content: center;
+    }
+
+    .fact dd {
+      font: 700 17px/1.2 var(--mono);
+      overflow-wrap: anywhere;
+    }
+
+    .harness-analysis h4 {
+      margin: 0 0 12px;
+      font: 800 13px/1.2 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .harness-analysis p {
+      max-width: 72ch;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .harness-analysis p + p { margin-top: 14px; }
+    .harness-analysis strong { color: var(--ink); }
+
+    .source-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      margin-top: 22px;
+    }
+
+    .source-links a {
+      color: var(--muted);
+      font: 700 10px/1.2 var(--mono);
+      letter-spacing: 0.04em;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 4px;
+      text-transform: uppercase;
+    }
+
+    .source-links a:hover { color: var(--ink); }
+
+    .execution-chart {
+      display: grid;
+      gap: 18px;
+      margin-top: 42px;
+      padding: 28px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr) 90px;
+      align-items: center;
+      gap: 18px;
+      min-height: 44px;
+    }
+
+    .bar-label,
+    .bar-value {
+      font: 700 11px/1.2 var(--mono);
+      text-transform: uppercase;
+    }
+
+    .bar-value { color: var(--muted); text-align: right; }
+    .bar-field {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      border-left: 1px solid var(--line-strong);
+    }
+
+    .bar {
+      width: var(--w);
+      min-width: 2px;
+      height: 10px;
+      background: var(--ink);
+    }
+
+    .bar.pi { background: var(--faint); }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .data-grid > article { padding: clamp(24px, 4vw, 46px); background: var(--panel); }
+
+    .data-grid h3,
+    .coverage h3,
+    .method h3 {
+      margin: 0 0 26px;
+      font-size: clamp(1.4rem, 2.5vw, 2.4rem);
+      font-weight: 900;
+      letter-spacing: -0.035em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .tool-table,
+    .phase-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .tool-table th,
+    .tool-table td,
+    .phase-table th,
+    .phase-table td {
+      padding: 13px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      vertical-align: top;
+    }
+
+    .tool-table th:first-child,
+    .tool-table td:first-child,
+    .phase-table th:first-child,
+    .phase-table td:first-child { padding-left: 0; text-align: left; }
+
+    .tool-table th,
+    .phase-table th {
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .tool-table tbody tr:last-child td,
+    .phase-table tbody tr:last-child td { border-bottom: 0; }
+    .tool-table .na { color: var(--faint); }
+
+    .callout {
+      margin-top: 26px;
+      padding: 20px;
+      border-left: 4px solid var(--accent);
+      background: var(--bg);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 9px;
+      font: 800 11px/1.2 var(--mono);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .callout p { margin: 0; color: var(--muted); font-size: 14px; }
+
+    .coverage-layout {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: clamp(34px, 7vw, 110px);
+      align-items: start;
+    }
+
+    .coverage-score {
+      position: sticky;
+      top: 100px;
+      padding: 32px;
+      border: 1px solid var(--line-strong);
+      background: var(--panel);
+    }
+
+    .coverage-score output {
+      display: block;
+      color: var(--pass);
+      font: 900 clamp(4.5rem, 10vw, 10rem)/0.82 var(--mono);
+      letter-spacing: -0.1em;
+    }
+
+    .coverage-score p { margin: 24px 0 0; color: var(--muted); }
+
+    .coverage-groups { display: grid; gap: 28px; }
+    .coverage {
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--line);
+    }
+    .coverage:last-child { border-bottom: 0; }
+    .coverage h3 { margin-bottom: 15px; }
+    .coverage p { margin: 0 0 13px; color: var(--muted); }
+    .test-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 22px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .test-list li {
+      position: relative;
+      padding-left: 19px;
+      color: var(--muted);
+      font: 11px/1.5 var(--mono);
+    }
+
+    .test-list li::before {
+      content: "+";
+      position: absolute;
+      left: 0;
+      color: var(--pass);
+      font-weight: 700;
+    }
+
+    .test-list .pi-fail::before { content: "x"; color: var(--accent); }
+
+    .notes-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .method { min-height: 285px; padding: 34px; background: var(--panel); }
+    .method p { color: var(--muted); }
+    .method ul { margin: 20px 0 0; padding-left: 20px; color: var(--muted); }
+    .method li + li { margin-top: 10px; }
+
+    details {
+      border-top: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    details:last-of-type { border-bottom: 1px solid var(--line); }
+    summary {
+      cursor: pointer;
+      padding: 20px 0;
+      color: var(--ink);
+      font: 700 12px/1.3 var(--mono);
+      letter-spacing: 0.05em;
+      list-style: none;
+      text-transform: uppercase;
+    }
+
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "[+]"; margin-right: 14px; color: var(--accent); }
+    details[open] summary::before { content: "[-]"; }
+
+    .raw-output {
+      max-height: 420px;
+      margin: 0 0 24px;
+      padding: 20px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--muted);
+      font: 11px/1.6 var(--mono);
+      white-space: pre-wrap;
+    }
+
+    footer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 30px;
+      align-items: end;
+      padding: 36px clamp(20px, 4vw, 58px);
+      color: var(--muted);
+      font: 11px/1.55 var(--mono);
+    }
+
+    footer strong { display: block; color: var(--ink); text-transform: uppercase; }
+    footer a { text-underline-offset: 3px; }
+
+    .reveal { opacity: 0; transform: translateY(18px); }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+      transition: opacity 460ms ease, transform 460ms ease;
+    }
+
+    @media (max-width: 1040px) {
+      .topbar { grid-template-columns: 1fr; position: static; }
+      nav { overflow-x: auto; border-top: 1px solid var(--line); border-left: 0; }
+      nav a { min-height: 45px; flex: 1 0 auto; }
+      .hero { grid-template-columns: 1fr; min-height: auto; }
+      .hero-main { min-height: 70dvh; border-right: 0; border-bottom: 1px solid var(--line-strong); }
+      .scoreboard { min-height: 560px; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .harness { grid-template-columns: 0.75fr 1.25fr; }
+      .harness-analysis { grid-column: 1 / -1; border-left: 0 !important; border-top: 1px solid var(--line); }
+      .data-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .shell { border-inline: 0; }
+      .brand { padding-inline: 16px; }
+      nav a { min-width: 104px; }
+      .hero-main { min-height: auto; padding: 40px 20px 0; }
+      h1 { margin-top: 26px; }
+      .hero-foot { grid-template-columns: 1fr; margin: 42px -20px 0; }
+      .hero-foot div { min-height: 72px; }
+      .scoreboard { min-height: 480px; }
+      .section { padding-inline: 18px; }
+      .summary-grid { grid-template-columns: 1fr; }
+      .metric { min-height: 120px; }
+      .harness { grid-template-columns: 1fr; }
+      .harness > div + div { border-left: 0; border-top: 1px solid var(--line); }
+      .harness-analysis { grid-column: auto; }
+      .harness-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .bar-row { grid-template-columns: 100px minmax(0, 1fr) 70px; gap: 10px; }
+      .coverage-layout { grid-template-columns: 1fr; }
+      .coverage-score { position: static; }
+      .test-list { grid-template-columns: 1fr; }
+      .notes-grid { grid-template-columns: 1fr; }
+      .tool-table, .phase-table { font-size: 10px; }
+      .tool-table th, .tool-table td, .phase-table th, .phase-table td { padding-inline: 5px; }
+      footer { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+
+    @media print {
+      :root { color-scheme: light; --bg: #f4f4f0; --panel: #ffffff; --panel-2: #e9e9e4; --ink: #111111; --muted: #4d4d49; --faint: #777770; --line: #b8b8b1; --line-strong: #555550; --pass: #177a08; }
+      body::before, nav, .filters { display: none; }
+      .topbar { position: static; }
+      .reveal { opacity: 1; transform: none; }
+      .coverage-score { position: static; }
+      a { text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="Return to benchmark report overview">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <span>
+          <strong>Harbor Benchmark Report</strong>
+          <small>RUN / 20260816-195523</small>
+        </span>
+      </a>
+      <nav aria-label="Report navigation">
+        <a href="#results">Results</a>
+        <a href="#telemetry">Telemetry</a>
+        <a href="#coverage">Coverage</a>
+        <a href="#method">Method</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="report-title">
+        <div class="hero-main">
+          <div>
+            <p class="kicker">Four harnesses / One task / One local haze follow-up</p>
+            <h1 id="report-title">Agent<br>Trial</h1>
+            <p class="hero-copy"><strong>glm-5.2</strong> was requested across Claude Code, nanocoder, Pi, and haze. The corrected Pi run and the fixed local haze build bring all four artifacts to a verifier pass; all four completed cleanly.</p>
+          </div>
+          <dl class="hero-foot">
+            <div>
+              <dt>Task</dt>
+              <dd>csv-query</dd>
+            </div>
+            <div>
+              <dt>Started</dt>
+              <dd><time datetime="2026-08-16T19:55:24">2026-08-16 19:55</time></dd>
+            </div>
+            <div>
+              <dt>Primary wall time</dt>
+              <dd>25m 46s</dd>
+            </div>
+          </dl>
+        </div>
+
+        <aside class="scoreboard" aria-label="Primary benchmark score">
+          <div class="score">
+            <div class="score-output"><strong>04</strong><span>/04</span></div>
+            <p>All four harnesses produced artifacts that passed all 17 verifier tests after the corrected Pi run and the fixed haze build replaced their earlier failed trials.</p>
+          </div>
+          <div>
+            <div class="hazard" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="score-notes">
+              <div>
+                <span>Verifier pass rate</span>
+                <strong class="pass-value">100%</strong>
+              </div>
+              <div>
+                <span>Clean completion rate</span>
+                <strong class="pass-value">100%</strong>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section" aria-labelledby="snapshot-title">
+        <div class="section-head reveal">
+          <h2 id="snapshot-title">Run Snapshot</h2>
+          <p>The verifier outcome and the harness outcome are separate signals. All four runs passed the verifier and exited cleanly. The corrected Pi run used a private key overlay; the fixed haze build resolved the earlier completion-loop failures.</p>
+        </div>
+        <dl class="summary-grid reveal">
+          <div class="metric">
+            <dt>Verifier tests</dt>
+            <dd>68/68</dd>
+            <small>Four complete 17-test passes across four run records</small>
+          </div>
+          <div class="metric">
+            <dt>Model steps</dt>
+            <dd>58</dd>
+            <small>Recorded trajectory steps plus 10 Pi turns</small>
+          </div>
+          <div class="metric">
+            <dt>Total tool calls</dt>
+            <dd>63</dd>
+            <small>21 Claude, 18 nano, 15 Pi, 9 haze</small>
+          </div>
+          <div class="metric">
+            <dt>Reported output</dt>
+            <dd>43.8K</dd>
+            <small>Output tokens from all reporting adapters</small>
+          </div>
+        </dl>
+      </section>
+
+      <section class="section" id="results" aria-labelledby="results-title">
+        <div class="section-head reveal">
+          <h2 id="results-title">Harness Results</h2>
+          <p>Filter by operational status. A verifier pass means the artifact met the task contract; a clean run means Harbor recorded no agent exception.</p>
+        </div>
+
+        <div class="filters reveal" role="group" aria-label="Filter harness results">
+          <button class="filter-button" type="button" data-filter="all" aria-pressed="true">All / 4</button>
+          <button class="filter-button" type="button" data-filter="pass" aria-pressed="false">Verifier pass / 4</button>
+          <button class="filter-button" type="button" data-filter="clean" aria-pressed="false">Clean run / 4</button>
+          <button class="filter-button" type="button" data-filter="exception" aria-pressed="false">Exception / 0</button>
+        </div>
+
+        <div class="harness-list" aria-live="polite">
+          <article class="harness reveal" data-state="pass clean">
+            <div class="harness-name">
+              <div>
+                <h3>Claude<br>Code</h3>
+                <code>2.1.233</code>
+              </div>
+              <div class="status-stack">
+                <span class="status pass">17/17 pass</span>
+                <span class="status neutral">clean exit</span>
+              </div>
+            </div>
+            <div class="harness-facts">
+              <dl class="fact"><dt>Reward</dt><dd>1.0</dd></dl>
+              <dl class="fact"><dt>Agent time</dt><dd>397.6s</dd></dl>
+              <dl class="fact"><dt>Steps / tools</dt><dd>21 / 21</dd></dl>
+              <dl class="fact"><dt>Tokens in / out</dt><dd>735,470 / 21,328</dd></dl>
+              <dl class="fact"><dt>Cache tokens</dt><dd>705,216</dd></dl>
+              <dl class="fact"><dt>Cost reported</dt><dd>$1.037078</dd></dl>
+            </div>
+            <div class="harness-analysis">
+              <h4>Assessment</h4>
+              <p><strong>Complete artifact and clean Harbor result.</strong> The run used 5 reads, 8 shell calls, 3 writes, and 5 edits. It was the slowest of the four clean runs.</p>
+              <p>The request and Harbor metadata name <code>glm-5.2</code>, but all 20 model-bearing trajectory steps report <code>glm-5.3</code>. This identity mismatch weakens direct model-level comparison and should be investigated before publishing a leaderboard.</p>
+              <div class="source-links">
+                <a href="../jobs/csv-query-claude-code-20260816-195523/result.json">Job JSON</a>
+                <a href="../jobs/csv-query-claude-code-20260816-195523/csv-query__drvkJHd/result.json">Trial JSON</a>
+                <a href="../jobs/csv-query-claude-code-20260816-195523/csv-query__drvkJHd/agent/trajectory.json">Trajectory</a>
+                <a href="../jobs/csv-query-claude-code-20260816-195523/csv-query__drvkJHd/verifier/test-stdout.txt">Verifier log</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="harness reveal" data-state="pass clean">
+            <div class="harness-name">
+              <div>
+                <h3>Nano<br>coder</h3>
+                <code>1.29.0</code>
+              </div>
+              <div class="status-stack">
+                <span class="status pass">17/17 pass</span>
+                <span class="status neutral">clean exit</span>
+              </div>
+            </div>
+            <div class="harness-facts">
+              <dl class="fact"><dt>Reward</dt><dd>1.0</dd></dl>
+              <dl class="fact"><dt>Agent time</dt><dd>211.5s</dd></dl>
+              <dl class="fact"><dt>Steps / tools</dt><dd>19 / 18</dd></dl>
+              <dl class="fact"><dt>Tokens in / out</dt><dd>not reported</dd></dl>
+              <dl class="fact"><dt>Total trial</dt><dd>251.7s</dd></dl>
+            </div>
+            <div class="harness-analysis">
+              <h4>Assessment</h4>
+              <p><strong>Clean run, second fastest overall.</strong> nanocoder completed agent execution in 3m 31.5s, roughly 47% faster than Claude Code, behind only the fixed haze build. The trajectory records 3 reads, 2 writes, 8 shell calls, and 5 file operations.</p>
+              <p>Token and cost fields are empty, so efficiency can only be compared through time, steps, and tool calls. The artifact itself passed every behavior and error-path test.</p>
+              <div class="source-links">
+                <a href="../jobs/csv-query-nanocoder-20260816-195523/result.json">Job JSON</a>
+                <a href="../jobs/csv-query-nanocoder-20260816-195523/csv-query__dHAfzmU/result.json">Trial JSON</a>
+                <a href="../jobs/csv-query-nanocoder-20260816-195523/csv-query__dHAfzmU/agent/trajectory.json">Trajectory</a>
+                <a href="../jobs/csv-query-nanocoder-20260816-195523/csv-query__dHAfzmU/verifier/test-stdout.txt">Verifier log</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="harness reveal" data-state="pass clean">
+            <div class="harness-name">
+              <div>
+                <h3>Pi</h3>
+                <code>0.73.1</code>
+              </div>
+              <div class="status-stack">
+                <span class="status pass">17/17 pass</span>
+                <span class="status neutral">clean exit</span>
+              </div>
+            </div>
+            <div class="harness-facts">
+              <dl class="fact"><dt>Reward</dt><dd>1.0</dd></dl>
+              <dl class="fact"><dt>Agent time</dt><dd>195.8s</dd></dl>
+              <dl class="fact"><dt>Steps / tools</dt><dd>10 / 15</dd></dl>
+              <dl class="fact"><dt>Tokens in / out</dt><dd>108,701 / 13,142</dd></dl>
+              <dl class="fact"><dt>Cache tokens</dt><dd>92,480</dd></dl>
+              <dl class="fact"><dt>Total trial</dt><dd>237.7s</dd></dl>
+            </div>
+            <div class="harness-analysis">
+              <h4>Corrected assessment</h4>
+              <p><strong>Clean run, fastest of the primary 195523 set.</strong> With <code>ZAI_API_KEY</code> injected through a private Compose overlay, Pi completed agent execution in 3m 15.8s and passed every verifier test without an exception. It used 2 reads, 1 write, and 12 shell calls.</p>
+              <p>Harbor requested <code>glm-5.2</code>, while all 10 response-bearing events identify <code>glm-5.3</code>. As with Claude Code, this backend model mismatch must be resolved before treating the run as a strict glm-5.2 comparison.</p>
+              <div class="source-links">
+                <a href="../jobs/csv-query-pi-key-20260816-205616/result.json">Job JSON</a>
+                <a href="../jobs/csv-query-pi-key-20260816-205616/csv-query__LnV5wYv/result.json">Trial JSON</a>
+                <a href="../jobs/csv-query-pi-key-20260816-205616/csv-query__LnV5wYv/agent/pi.txt">Agent output</a>
+                <a href="../jobs/csv-query-pi-key-20260816-205616/csv-query__LnV5wYv/verifier/test-stdout.txt">Verifier log</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="harness reveal" data-state="pass clean">
+            <div class="harness-name">
+              <div>
+                <h3>Haze</h3>
+                <code>0.11.0+fixes / 41b1efa</code>
+              </div>
+              <div class="status-stack">
+                <span class="status pass">17/17 pass</span>
+                <span class="status neutral">clean exit</span>
+              </div>
+            </div>
+            <div class="harness-facts">
+              <dl class="fact"><dt>Reward</dt><dd>1.0</dd></dl>
+              <dl class="fact"><dt>Agent time</dt><dd>164.6s</dd></dl>
+              <dl class="fact"><dt>Steps / tools</dt><dd>8 / 9</dd></dl>
+              <dl class="fact"><dt>Tokens in / out</dt><dd>57,538 / 9,314</dd></dl>
+              <dl class="fact"><dt>Cache tokens</dt><dd>46,080</dd></dl>
+              <dl class="fact"><dt>Goal cycles</dt><dd>1</dd></dl>
+            </div>
+            <div class="harness-analysis">
+              <h4>Fixed-build assessment</h4>
+              <p><strong>Complete artifact and clean Harbor result, fastest run of the set.</strong> The fixed local build (commit <code>41b1efa</code> plus the completion-gate fixes) recognized post-edit validation evidence, so the goal completed in a single cycle instead of looping to the timeout. It used 3 reads, 1 discovery call, 1 write, 3 shell calls, and 1 raw-output retrieval.</p>
+              <p>Token accounting now treats AI SDK <code>inputTokens</code> as cache-inclusive, so the earlier double-counted haze rows are superseded. As with Claude Code and Pi, every model-bearing trajectory step reports <code>glm-5.3</code> despite the <code>glm-5.2</code> request.</p>
+              <div class="source-links">
+                <a href="../jobs/csv-query-haze-fixed-20260816-215426/result.json">Job JSON</a>
+                <a href="../jobs/csv-query-haze-fixed-20260816-215426/csv-query__7PMB5WM/result.json">Trial JSON</a>
+                <a href="../jobs/csv-query-haze-fixed-20260816-215426/csv-query__7PMB5WM/agent/trajectory.json">Trajectory</a>
+                <a href="../jobs/csv-query-haze-fixed-20260816-215426/csv-query__7PMB5WM/verifier/test-stdout.txt">Verifier log</a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="telemetry" aria-labelledby="telemetry-title">
+        <div class="section-head reveal">
+          <h2 id="telemetry-title">Execution Telemetry</h2>
+          <p>Agent execution time excludes environment setup, adapter installation, and verification. The fixed haze build is the fastest clean run.</p>
+        </div>
+
+        <div class="execution-chart reveal" role="img" aria-label="Agent execution time comparison: haze 164.6 seconds, Pi 195.8 seconds, nanocoder 211.5 seconds, Claude Code 397.6 seconds">
+          <div class="bar-row">
+            <span class="bar-label">haze</span>
+            <span class="bar-field"><i class="bar" style="--w: 41.4%"></i></span>
+            <data class="bar-value" value="164.6">164.6s</data>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Pi</span>
+            <span class="bar-field"><i class="bar" style="--w: 49.2%"></i></span>
+            <data class="bar-value" value="195.8">195.8s</data>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">nanocoder</span>
+            <span class="bar-field"><i class="bar" style="--w: 53.2%"></i></span>
+            <data class="bar-value" value="211.5">211.5s</data>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Claude Code</span>
+            <span class="bar-field"><i class="bar" style="--w: 100%"></i></span>
+            <data class="bar-value" value="397.6">397.6s</data>
+          </div>
+        </div>
+
+        <div class="data-grid reveal" style="margin-top: 32px;">
+          <article>
+            <h3>Phase Timing / Seconds</h3>
+            <div style="overflow-x:auto">
+              <table class="phase-table">
+                <thead>
+                  <tr><th>Harness</th><th>Environment</th><th>Agent setup</th><th>Execution</th><th>Verifier</th><th>Total</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Claude Code</td><td>1.9</td><td>21.1</td><td>397.6</td><td>6.5</td><td>438.4</td></tr>
+                  <tr><td>nanocoder</td><td>2.2</td><td>20.4</td><td>211.5</td><td>6.1</td><td>251.7</td></tr>
+                  <tr><td>Pi</td><td>2.2</td><td>22.6</td><td>195.8</td><td>5.7</td><td>237.7</td></tr>
+                  <tr><td>haze local (fixed)</td><td>2.0</td><td>14.4</td><td>164.6</td><td>6.6</td><td>199.0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article>
+            <h3>Interpretation</h3>
+            <p style="color:var(--muted)">The fixed haze build is the fastest clean run, finishing 31.2 seconds ahead of Pi with the fewest tool calls (9) and the lowest reported input tokens (57,538) of the reporting adapters. Claude Code is the slowest clean run and the heaviest tool user of the set.</p>
+            <div class="callout">
+              <strong>Comparison boundary</strong>
+              <p>All four runs completed cleanly and passed the verifier. Claude, Pi, and haze responses all identify the backend as <code>glm-5.3</code> despite the <code>glm-5.2</code> request, which still prevents a strict glm-5.2 ranking.</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="data-grid reveal" style="margin-top: 1px;">
+          <article>
+            <h3>Tool Calls</h3>
+            <div style="overflow-x:auto">
+              <table class="tool-table">
+                <thead>
+                  <tr><th>Operation family</th><th>Claude</th><th>nano</th><th>Pi</th><th>haze</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Read</td><td>5</td><td>3</td><td>2</td><td>3</td></tr>
+                  <tr><td>Discovery / search</td><td class="na">n/a</td><td class="na">n/a</td><td class="na">n/a</td><td>1</td></tr>
+                  <tr><td>Write</td><td>3</td><td>2</td><td>1</td><td>1</td></tr>
+                  <tr><td>Edit / file op</td><td>5</td><td>5</td><td class="na">n/a</td><td class="na">n/a</td></tr>
+                  <tr><td>Shell</td><td>8</td><td>8</td><td>12</td><td>3</td></tr>
+                  <tr><td>Task tracking</td><td class="na">n/a</td><td class="na">n/a</td><td class="na">n/a</td><td class="na">n/a</td></tr>
+                  <tr><td>Output retrieval</td><td class="na">n/a</td><td class="na">n/a</td><td class="na">n/a</td><td>1</td></tr>
+                  <tr><td><strong>Total</strong></td><td><strong>21</strong></td><td><strong>18</strong></td><td><strong>15</strong></td><td><strong>9</strong></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article>
+            <h3>Token Telemetry</h3>
+            <div style="overflow-x:auto">
+              <table class="tool-table">
+                <thead>
+                  <tr><th>Harness</th><th>Input</th><th>Cached</th><th>Output</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Claude Code</td><td>735,470</td><td>705,216</td><td>21,328</td></tr>
+                  <tr><td>nanocoder</td><td class="na">not reported</td><td class="na">not reported</td><td class="na">not reported</td></tr>
+                  <tr><td>Pi</td><td>108,701</td><td>92,480</td><td>13,142</td></tr>
+                  <tr><td>haze (fixed)</td><td>57,538</td><td>46,080</td><td>9,314</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="callout">
+              <strong>Accounting caveat</strong>
+              <p>Adapters report usage differently. Treat these figures as harness telemetry, not a normalized model-efficiency metric.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="coverage" aria-labelledby="coverage-title">
+        <div class="section-head reveal">
+          <h2 id="coverage-title">Verifier Coverage</h2>
+          <p>The pytest verifier exercises the functional path, CSV edge cases, stable sorting, repeated flags, and required exit behavior.</p>
+        </div>
+
+        <div class="coverage-layout">
+          <aside class="coverage-score reveal">
+            <output>17</output>
+            <p>Independent tests per artifact. Claude Code, nanocoder, corrected Pi, and the fixed haze build all passed the complete set.</p>
+          </aside>
+          <div class="coverage-groups">
+            <article class="coverage reveal">
+              <h3>Filtering and output / 6 tests</h3>
+              <ul class="test-list">
+                <li>Exact example from the specification</li>
+                <li>Default columns and row order</li>
+                <li>Quoted field with spaces</li>
+                <li>Where value containing equals</li>
+                <li>Multiple filters combined with AND</li>
+                <li>No matches returns header only</li>
+              </ul>
+            </article>
+            <article class="coverage reveal">
+              <h3>Selection and sorting / 3 tests</h3>
+              <ul class="test-list">
+                <li>Reordered and duplicate columns</li>
+                <li>Repeated select flags concatenate</li>
+                <li>Lexicographic stable sort</li>
+              </ul>
+            </article>
+            <article class="coverage reveal">
+              <h3>CSV parsing / 2 tests</h3>
+              <ul class="test-list">
+                <li>Quoted field with embedded newline</li>
+                <li>Trailing newline adds no empty row</li>
+              </ul>
+            </article>
+            <article class="coverage reveal">
+              <h3>Error handling / 6 tests</h3>
+              <ul class="test-list">
+                <li>Unknown where column exits 2</li>
+                <li>Unknown select column exits 2</li>
+                <li>Unknown sort column exits 2</li>
+                <li>Missing file exits 2</li>
+                <li>Unreadable file exits 2</li>
+                <li>Malformed CSV exits 2</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="method" aria-labelledby="method-title">
+        <div class="section-head reveal">
+          <h2 id="method-title">Method and Limits</h2>
+          <p>This is a single-task diagnostic run, not a statistically meaningful leaderboard. The operational anomalies matter as much as the reward.</p>
+        </div>
+
+        <div class="notes-grid reveal">
+          <article class="method">
+            <h3>Task Contract</h3>
+            <p>Implement one dependency-free Node.js CLI that parses CSV, filters rows, selects columns, performs stable lexical sorting, and returns precise error codes.</p>
+            <ul>
+              <li>One Harbor task: <code>csv-query</code></li>
+              <li>One primary attempt per harness</li>
+              <li>One local haze follow-up (fixed build) from commit <code>41b1efa</code></li>
+              <li>Model requested: <code>glm-5.2</code></li>
+              <li>17 pytest checks per artifact</li>
+            </ul>
+          </article>
+          <article class="method">
+            <h3>Result Semantics</h3>
+            <p>Harbor runs the verifier even after an agent exception. This correctly distinguishes artifact quality from harness reliability.</p>
+            <ul>
+              <li>Reward 1.0 means all verifier tests passed</li>
+              <li>Exception means the agent command did not exit cleanly</li>
+              <li>Corrected Pi completed cleanly with reward 1.0</li>
+              <li>The fixed haze build completed cleanly with reward 1.0, superseding the two earlier timeout exits</li>
+            </ul>
+          </article>
+          <article class="method">
+            <h3>Known Confounds</h3>
+            <p>Version pinning and provider metadata do not guarantee identical backend execution across adapters.</p>
+            <ul>
+              <li>Claude and Pi response events identify <code>glm-5.3</code></li>
+              <li>nanocoder exposes no token usage</li>
+              <li>Pi required a private Compose overlay for key injection</li>
+              <li>The haze follow-up ran under a 10-minute process timeout it did not reach</li>
+              <li>Earlier haze builds never promoted shell checks to validation evidence; the fixed build records <code>purpose=validation</code> results</li>
+            </ul>
+          </article>
+          <article class="method">
+            <h3>Recommended Next Run</h3>
+            <p>Make Pi credential forwarding permanent, verify model identity at the response level, and run at least three attempts per harness.</p>
+            <ul>
+              <li>Separate clean-completion and verifier-pass metrics</li>
+              <li>Scope summaries to the current timestamp</li>
+              <li>Normalize usage accounting where possible</li>
+              <li>Retain exact package versions and endpoint IDs</li>
+              <li>Record the provider-reported response model in every adapter trajectory</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="reveal" style="margin-top: 36px;">
+          <details>
+            <summary>Pi corrected run excerpt</summary>
+            <pre class="raw-output">Agent: pi 0.73.1
+Requested model: zai/glm-5.2
+Agent execution: 195.828 seconds
+Model turns: 10
+Tool calls: 15
+Process exit: 0
+Harbor exceptions: 0
+Verifier result: 17 passed, 0 failed
+Reward: 1.0
+Response model reported by provider: glm-5.3</pre>
+          </details>
+          <details>
+            <summary>haze fixed run excerpt</summary>
+            <pre class="raw-output">Local build commit: 41b1efab4b835171351b62df46ce615566e36ef9
+Command: haze -p &lt;instruction&gt; --model benchmark:glm-5.2 --output stream-json --no-session --timeout 10m
+Agent execution: 164.644 seconds
+Goal cycles: 1
+Validation outcome: passed (after mutation)
+Process exit: 0
+Harbor exceptions: 0
+Verifier result: 17 passed, 0 failed
+Reward: 1.0
+Response model reported by provider: glm-5.3</pre>
+          </details>
+          <details>
+            <summary>Source locations</summary>
+            <pre class="raw-output">benchmarks/harbor/jobs/csv-query-claude-code-20260816-195523/
+benchmarks/harbor/jobs/csv-query-nanocoder-20260816-195523/
+benchmarks/harbor/jobs/csv-query-pi-key-20260816-205616/
+benchmarks/harbor/jobs/csv-query-haze-fixed-20260816-215426/
+
+Task checksum:
+9871885d1d403fa20f03803fafc7bbe55ee97b66fe61c54adc6a685d8dd6a7ae</pre>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div>
+        <strong>Harbor run 20260816-195523 + corrected Pi 205616 + fixed haze 215426</strong>
+        Generated from local job results. No credentials or model responses are embedded in this report.
+      </div>
+      <div>
+        <a href="../README.md">Benchmark documentation</a><br>
+        <a href="../tasks/csv-query/environment/app/SPEC.md">Task specification</a>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      const buttons = [...document.querySelectorAll('[data-filter]')];
+      const harnesses = [...document.querySelectorAll('.harness[data-state]')];
+
+      for (const button of buttons) {
+        button.addEventListener('click', () => {
+          const filter = button.dataset.filter;
+          for (const candidate of buttons) {
+            candidate.setAttribute('aria-pressed', String(candidate === button));
+          }
+          for (const harness of harnesses) {
+            const states = harness.dataset.state.split(' ');
+            harness.hidden = filter !== 'all' && !states.includes(filter);
+          }
+        });
+      }
+
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const reveals = [...document.querySelectorAll('.reveal')];
+      if (reducedMotion || !('IntersectionObserver' in window)) {
+        for (const element of reveals) element.classList.add('visible');
+      } else {
+        const observer = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        }, { threshold: 0.08 });
+        for (const element of reveals) observer.observe(element);
+      }
+    })();
+  </script>
+</body>
+</html>
