@@ -115,5 +115,8 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
   const taskLine = taskCounts
     ? ` The task list currently shows ${taskCounts.pending + taskCounts.inProgress} open item${taskCounts.pending + taskCounts.inProgress === 1 ? '' : 's'} of ${taskCounts.total}; update writeTasks as you complete them.`
     : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}). Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+  const validationLine = reason.includes('validation')
+    ? ' No recognized post-edit validation was recorded. Run one standard test/build command, directly execute the changed artifact as one unchained command, or call shell with purpose=validation for a custom assertion check.'
+    : '';
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }

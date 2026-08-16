@@ -17,11 +17,11 @@ describe('shell tool safety', () => {
     await fs.remove(tmp);
   });
 
-  async function shell(command: string, abortSignal?: AbortSignal, background = false) {
+  async function shell(command: string, abortSignal?: AbortSignal, background = false, purpose: 'auto' | 'validation' = 'auto') {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.shell.execute({command, background}, {abortSignal});
+      return await hazeTools.shell.execute({command, purpose, background}, {abortSignal});
     } finally {
       process.chdir(originalCwd);
     }
@@ -59,6 +59,11 @@ describe('shell tool safety', () => {
     await fs.outputFile(path.join(tmp, 'public/app.js'), 'const value = 1;\n');
     const result = await shell('node --check public/app.js');
     expect(result.ok).toBe(true);
+  });
+
+  it('returns structured evidence for an explicit custom validation command', async () => {
+    const result = await shell("node -e \"if (2 + 2 !== 4) process.exit(1)\" && echo assertions-pass", undefined, false, 'validation');
+    expect(result).toMatchObject({ok: true, purpose: 'validation', validationSummary: {status: 'passed'}});
   });
 
   it('stores oversized output behind a retrievable handle', async () => {

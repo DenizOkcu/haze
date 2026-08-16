@@ -21,14 +21,15 @@ function streamByteStats(stream: BoundedStream) {
 const userShell = resolveUserShell();
 
 export const shellTool = tool({
-  description: 'Run workspace tests, builds, validation, or inspection. Risk classification is informational; use file tools for edits.',
+  description: 'Run workspace inspection or validation. Set purpose=validation for custom checks that should count as completion evidence; risk classification is informational.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}. ${shellSyntaxGuidance(userShell)}`.trim()),
+    purpose: z.enum(['auto', 'validation']).default('auto').describe('Use validation for an intentional test/check command, including custom assertion scripts; pass/fail still comes from the real process result.'),
     timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
     background: z.boolean().default(false).describe('Start a registered long-running process and return immediately. Use process to list, inspect output, or kill it.'),
   }),
-  execute: async ({command, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, timeoutSeconds, background}, context, async () => {
+  execute: async ({command, purpose, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, purpose, timeoutSeconds, background}, context, async () => {
     const cwd = workspaceRoot();
     const classification = classifyShellCommand(command);
     if (background) {
@@ -51,7 +52,7 @@ export const shellTool = tool({
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;
-    const validationSummary = isValidationClassification(classification)
+    const validationSummary = purpose === 'validation' || isValidationClassification(classification)
       ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: processResult.stdout.omittedBytes > 0, stderrTruncated: processResult.stderr.omittedBytes > 0, classification})
       : undefined;
     const validationPassed = validationSummary?.status === 'passed';
@@ -61,7 +62,7 @@ export const shellTool = tool({
     const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;
     return {
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
-      code, command, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
+      code, command, purpose, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
       aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
       stdout: output.stdout, stderr: output.stderr, validationSummary,
       stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),

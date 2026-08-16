@@ -38,7 +38,7 @@ Do not persist this state; it is valid only for one agent turn. If scoped contex
 
 Current behavior:
 
-- `shellTool.ts` always executes commands and returns informational risk classification.
+- `shellTool.ts` always executes commands and returns informational risk classification. Known test/build commands are validation automatically; `purpose=validation` gives custom assertion commands structured pass/fail evidence from their real process result.
 - Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
 - `shellTool.ts` runs the configured user login shell through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`. Its schema identifies the active dialect. With `background=true`, it instead registers a main-turn-only long-running process and returns immediately.
