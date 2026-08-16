@@ -15,8 +15,7 @@ Usage with the harbor CLI:
     PYTHONPATH=benchmarks/harbor/agents harbor run \
         --agent haze_agent:HazeAgent \
         --model <model-id> \
-        --ae HAZE_BASE_URL=<openai-compatible-base-url> \
-        --ae HAZE_API_KEY=<key> \
+        --env-file <private-env-file-with-HAZE_BASE_URL-and-HAZE_API_KEY> \
         ...
 """
 
@@ -40,7 +39,10 @@ from harbor.models.trajectories import (
     Agent,
     FinalMetrics,
     Metrics,
+    Observation,
+    ObservationResult,
     Step,
+    ToolCall,
     Trajectory,
 )
 from harbor.utils.trajectory_utils import format_trajectory_json
@@ -102,7 +104,7 @@ class HazeAgent(BaseInstalledAgent):
     def _build_config_install_command(self) -> str:
         """Write a settings.json built from HAZE_* environment values.
 
-        Required env (host, passed via --ae or the shell):
+        Required env (host, preferably loaded with Harbor --env-file):
           HAZE_API_KEY   API key for the OpenAI-compatible provider
           HAZE_BASE_URL  Base URL of the OpenAI-compatible provider
         """
@@ -110,11 +112,11 @@ class HazeAgent(BaseInstalledAgent):
         base_url = (self._get_env("HAZE_BASE_URL") or "").strip()
         if not api_key:
             raise RuntimeError(
-                "HAZE_API_KEY is not set. Pass it with `--ae HAZE_API_KEY=...`."
+                "HAZE_API_KEY is not set. Load it with Harbor --env-file."
             )
         if not base_url:
             raise RuntimeError(
-                "HAZE_BASE_URL is not set. Pass it with `--ae HAZE_BASE_URL=...`."
+                "HAZE_BASE_URL is not set. Load it with Harbor --env-file."
             )
 
         model = self.model_name or self.DEFAULT_MODEL
@@ -149,6 +151,11 @@ class HazeAgent(BaseInstalledAgent):
         # SIGKILLs the process). Default stays just under Harbor's typical
         # 15-minute agent timeout; override with --ae HAZE_TIMEOUT=...
         timeout = (self._get_env("HAZE_TIMEOUT") or "13m").strip()
+        # stream-json is diagnostic by default; use HAZE_OUTPUT=json for the
+        # lowest-overhead final performance run while retaining the result envelope.
+        output_mode = (self._get_env("HAZE_OUTPUT") or "stream-json").strip()
+        if output_mode not in {"json", "stream-json"}:
+            raise RuntimeError("HAZE_OUTPUT must be 'json' or 'stream-json'.")
 
         config_command = self._build_config_install_command()
         await self.exec_as_agent(environment, command=config_command)
@@ -158,7 +165,7 @@ class HazeAgent(BaseInstalledAgent):
             "cd /app && "
             f"haze -p {shlex.quote(instruction)} "
             f"--model {shlex.quote(f'{_PROVIDER_NAME}:{model}')} "
-            "--output stream-json "
+            f"--output {output_mode} "
             "--no-session "
             f"--timeout {shlex.quote(timeout)} "
             f"> /logs/agent/{_OUTPUT_LOG} "
@@ -199,64 +206,196 @@ class HazeAgent(BaseInstalledAgent):
                 continue
         return events
 
+    @staticmethod
+    def _summed_usage(events: list[dict[str, Any]]) -> dict[str, int]:
+        totals = {
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+        }
+        for event in events:
+            if event.get("type") != "step_end":
+                continue
+            usage = event.get("usage") or {}
+            for key in totals:
+                totals[key] += usage.get(key, 0) or 0
+        envelope = next(
+            (event for event in reversed(events) if event.get("type") == "result"),
+            None,
+        )
+        envelope_usage = (envelope or {}).get("usage") or {}
+        if envelope_usage:
+            for key in totals:
+                if key in envelope_usage:
+                    totals[key] = envelope_usage.get(key, 0) or 0
+        return totals
+
     def _convert_events_to_trajectory(
         self, events: list[dict[str, Any]]
     ) -> Trajectory | None:
         model_name = self.model_name or self.DEFAULT_MODEL
-        now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-
+        fallback_time = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         steps: list[Step] = []
-        step_id = 1
-        total_input = 0
-        total_output = 0
-        envelope_usage: dict[str, Any] = {}
+        active: dict[str, Any] | None = None
+        orphan_messages: list[dict[str, Any]] = []
+
+        def append_active() -> None:
+            nonlocal active
+            if active is None:
+                return
+            end_event = active.get("end_event")
+            messages = active["messages"]
+            tools = list(active["tools"].values())
+            tool_calls = [
+                ToolCall(
+                    tool_call_id=tool["id"],
+                    function_name=tool["name"],
+                    arguments={},
+                )
+                for tool in tools
+            ]
+            observations = [
+                ObservationResult(
+                    source_call_id=tool["id"],
+                    content=json.dumps(
+                        {
+                            "success": tool.get("success"),
+                            "durationMs": tool.get("durationMs"),
+                            **(
+                                {"errorCode": tool["errorCode"]}
+                                if tool.get("errorCode")
+                                else {}
+                            ),
+                            **(
+                                {"error": tool["error"]}
+                                if tool.get("error")
+                                else {}
+                            ),
+                        }
+                    ),
+                )
+                for tool in tools
+            ]
+            message = "\n\n".join(messages).strip() or "(tool use)"
+            usage = (end_event or {}).get("usage") or {}
+            # AI SDK inputTokens already includes cache-read tokens. Harbor
+            # tracks the cached subset separately; adding it here double-counts.
+            prompt_tokens = usage.get("inputTokens", 0) or 0
+            output_tokens = usage.get("outputTokens", 0) or 0
+            cached_tokens = usage.get("cacheReadTokens", 0) or 0
+            metrics = None
+            if end_event is not None and (
+                prompt_tokens or output_tokens or cached_tokens
+            ):
+                metrics = Metrics(
+                    prompt_tokens=prompt_tokens or None,
+                    completion_tokens=output_tokens or None,
+                    cached_tokens=cached_tokens or None,
+                )
+            steps.append(
+                Step(
+                    step_id=len(steps) + 1,
+                    timestamp=active.get("timestamp") or fallback_time,
+                    source="agent",
+                    message=message,
+                    llm_call_count=1 if end_event is not None else None,
+                    model_name=(end_event or {}).get("responseModel") or model_name,
+                    tool_calls=tool_calls or None,
+                    observation=(
+                        Observation(results=observations) if observations else None
+                    ),
+                    metrics=metrics,
+                    extra={
+                        "attempt": active.get("attempt"),
+                        "step": active.get("step"),
+                        **(
+                            {"finishReason": end_event.get("finishReason")}
+                            if end_event is not None
+                            else {"incomplete": True}
+                        ),
+                    },
+                )
+            )
+            active = None
 
         for event in events:
             etype = event.get("type")
-            if etype == "message_end":
+            if etype == "step_start":
+                append_active()
+                active = {
+                    "attempt": event.get("attempt"),
+                    "step": event.get("step"),
+                    "timestamp": event.get("at"),
+                    "messages": [],
+                    "tools": {},
+                }
+            elif etype == "message_end":
                 text = event.get("text") or ""
                 if not text or event.get("hidden"):
                     continue
-                steps.append(
-                    Step(
-                        step_id=step_id,
-                        timestamp=now,
-                        source="agent",
-                        message=text,
-                        llm_call_count=1,
-                        model_name=model_name,
-                    )
+                if active is None:
+                    orphan_messages.append(event)
+                else:
+                    active["messages"].append(text)
+            elif etype == "tool_start":
+                if active is None:
+                    active = {
+                        "attempt": None,
+                        "step": None,
+                        "timestamp": event.get("at"),
+                        "messages": [],
+                        "tools": {},
+                    }
+                active["tools"][event.get("id") or f"tool-{len(active['tools']) + 1}"] = {
+                    "id": event.get("id") or f"tool-{len(active['tools']) + 1}",
+                    "name": event.get("name") or "unknown",
+                }
+            elif etype == "tool_end" and active is not None:
+                tool_id = event.get("id") or f"tool-{len(active['tools']) + 1}"
+                tool = active["tools"].setdefault(
+                    tool_id,
+                    {"id": tool_id, "name": event.get("name") or "unknown"},
                 )
-                step_id += 1
+                tool.update(
+                    {
+                        "success": event.get("success"),
+                        "durationMs": event.get("durationMs"),
+                        "errorCode": event.get("errorCode"),
+                        "error": event.get("error"),
+                    }
+                )
             elif etype == "step_end":
-                usage = event.get("usage") or {}
-                total_input += usage.get("inputTokens", 0) or 0
-                total_input += usage.get("cacheReadTokens", 0) or 0
-                total_output += usage.get("outputTokens", 0) or 0
-            elif etype == "result":
-                envelope_usage = event.get("usage") or {}
+                if active is None:
+                    active = {
+                        "attempt": event.get("attempt"),
+                        "step": event.get("step"),
+                        "timestamp": event.get("at"),
+                        "messages": [],
+                        "tools": {},
+                    }
+                active["end_event"] = event
 
-        if not steps and not envelope_usage:
-            return None
-
-        # Prefer the final envelope's usage (authoritative) when present.
-        if envelope_usage:
-            total_input = (
-                envelope_usage.get("inputTokens", 0)
-                + envelope_usage.get("cacheReadTokens", 0)
-            )
-            total_output = envelope_usage.get("outputTokens", 0)
-            if steps and (total_input or total_output):
-                steps[-1].metrics = Metrics(
-                    prompt_tokens=total_input or None,
-                    completion_tokens=total_output or None,
+        append_active()
+        for event in orphan_messages:
+            steps.append(
+                Step(
+                    step_id=len(steps) + 1,
+                    timestamp=event.get("at") or fallback_time,
+                    source="agent",
+                    message=event.get("text") or "",
+                    llm_call_count=None,
+                    model_name=model_name,
                 )
+            )
 
         if not steps:
             return None
 
+        usage = self._summed_usage(events)
+        total_input = usage["inputTokens"]
+        total_output = usage["outputTokens"]
         return Trajectory(
-            schema_version="ATIF-v1.6",
+            schema_version="ATIF-v1.7",
             session_id=f"haze-{int(time.time())}",
             agent=Agent(
                 name="haze",
@@ -275,12 +414,10 @@ class HazeAgent(BaseInstalledAgent):
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
         events = self._load_events()
-        envelope = next((e for e in reversed(events) if e.get("type") == "result"), None)
-        usage = (envelope or {}).get("usage") or {}
-        context.n_input_tokens = (
-            usage.get("inputTokens", 0) + usage.get("cacheReadTokens", 0)
-        )
-        context.n_output_tokens = usage.get("outputTokens", 0)
+        usage = self._summed_usage(events)
+        context.n_input_tokens = usage["inputTokens"]
+        context.n_output_tokens = usage["outputTokens"]
+        context.n_cache_tokens = usage["cacheReadTokens"]
 
         trajectory = self._convert_events_to_trajectory(events)
         if not trajectory:

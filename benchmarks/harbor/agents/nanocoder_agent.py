@@ -14,8 +14,7 @@ Usage with the harbor CLI:
     PYTHONPATH=benchmarks/harbor/agents harbor run \
         --agent nanocoder_agent:NanocoderAgent \
         --model <model-id> \
-        --ae NANOCODER_BASE_URL=<openai-compatible-base-url> \
-        --ae NANOCODER_API_KEY=<key> \
+        --env-file <private-env-file-with-NANOCODER_BASE_URL-and-NANOCODER_API_KEY> \
         ...
 """
 
@@ -95,7 +94,7 @@ class NanocoderAgent(BaseInstalledAgent):
     def _build_config_install_command(self) -> str:
         """Write an agents.config.json built from NANOCODER_* environment values.
 
-        Required env (host, passed via --ae or the shell):
+        Required env (host, preferably loaded with Harbor --env-file):
           NANOCODER_API_KEY   API key for the OpenAI-compatible provider
           NANOCODER_BASE_URL  Base URL of the OpenAI-compatible provider
         Optional env:
@@ -106,12 +105,12 @@ class NanocoderAgent(BaseInstalledAgent):
         if not api_key:
             raise RuntimeError(
                 "NANOCODER_API_KEY is not set. Pass it with "
-                "`--ae NANOCODER_API_KEY=...`."
+                "Harbor --env-file."
             )
         if not base_url:
             raise RuntimeError(
                 "NANOCODER_BASE_URL is not set. Pass it with "
-                "`--ae NANOCODER_BASE_URL=...`."
+                "Harbor --env-file."
             )
 
         provider_name = (

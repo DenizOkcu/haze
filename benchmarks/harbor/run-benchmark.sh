@@ -18,11 +18,20 @@
 set -euo pipefail
 
 MODEL="${1:-glm-5.2}"
+ATTEMPTS="${HARBOR_ATTEMPTS:-1}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.233}"
+NANOCODER_VERSION="${NANOCODER_VERSION:-1.29.0}"
+PI_VERSION="${PI_VERSION:-0.73.1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HAZE_VERSION="${HAZE_VERSION:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$SCRIPT_DIR/../../package.json")}"
 cd "$SCRIPT_DIR"
 
 JOBS_DIR="$SCRIPT_DIR/jobs"
 mkdir -p "$JOBS_DIR"
+if ! [[ "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: HARBOR_ATTEMPTS must be a positive integer" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Resolve the Z.ai API key (never printed).
@@ -51,75 +60,126 @@ if [[ -z "$ZAI_API_KEY" ]]; then
   exit 1
 fi
 
-# The built-in harbor pi adapter reads provider keys from the host environment.
+# Keep credentials out of process arguments. Harbor loads this private file into
+# its host environment; built-in and custom adapters resolve their own variables
+# from there and inject only what their agent process needs.
 export ZAI_API_KEY
+RUN_DIR="$SCRIPT_DIR/.run"
+ENV_FILE="$RUN_DIR/benchmark.env"
+mkdir -p "$RUN_DIR"
+umask 077
+rm -f "$ENV_FILE"
+trap 'rm -f "$ENV_FILE"' EXIT
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export ANTHROPIC_API_KEY="$ZAI_API_KEY"
+export NANOCODER_BASE_URL="https://api.z.ai/api/coding/paas/v4/"
+export NANOCODER_API_KEY="$ZAI_API_KEY"
+export HAZE_BASE_URL="https://api.z.ai/api/coding/paas/v4/"
+export HAZE_API_KEY="$ZAI_API_KEY"
+python3 - "$ENV_FILE" <<'EOF'
+import json
+import os
+import sys
+
+keys = (
+    "ZAI_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "NANOCODER_BASE_URL",
+    "NANOCODER_API_KEY",
+    "HAZE_BASE_URL",
+    "HAZE_API_KEY",
+    "HAZE_LOCAL_TARBALL",
+    "HAZE_TIMEOUT",
+    "HAZE_OUTPUT",
+)
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    for key in keys:
+        if value := os.environ.get(key):
+            stream.write(f"{key}={json.dumps(value)}\n")
+EOF
+chmod 600 "$ENV_FILE"
 
 TASK="$SCRIPT_DIR/tasks"
 AGENT_PATH="$SCRIPT_DIR/agents"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+FAILURES=()
 
 # ---------------------------------------------------------------------------
 # 1. Claude Code harness (Anthropic-compatible endpoint on Z.ai)
 # ---------------------------------------------------------------------------
 echo "=== [1/4] claude-code on $MODEL ==="
-export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-PYTHONPATH="$AGENT_PATH" harbor run \
+if ! PYTHONPATH="$AGENT_PATH" harbor run \
   --path "$TASK" \
   --agent claude-code \
   --model "$MODEL" \
-  --ae "ANTHROPIC_API_KEY=$ZAI_API_KEY" \
+  --ak "version=$CLAUDE_CODE_VERSION" \
+  --env-file "$ENV_FILE" \
+  --n-attempts "$ATTEMPTS" \
   --jobs-dir "$JOBS_DIR" \
   --job-name "csv-query-claude-code-$STAMP" \
   --n-concurrent 1 \
   --yes \
-  --delete
+  --delete; then
+  FAILURES+=("claude-code")
+fi
 
 # ---------------------------------------------------------------------------
 # 2. nanocoder harness (OpenAI-compatible endpoint on Z.ai)
 # ---------------------------------------------------------------------------
 echo "=== [2/4] nanocoder on $MODEL ==="
-PYTHONPATH="$AGENT_PATH" harbor run \
+if ! PYTHONPATH="$AGENT_PATH" harbor run \
   --path "$TASK" \
   --agent nanocoder_agent:NanocoderAgent \
   --model "$MODEL" \
-  --ae "NANOCODER_BASE_URL=https://api.z.ai/api/coding/paas/v4/" \
-  --ae "NANOCODER_API_KEY=$ZAI_API_KEY" \
+  --ak "version=$NANOCODER_VERSION" \
+  --env-file "$ENV_FILE" \
+  --n-attempts "$ATTEMPTS" \
   --jobs-dir "$JOBS_DIR" \
   --job-name "csv-query-nanocoder-$STAMP" \
   --n-concurrent 1 \
   --yes \
-  --delete
+  --delete; then
+  FAILURES+=("nanocoder")
+fi
 
 # ---------------------------------------------------------------------------
 # 3. Pi harness (built-in adapter; Z.ai via the zai provider)
 # ---------------------------------------------------------------------------
 echo "=== [3/4] pi on $MODEL ==="
-PYTHONPATH="$AGENT_PATH" harbor run \
+if ! PYTHONPATH="$AGENT_PATH" harbor run \
   --path "$TASK" \
   --agent pi \
   --model "zai/$MODEL" \
-  --ae "ZAI_API_KEY=$ZAI_API_KEY" \
+  --ak "version=$PI_VERSION" \
+  --env-file "$ENV_FILE" \
+  --n-attempts "$ATTEMPTS" \
   --jobs-dir "$JOBS_DIR" \
   --job-name "csv-query-pi-$STAMP" \
   --n-concurrent 1 \
   --yes \
-  --delete
+  --delete; then
+  FAILURES+=("pi")
+fi
 
 # ---------------------------------------------------------------------------
 # 4. haze harness (OpenAI-compatible endpoint on Z.ai)
 # ---------------------------------------------------------------------------
 echo "=== [4/4] haze on $MODEL ==="
-PYTHONPATH="$AGENT_PATH" harbor run \
+if ! PYTHONPATH="$AGENT_PATH" harbor run \
   --path "$TASK" \
   --agent haze_agent:HazeAgent \
   --model "$MODEL" \
-  --ae "HAZE_BASE_URL=https://api.z.ai/api/coding/paas/v4/" \
-  --ae "HAZE_API_KEY=$ZAI_API_KEY" \
+  --ak "version=$HAZE_VERSION" \
+  --env-file "$ENV_FILE" \
+  --n-attempts "$ATTEMPTS" \
   --jobs-dir "$JOBS_DIR" \
   --job-name "csv-query-haze-$STAMP" \
   --n-concurrent 1 \
   --yes \
-  --delete
+  --delete; then
+  FAILURES+=("haze")
+fi
 
 # ---------------------------------------------------------------------------
 # 5. Summary
@@ -151,12 +211,14 @@ for job_dir in sorted(jobs.glob("csv-query-*")):
         except (KeyError, ValueError):
             pass
         trajectory_file = result_file.parent / "agent" / "trajectory.json"
-        in_tok = out_tok = "?"
+        agent_result = result.get("agent_result") or {}
+        in_tok = agent_result.get("n_input_tokens") or "n/a"
+        out_tok = agent_result.get("n_output_tokens") or "n/a"
         if trajectory_file.exists():
             trajectory = json.loads(trajectory_file.read_text())
             metrics = trajectory.get("final_metrics") or {}
-            in_tok = metrics.get("total_prompt_tokens") or "n/a"
-            out_tok = metrics.get("total_completion_tokens") or "n/a"
+            in_tok = metrics.get("total_prompt_tokens") or in_tok
+            out_tok = metrics.get("total_completion_tokens") or out_tok
         harness = job_dir.name.removeprefix("csv-query-").rsplit("-", 2)[0]
         rows.append((harness, reward, duration, in_tok, out_tok,
                      agent.get("model_info", {}).get("name"), agent.get("version")))
@@ -169,3 +231,8 @@ print(f"{'harness':<12} {'reward':<7} {'agent time':<11} {'in tok':<10} {'out to
 for harness, reward, duration, in_tok, out_tok, model, version in rows:
     print(f"{harness:<12} {str(reward):<7} {duration:<11} {str(in_tok):<10} {str(out_tok):<9} {str(model):<9} {str(version):<10}")
 EOF
+
+if (( ${#FAILURES[@]} > 0 )); then
+  printf '\nInfrastructure failures: %s\n' "${FAILURES[*]}" >&2
+  exit 1
+fi
