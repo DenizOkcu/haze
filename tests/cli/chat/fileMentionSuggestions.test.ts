@@ -2,11 +2,7 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
 import {detectMentionAtCursor, fileMentionSuggestions} from '../../../src/cli/chat/fileMentionSuggestions.js';
-
-const execFile = promisify(execFileCallback);
 
 describe('mention primitives (F04 AC1)', () => {
   describe('detectMentionAtCursor', () => {
@@ -47,13 +43,14 @@ describe('mention primitives (F04 AC1)', () => {
 
     beforeEach(async () => {
       // Resolve through realpath so the workspace matches process.cwd() —
-      // on macOS `/var` is a symlink to `/private/var`, and `git check-ignore`
+      // on macOS `/var` is a symlink to `/private/var`, and ignore evaluation
       // needs the relative path to be consistent.
       workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-mention-test-')));
       originalCwd = process.cwd();
       process.chdir(workspace);
-      // `isGitIgnored` shells out to `git check-ignore`, which needs a repo.
-      await execFile('git', ['init', '-q'], {cwd: workspace});
+      // `.git` presence keeps the fixture repo-shaped; ignore evaluation itself
+      // is in-process and needs no git binary.
+      await fs.ensureDir(path.join(workspace, '.git'));
     });
 
     afterEach(async () => {

@@ -1,24 +1,21 @@
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
-import {createIgnoreClassifier, classifyGitIgnored, GIT_IGNORE_BATCH, isGitIgnored} from '../../src/llm/tools/gitIgnore.js';
+import {createIgnoreClassifier, classifyGitIgnored, isGitIgnored} from '../../src/llm/tools/gitIgnore.js';
 
-const execFile = promisify(execFileCallback);
+async function makeTmp(prefix: string) {
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
+  return dir;
+}
 
-describe('gitIgnore batch classifier', () => {
+describe('in-process ignore classifier', () => {
   let tmp: string;
   let originalCwd: string;
 
   beforeEach(async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-gitignore-test-'));
-    // Resolve the macOS /var -> /private/var symlink so workspace-relative
-    // helpers (which use process.cwd()) agree with the absolute test paths.
-    tmp = await fs.realpath(tmp);
+    tmp = await makeTmp('haze-gitignore-test-');
     originalCwd = process.cwd();
-    await execFile('git', ['init', '-q', tmp]);
     process.chdir(tmp);
   });
 
@@ -27,7 +24,7 @@ describe('gitIgnore batch classifier', () => {
     await fs.remove(tmp);
   });
 
-  it('classifies ignored and unignored paths in one subprocess', async () => {
+  it('classifies ignored and unignored paths without a git binary or repository', async () => {
     await fs.writeFile(path.join(tmp, '.gitignore'), 'secret.txt\nbuild/\n');
     await fs.writeFile(path.join(tmp, 'secret.txt'), 'hidden');
     await fs.writeFile(path.join(tmp, 'visible.txt'), 'shown');
@@ -41,8 +38,6 @@ describe('gitIgnore batch classifier', () => {
     expect(ignored.has('build')).toBe(true);
     expect(ignored.has('build/out.js')).toBe(true);
     expect(ignored.has('visible.txt')).toBe(false);
-    // Hundreds of candidates collapse to exactly one git process.
-    expect(classifier.invocationCount).toBe(1);
   });
 
   it('handles paths with spaces and unusual names', async () => {
@@ -55,27 +50,79 @@ describe('gitIgnore batch classifier', () => {
     expect(ignored.has('normal.txt')).toBe(false);
   });
 
-  it('batches more than GIT_IGNORE_BATCH candidates into O(batches) calls', async () => {
-    const total = GIT_IGNORE_BATCH * 2 + 5;
-    for (let i = 0; i < total; i++) await fs.writeFile(path.join(tmp, `f${i}.txt`), 'x');
-
-    const classifier = createIgnoreClassifier(tmp);
-    const paths = Array.from({length: total}, (_, i) => `f${i}.txt`);
-    const ignored = await classifier.classify(paths);
-    expect(ignored.size).toBe(0);
-    // 2*256 + 5 -> 3 batches.
-    expect(classifier.invocationCount).toBe(3);
+  it('reports nothing ignored when no ignore file exists anywhere', async () => {
+    await fs.writeFile(path.join(tmp, 'a.txt'), 'x');
+    expect((await classifyGitIgnored(['a.txt'], tmp)).size).toBe(0);
   });
 
-  it('fails open (reports nothing ignored) outside a git repository', async () => {
-    const nonRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-nogit-'));
-    try {
-      await fs.writeFile(path.join(nonRepo, 'a.txt'), 'x');
-      const ignored = await classifyGitIgnored(['a.txt'], nonRepo);
-      expect(ignored.size).toBe(0);
-    } finally {
-      await fs.remove(nonRepo);
-    }
+  it('a deeper .gitignore overrides a shallower one, including negations', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\nsecret/\n');
+    await fs.ensureDir(path.join(tmp, 'nested'));
+    await fs.writeFile(path.join(tmp, 'nested', '.gitignore'), '!app.log\n');
+    await fs.writeFile(path.join(tmp, 'nested', 'app.log'), 'x');
+
+    // Nested !app.log wins over root *.log; root secret/ stays ignored.
+    const ignored = await classifyGitIgnored(['nested/app.log', 'app.log', 'secret/x.txt'], tmp);
+    expect(ignored.has('nested/app.log')).toBe(false);
+    expect(ignored.has('app.log')).toBe(true);
+    expect(ignored.has('secret/x.txt')).toBe(true);
+  });
+
+  it('cannot re-include a path below an ignored directory', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'secret/\n');
+    await fs.ensureDir(path.join(tmp, 'secret', 'inner'));
+    await fs.writeFile(path.join(tmp, 'secret', 'inner', '.gitignore'), '!x.txt\n');
+    await fs.writeFile(path.join(tmp, 'secret', 'inner', 'x.txt'), 'x');
+
+    const ignored = await classifyGitIgnored(['secret/inner/x.txt', 'secret/inner'], tmp);
+    expect(ignored.has('secret/inner/x.txt')).toBe(true);
+    expect(ignored.has('secret/inner')).toBe(true);
+  });
+
+  it('dir-only patterns ignore the directory and its children but not a same-named file', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'build/\n');
+    await fs.ensureDir(path.join(tmp, 'build'));
+    await fs.writeFile(path.join(tmp, 'build', 'out.js'), 'x');
+    // Same-named FILE in a sibling directory must stay visible.
+    await fs.ensureDir(path.join(tmp, 'other'));
+    await fs.writeFile(path.join(tmp, 'other', 'build'), 'file named build');
+
+    const ignored = await classifyGitIgnored(['build', 'build/out.js', 'other/build'], tmp);
+    expect(ignored.has('build')).toBe(true);
+    expect(ignored.has('build/out.js')).toBe(true);
+    expect(ignored.has('other/build')).toBe(false);
+  });
+
+  it('respects explicit directory hints from walkers (dir-only patterns need no stat)', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'vendor/\n');
+    const ignored = await createIgnoreClassifier(tmp).classify([{path: 'vendor', isDirectory: true}, {path: 'dist', isDirectory: false}]);
+    expect(ignored.has('vendor')).toBe(true);
+    expect(ignored.has('dist')).toBe(false);
+  });
+
+  it('respects .git/info/exclude below in-tree rules', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'keep-me.txt\n!local-only.txt\n');
+    await fs.ensureDir(path.join(tmp, '.git', 'info'));
+    await fs.writeFile(path.join(tmp, '.git', 'info', 'exclude'), 'local-only.txt\n');
+    await fs.writeFile(path.join(tmp, 'keep-me.txt'), 'x');
+    await fs.writeFile(path.join(tmp, 'local-only.txt'), 'x');
+
+    const ignored = await classifyGitIgnored(['keep-me.txt', 'local-only.txt'], tmp);
+    // In-tree negation outranks the exclude file; exclude still catches alone.
+    expect(ignored.has('local-only.txt')).toBe(false);
+    expect(ignored.has('keep-me.txt')).toBe(true);
+  });
+
+  it('picks up rule-file edits within one classifier instance (mtime cache)', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'old.txt\n');
+    const classifier = createIgnoreClassifier(tmp);
+    expect((await classifier.classify(['old.txt'])).has('old.txt')).toBe(true);
+
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'new.txt\n');
+    // mtime changed: the same instance must re-read and apply the new rules.
+    const second = await classifier.classify(['old.txt', 'new.txt']);
+    expect(second.has('old.txt')).toBe(false);
+    expect(second.has('new.txt')).toBe(true);
   });
 
   it('isGitIgnored single-path helper matches the batch result', async () => {
@@ -97,7 +144,7 @@ describe('gitIgnore batch classifier', () => {
   });
 
   it('checkGitIgnored returns not-ignored outside a repository — semantics, not a failure (F-05)', async () => {
-    const nonRepo = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-nogit2-'));
+    const nonRepo = await makeTmp('haze-nogit2-');
     try {
       process.chdir(nonRepo);
       const {checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
@@ -109,101 +156,47 @@ describe('gitIgnore batch classifier', () => {
   });
 });
 
-describe('gitIgnore tri-state under a broken Git (F-05)', () => {
+describe('tri-state under unreadable ignore files (F-05)', () => {
   let tmp: string;
   let originalCwd: string;
 
   beforeEach(async () => {
-    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-gitignore-broken-')));
+    tmp = await makeTmp('haze-gitignore-unreadable-');
     originalCwd = process.cwd();
     process.chdir(tmp);
-    vi.resetModules();
-    // Simulate a missing git binary: spawn fails at the transport level, which
-    // is the one failure the fail-open contract cannot distinguish on its own.
-    vi.doMock('node:child_process', async () => {
-      const {EventEmitter} = await import('node:events');
-      const spawn = () => {
-        const child = new EventEmitter() as EventEmitter & {stdout: EventEmitter; stderr: EventEmitter; stdin: {on: () => void; end: () => void}};
-        child.stdout = new EventEmitter();
-        child.stderr = new EventEmitter();
-        child.stdin = {on: () => undefined, end: () => undefined};
-        queueMicrotask(() => child.emit('error', new Error('spawn git ENOENT')));
-        return child;
-      };
-      return {spawn};
-    });
   });
 
-  afterEach(() => {
-    vi.doUnmock('node:child_process');
-    vi.resetModules();
+  afterEach(async () => {
     process.chdir(originalCwd);
-    void fs.remove(tmp);
+    await fs.remove(tmp);
   });
 
   it('reads still fail open while the tri-state reports unknown', async () => {
-    const {classifyGitIgnored, checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
+    await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\n');
+    await fs.chmod(path.join(tmp, '.gitignore'), 0o000);
+
+    // Batch: fail open (nothing reported), tri-state distinguishes.
     await expect(classifyGitIgnored(['a.txt'])).resolves.toEqual(new Set());
+    const {checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
     await expect(checkGitIgnored(path.join(tmp, 'a.txt'))).resolves.toBe('unknown');
   });
 
   it('mutation guards fail closed on unknown status unless allowIgnored is set', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\n');
+    await fs.chmod(path.join(tmp, '.gitignore'), 0o000);
     const {assertNotIgnored} = await import('../../src/llm/tools/fileToolShared.js');
     const target = path.join(tmp, 'mutate.txt');
     await expect(assertNotIgnored(target, 'mutate.txt')).rejects.toMatchObject({reasonCode: 'ignore_check_unavailable'});
     await expect(assertNotIgnored(target, 'mutate.txt', true)).resolves.toBeUndefined();
   });
-});
 
-describe('gitIgnore stalled child (bounded check-ignore)', () => {
-  let tmp: string;
-  let originalCwd: string;
-  let killCalls: number;
-
-  beforeEach(async () => {
-    vi.useFakeTimers();
-    tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-gitignore-hung-')));
-    originalCwd = process.cwd();
-    process.chdir(tmp);
-    vi.resetModules();
-    killCalls = 0;
-    // A `git` child that accepts stdin, never answers, and never exits — the
-    // abort-ignoring stall case. kill() emits the close event like a real
-    // SIGKILL would, proving the deadline (not the child) settles the batch.
-    vi.doMock('node:child_process', async () => {
-      const {EventEmitter} = await import('node:events');
-      const spawn = () => {
-        const child = new EventEmitter() as EventEmitter & {stdout: EventEmitter; stderr: EventEmitter; stdin: {on: () => void; end: () => void}; kill: (signal?: string) => void};
-        child.stdout = new EventEmitter();
-        child.stderr = new EventEmitter();
-        child.stdin = {on: () => undefined, end: () => undefined};
-        child.kill = () => {
-          killCalls++;
-          queueMicrotask(() => child.emit('close', null, 'SIGKILL'));
-        };
-        return child;
-      };
-      return {spawn};
-    });
-  });
-
-  afterEach(async () => {
-    vi.doUnmock('node:child_process');
-    vi.resetModules();
-    vi.useRealTimers();
-    process.chdir(originalCwd);
-    await fs.remove(tmp);
-  });
-
-  it('kills a stalled child at the deadline: reads fail open, tri-state reports unknown (F-05)', async () => {
-    const {createIgnoreClassifier, classifyGitIgnored, CHECK_IGNORE_DEADLINE_MS} = await import('../../src/llm/tools/gitIgnore.js');
-    const readPromise = classifyGitIgnored(['a.txt'], tmp);
-    const triStatePromise = createIgnoreClassifier(tmp).classifyChecked(['a.txt']);
-    await vi.advanceTimersByTimeAsync(CHECK_IGNORE_DEADLINE_MS + 10);
-    // Read path: bounded and fail-open (nothing reported ignored).
-    await expect(readPromise).resolves.toEqual(new Set());
-    // Tri-state path: the batch could not be checked, so mutations fail closed.
-    await expect(triStatePromise).resolves.toMatchObject({ignored: new Set(), checked: false});
-    expect(killCalls).toBe(2);
+  it('single-file reads fail open on unknown status (unreadable ignore files never block reads)', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\n');
+    await fs.chmod(path.join(tmp, '.gitignore'), 0o000);
+    const {assertNotIgnored} = await import('../../src/llm/tools/fileToolShared.js');
+    const target = path.join(tmp, 'read.txt');
+    await expect(assertNotIgnored(target, 'read.txt', undefined, {operation: 'read'})).resolves.toBeUndefined();
+    // Mutations keep failing closed in the same environment.
+    await expect(assertNotIgnored(target, 'read.txt')).rejects.toMatchObject({reasonCode: 'ignore_check_unavailable'});
   });
 });

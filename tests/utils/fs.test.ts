@@ -28,14 +28,14 @@ describe('walkDir', () => {
     expect(filePaths(entries)).toContain(path.join('src', 'b.txt'));
   });
 
-  it('skips node_modules and .git', async () => {
+  it('skips .git unconditionally; node_modules is governed by ignore rules', async () => {
     await fs.ensureDir(path.join(tmp, 'node_modules', 'pkg'));
     await fs.ensureDir(path.join(tmp, '.git', 'objects'));
     await fs.writeFile(path.join(tmp, 'node_modules', 'pkg', 'index.js'), '');
     await fs.writeFile(path.join(tmp, '.git', 'objects', 'abc'), '');
     await fs.writeFile(path.join(tmp, 'real.txt'), 'content');
     const entries = await walkDir(tmp, {recursive: true});
-    expect(filePaths(entries)).toEqual(['real.txt']);
+    expect(filePaths(entries)).toEqual([path.join('node_modules', 'pkg', 'index.js'), 'real.txt']);
   });
 
   it('returns empty for nonexistent directory', async () => {
@@ -72,7 +72,7 @@ describe('walkDir', () => {
 
     const walked = await walkDir(tmp, {
       recursive: true,
-      ignoreBatch: async relativePaths => new Set(relativePaths.filter(p => p === 'ignored-dir' || p.startsWith('ignored-dir/'))),
+      ignoreBatch: async entries => new Set(entries.filter(entry => entry.path === 'ignored-dir' || entry.path.startsWith('ignored-dir/')).map(entry => entry.path)),
     });
     const paths = walked.map(entry => entry.path);
     expect(paths).not.toContain('ignored-dir');

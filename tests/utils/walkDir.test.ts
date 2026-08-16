@@ -40,13 +40,13 @@ describe('walkDir', () => {
     expect(paths).toContain(path.join('lib', 'c.js'));
   });
 
-  it('skips node_modules and .git', async () => {
+  it('skips .git unconditionally; node_modules is governed by ignore rules', async () => {
     await fs.ensureDir(path.join(tmp, 'node_modules', 'pkg'));
     await fs.ensureDir(path.join(tmp, '.git', 'objects'));
     const entries = await walkDir(tmp, {recursive: true});
     const names = entries.map(e => e.name);
-    expect(names).not.toContain('node_modules');
     expect(names).not.toContain('.git');
+    expect(names).toContain('node_modules');
   });
 
   it('respects maxEntries', async () => {

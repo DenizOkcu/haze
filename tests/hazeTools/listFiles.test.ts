@@ -2,11 +2,8 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
 import {hazeTools} from '../../src/llm/hazeTools.js';
 
-const execFile = promisify(execFileCallback);
 
 describe('listFiles tool', () => {
   let tmp: string;
@@ -15,7 +12,7 @@ describe('listFiles tool', () => {
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-listfiles-test-'));
     originalCwd = process.cwd();
-    await execFile('git', ['init', '-q', tmp]);
+    await fs.ensureDir(path.join(tmp, '.git'));
     process.chdir(tmp);
   });
 

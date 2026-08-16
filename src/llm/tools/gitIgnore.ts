@@ -1,183 +1,199 @@
-import {spawn} from 'node:child_process';
+import fs from 'fs-extra';
+import path from 'node:path';
+import ignoreFactory, {type Ignore} from 'ignore';
 import {workspaceRelativePath, workspaceRoot} from '../../utils/path.js';
 
 /**
- * Maximum candidate paths submitted to a single `git check-ignore` invocation.
- * Bounding the batch keeps stdin/stdout bounded while collapsing hundreds of
- * entries into O(batches) subprocesses instead of one process per path
- * (RH-001). 256 candidates comfortably fits a typical directory frontier.
+ * In-process `.gitignore` evaluation. No Git binary is required or used: rules
+ * come from `.gitignore` files along the ancestor chain (deepest file wins,
+ * last matching line within a file wins) plus `.git/info/exclude` at the root
+ * (lowest precedence), matching Git's documented precedence order. The
+ * evaluation is pure filesystem work — stat/read/regex — so it is fast enough
+ * to call per walked entry and deterministic across environments.
  */
-export const GIT_IGNORE_BATCH = 256;
 
-/**
- * Generous stdout ceiling for a single batch. check-ignore echoes at most the
- * ignored paths it was given, so this is bounded by batch size in practice.
- */
-const CHECK_IGNORE_MAX_BYTES = 8 * 1024 * 1024;
+const GITIGNORE_FILE = '.gitignore';
+const ROOT_EXCLUDE_FILE = path.join('.git', 'info', 'exclude');
 
-/**
- * Wall-clock bound for one batch. check-ignore answers in well under a second;
- * a child that stalls (never reading stdin, never exiting) is killed here and
- * the batch fails open, so a hung `git` can never pin a tool call or leak a
- * process with open stdio pipes past the turn.
- */
-export const CHECK_IGNORE_DEADLINE_MS = 10_000;
+export type GitIgnoreStatus = 'ignored' | 'not-ignored' | 'unknown';
 
 interface IgnoreClassification {
-  /** Subset of the submitted paths Git reports as ignored. */
+  /** Subset of the submitted paths the ignore rules report as ignored. */
   ignored: Set<string>;
   /**
-   * False when a Git failure (e.g. git not installed) made the result partial.
-   * Reads treat that as "nothing ignored" (fail open); mutation guards treat
-   * it as un-verifiable and fail closed instead (F-05).
+   * False when an ignore file somewhere in the evaluated chains exists but
+   * could not be read (e.g. permission denied). Reads treat that as "nothing
+   * ignored" (fail open); mutation guards treat it as un-verifiable and fail
+   * closed instead (F-05).
    */
   checked: boolean;
 }
 
+/** A candidate path plus optional directory-ness; omitted means "stat it". */
+export type IgnoreCandidate = {path: string; isDirectory?: boolean};
+
+interface RuleFileState {
+  mtimeMs: number;
+  /** Compiled rules, or null when no such file exists in that directory. */
+  rules: Ignore | null;
+}
+
+type RuleFileResult = RuleFileState | {unreadable: true};
+
 export interface IgnoreClassifier {
   /**
-   * Classify workspace-relative candidate paths. Returns the subset that Git
-   * reports as ignored. Fails open: a non-repository, an operational Git
-   * failure, and the "no paths ignored" exit code (1) all resolve to "nothing
-   * here is ignored" so workspace reads are never blocked by ignore checks.
+   * Classify candidate paths. Returns the subset the ignore rules report as
+   * ignored. Fails open: candidates whose rules cannot be read are not
+   * reported, so workspace reads are never blocked by ignore checks.
    */
-  classify(relativePaths: readonly string[]): Promise<Set<string>>;
+  classify(candidates: readonly (string | IgnoreCandidate)[]): Promise<Set<string>>;
   /** Like `classify`, but distinguishes "checked" from "could not check" (F-05). */
-  classifyChecked(relativePaths: readonly string[]): Promise<IgnoreClassification>;
-  /** Number of `git check-ignore` subprocesses started by this classifier. */
-  readonly invocationCount: number;
+  classifyChecked(candidates: readonly (string | IgnoreCandidate)[]): Promise<IgnoreClassification>;
+}
+
+/** Normalize separators so Windows-style relatives probe like POSIX paths. */
+function probePath(relPath: string, isDirectory: boolean) {
+  const normalized = relPath.split(/[\\/]+/).join('/');
+  return isDirectory ? `${normalized}/` : normalized;
+}
+
+async function lstatIsDirectory(absolutePath: string) {
+  try {
+    return (await fs.lstat(absolutePath)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Run one bounded `git check-ignore -z --stdin` invocation. Resolves with the
- * raw NUL-delimited stdout (empty when no paths are ignored or the workspace is
- * not a repository); rejects only on a spawn-level failure such as git missing.
- */
-function runCheckIgnore(root: string, input: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('git', ['-C', root, 'check-ignore', '-z', '--stdin'], {windowsHide: true});
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
-    let overflowed = false;
-    let settled = false;
-    let timedOut = false;
-
-    // Stalled-child bound: kill the process tree; its 'close' event rejects the
-    // batch as could-not-check below.
-    const deadline = setTimeout(() => {
-      if (settled) return;
-      timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // Already gone; 'close' will fire (or already did).
-      }
-    }, CHECK_IGNORE_DEADLINE_MS);
-
-    const finish = (stdout: string) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
-      resolve(stdout);
-    };
-    const fail = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
-      reject(error);
-    };
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      if (overflowed) return;
-      totalBytes += chunk.length;
-      if (totalBytes > CHECK_IGNORE_MAX_BYTES) {
-        overflowed = true;
-        chunks.length = 0;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    child.stderr.on('data', () => undefined);
-    child.on('error', fail);
-    child.on('close', () => {
-      // Exit codes: 0 = some ignored, 1 = none ignored, 128 = not a repo. All
-      // are resolved with whatever stdout arrived (empty for 1/128); overflow
-      // yields empty output so the batch fails open (nothing reported ignored).
-      // A deadline kill rejects instead: the batch could not be checked, so the
-      // tri-state callers report `unknown` and mutations fail closed (F-05).
-      if (timedOut) return fail(new Error(`git check-ignore stalled for ${CHECK_IGNORE_DEADLINE_MS}ms and was killed`));
-      finish(overflowed ? '' : Buffer.concat(chunks).toString('utf8'));
-    });
-    child.stdin.on('error', () => undefined);
-    child.stdin.end(input, 'utf8');
-  });
-}
-
-/**
- * Create a bounded batch ignore classifier rooted at `root` (defaults to the
- * workspace root). One classifier should own an entire listing operation so
- * sibling/frontier candidates share subprocesses.
+ * Create an ignore classifier rooted at `root` (defaults to the workspace
+ * root). One classifier should own an entire listing operation: it memoizes
+ * compiled rule files by mtime, so a walk stats each `.gitignore` once per
+ * mtime change instead of re-reading it per entry. Nothing is cached across
+ * classifier instances, so external edits are always picked up.
  */
 export function createIgnoreClassifier(root: string = workspaceRoot()): IgnoreClassifier {
-  let invocationCount = 0;
-  const classifyChecked = async (relativePaths: readonly string[]): Promise<IgnoreClassification> => {
-    // De-duplicate and drop meaningless inputs; preserve insertion uniqueness
-    // so the returned set keys match caller-supplied relative paths exactly.
-    const unique = Array.from(new Set(relativePaths.filter(candidate => candidate && candidate !== '.')));
-    if (unique.length === 0) return {ignored: new Set(), checked: true};
+  const ruleFiles = new Map<string, RuleFileState>();
+
+  async function loadRuleFile(relDir: string, fileName: string): Promise<RuleFileResult> {
+    const cacheKey = relDir ? `${relDir.split(path.sep).join('/')}/${fileName}` : fileName;
+    const absolute = relDir ? path.join(root, relDir, fileName) : path.join(root, fileName);
+    let mtimeMs: number;
+    try {
+      mtimeMs = (await fs.stat(absolute)).mtimeMs;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        const absent: RuleFileState = {mtimeMs: -1, rules: null};
+        ruleFiles.set(cacheKey, absent);
+        return absent;
+      }
+      // Exists (or unknowable) but cannot be stat-read: not cached, retried next call.
+      return {unreadable: true};
+    }
+    const cached = ruleFiles.get(cacheKey);
+    if (cached && cached.mtimeMs === mtimeMs) return cached;
+    try {
+      const rules = ignoreFactory().add(await fs.readFile(absolute, 'utf8'));
+      const state: RuleFileState = {mtimeMs, rules};
+      ruleFiles.set(cacheKey, state);
+      return state;
+    } catch {
+      return {unreadable: true};
+    }
+  }
+
+  /**
+   * Verdict for one path from its applicable rule files: `.gitignore` files in
+   * the parent chain, deepest first (deeper overrides shallower), then the
+   * root exclude file (lowest precedence). `unknown` is true when any file in
+   * the chain could not be read.
+   */
+  async function verdictFor(relPath: string, isDirectory: boolean): Promise<{ignored: boolean; unknown: boolean}> {
+    const probe = probePath(relPath, isDirectory);
+    const parentSegments = probe.split('/').filter(segment => segment.length > 0).slice(0, -1);
+    let unknown = false;
+    for (let index = parentSegments.length; index >= 0; index--) {
+      const relDir = parentSegments.slice(0, index).join('/');
+      const state = await loadRuleFile(relDir, GITIGNORE_FILE);
+      if ('unreadable' in state) {
+        unknown = true;
+        continue;
+      }
+      if (!state.rules) continue;
+      // Paths probed against a nested rule file are relative to its directory.
+      const relToDir = index === 0 ? probe : probe.slice(relDir.length + 1);
+      const result = state.rules.test(relToDir);
+      if (result.ignored || result.unignored) return {ignored: result.ignored, unknown};
+    }
+    const exclude = await loadRuleFile('', ROOT_EXCLUDE_FILE);
+    if ('unreadable' in exclude) return {ignored: false, unknown: true};
+    if (exclude.rules) {
+      const result = exclude.rules.test(probe);
+      if (result.ignored || result.unignored) return {ignored: result.ignored, unknown};
+    }
+    return {ignored: false, unknown};
+  }
+
+  /**
+   * Tri-state status for one root-relative path. Any ignored ancestor makes
+   * the path ignored (Git cannot re-include below an excluded directory);
+   * otherwise the deepest matching rule decides the leaf itself.
+   */
+  async function statusOf(relPath: string, isDirectory: boolean): Promise<{status: GitIgnoreStatus; checked: boolean}> {
+    const segments = probePath(relPath, isDirectory).replace(/\/$/, '').split('/');
+    let unknown = false;
+    for (let depth = 1; depth <= segments.length; depth++) {
+      const rel = segments.slice(0, depth).join('/');
+      const isDir = depth < segments.length || isDirectory;
+      const verdict = await verdictFor(rel, isDir);
+      if (verdict.unknown) unknown = true;
+      // An ignored prefix is decisive: everything below it is ignored too.
+      if (verdict.ignored) return {status: 'ignored', checked: !unknown};
+    }
+    return {status: 'not-ignored', checked: !unknown};
+  }
+
+  const classifyChecked = async (candidates: readonly (string | IgnoreCandidate)[]): Promise<IgnoreClassification> => {
+    // De-duplicate while preserving the first occurrence's directory hint.
+    const unique = new Map<string, IgnoreCandidate>();
+    for (const candidate of candidates) {
+      const entry = typeof candidate === 'string' ? {path: candidate} : candidate;
+      if (!entry.path || entry.path === '.') continue;
+      if (!unique.has(entry.path)) unique.set(entry.path, entry);
+    }
     const ignored = new Set<string>();
     let checked = true;
-    for (let offset = 0; offset < unique.length; offset += GIT_IGNORE_BATCH) {
-      const batch = unique.slice(offset, offset + GIT_IGNORE_BATCH);
-      const input = `${batch.join('\0')}\0`;
-      invocationCount++;
-      // check-ignore echoes each ignored path verbatim (NUL-delimited with
-      // -z). Matching by exact submitted string preserves spaces, embedded
-      // newlines, and unusual names; only ignored entries appear in stdout.
-      try {
-        const stdout = await runCheckIgnore(root, input);
-        for (const part of stdout.split('\0')) if (part) ignored.add(part);
-      } catch {
-        // Spawn-level failure (e.g. git not installed): whatever was classified
-        // so far stands, but the batch could not be checked.
-        checked = false;
-        return {ignored, checked};
-      }
+    for (const [relPath, entry] of unique) {
+      const isDirectory = entry.isDirectory ?? (await lstatIsDirectory(path.join(root, relPath)));
+      const {status, checked: entryChecked} = await statusOf(relPath, isDirectory);
+      if (!entryChecked) checked = false;
+      if (status === 'ignored') ignored.add(relPath);
     }
     return {ignored, checked};
   };
+
   return {
     classifyChecked,
-    classify: async (relativePaths: readonly string[]) => (await classifyChecked(relativePaths)).ignored,
-    get invocationCount() {
-      return invocationCount;
-    },
+    classify: async (candidates: readonly (string | IgnoreCandidate)[]) => (await classifyChecked(candidates)).ignored,
   };
 }
 
-/** Classify a set of workspace-relative paths in bounded batches. */
+/** Classify a set of root-relative paths. */
 export async function classifyGitIgnored(relativePaths: readonly string[], root?: string): Promise<Set<string>> {
   return createIgnoreClassifier(root ?? workspaceRoot()).classify(relativePaths);
 }
 
-/** Distinguish "checked and not ignored" from "could not check" (F-05). */
-export type GitIgnoreStatus = 'ignored' | 'not-ignored' | 'unknown';
-
-/**
- * Single-path ignore classification (used by mutating-tool guards and other
- * one-off checks). Built on the batch primitive so the fail-open read contract
- * stays identical to batched traversal; `unknown` means Git could not be run
- * at all, so callers that must not fail open (mutations) can fail closed.
- */
 export async function isGitIgnored(absolutePath: string): Promise<boolean> {
   return (await checkGitIgnored(absolutePath)) === 'ignored';
 }
 
 /** Tri-state single-path check: mutation guards key off `unknown` (F-05). */
 export async function checkGitIgnored(absolutePath: string): Promise<GitIgnoreStatus> {
+  const root = workspaceRoot();
   const relative = workspaceRelativePath(absolutePath);
-  if (relative === '.') return 'not-ignored';
-  const {ignored, checked} = await createIgnoreClassifier(workspaceRoot()).classifyChecked([relative]);
+  if (relative === '.' || relative.startsWith('..')) return 'not-ignored'; // root, or outside the workspace: no rules apply
+  const isDirectory = await lstatIsDirectory(absolutePath);
+  const {ignored, checked} = await createIgnoreClassifier(root).classifyChecked([{path: relative, isDirectory}]);
   if (!checked) return 'unknown';
   return ignored.has(relative) ? 'ignored' : 'not-ignored';
 }

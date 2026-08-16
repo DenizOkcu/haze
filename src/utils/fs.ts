@@ -1,7 +1,12 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 
-const SKIP_ENTRIES = new Set(['node_modules', '.git']);
+// Only `.git` is unconditionally skipped: Git itself never traverses it and no
+// `.gitignore` rule can re-include it, so skipping it is faithful rule
+// evaluation, not an assumption about the workspace. Everything else —
+// including `node_modules` — is governed purely by ignore rules; a workspace
+// that does not ignore `node_modules` gets it listed.
+const SKIP_ENTRIES = new Set(['.git']);
 
 export interface WalkEntry {
   path: string;
@@ -19,12 +24,14 @@ export interface WalkOptions {
   filter?: (entry: WalkEntry) => boolean | Promise<boolean>;
   /**
    * Batched ignore classification over workspace-relative paths. Given a
-   * directory's children, return the subset that is Git-ignored. Ignored
-   * entries are dropped and ignored directories are not descended into, so a
-   * listing needs O(number of visited directories) Git subprocesses rather
-   * than one per entry (RH-001). Fails open: an empty set means "keep all".
+   * directory's children (with real directory-ness, so dir-only patterns
+   * evaluate exactly like Git), return the subset that is ignored. Ignored
+   * entries are dropped and ignored directories are not descended into.
+   * Evaluation is in-process, so a listing costs O(visited directories) rule
+   * file reads rather than one per entry (RH-001). Fails open: an empty set
+   * means "keep all".
    */
-  ignoreBatch?: (relativePaths: string[]) => Promise<Set<string>>;
+  ignoreBatch?: (entries: WalkEntry[]) => Promise<Set<string>>;
 }
 
 export async function walkDir(root: string, options: WalkOptions = {}): Promise<WalkEntry[]> {
@@ -57,7 +64,7 @@ export async function walkDir(root: string, options: WalkOptions = {}): Promise<
   async function keepNonIgnored(entries: WalkEntry[]): Promise<WalkEntry[]> {
     if (!ignoreBatch) return entries;
     if (entries.length === 0) return entries;
-    const ignored = await ignoreBatch(entries.map(entry => entry.path));
+    const ignored = await ignoreBatch(entries);
     if (ignored.size === 0) return entries;
     return entries.filter(entry => !ignored.has(entry.path));
   }

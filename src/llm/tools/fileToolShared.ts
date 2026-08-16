@@ -11,17 +11,21 @@ export const INLINE_DIFF_LINE_LIMIT = 8;
 // while traversal uses the batched classifier in `gitIgnore.ts` (RH-001).
 export {isGitIgnored};
 
-export async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean) {
+export async function assertNotIgnored(absolutePath: string, inputPath: string, allowIgnored?: boolean, options?: {operation?: 'read' | 'mutation'}) {
   if (allowIgnored) return;
   // Mutations fail closed when ignore status cannot be verified (F-05): reads
   // failing open is right, but silently proceeding into a possibly-ignored
-  // path because Git is missing/broken is the unsafe direction for writes.
+  // path because the ignore file is unreadable is the unsafe direction for
+  // writes. Reads themselves also fail open on 'unknown' (AGENTS contract:
+  // "reads fail open, mutation guards fail closed") — a workspace without
+  // ignore files must not block reads; only 'ignored' is a definite verdict
+  // that stops a read.
   const status = await checkGitIgnored(absolutePath);
   if (status === 'ignored') {
     throw new HazeToolError(`Path is ignored by .gitignore: ${inputPath}. Set allowIgnored=true only if you explicitly need to access ignored files.`, 'ignored_path', {recoveryTool: 'listFiles'});
   }
-  if (status === 'unknown') {
-    throw new HazeToolError(`Could not verify git-ignore status for ${inputPath} (Git unavailable or failed). Set allowIgnored=true to proceed anyway.`, 'ignore_check_unavailable', {recoveryTool: 'listFiles'});
+  if (status === 'unknown' && options?.operation !== 'read') {
+    throw new HazeToolError(`Could not verify git-ignore status for ${inputPath} (an ignore file exists but is unreadable). Set allowIgnored=true to proceed anyway.`, 'ignore_check_unavailable', {recoveryTool: 'listFiles'});
   }
 }
 

@@ -3,7 +3,7 @@ import path from 'node:path';
 import {tool} from 'ai';
 import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
-import {walkDir} from '../utils/fs.js';
+import {walkDir, type WalkEntry} from '../utils/fs.js';
 import {writeTasksTool} from './tools/taskTool.js';
 import {readToolOutputTool} from './tools/storedOutputTool.js';
 import {workspaceRoot} from '../utils/path.js';
@@ -59,11 +59,11 @@ export const hazeTools = {
         let ignoredSkipped = 0;
 
         // One persistent classifier owns the whole listing so a frontier of
-        // candidates collapses to O(visited directories) Git subprocesses
-        // instead of one process per walked entry (RH-001). Page-2 cursor
+        // candidates collapses to O(visited directories) rule-file reads
+        // instead of one evaluation per walked entry (RH-001). Page-2 cursor
         // resumes do not re-check entries preceding the cursor.
-        const ignoreBatch = includeIgnored ? undefined : (relativePaths: string[]) =>
-          createIgnoreClassifier(workspaceRoot()).classify(relativePaths).then(ignored => {
+        const ignoreBatch = includeIgnored ? undefined : (entries: WalkEntry[]) =>
+          createIgnoreClassifier(workspaceRoot()).classify(entries).then(ignored => {
             ignoredSkipped += ignored.size;
             return ignored;
           });

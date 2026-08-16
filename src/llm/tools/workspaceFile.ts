@@ -21,7 +21,7 @@ export async function prepareWorkspaceRead(filePath: string, allowIgnored: boole
     if (isPathBlessed(realRequested, blessed)) return absolutePath;
   }
   const absolutePath = resolveWorkspacePath(filePath);
-  await assertNotIgnored(absolutePath, filePath, allowIgnored);
+  await assertNotIgnored(absolutePath, filePath, allowIgnored, {operation: 'read'});
   await assertRealPathInsideWorkspace(absolutePath, filePath);
   return absolutePath;
 }

@@ -68,7 +68,7 @@ async function nearbyReadablePaths(filePath: string): Promise<string[]> {
     return [];
   }
   const ranked = entries
-    .filter(entry => entry.name !== '.git' && entry.name !== 'node_modules')
+    .filter(entry => entry.name !== '.git')
     .map(entry => ({entry, distance: editDistance(wanted.toLowerCase(), entry.name.toLowerCase())}))
     .filter(({entry, distance}) => distance <= Math.max(2, Math.ceil(wanted.length * 0.4)) || entry.name.toLowerCase().includes(wanted.toLowerCase()) || wanted.toLowerCase().includes(entry.name.toLowerCase()))
     .sort((left, right) => left.distance - right.distance || left.entry.name.localeCompare(right.entry.name))

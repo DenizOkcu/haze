@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {spawn, spawnSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
 import fs from 'fs-extra';
 import http from 'node:http';
 import os from 'node:os';
@@ -173,8 +173,8 @@ describe.skipIf(!buildCurrent)('autonomous goal continuation (subprocess, real b
     workspace = path.join(tmp, 'workspace');
     await fs.ensureDir(home);
     await fs.ensureDir(workspace);
-    // A real git repo: mutation tools fail closed when ignore status is unverifiable.
-    spawnSync('git', ['init', '-q'], {cwd: workspace});
+    // Repo-shaped workspace: ignore evaluation is in-process, no git binary needed.
+    await fs.ensureDir(path.join(workspace, '.git'));
     await fs.outputJson(path.join(workspace, 'package.json'), {name: 'greet', private: true, scripts: {test: 'node greet.test.js'}});
     await fs.writeFile(path.join(workspace, 'greet.test.js'), [
       "const assert = require('node:assert');",
