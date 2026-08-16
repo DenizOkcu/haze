@@ -35,24 +35,42 @@ describe('assembleRequestContext', () => {
     for (const mock of Object.values(mocks)) mock.mockReset();
   });
 
-  it('registers built-in and subagent tools when no LSP/MCP/skills are configured', async () => {
+  it('keeps a simple coding request on the lean built-in tool set', async () => {
     mocks.readSettings.mockResolvedValue(settings);
     mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
     mocks.installedLspServers.mockResolvedValue([]);
     mocks.configuredMcpServers.mockReturnValue([]);
     mocks.loadMcpTools.mockResolvedValue({tools: {}, clients: [], errors: []});
 
-    const result = await assembleRequestContext({contextFiles: [], model: fakeModel});
+    const result = await assembleRequestContext({request: 'Implement the small CLI.', contextFiles: [], model: fakeModel});
 
-    expect(result.availableTools.subagent).toBeDefined();
+    expect(result.availableTools.subagent).toBeUndefined();
+    expect(result.availableTools.fetch).toBeUndefined();
+    expect(result.availableTools.process).toBeUndefined();
+    expect(result.availableTools.writeTasks).toBeDefined();
     expect(result.availableTools.readFile).toBeDefined();
-    expect(result.toolCategories.get('subagent')).toBe('subagent');
+    expect(result.toolCategories.get('subagent')).toBeUndefined();
     expect(result.toolCategories.get('readFile')).toBe('builtin');
     expect(result.toolCategories.get('skill')).toBeUndefined();
     expect(result.loadedMcp).toBeUndefined();
     expect(result.executionScope.coordinator).toBeDefined();
     expect(result.executionScope.mutationPolicy).toBeDefined();
-    expect(result.systemPrompt).toContain('Tools');
+    expect(result.systemPrompt).toContain('Tool use');
+    expect(result.systemPrompt).not.toContain('Use subagent');
+    expect(result.systemPrompt).not.toContain('fetch reads');
+  });
+
+  it('enables optional tools only when the request calls for them', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+
+    const result = await assembleRequestContext({request: 'Use parallel agents to research online docs, run a dev server in the background, and maintain a task list.', contextFiles: [], model: fakeModel});
+
+    expect(result.availableTools).toMatchObject({subagent: expect.anything(), fetch: expect.anything(), process: expect.anything(), writeTasks: expect.anything()});
+    expect(result.systemPrompt).toContain('Use subagent');
+    expect(result.systemPrompt).toContain('fetch reads');
   });
 
   it('reuses a supplied turn execution scope across request retries', async () => {

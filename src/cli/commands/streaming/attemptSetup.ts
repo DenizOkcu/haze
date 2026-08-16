@@ -124,7 +124,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   const activeContextFiles = contextFiles;
   const activeModel = runtime.model;
   const {omitMaxOutputTokens, ...providerSettings} = providerRequestSettings(runtime.config);
-  const assembled = await assembleRequestContext({contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
+  const assembled = await assembleRequestContext({request: value, contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
     ? {type: 'subagent_state', id: event.id, state: 'queued', mode: event.mode, queued: event.queued, running: event.running}
     : event.type === 'started'
       ? {type: 'subagent_state', id: event.id, state: 'started', mode: event.mode, queueMs: event.queueMs, running: event.running}

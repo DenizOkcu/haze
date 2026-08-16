@@ -36,6 +36,25 @@ export interface TurnExecutionScope {
   mutationPolicy: WorkspaceMutationPolicy;
 }
 
+const ALWAYS_AVAILABLE_TOOLS = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'shell', 'writeTasks', 'readToolOutput', 'skill']);
+
+/** Keep the common coding path lean while preserving explicitly relevant capabilities. */
+export function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
+  if (request === undefined) return tools;
+  const lower = request.toLowerCase();
+  const includeFetch = /https?:\/\/|\b(web|online|fetch|current docs?|api docs?|library docs?|research)\b/.test(lower);
+  const includeProcess = /\b(background|server|serve|daemon|watch(?:er)?|long-running|process|dev server)\b/.test(lower);
+  const includeSubagent = /\b(subagents?|agents?|fleet|parallel|delegate|orchestrat\w*|multi-agent|review|audit|compare)\b/.test(lower) || request.length > 1_200;
+  return Object.fromEntries(Object.entries(tools).filter(([name]) =>
+    ALWAYS_AVAILABLE_TOOLS.has(name)
+    || (name === 'fetch' && includeFetch)
+    || (name === 'process' && includeProcess)
+    || (name === 'subagent' && includeSubagent)
+    // Configured LSP/MCP tools are explicit user capabilities and remain available.
+    || !['fetch', 'process', 'subagent'].includes(name),
+  ));
+}
+
 export interface AssembledRequestContext {
   systemPrompt: string;
   availableTools: ToolSet;
@@ -64,6 +83,8 @@ export async function assembleRequestContext(input: {
   onSubagentEvent?: (event: CoordinatorEvent) => void;
   abortSignal?: AbortSignal;
   executionScope?: TurnExecutionScope;
+  /** Current user request, used only to omit irrelevant heavyweight built-ins. */
+  request?: string;
   /** Pre-read settings so a turn performs a single settings read (CR-024). */
   settings?: Awaited<ReturnType<typeof readSettings>>;
 }): Promise<AssembledRequestContext> {
@@ -117,10 +138,18 @@ export async function assembleRequestContext(input: {
     addCapabilityTools({availableTools, toolCategories, loaded: {category: 'mcp', tools: loadedMcp.tools}, skipCollisions: true});
   }
 
+  const selectedTools = selectToolsForRequest(availableTools, input.request);
+  for (const name of Object.keys(availableTools)) {
+    if (!(name in selectedTools)) {
+      delete availableTools[name];
+      toolCategories.delete(name);
+    }
+  }
+
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
   const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`);
   const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
-  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
+  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope};
 }
