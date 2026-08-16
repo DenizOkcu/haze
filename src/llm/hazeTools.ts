@@ -313,7 +313,10 @@ export const hazeTools = {
     contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().describe('File path relative to the current workspace'),
-      content: z.string().max(WRITE_FILE_CHUNK_BYTES).describe(`File content chunk, at most ${WRITE_FILE_CHUNK_BYTES} UTF-8 bytes`),
+      // Size policy lives in execute (write_chunk_too_large with chunking
+      // guidance), not in the schema: a Zod .max() would shadow that error
+      // with a cryptic AI_TypeValidationError before execute can run.
+      content: z.string().describe(`File content chunk, at most ${WRITE_FILE_CHUNK_BYTES} UTF-8 bytes`),
       overwriteExisting: z.boolean().default(false).describe('Approve replacing an existing file with the first chunk of an intentional full rewrite'),
       append: z.boolean().default(false).describe('Append this chunk to an existing file; use after creating or replacing the file with the first chunk'),
       allowIgnored: z.boolean().default(false).describe('Write a .gitignored file only when needed'),

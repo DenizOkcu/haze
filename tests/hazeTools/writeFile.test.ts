@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';
+import {WRITE_FILE_CHUNK_BYTES} from '../../src/core/agent/budgets.js';
 
 describe('writeFile tool', () => {
   let tmp: string;
@@ -95,6 +96,16 @@ describe('writeFile tool', () => {
     const result = await writeFile({path: 'large.txt', content: 'ü'.repeat(9_000)});
     expect(result).toMatchObject({ok: false, reasonCode: 'write_chunk_too_large'});
     await expect(fs.pathExists(path.join(tmp, 'large.txt'))).resolves.toBe(false);
+  });
+
+  it('keeps the chunk size policy out of the input schema so the structured error stays reachable', () => {
+    // Regression: a Zod .max() on content shadowed execute's friendly
+    // write_chunk_too_large guidance with a cryptic AI_TypeValidationError,
+    // stranding real model calls (unit tests called execute directly and never
+    // saw it). The schema must accept oversized content and let execute reply.
+    const oversized = 'x'.repeat(WRITE_FILE_CHUNK_BYTES + 1);
+    const parsed = hazeTools.writeFile.inputSchema.safeParse({path: 'large.txt', content: oversized});
+    expect(parsed.success).toBe(true);
   });
 
   it('rejects ignored paths by default and writes them with allowIgnored', async () => {
