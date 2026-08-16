@@ -66,19 +66,19 @@ describe('toolContext', () => {
     await expect(runDedupedTool('writeFile', {path: './new.ts', append: false}, {context}, async () => ({ok: true}))).resolves.toEqual({ok: true});
   });
 
-  it('serializes concurrent main-turn file mutation and bash under the workspace policy', async () => {
+  it('serializes concurrent main-turn file mutation and shell under the workspace policy', async () => {
     const context: HazeToolContext = {mutationPolicy: new WorkspaceMutationPolicy()};
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
     const order: string[] = [];
     const first = runDedupedTool('editFile', {path: 'a.ts'}, {context}, async () => { order.push('edit-start'); await firstGate; order.push('edit-end'); return {ok: true}; });
     await Promise.resolve();
-    const second = runDedupedTool('bash', {command: 'npm test'}, {context}, async () => { order.push('bash'); return {ok: true}; });
+    const second = runDedupedTool('shell', {command: 'npm test'}, {context}, async () => { order.push('shell'); return {ok: true}; });
     await Promise.resolve();
     expect(order).toEqual(['edit-start']);
     releaseFirst();
     await Promise.all([first, second]);
-    expect(order).toEqual(['edit-start', 'edit-end', 'bash']);
+    expect(order).toEqual(['edit-start', 'edit-end', 'shell']);
   });
 
   it('rejects circular tool input instead of infinite-looping the dedup key builder', async () => {

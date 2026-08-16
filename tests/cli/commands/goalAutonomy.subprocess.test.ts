@@ -95,7 +95,7 @@ function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unkn
       return {kind: 'chunks', chunks: toolCallResponse('call-write-1', 'writeFile', {path: 'greet.js', content: BROKEN_GREET}), label: 'write broken greet.js'};
     }
     if (toolCount === 2) {
-      return {kind: 'chunks', chunks: toolCallResponse('call-test-1', 'bash', {command: 'npm test'}), label: 'run failing npm test'};
+      return {kind: 'chunks', chunks: toolCallResponse('call-test-1', 'shell', {command: 'npm test'}), label: 'run failing npm test'};
     }
     // Read-only inspection with unique inputs until the step budget ends the
     // physical turn (finish reason `tool-calls`). Substantive text keeps these
@@ -107,7 +107,7 @@ function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unkn
     return {kind: 'chunks', chunks: toolCallResponse('call-fix-1', 'editFile', {path: 'greet.js', edits: [{oldText: "'goodbye '", newText: "'hello '"}]}), label: 'fix greet.js'};
   }
   if (toolCount === 1) {
-    return {kind: 'chunks', chunks: toolCallResponse('call-test-2', 'bash', {command: 'npm test'}), label: 'run passing npm test'};
+    return {kind: 'chunks', chunks: toolCallResponse('call-test-2', 'shell', {command: 'npm test'}), label: 'run passing npm test'};
   }
   if (toolCount === 2) {
     return {kind: 'chunks', chunks: toolCallResponse('call-tasks-2', 'writeTasks', {tasks: [

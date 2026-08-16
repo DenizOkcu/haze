@@ -1,4 +1,4 @@
-import type {BashClassification} from '../safety/bashClassifier.js';
+import type {ShellClassification} from '../safety/shellClassifier.js';
 import type {ValidationSummary} from '../../llm/toolResultTypes.js';
 import type {ReductionContentKind, ReductionParseTier} from '../toolOutput/reduction.js';
 
@@ -10,7 +10,7 @@ export interface BashOutputFilterInput {
   stdout: string;
   stderr: string;
   timedOut: boolean;
-  classification?: BashClassification;
+  classification?: ShellClassification;
   validationSummary?: ValidationSummary;
   storeRawOutput?: (content: string) => string;
   fallbackCompact: (text: string, maxChars?: number) => {text: string; truncated: boolean; omittedChars?: number; handle?: string};

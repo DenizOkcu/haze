@@ -54,7 +54,7 @@ describe('loadMcpTools', () => {
 
   it('never lets an MCP tool shadow a reserved (built-in) name', async () => {
     mocks.createMCPClient.mockReturnValueOnce(fakeClient(toolset([['readFile', 'mcp'], ['unique', 'mcp']])));
-    const result = await loadMcpTools([httpServer('s1')], new Set(['readFile', 'bash']));
+    const result = await loadMcpTools([httpServer('s1')], new Set(['readFile', 'shell']));
     expect(Object.keys(result.tools)).toEqual(['unique']);
     expect(result.errors).toContain('s1: skipped tool "readFile" (name already in use)');
   });

@@ -8,7 +8,7 @@ import {promises as dns} from 'node:dns';
  * blocking + DNS-resolution check (defeats DNS rebinding to internal IPs).
  *
  * This module is pure safety logic under `core/safety/`, parallel to
- * `bashClassifier.ts`. It must not import anything from `ai`, `hazeTools`, or
+ * `shellClassifier.ts`. It must not import anything from `ai`, `hazeTools`, or
  * the UI — keep it auditable in one place.
  */
 

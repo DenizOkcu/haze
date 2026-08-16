@@ -44,7 +44,7 @@ describe('assembleWorkerContext', () => {
     const inspect = await assembleWorkerContext(task('inspect'), COMPATIBILITY_PROFILE, {cwd: root});
     expect(Object.keys(inspect.tools)).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput']);
     const validate = await assembleWorkerContext(task('validate'), COMPATIBILITY_PROFILE, {cwd: root});
-    expect(Object.keys(validate.tools)).toContain('bash');
+    expect(Object.keys(validate.tools)).toContain('shell');
     expect(Object.keys(validate.tools)).not.toContain('writeFile');
   });
 

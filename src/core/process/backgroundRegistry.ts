@@ -4,6 +4,7 @@ import {BACKGROUND_PROCESS_HISTORY_LIMIT, BACKGROUND_PROCESS_MAX_CONCURRENCY} fr
 import {registerDynamicToolOutput, unregisterDynamicToolOutput} from '../agent/toolOutputStore.js';
 import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits.js';
 import {signalProcessTree} from './runBoundedProcess.js';
+import {shellInvocation} from './userShell.js';
 import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
 type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
@@ -114,7 +115,8 @@ export function startBackgroundProcess(input: {command: string; cwd: string}): B
   }
   installExitHook();
   const backgroundId = `background-${nextId++}`;
-  const child = spawn('bash', ['-lc', input.command], {
+  const invocation = shellInvocation(input.command);
+  const child = spawn(invocation.command, invocation.args, {
     cwd: input.cwd,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -137,10 +139,12 @@ export function startBackgroundProcess(input: {command: string; cwd: string}): B
   child.once('error', error => {
     summary.status = 'failed';
     const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
-    // bash is required on Windows (via WSL or Git Bash). Without it, spawn
-    // fails with ENOENT; surface a clearer message than the raw syscall error.
+    // Without the user's shell on PATH, spawn fails with ENOENT; surface a
+    // clearer message than the raw syscall error. The default Windows shell is
+    // bash (via WSL or Git Bash), so that case keeps the install hint.
+    const shellName = invocation.command;
     summary.error = code === 'ENOENT' && process.platform === 'win32'
-      ? `bash was not found on PATH. Install WSL or Git Bash, or run haze on a POSIX shell. Underlying error: ${error.message}`
+      ? `${shellName} was not found on PATH.${shellName === 'bash' ? ' Install WSL or Git Bash, or run haze on a POSIX shell.' : ''} Underlying error: ${error.message}`
       : error.message;
     notify();
   });

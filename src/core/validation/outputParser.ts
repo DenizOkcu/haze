@@ -1,4 +1,4 @@
-import type {BashClassification} from '../safety/bashClassifier.js';
+import type {ShellClassification} from '../safety/shellClassifier.js';
 import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
 import {capOutputForProcessing} from '../toolOutput/reduction.js';
 
@@ -6,7 +6,7 @@ function uniq(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function inferKind(command: string, classification?: BashClassification): ValidationKind {
+function inferKind(command: string, classification?: ShellClassification): ValidationKind {
   const lower = command.toLowerCase();
   if (/typecheck|\btsc\b/.test(lower)) return 'typecheck';
   if (/\beslint\b|\blint\b/.test(lower)) return 'lint';
@@ -23,7 +23,7 @@ export function parseValidationOutput(input: {
   timedOut?: boolean;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
-  classification?: BashClassification;
+  classification?: ShellClassification;
 }): ValidationSummary {
   const text = `${capOutputForProcessing(input.stdout)}\n${capOutputForProcessing(input.stderr)}`;
   const lines = text.split(/\r?\n/);

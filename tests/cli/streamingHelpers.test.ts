@@ -20,11 +20,11 @@ describe('uniqueRepeatedToolNames', () => {
 
   it('returns each repeated name once even if it repeats several times', () => {
     const calls = [
-      {toolName: 'bash', input: {command: 'ls'}},
-      {toolName: 'bash', input: {command: 'ls'}},
-      {toolName: 'bash', input: {command: 'ls'}},
+      {toolName: 'shell', input: {command: 'ls'}},
+      {toolName: 'shell', input: {command: 'ls'}},
+      {toolName: 'shell', input: {command: 'ls'}},
     ];
-    expect(uniqueRepeatedToolNames(calls)).toEqual(['bash']);
+    expect(uniqueRepeatedToolNames(calls)).toEqual(['shell']);
   });
 
   it('does not conflate different tools that share identical input', () => {
@@ -38,11 +38,11 @@ describe('uniqueRepeatedToolNames', () => {
   it('tracks several repeated tool names independently', () => {
     const calls = [
       {toolName: 'readFile', input: {path: 'a'}},
-      {toolName: 'bash', input: {command: 'x'}},
+      {toolName: 'shell', input: {command: 'x'}},
       {toolName: 'readFile', input: {path: 'a'}},
-      {toolName: 'bash', input: {command: 'x'}},
+      {toolName: 'shell', input: {command: 'x'}},
     ];
-    expect(uniqueRepeatedToolNames(calls).sort()).toEqual(['bash', 'readFile']);
+    expect(uniqueRepeatedToolNames(calls).sort()).toEqual(['readFile', 'shell']);
   });
 });
 

@@ -25,7 +25,7 @@ describe('validation output parser', () => {
 
   it('marks failed tests as failed even when a pipe swallows the exit code', () => {
     // Reproduces the regression seen in the 2026-06-13 session log: the
-    // agent ran `npm test 2>&1 | tail -50`, jest exited non-zero, but bash
+    // agent ran `npm test 2>&1 | tail -50`, jest exited non-zero, but the shell
     // returned tail's exit code (0). The parser still extracted the failed
     // tests, so that evidence must override the green exit code.
     const stdout = [

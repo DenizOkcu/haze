@@ -93,7 +93,7 @@ function compactResultOutput(output: unknown, toolName: string) {
   return output;
 }
 
-const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'editFile', 'replaceLines', 'bash']);
+const COMPACTABLE_INPUT_TOOLS = new Set(['writeFile', 'editFile', 'replaceLines', 'shell']);
 const BASH_COMMAND_TRUNCATE_THRESHOLD = 200;
 const BASH_COMMAND_KEEP_CHARS = 150;
 
@@ -131,7 +131,7 @@ function compactToolCallInput(input: unknown, toolName: string): unknown {
       content: `[Compacted: original ${bytes} bytes. Use readFile on "${path}" to inspect.]`,
     };
   }
-  if (toolName === 'bash' && typeof source.command === 'string' && source.command.length > BASH_COMMAND_TRUNCATE_THRESHOLD) {
+  if (toolName === 'shell' && typeof source.command === 'string' && source.command.length > BASH_COMMAND_TRUNCATE_THRESHOLD) {
     const total = source.command.length;
     const truncated = source.command.slice(0, BASH_COMMAND_KEEP_CHARS).replace(/\s+/g, ' ').trim();
     return {

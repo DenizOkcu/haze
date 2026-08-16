@@ -11,7 +11,7 @@ describe('tool capability metadata', () => {
     expect(toolCapability('writeFile')).toEqual(['mutate']);
     expect(toolCapability('editFile')).toEqual(['mutate']);
     expect(toolCapability('replaceLines')).toEqual(['mutate']);
-    expect(toolCapability('bash')).toEqual(['process']);
+    expect(toolCapability('shell')).toEqual(['process']);
     expect(toolCapability('process')).toEqual(['process']);
     expect(toolCapability('writeTasks')).toEqual(['coordinate']);
     expect(toolCapability('subagent')).toEqual(['coordinate']);
@@ -27,9 +27,9 @@ describe('tool capability metadata', () => {
     expect(isMutatingCapability('editFile')).toBe(true);
     expect(isMutatingCapability('replaceLines')).toBe(true);
     expect(isMutatingCapability('readFile')).toBe(false);
-    // bash is process-capable and validation is runtime-classifier dependent,
+    // shell is process-capable and validation is runtime-classifier dependent,
     // so it counts as validation-capable (the command decides per call).
-    expect(isValidationCapable('bash')).toBe(true);
+    expect(isValidationCapable('shell')).toBe(true);
     expect(isValidationCapable('readFile')).toBe(false);
   });
 
@@ -37,7 +37,7 @@ describe('tool capability metadata', () => {
     expect(isReadOrDiscoveryCapability('listFiles')).toBe(true);
     expect(isReadOrDiscoveryCapability('readFile')).toBe(true);
     expect(isReadOrDiscoveryCapability('grep')).toBe(true);
-    expect(isReadOrDiscoveryCapability('bash')).toBe(false);
+    expect(isReadOrDiscoveryCapability('shell')).toBe(false);
     expect(isReadOrDiscoveryCapability('writeFile')).toBe(false);
     expect(hasCapability('readFile', 'read')).toBe(true);
     expect(hasCapability('writeFile', 'read')).toBe(false);

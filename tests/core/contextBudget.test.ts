@@ -90,7 +90,7 @@ describe('memoized message estimation (F-07)', () => {
     const messages: ModelMessage[] = [
       {role: 'user', content: 'hello world, this is a request'},
       {role: 'assistant', content: [{type: 'text', text: 'an answer with some length to it'}]},
-      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'c1', toolName: 'bash', output: {type: 'json', value: {ok: true}}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'c1', toolName: 'shell', output: {type: 'json', value: {ok: true}}}]},
     ];
     expect(estimateMessagesTokens(messages)).toBe(estimateValueTokens(messages));
   });

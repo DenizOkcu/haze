@@ -16,9 +16,9 @@ export function compact(value: unknown, maxLength = 180) {
 
 export function toolCallSummary(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
-  if (toolName === 'bash' && typeof data?.command === 'string') {
+  if (toolName === 'shell' && typeof data?.command === 'string') {
     const mode = data.background === true ? ' (background)' : typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
-    return `bash $ ${data.command}${mode}`;
+    return `shell $ ${data.command}${mode}`;
   }
   if (toolName === 'process' && typeof data?.action === 'string') return `process ${data.action}${typeof data.backgroundId === 'string' ? ` ${data.backgroundId}` : ''}`;
   if (toolName === 'grep' && typeof data?.pattern === 'string') {
@@ -134,7 +134,7 @@ export function busyToolLabel(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
   const pathLabel = typeof data?.path === 'string' ? compact(data.path, 80) : undefined;
   switch (toolName) {
-    case 'bash':
+    case 'shell':
       return data?.background === true ? 'Starting background process' : 'Running command';
     case 'process':
       return 'Managing background process';

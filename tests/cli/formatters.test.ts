@@ -40,19 +40,19 @@ describe('compact', () => {
 });
 
 describe('toolCallSummary', () => {
-  it('formats bash commands', () => {
-    expect(toolCallSummary('bash', {command: 'ls -la'})).toBe('bash $ ls -la');
+  it('formats shell commands', () => {
+    expect(toolCallSummary('shell', {command: 'ls -la'})).toBe('shell $ ls -la');
   });
 
-  it('includes timeout for bash commands', () => {
-    expect(toolCallSummary('bash', {command: 'sleep', timeoutSeconds: 30})).toBe('bash $ sleep (timeout 30s)');
+  it('includes timeout for shell commands', () => {
+    expect(toolCallSummary('shell', {command: 'sleep', timeoutSeconds: 30})).toBe('shell $ sleep (timeout 30s)');
   });
 
   it('formats background process starts and controls (F09)', () => {
-    expect(toolCallSummary('bash', {command: 'npm run dev', background: true})).toBe('bash $ npm run dev (background)');
+    expect(toolCallSummary('shell', {command: 'npm run dev', background: true})).toBe('shell $ npm run dev (background)');
     expect(toolCallSummary('process', {action: 'kill', backgroundId: 'background-3'})).toBe('process kill background-3');
     expect(toolResultSummary({success: true, output: {ok: true, background: true, backgroundId: 'background-3', command: 'npm run dev', pid: 41213}})).toBe('⏵ background-3 npm run dev (pid 41213)');
-    expect(busyToolLabel('bash', {background: true})).toBe('Starting background process');
+    expect(busyToolLabel('shell', {background: true})).toBe('Starting background process');
   });
 
   it('formats listFiles', () => {
@@ -95,8 +95,8 @@ describe('toolCallSummary', () => {
 });
 
 describe('busyToolLabel', () => {
-  it('labels bash as running a command', () => {
-    expect(busyToolLabel('bash', {command: 'npm test'})).toBe('Running command');
+  it('labels shell as running a command', () => {
+    expect(busyToolLabel('shell', {command: 'npm test'})).toBe('Running command');
   });
 
   it('labels readFile with its path', () => {
@@ -214,14 +214,14 @@ describe('formatContextReport', () => {
       systemTokens: 1000,
       projectContext: [{path: 'AGENTS.md', tokens: 600}],
       tools: [
-        {name: 'bash', tokens: 400, category: 'builtin'},
+        {name: 'shell', tokens: 400, category: 'builtin'},
         {name: 'readFile', tokens: 200, category: 'builtin'},
         {name: 'context7_search', tokens: 500, category: 'mcp'},
         {name: 'subagent', tokens: 150, category: 'subagent'},
       ],
       messagesByRole: {user: 300, assistant: 1200, tool: 2000},
-      toolResults: {bash: 1500, grep: 500},
-      toolInputs: {bash: 300},
+      toolResults: {shell: 1500, grep: 500},
+      toolInputs: {shell: 300},
       syntheticControl: 0,
       logicalInputEstimate: 4350,
       messageCount: 7,
@@ -250,7 +250,7 @@ describe('formatContextReport', () => {
   it('groups tools by category and totals them', () => {
     const out = formatContextReport(base());
     expect(out).toMatch(/Tools \(4\)/);
-    // builtin: bash 400 + readFile 200 = 600
+    // builtin: shell 400 + readFile 200 = 600
     expect(out).toMatch(/Built-in \(2\).*600/s);
     // mcp: 500
     expect(out).toMatch(/MCP \(1\).*500/s);
@@ -271,7 +271,7 @@ describe('formatContextReport', () => {
     expect(out).toContain('Tool content inside messages (already counted above');
     expect(out).toContain('tool results');
     expect(out).toContain('tool inputs');
-    // bash results 1500 + grep 500
+    // shell results 1500 + grep 500
     expect(out).toContain('1,500');
     expect(out).toContain('500');
   });
@@ -298,7 +298,7 @@ describe('formatContextReport bars', () => {
       modelLabel: 'p:m',
       systemTokens: 4000,
       projectContext: [],
-      tools: [{name: 'bash', tokens: 1000, category: 'builtin'}],
+      tools: [{name: 'shell', tokens: 1000, category: 'builtin'}],
       messagesByRole: {user: 5000},
       toolResults: {},
       toolInputs: {},
@@ -314,8 +314,8 @@ describe('formatContextReport bars', () => {
     const out = formatContextReport(base());
     // 4000/10000 = 40% → 8 full cells of 20
     expect(out).toMatch(/System prompt\s+█{8}░{12}\s+4,000\s+40%/);
-    // bash tool 1000/10000 = 10% → 2 full cells
-    expect(out).toMatch(/bash\s+██░{18}\s+1,000\s+10%/);
+    // shell tool 1000/10000 = 10% → 2 full cells
+    expect(out).toMatch(/shell\s+██░{18}\s+1,000\s+10%/);
     // messages 5000/10000 = 50%
     expect(out).toMatch(/5,000\s+50%/);
   });

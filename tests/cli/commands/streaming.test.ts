@@ -93,8 +93,8 @@ async function loadStreaming(config: MocksConfig) {
       mocks.assembledCalls.push({input, executionScope});
       return mocks.assembleContextResult ?? {
         systemPrompt: 'You are haze.',
-        availableTools: config.availableTools ?? {bash: {description: 'bash', execute: async () => ({ok: true})}},
-        toolCategories: new Map(Object.keys(config.availableTools ?? {bash: {}}).map(name => [name, 'builtin'])),
+        availableTools: config.availableTools ?? {shell: {description: 'shell', execute: async () => ({ok: true})}},
+        toolCategories: new Map(Object.keys(config.availableTools ?? {shell: {}}).map(name => [name, 'builtin'])),
         executionScope,
       };
     },
@@ -628,9 +628,9 @@ describe('runAgentTurn: stream handling', () => {
         config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
       },
       streamParts: [
-        {type: 'tool-input-start', id: 't1', toolName: 'bash'},
-        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
-        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
+        {type: 'tool-input-start', id: 't1', toolName: 'shell'},
+        {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
         {type: 'finish', finishReason: 'stop'},
       ],
       responseMessages: [{role: 'assistant', content: 'done'}],
@@ -647,9 +647,9 @@ describe('runAgentTurn: stream handling', () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
       streamParts: [
-        {type: 'tool-input-start', id: 't1', toolName: 'bash', testNow: 1_000},
-        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, testNow: 101_000},
-        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true}, testNow: 101_025},
+        {type: 'tool-input-start', id: 't1', toolName: 'shell', testNow: 1_000},
+        {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, testNow: 101_000},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true}, testNow: 101_025},
         {type: 'text-delta', text: 'Done.'},
         {type: 'finish', finishReason: 'stop'},
       ],
@@ -663,8 +663,8 @@ describe('runAgentTurn: stream handling', () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
       streamParts: [
-        {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}},
-        {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: false, code: 1, validationSummary: {kind: 'test', status: 'failed', summaryText: 'test failed: 1 failed test', failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}}},
+        {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'npm test'}},
+        {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: false, code: 1, validationSummary: {kind: 'test', status: 'failed', summaryText: 'test failed: 1 failed test', failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}}},
         {type: 'text-delta', text: 'The validation failed and remains unresolved.'},
         {type: 'finish', finishReason: 'stop'},
       ],
@@ -700,10 +700,10 @@ describe('restrictToRescueTools (F-08)', () => {
       editFile: {description: 'e'},
       writeFile: {description: 'w'},
       replaceLines: {description: 'l'},
-      bash: {description: 'b'},
+      shell: {description: 'b'},
       someMcpTool: {description: 'm'},
     };
-    expect(Object.keys(restrictToRescueTools(tools as never)).sort()).toEqual(['bash', 'editFile', 'replaceLines', 'writeFile']);
+    expect(Object.keys(restrictToRescueTools(tools as never)).sort()).toEqual(['editFile', 'replaceLines', 'shell', 'writeFile']);
   });
 
   it('returns an empty set when nothing qualifies instead of the full tool set', () => {
@@ -861,17 +861,17 @@ describe('runAgentTurn: model-stream idle timeout', () => {
   it('treats an idle stall as retryable, resumes from the salvaged step, and completes', async () => {
     vi.useFakeTimers();
     const salvagedStep = [
-      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}}]},
-      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'bash', output: {ok: true, stdout: 'src'}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', output: {ok: true, stdout: 'src'}}]},
     ];
     const {runAgentTurn} = await loadStreaming({
       modelHandle: stallModelHandle,
       stallCalls: [1],
-      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'bash'}], response: {messages: salvagedStep}}],
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}], response: {messages: salvagedStep}}],
       callStreams: [
         [
-          {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
-          {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'src'}},
+          {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'src'}},
         ],
         [{type: 'text-delta', text: 'The inspection finished and the requested summary is complete.'}, {type: 'finish', finishReason: 'stop'}],
       ],
@@ -900,7 +900,7 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: stallModelHandle,
       stallCalls: [1, 2, 3],
-      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'bash'}]}],
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}]}],
       callStreams: [[{type: 'finish', finishReason: 'tool-calls'}]],
     });
     const cb = makeCallbacks();
@@ -954,8 +954,8 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     vi.useFakeTimers();
     mocks.assembleContextResult = {
       systemPrompt: 'sys',
-      availableTools: {bash: {description: 'bash', execute: async () => ({ok: true})}},
-      toolCategories: new Map([['bash', 'builtin']]),
+      availableTools: {shell: {description: 'shell', execute: async () => ({ok: true})}},
+      toolCategories: new Map([['shell', 'builtin']]),
       loadedMcp: {clients: [{close: async () => undefined}], tools: {}, errors: []},
     };
     const {runAgentTurn} = await loadStreaming({
@@ -1009,8 +1009,8 @@ describe('runAgentTurn: MCP cleanup', () => {
     const closeMock = vi.fn(async () => undefined);
     mocks.assembleContextResult = {
       systemPrompt: 'sys',
-      availableTools: {bash: {description: 'bash'}},
-      toolCategories: new Map([['bash', 'builtin']]),
+      availableTools: {shell: {description: 'shell'}},
+      toolCategories: new Map([['shell', 'builtin']]),
       loadedMcp: {clients: [{close: closeMock}], tools: {}, errors: []},
     };
     const {runAgentTurn} = await loadStreaming({
@@ -1052,7 +1052,7 @@ describe('runAgentTurn: bounded completion recovery', () => {
     grep: {description: 'grep', execute: async () => ({ok: true})},
     editFile: {description: 'edit', execute: async () => ({ok: true})},
     writeFile: {description: 'write', execute: async () => ({ok: true})},
-    bash: {description: 'bash', execute: async () => ({ok: true})},
+    shell: {description: 'shell', execute: async () => ({ok: true})},
   };
 
   it('a normal successful turn makes no extra recovery call', async () => {
@@ -1077,8 +1077,8 @@ describe('runAgentTurn: bounded completion recovery', () => {
         [
           {type: 'tool-call', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt', content: 'done'}},
           {type: 'tool-result', toolCallId: 'w1', toolName: 'writeFile', input: {path: 'out.txt'}, output: {ok: true}},
-          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'cat out.txt'}},
-          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'cat out.txt'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'cat out.txt'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'cat out.txt'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'text-delta', text: 'Wrote out.txt.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -1122,8 +1122,8 @@ describe('runAgentTurn: bounded completion recovery', () => {
         [
           {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: [{oldText: 'x', newText: 'y'}]}},
           {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test -- a.ts'}},
-          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test -- a.ts'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test -- a.ts'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test -- a.ts'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'text-delta', text: 'Applied the discovered fix to a.ts.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -1137,7 +1137,7 @@ describe('runAgentTurn: bounded completion recovery', () => {
     const rescueTools = Object.keys((mocks.agentOptions[1] as {tools?: Record<string, unknown>}).tools ?? {});
     expect(rescueTools).toContain('editFile');
     expect(rescueTools).toContain('writeFile');
-    expect(rescueTools).toContain('bash');
+    expect(rescueTools).toContain('shell');
     expect(rescueTools).not.toContain('listFiles');
     expect(rescueTools).not.toContain('readFile');
     expect(rescueTools).not.toContain('grep');
@@ -1176,7 +1176,7 @@ describe('runAgentTurn: bounded completion recovery', () => {
     // of the two-call slice is allowed…
     await expect(toolsOf(2).editFile.execute()).resolves.toMatchObject({ok: true});
     // …and the third is blocked before the underlying tool runs.
-    await expect(toolsOf(2).bash.execute()).resolves.toMatchObject({ok: false, error: expect.stringMatching(/budget exhausted/)});
+    await expect(toolsOf(2).shell.execute()).resolves.toMatchObject({ok: false, error: expect.stringMatching(/budget exhausted/)});
   });
 
   it('does not rescue a non-mutating (answer) request even at the boundary', async () => {
@@ -1198,14 +1198,14 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     readFile: {description: 'read', execute: async () => ({ok: true})},
     editFile: {description: 'edit', execute: async () => ({ok: true})},
     writeFile: {description: 'write', execute: async () => ({ok: true})},
-    bash: {description: 'bash', execute: async () => ({ok: true})},
+    shell: {description: 'shell', execute: async () => ({ok: true})},
     writeTasks: {description: 'tasks', execute: async () => ({ok: true})},
   };
   const pendingTasksOutput = {ok: true, taskCount: 5, counts: {pending: 5, in_progress: 0, completed: 0}, summary: 'Tasks: 5 pending.'};
   const completedTasksOutput = {ok: true, taskCount: 5, counts: {pending: 0, in_progress: 0, completed: 5}, summary: 'Tasks: 5 completed.'};
   const passedValidation = (toolCallId: string) => [
-    {type: 'tool-call', toolCallId, toolName: 'bash', input: {command: 'npm test'}},
-    {type: 'tool-result', toolCallId, toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+    {type: 'tool-call', toolCallId, toolName: 'shell', input: {command: 'npm test'}},
+    {type: 'tool-result', toolCallId, toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
   ];
 
   it('continues automatically after a partial final while tasks are pending (roadmap regression)', async () => {
@@ -1402,8 +1402,8 @@ describe('runAgentTurn: completion evidence', () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
       streamParts: [
-        {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
-        {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+        {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}},
+        {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
         {type: 'text-delta', text: 'All tests pass.'},
         {type: 'finish', finishReason: 'stop'},
       ],
@@ -1436,7 +1436,7 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
   const tools = {
     readFile: {description: 'read', execute: async () => ({ok: true})},
     editFile: {description: 'edit', execute: async () => ({ok: true})},
-    bash: {description: 'bash', execute: async () => ({ok: true})},
+    shell: {description: 'shell', execute: async () => ({ok: true})},
     writeTasks: {description: 'tasks', execute: async () => ({ok: true})},
   };
 
@@ -1462,8 +1462,8 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
         [
           {type: 'tool-call', toolCallId: 'e2', toolName: 'editFile', input: {path: 'b.ts', edits: []}},
           {type: 'tool-result', toolCallId: 'e2', toolName: 'editFile', input: {path: 'b.ts'}, output: {ok: true}},
-          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
-          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'tool-call', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}},
           {type: 'tool-result', toolCallId: 't2', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 7, counts: {pending: 0, in_progress: 0, completed: 7}, summary: 'x'}},
           {type: 'text-delta', text: 'All seven tasks are complete and validation passes.'},
@@ -1514,8 +1514,8 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
         [{type: 'text-delta', text: 'Tasks are done; stopping here.'}, {type: 'finish', finishReason: 'stop'}],
         // Cycle 3: validation lands and the goal completes.
         [
-          {type: 'tool-call', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}},
-          {type: 'tool-result', toolCallId: 'v1', toolName: 'bash', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'text-delta', text: 'Validation passes after the edits.'},
           {type: 'finish', finishReason: 'stop'},
         ],

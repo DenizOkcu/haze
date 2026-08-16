@@ -5,7 +5,7 @@ import {readToolOutput} from '../../core/agent/toolOutputStore.js';
 import {hazeContext, hazeToolContextSchema} from './toolContext.js';
 
 export const processTool = tool({
-  description: 'List, read output from, or kill background processes started by bash background=true. Kill servers and watchers when finished.',
+  description: 'List, read output from, or kill background processes started by shell background=true. Kill servers and watchers when finished.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     action: z.enum(['list', 'output', 'kill']),

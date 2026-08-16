@@ -1,6 +1,6 @@
-type BashRiskLevel = 'read_only' | 'mutating' | 'destructive' | 'network' | 'unknown';
+type ShellRiskLevel = 'read_only' | 'mutating' | 'destructive' | 'network' | 'unknown';
 
-type BashTrait =
+type ShellTrait =
   | 'reads_files'
   | 'writes_files'
   | 'deletes_files'
@@ -11,9 +11,9 @@ type BashTrait =
   | 'changes_git_state'
   | 'changes_permissions';
 
-export type BashClassification = {
-  riskLevel: BashRiskLevel;
-  traits: BashTrait[];
+export type ShellClassification = {
+  riskLevel: ShellRiskLevel;
+  traits: ShellTrait[];
   confidence: 'high' | 'medium' | 'low';
   reason: string;
 };
@@ -26,9 +26,9 @@ function uniq<T>(values: T[]) {
   return [...new Set(values)];
 }
 
-export function classifyBashCommand(command: string): BashClassification {
+export function classifyShellCommand(command: string): ShellClassification {
   const trimmed = command.trim();
-  const traits: BashTrait[] = [];
+  const traits: ShellTrait[] = [];
   const lower = trimmed.toLowerCase();
   const complex = /[`$()]|\b(eval|xargs|sh\s+-c|bash\s+-c)\b/.test(trimmed);
 
@@ -83,8 +83,8 @@ export function classifyBashCommand(command: string): BashClassification {
     return {riskLevel: 'unknown', traits: uniq(traits), confidence: 'low', reason: 'find -exec / xargs runs an embedded command'};
   }
 
-  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b)/)) {
-    if (has(lower, /test|vitest|jest/)) traits.push('runs_tests');
+  if (has(lower, /(^|[;&|]\s*)(npm\s+test|npm\s+run\s+(test|typecheck|lint|build)|pnpm\s+(test|run\s+(test|typecheck|lint|build))|yarn\s+(test|run\s+(test|typecheck|lint|build))|vitest\b|jest\b|tsc\b|eslint\b|pytest\b|python3?\s+-m\s+(pytest|unittest|nose2?)\b|go\s+test\b|cargo\s+(test|nextest)\b|make\s+(test|check)\b|mvn\s+(test|verify)\b|gradle?w?\s+test\b|rspec\b|dotnet\s+test\b|deno\s+(test|lint)\b|bun\s+(test|lint)\b|node\s+--test\b)/)) {
+    if (has(lower, /test|vitest|jest|rspec|make\s+check|mvn\s+verify/)) traits.push('runs_tests');
     if (has(lower, /build|tsc|typecheck|lint|eslint/)) traits.push('runs_build');
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};
   }
@@ -97,6 +97,6 @@ export function classifyBashCommand(command: string): BashClassification {
   return {riskLevel: 'unknown', traits: [], confidence: 'low', reason: 'command did not match known safe patterns'};
 }
 
-export function isValidationClassification(classification: BashClassification) {
+export function isValidationClassification(classification: ShellClassification) {
   return classification.traits.includes('runs_tests') || classification.traits.includes('runs_build');
 }

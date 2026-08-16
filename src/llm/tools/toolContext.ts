@@ -102,7 +102,7 @@ export function hazeContext(context: ToolExecutionContext): HazeToolContext | un
 }
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
-  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'bash', 'process', 'fetch']);
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch']);
   return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 
@@ -162,7 +162,7 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
 function isMutatingTool(toolName: string) {
   // Bash is conservatively workspace-mutation-capable. Classification remains
   // informational and is not a sandbox boundary.
-  return ['editFile', 'replaceLines', 'writeFile', 'bash'].includes(toolName);
+  return ['editFile', 'replaceLines', 'writeFile', 'shell'].includes(toolName);
 }
 
 function isReadOnlyFileTool(toolName: string) {
@@ -236,7 +236,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
     if (isMutatingTool(toolName) && ctx.mutationPolicy) {
       // A worker supplies its whole-run owner so nested tool calls are
       // reentrant. Main-turn calls intentionally receive a fresh owner per
-      // mutation, serializing concurrent edit/bash calls.
+      // mutation, serializing concurrent edit/shell calls.
       const owner = ctx.mutationOwner ?? ctx.mutationPolicy.createOwner();
       releaseMutation = await ctx.mutationPolicy.acquire(owner, context.abortSignal);
     }

@@ -17,8 +17,8 @@ describe('requestAssembly', () => {
     const messages = [
       {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'old', toolName: 'readFile', input: {path: 'a.ts'}}]},
       {role: 'tool', content: [{type: 'tool-result', toolCallId: 'old', toolName: 'readFile', output: {type: 'json', value: {ok: true, path: 'a.ts', content: 'x'.repeat(2000)}}}]},
-      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'failed', toolName: 'bash', input: {command: 'npm test'}}]},
-      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'failed', toolName: 'bash', output: {type: 'json', value: {ok: false, error: 'failure'.repeat(500)}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'failed', toolName: 'shell', input: {command: 'npm test'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'failed', toolName: 'shell', output: {type: 'json', value: {ok: false, error: 'failure'.repeat(500)}}}]},
       {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'recent', toolName: 'grep', input: {pattern: 'x'}}]},
       {role: 'tool', content: [{type: 'tool-result', toolCallId: 'recent', toolName: 'grep', output: {type: 'json', value: {ok: true, matches: ['x'.repeat(2000)]}}}]},
     ] as unknown as ModelMessage[];
@@ -106,13 +106,13 @@ describe('requestAssembly', () => {
     expect(recentJson).toContain(bigContent);
   });
 
-  it('compacts old bash tool-call commands but keeps short ones intact', () => {
+  it('compacts old shell tool-call commands but keeps short ones intact', () => {
     const longCommand = 'node -e "const x = ' + "'a'".repeat(300) + '; console.log(x);"';
     const messages = [
-      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'longbash', toolName: 'bash', input: {command: longCommand, allowMutation: false}}]},
-      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'longbash', toolName: 'bash', output: {type: 'json', value: {ok: true, code: 0}}}]},
-      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'shortbash', toolName: 'bash', input: {command: 'npm test', allowMutation: false}}]},
-      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'shortbash', toolName: 'bash', output: {type: 'json', value: {ok: true, code: 0}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'longbash', toolName: 'shell', input: {command: longCommand, allowMutation: false}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'longbash', toolName: 'shell', output: {type: 'json', value: {ok: true, code: 0}}}]},
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'shortbash', toolName: 'shell', input: {command: 'npm test', allowMutation: false}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'shortbash', toolName: 'shell', output: {type: 'json', value: {ok: true, code: 0}}}]},
     ] as unknown as ModelMessage[];
     const result = compactToolHistory(messages, {keepRecentCalls: 0, minCallTokens: 50});
     expect(result.compactedCalls).toBe(1);

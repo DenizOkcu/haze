@@ -46,7 +46,7 @@ describe('subagent internals.toolSummary', () => {
     expect(internals.toolSummary({totalMatches: 12, matchCountIsLowerBound: true})).toBe('at least 12 matches');
   });
 
-  it('returns "exit <code>" for bash-style outputs', () => {
+  it('returns "exit <code>" for shell-style outputs', () => {
     expect(internals.toolSummary({code: 0})).toBe('exit 0');
     expect(internals.toolSummary({code: 127})).toBe('exit 127');
   });
@@ -69,9 +69,9 @@ describe('subagent internals.toolSummary', () => {
 });
 
 describe('subagent validation evidence', () => {
-  it('does not treat generic successful bash commands as validation', () => {
-    expect(internals.validationFromOutput('bash', {command: 'git status', ok: true, code: 0})).toBeUndefined();
-    expect(internals.validationFromOutput('bash', {command: 'npm test', ok: true, code: 0, validationSummary: {status: 'passed'}})).toEqual({command: 'npm test', ok: true});
+  it('does not treat generic successful shell commands as validation', () => {
+    expect(internals.validationFromOutput('shell', {command: 'git status', ok: true, code: 0})).toBeUndefined();
+    expect(internals.validationFromOutput('shell', {command: 'npm test', ok: true, code: 0, validationSummary: {status: 'passed'}})).toEqual({command: 'npm test', ok: true});
   });
 });
 
@@ -376,7 +376,7 @@ describe('createSubagentTool', () => {
 
   it('does not expose the ambiguous legacy task/tools/maxSteps shape', () => {
     const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
-    expect(toolObj.inputSchema.safeParse({task: 'do something', tools: ['bash', 'grep'], maxSteps: 10}).success).toBe(false);
+    expect(toolObj.inputSchema.safeParse({task: 'do something', tools: ['shell', 'grep'], maxSteps: 10}).success).toBe(false);
   });
 });
 

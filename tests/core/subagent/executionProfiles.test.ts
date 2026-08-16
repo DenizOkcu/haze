@@ -14,11 +14,11 @@ describe('subagent execution profiles', () => {
     expect(() => resolveExecutionProfile('custom', {custom: {maxConcurrency: 999}})).toThrow();
   });
 
-  it('keeps read-only modes free of bash and mutation tools', () => {
+  it('keeps read-only modes free of shell and mutation tools', () => {
     expect(MODE_TOOL_NAMES.inspect).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput']);
     expect(MODE_TOOL_NAMES.research).toContain('fetch');
-    expect(MODE_TOOL_NAMES.research).not.toContain('bash');
-    expect(MODE_TOOL_NAMES.validate).toContain('bash');
+    expect(MODE_TOOL_NAMES.research).not.toContain('shell');
+    expect(MODE_TOOL_NAMES.validate).toContain('shell');
     expect(MODE_TOOL_NAMES.validate).not.toContain('writeFile');
   });
 });

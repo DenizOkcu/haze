@@ -5,7 +5,7 @@ import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';
 import {teardownBackgroundProcesses} from '../../src/core/process/backgroundRegistry.js';
 
-describe('bash tool safety', () => {
+describe('shell tool safety', () => {
   let tmp: string;
 
   beforeEach(async () => {
@@ -17,18 +17,18 @@ describe('bash tool safety', () => {
     await fs.remove(tmp);
   });
 
-  async function bash(command: string, allowMutation = false, abortSignal?: AbortSignal, background = false) {
+  async function shell(command: string, allowMutation = false, abortSignal?: AbortSignal, background = false) {
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      return await hazeTools.bash.execute({command, allowMutation, background}, {abortSignal});
+      return await hazeTools.shell.execute({command, allowMutation, background}, {abortSignal});
     } finally {
       process.chdir(originalCwd);
     }
   }
 
   it('runs read-only commands with classification metadata', async () => {
-    const result = await bash('pwd');
+    const result = await shell('pwd');
     expect(result.ok).toBe(true);
     await expect(fs.realpath(result.cwd)).resolves.toBe(await fs.realpath(tmp));
     expect(result.classification.riskLevel).toBe('read_only');
@@ -36,14 +36,14 @@ describe('bash tool safety', () => {
 
   it('runs destructive commands without confirmation', async () => {
     await fs.outputFile(path.join(tmp, 'dist/file.txt'), 'temporary build output');
-    const result = await bash('rm -rf dist', true);
+    const result = await shell('rm -rf dist', true);
     expect(result.ok).toBe(true);
     expect(result.classification.riskLevel).toBe('destructive');
     await expect(fs.pathExists(path.join(tmp, 'dist'))).resolves.toBe(false);
   });
 
   it('runs non-destructive mutating commands without confirmation', async () => {
-    const result = await bash('touch file.txt');
+    const result = await shell('touch file.txt');
     expect(result.ok).toBe(true);
     expect(result.classification.riskLevel).toBe('mutating');
     await expect(fs.pathExists(path.join(tmp, 'file.txt'))).resolves.toBe(true);
@@ -51,12 +51,12 @@ describe('bash tool safety', () => {
 
   it('runs unknown-but-recoverable validation commands without confirmation', async () => {
     await fs.outputFile(path.join(tmp, 'public/app.js'), 'const value = 1;\n');
-    const result = await bash('node --check public/app.js');
+    const result = await shell('node --check public/app.js');
     expect(result.ok).toBe(true);
   });
 
   it('stores oversized output behind a retrievable handle', async () => {
-    const result = await bash("node -e \"process.stdout.write('x'.repeat(20000))\"");
+    const result = await shell("node -e \"process.stdout.write('x'.repeat(20000))\"");
     expect(result.stdout.truncated).toBe(true);
     expect(result.stdout.handle).toMatch(/^output-/);
     const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000}, {abortSignal: undefined});
@@ -65,7 +65,7 @@ describe('bash tool safety', () => {
   });
 
   it('searches stored output handles with context lines', async () => {
-    const result = await bash("node -e \"for (let i = 0; i < 2000; i++) console.log(i === 1234 ? 'needle failure' : 'line ' + i)\"");
+    const result = await shell("node -e \"for (let i = 0; i < 2000; i++) console.log(i === 1234 ? 'needle failure' : 'line ' + i)\"");
     expect(result.stdout.handle).toMatch(/^output-/);
     const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 0, limit: 1000, query: 'needle', contextLines: 1}, {abortSignal: undefined});
     expect(page.query).toBe('needle');
@@ -75,7 +75,7 @@ describe('bash tool safety', () => {
   });
 
   it('bounds runaway command output without hanging reducers', async () => {
-    const result = await bash("node -e \"process.stdout.write('line\\n'.repeat(600000))\"");
+    const result = await shell("node -e \"process.stdout.write('line\\n'.repeat(600000))\"");
     expect(result.ok).toBe(true);
     expect(result.stdout.text.length).toBeLessThan(20_000);
     expect(result.stdoutBytes.omittedBytes).toBeGreaterThan(0);
@@ -84,7 +84,7 @@ describe('bash tool safety', () => {
   }, 15_000);
 
   it('starts background commands immediately and manages them through the process tool (F09)', async () => {
-    const result = await bash("node -e \"console.log('server ready');setInterval(()=>console.log('tick'),25)\"", false, undefined, true);
+    const result = await shell("node -e \"console.log('server ready');setInterval(()=>console.log('tick'),25)\"", false, undefined, true);
     expect(result).toMatchObject({ok: true, background: true, backgroundId: expect.any(String), pid: expect.any(Number), outputHandle: expect.stringMatching(/^output-/)});
     if (!('backgroundId' in result) || !('outputHandle' in result)) throw new Error('Expected a background result.');
     let output: Awaited<ReturnType<typeof hazeTools.process.execute>> | undefined;
@@ -106,13 +106,13 @@ describe('bash tool safety', () => {
   it('does not start background work after turn abort or inside a worker', async () => {
     const controller = new AbortController();
     controller.abort();
-    const aborted = await bash('sleep 30', false, controller.signal, true);
+    const aborted = await shell('sleep 30', false, controller.signal, true);
     expect(aborted).toMatchObject({ok: false, reasonCode: 'aborted'});
 
     const originalCwd = process.cwd();
     process.chdir(tmp);
     try {
-      const worker = await hazeTools.bash.execute({command: 'sleep 30', allowMutation: false, background: true}, {context: {isSubagent: true}});
+      const worker = await hazeTools.shell.execute({command: 'sleep 30', allowMutation: false, background: true}, {context: {isSubagent: true}});
       expect(worker).toMatchObject({ok: false, reasonCode: 'background_not_allowed'});
     } finally {
       process.chdir(originalCwd);
@@ -121,7 +121,7 @@ describe('bash tool safety', () => {
 
   it('reports explicit abort separately from timeout', async () => {
     const controller = new AbortController();
-    const pending = bash("node -e 'setInterval(()=>{},1000)'", false, controller.signal);
+    const pending = shell("node -e 'setInterval(()=>{},1000)'", false, controller.signal);
     setTimeout(() => controller.abort(), 50);
     const result = await pending;
     expect(result).toMatchObject({ok: false, aborted: true, timedOut: false});
@@ -129,14 +129,14 @@ describe('bash tool safety', () => {
 
   it('keeps full raw output retrievable when reducer input is capped', async () => {
     const script = "let s='a'.repeat(250000); s += 'NEEDLE_END'; process.stdout.write(s)";
-    const result = await bash(`node -e "${script}"`);
+    const result = await shell(`node -e "${script}"`);
     expect(result.stdout.handle).toMatch(/^output-/);
     const page = await hazeTools.readToolOutput.execute({handle: result.stdout.handle, offset: 250000, limit: 20}, {abortSignal: undefined});
     expect(page.content).toContain('NEEDLE_END');
   }, 15_000);
 
   it('does not embed raw stream text in the tool result (regression CR-001)', async () => {
-    const result = await bash("node -e \"process.stdout.write('y'.repeat(150000))\"");
+    const result = await shell("node -e \"process.stdout.write('y'.repeat(150000))\"");
     expect(result.stdoutBytes.retainedBytes).toBeGreaterThan(100_000);
     expect(result.stdoutBytes).toEqual({totalBytes: expect.any(Number), retainedBytes: expect.any(Number), omittedBytes: expect.any(Number)});
     expect(result.stderrBytes).toEqual({totalBytes: expect.any(Number), retainedBytes: expect.any(Number), omittedBytes: expect.any(Number)});

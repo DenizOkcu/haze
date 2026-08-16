@@ -71,7 +71,7 @@ function changedPathFromOutput(name: string, output: unknown) {
 }
 
 function validationFromOutput(name: string, output: unknown) {
-  if (name !== 'bash' || typeof output !== 'object' || output == null) return undefined;
+  if (name !== 'shell' || typeof output !== 'object' || output == null) return undefined;
   const value = output as {command?: unknown; ok?: unknown; validationSummary?: unknown};
   if (typeof value.command !== 'string' || typeof value.validationSummary !== 'object' || value.validationSummary == null) return undefined;
   return {command: value.command, ok: value.ok === true};
@@ -110,7 +110,7 @@ export async function runSubagent(
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
   const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
   const task: SubagentTaskCapsule = typeof taskInput === 'string'
-    ? {id: 'worker', objective: taskInput, deliverable: 'Return a concise self-contained result.', mode: options.allowedTools ? (options.allowedTools.some(name => ['editFile', 'replaceLines', 'writeFile'].includes(name)) ? 'implement' : options.allowedTools.includes('bash') ? 'validate' : options.allowedTools.includes('fetch') ? 'research' : 'inspect') : 'implement', scope: [], acceptanceCriteria: [], legacyMaxSteps: options.maxSteps}
+    ? {id: 'worker', objective: taskInput, deliverable: 'Return a concise self-contained result.', mode: options.allowedTools ? (options.allowedTools.some(name => ['editFile', 'replaceLines', 'writeFile'].includes(name)) ? 'implement' : options.allowedTools.includes('shell') ? 'validate' : options.allowedTools.includes('fetch') ? 'research' : 'inspect') : 'implement', scope: [], acceptanceCriteria: [], legacyMaxSteps: options.maxSteps}
     : taskInput;
   const requestedSteps = task.legacyMaxSteps ?? options.maxSteps;
   if (requestedSteps != null && (requestedSteps < SUBAGENT_MIN_STEPS || requestedSteps > SUBAGENT_MAX_STEPS)) return terminalResult(task, runtime, profile, 'policy_blocked', `maxSteps must be from ${SUBAGENT_MIN_STEPS} to ${SUBAGENT_MAX_STEPS}.`);

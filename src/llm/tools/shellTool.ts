@@ -1,6 +1,6 @@
 import {tool} from 'ai';
 import {z} from 'zod';
-import {classifyBashCommand, isValidationClassification} from '../../core/safety/bashClassifier.js';
+import {classifyShellCommand, isValidationClassification} from '../../core/safety/shellClassifier.js';
 import {detectMissingExecutable, missingExecutableFields} from '../../core/safety/missingExecutable.js';
 import {parseValidationOutput} from '../../core/validation/outputParser.js';
 import {filterBashOutput} from '../../core/bashOutput/registry.js';
@@ -11,24 +11,27 @@ import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
 import {BASH_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
+import {resolveUserShell, shellInvocation} from '../../core/process/userShell.js';
 
 /** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */
 function streamByteStats(stream: BoundedStream) {
   return {totalBytes: stream.totalBytes, retainedBytes: stream.retainedBytes, omittedBytes: stream.omittedBytes};
 }
 
-export const bashTool = tool({
+const userShell = resolveUserShell();
+
+export const shellTool = tool({
   description: 'Run workspace tests, builds, validation, or inspection. Risk classification is informational; use file tools for edits.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
-    command: z.string().min(1).describe('Command to execute with bash -lc'),
+    command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}`.trim()),
     timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
     allowMutation: z.boolean().default(false).describe('Deprecated compatibility flag. Commands run without confirmation; retained for compatibility.'),
     background: z.boolean().default(false).describe('Start a registered long-running process and return immediately. Use process to list, inspect output, or kill it.'),
   }),
-  execute: async ({command, timeoutSeconds, background}, context) => runDedupedTool('bash', {command, timeoutSeconds, background}, context, async () => {
+  execute: async ({command, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, timeoutSeconds, background}, context, async () => {
     const cwd = workspaceRoot();
-    const classification = classifyBashCommand(command);
+    const classification = classifyShellCommand(command);
     if (background) {
       if (hazeContext(context)?.isSubagent) {
         return {ok: false, command, reasonCode: 'background_not_allowed', recoverable: false, error: 'Background processes are available only to the main haze turn, not fleet workers.', suggestedNextStep: 'Run the server from the main conversation.'};
@@ -45,7 +48,7 @@ export const bashTool = tool({
     }
     const timeoutMs = (timeoutSeconds ?? 60) * 1000;
     const startedAt = Date.now();
-    const processResult = await runBoundedProcess({command: 'bash', args: ['-lc', command], cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: BASH_STREAM_BYTES, maxStderrBytes: BASH_STREAM_BYTES});
+    const processResult = await runBoundedProcess({...shellInvocation(command), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: BASH_STREAM_BYTES, maxStderrBytes: BASH_STREAM_BYTES});
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;

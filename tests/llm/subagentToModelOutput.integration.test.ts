@@ -37,7 +37,7 @@ describe('installed AI SDK subagent model-output boundary', () => {
       model: mainModel,
       tools: {subagent: createSubagentTool({model: workerModel, contextFiles: []})},
       // Mirrors the real main turn: toolsContext is provided only for built-in
-      // Haze file/bash tools, not for the orchestration-only subagent tool.
+      // Haze file/shell tools, not for the orchestration-only subagent tool.
       messages: [{role: 'user', content: 'delegate'}],
       stopWhen: isStepCount(2),
       onToolExecutionEnd(event) {

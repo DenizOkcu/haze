@@ -230,10 +230,10 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
     }
   }
 
-  // Only a classifier-confirmed bash command is a validation step. An arbitrary
+  // Only a classifier-confirmed shell command is a validation step. An arbitrary
   // shell call (inspection, mkdir, echo) is process work, not validation; the
   // bash tool embeds a `validationSummary` exactly when the classifier says so.
-  if (event.toolName === 'bash') {
+  if (event.toolName === 'shell') {
     const command = toolInputField(event.input, 'command');
     const summary = validationSummaryFromOutput(event.output);
     if (command && summary) {

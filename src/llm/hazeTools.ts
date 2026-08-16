@@ -18,7 +18,7 @@ import {boundedDiff, fileDiff, findEditRange, splitDiffLines, lineNumberAtOffset
 import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './tools/toolContext.js';
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './tools/workspaceFile.js';
 import {fetchTool} from './tools/fetchTool.js';
-import {bashTool} from './tools/bashTool.js';
+import {shellTool} from './tools/shellTool.js';
 import {processTool} from './tools/processTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 import {createIgnoreClassifier} from './tools/gitIgnore.js';
@@ -42,7 +42,7 @@ function mutationDiffFields(filePath: string, fullDiff: ToolDiffLine[]) {
 
 export const hazeTools = {
   listFiles: tool({
-    description: 'List workspace files/directories with pagination. Prefer this to bash for discovery.',
+    description: 'List workspace files/directories with pagination. Prefer this to shell for discovery.',
     contextSchema: hazeToolContextSchema,
     inputSchema: z.object({
       path: z.string().default('.').describe('Directory path relative to the current workspace'),
@@ -457,7 +457,7 @@ export const hazeTools = {
 
   fetch: fetchTool,
 
-  bash: bashTool,
+  shell: shellTool,
 
   process: processTool,
 

@@ -10,7 +10,7 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('listFiles');
     expect(prompt).toContain('editFile');
     expect(prompt).toContain('replaceLines');
-    expect(prompt).toContain('bash');
+    expect(prompt).toContain('shell');
   });
 
   it('includes current date', () => {

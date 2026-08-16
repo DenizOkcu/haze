@@ -24,10 +24,10 @@ async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = 
     assembleRequestContext: async () => ({
       systemPrompt: 'You are haze.',
       availableTools: {
-        bash: {description: 'bash', execute: async () => ({ok: true})},
+        shell: {description: 'shell', execute: async () => ({ok: true})},
         readFile: {description: 'read', execute: async () => ({ok: true})},
       },
-      toolCategories: new Map([['bash', 'builtin'], ['readFile', 'builtin']]),
+      toolCategories: new Map([['shell', 'builtin'], ['readFile', 'builtin']]),
     }),
   }));
   vi.doMock('../../../src/llm/mcp.js', () => ({closeMcpClients: async () => undefined}));
@@ -102,9 +102,9 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     const {runHeadless} = await loadRunHeadless([
       {type: 'text-delta', text: 'This is the first segment of the reply'},
       {type: 'text-delta', text: ' with extra trailing words.'},
-      {type: 'tool-input-start', id: 't1', toolName: 'bash'},
-      {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
-      {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
+      {type: 'tool-input-start', id: 't1', toolName: 'shell'},
+      {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+      {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
       {type: 'text-delta', text: 'Here is the second segment of the'},
       {type: 'text-delta', text: ' answer, all done.'},
       {type: 'finish', finishReason: 'stop'},
@@ -142,9 +142,9 @@ describe('runHeadless integration (real runAgentTurn)', () => {
     const {runHeadless} = await loadRunHeadless([
       {type: 'text-delta', text: 'This is the first segment of the reply'},
       {type: 'text-delta', text: ' with extra trailing words.'},
-      {type: 'tool-input-start', id: 't1', toolName: 'bash'},
-      {type: 'tool-call', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}},
-      {type: 'tool-result', toolCallId: 't1', toolName: 'bash', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
+      {type: 'tool-input-start', id: 't1', toolName: 'shell'},
+      {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+      {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'x'}},
       {type: 'text-delta', text: 'Here is the second segment of the'},
       {type: 'text-delta', text: ' answer, all done.'},
       {type: 'finish', finishReason: 'stop'},

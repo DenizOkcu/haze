@@ -60,7 +60,7 @@ describe('turnRuntime', () => {
       system: 'You are haze.',
       contextFiles: [{path: 'AGENTS.md', content: 'rules'}],
       messages: [{role: 'user', content: 'hi'}, {role: 'assistant', content: 'hello'}],
-      tools: {readFile: {description: 'r'}, bash: {description: 'b'}},
+      tools: {readFile: {description: 'r'}, shell: {description: 'b'}},
     });
     expect(breakdown.systemPrompt).toBeGreaterThan(0);
     expect(breakdown.messages).toBeGreaterThan(0);

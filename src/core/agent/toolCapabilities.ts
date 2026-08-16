@@ -4,8 +4,8 @@
  * Capabilities describe what a tool *can do* so turn-policy code can reason
  * about a turn without hard-coding tool names in every decision site. They are
  * metadata for policy/observability, never an execution gate (mirroring the
- * bash-classifier contract): the actual effect of a call is still determined at
- * runtime (e.g. a `bash` call is only validation when its command is a
+ * shell-classifier contract): the actual effect of a call is still determined at
+ * runtime (e.g. a `shell` call is only validation when its command is a
  * classifier-confirmed validation command).
  *
  * Kept provider/UI-agnostic (no `ai`/Ink imports) so it is unit-testable in
@@ -25,10 +25,10 @@ const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   writeFile: ['mutate'],
   editFile: ['mutate'],
   replaceLines: ['mutate'],
-  // Process execution. A bash call becomes validation only when its command is
+  // Process execution. A shell call becomes validation only when its command is
   // a classifier-confirmed validation command (see work state); that runtime
   // fact is tracked separately as a validation event, not as a static trait.
-  bash: ['process'],
+  shell: ['process'],
   process: ['process'],
   // Coordination / durable state.
   writeTasks: ['coordinate'],
@@ -56,7 +56,7 @@ export function isMutatingCapability(name: string): boolean {
 
 /** Tools that can act as a validation step (runtime-classifier dependent). */
 export function isValidationCapable(name: string): boolean {
-  return hasCapability(name, 'validate') || name === 'bash';
+  return hasCapability(name, 'validate') || name === 'shell';
 }
 
 /** Read/discovery-only built-in tools (no mutation side effects). */
