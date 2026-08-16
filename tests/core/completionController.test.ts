@@ -288,6 +288,17 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
     expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budget).action).toBe('stop');
   });
 
+  it('allows only one focused validation-repair continuation', () => {
+    const s = state({finishCause: 'stop', intent: 'implement', mutationCount: 1, validationOutcome: 'absent'});
+    const first = decideGoalContinuation(s, evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: true}), budget);
+    expect(first).toMatchObject({action: 'continue', slice: {steps: 3, toolCalls: 3}});
+    recordGoalContinuation(s);
+    s.validationContinuationUsed = true;
+    // More mutation activity cannot reopen another evidence-repair slice.
+    s.mutationCount += 1;
+    expect(decideGoalContinuation(s, evidence({sawToolCall: true, assistantText: 'Done again.', lastToolOk: true}), budget).action).toBe('stop');
+  });
+
   it('stops (checkpoint is the caller\'s decision) when ready, aborted, empty-text, or a non-recoverable finish', () => {
     expect(decideGoalContinuation(state({finishCause: 'stop'}), evidence({assistantText: 'Done.', lastToolOk: true}), budget).action).toBe('stop');
     expect(decideGoalContinuation(state({finishCause: 'stop', aborted: true, taskProgress: pendingTasks}), finalText, budget).action).toBe('stop');
@@ -352,10 +363,11 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
     expect(decideGoalContinuation(s, finalText, budget).action).toBe('continue');
     recordGoalContinuation(s);
     expect(s.goalContinuationCorrectiveUsed).toBe(false);
-    // Progress again resets the corrective credit; only consecutive no-progress stops pause.
+    // More mutation activity without a task/validation outcome change is churn,
+    // not measurable progress (edit→revert must not keep the loop alive).
     s.mutationCount += 1;
     recordGoalContinuation(s);
-    expect(s.goalContinuationCorrectiveUsed).toBe(false);
+    expect(s.goalContinuationCorrectiveUsed).toBe(true);
   });
 
   it('never resets budgets or continuation counters (state is turn-wide)', () => {

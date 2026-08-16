@@ -19,6 +19,7 @@ import {abortableDelay, type TokenUsage} from './streaming/turnRuntime.js';
 import type {ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
 import {abortForTurn, createUserAbortCause} from './streaming/abortCause.js';
 import {runAgentAttempt} from './streaming/agentAttempt.js';
+import {projectGoalEvidence} from './streaming/attemptOutcome.js';
 import {awaitAttemptWithForcedSettlement, createAttemptCleanupRegistry, createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
 import {formatIdleMinutes} from './streaming/stallRecovery.js';
 
@@ -29,6 +30,8 @@ export type TurnStatus = 'complete' | 'aborted' | 'failed';
 /** Authoritative outcome of a turn, so callers (esp. headless/CI) need not sniff message texts. */
 export interface TurnResult {
   status: TurnStatus;
+  /** Distinguishes a real user cancel from an internal absolute deadline. */
+  abortReason?: 'user' | 'turn-deadline';
   /** Bounded, safe completion evidence (no raw commands/output). Additive. */
   evidence?: TurnCompletionEvidence;
   /**
@@ -116,6 +119,7 @@ export async function runAgentTurn(
   let abortController = new AbortController();
   let abortCause = createUserAbortCause();
   let status: TurnStatus = 'failed';
+  let abortReason: TurnResult['abortReason'];
   let resume: TurnResult['resume'];
   const turnState = createTurnExecutionState();
   callbacks.onEvent?.(agentEvent({type: 'turn_start', request: value}));
@@ -186,12 +190,13 @@ export async function runAgentTurn(
           callbacks.addMessage({role: 'system', text: abortCause.kind === 'turn-deadline'
             ? `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? turnDeadlineMs)} turn budget elapsed before the model finished.${tornDown ? '' : ' Some background teardown is still settling.'} Completed steps are preserved in the conversation; send a follow-up to continue.`
             : 'Thinking aborted. You can type again.'});
-          return {status: 'aborted'};
+          return {status: 'aborted', abortReason: abortCause.kind === 'turn-deadline' ? 'turn-deadline' : 'user'};
         },
       });
       turnDeadline.clear();
       turnDeadline = undefined;
       status = result.status;
+      abortReason = result.abortReason;
       resume = result.resume;
       if (result.retry) {
         attempt = result.retry.attempt;
@@ -227,8 +232,9 @@ export async function runAgentTurn(
       }
       break;
     }
+    projectGoalEvidence(turnState, goal);
     const evidence = toCompletionEvidence(turnState);
-    return {status, evidence, ...(resume ? {resume} : {})};
+    return {status, evidence, ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
   } finally {
     turnDeadline?.clear();
     callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState)}));

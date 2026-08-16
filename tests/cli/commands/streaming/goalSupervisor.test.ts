@@ -149,7 +149,7 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     expect(cb.events.find(event => event.type === 'goal_end')).toMatchObject({cycles: 3});
   });
 
-  it('pauses safely after two consecutive no-progress cycles, with a resumable checkpoint', async () => {
+  it('pauses safely after one corrective no-progress cycle, with a resumable checkpoint', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {result: turnResult('failed', {resume: incompleteGoalResume()})},
       // Corrective cycle: identical evidence signature (no measurable progress).
@@ -157,16 +157,16 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     ]);
     const cb = makeCallbacks();
     const result = await runAgentGoal(baseOptions({callbacks: cb}));
-    // Cycle 1 establishes the baseline; cycle 2 is the corrective no-progress
-    // cycle; cycle 3 repeats it and pauses (script repeats the last turn).
-    expect(result).toMatchObject({status: 'failed', stopReason: 'no-progress', cycles: 3});
+    // Cycle 1 establishes the baseline; cycle 2 is the single corrective
+    // no-progress cycle and then pauses.
+    expect(result).toMatchObject({status: 'failed', stopReason: 'no-progress', cycles: 2});
     expect(result.resume?.kind).toBe('incomplete-goal');
-    expect((result.resume as {checkpoint: GoalCheckpoint}).checkpoint).toMatchObject({readiness: 'pending_tasks', noProgressCount: 2});
-    expect(cb.messages.some(m => m.role === 'system' && /paused after 2 cycles without measurable progress/.test(m.text))).toBe(true);
+    expect((result.resume as {checkpoint: GoalCheckpoint}).checkpoint).toMatchObject({readiness: 'pending_tasks', noProgressCount: 1});
+    expect(cb.messages.some(m => m.role === 'system' && /paused after 1 corrective cycle without measurable progress/.test(m.text))).toBe(true);
     expect(cb.events.filter(event => event.type === 'goal_end')).toHaveLength(1);
   });
 
-  it('treats changed task counts or mutations as progress and keeps going', async () => {
+  it('treats changed task outcomes as progress but not mutation-counter churn', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {result: turnResult('failed', {resume: incompleteGoalResume()})},
       // More completed work — measurable progress resets the no-progress guard.
@@ -176,9 +176,9 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     ]);
     const cb = makeCallbacks();
     const result = await runAgentGoal(baseOptions({callbacks: cb}));
-    // Fourth physical turn (script repeats) repeats the signature again — that
-    // is the second consecutive no-progress cycle, so the goal pauses.
-    expect(result.cycles).toBe(4);
+    // The changed task counts reset progress once; the next identical outcome
+    // consumes the single corrective cycle and pauses.
+    expect(result.cycles).toBe(3);
     expect(result.stopReason).toBe('no-progress');
   });
 
@@ -192,6 +192,14 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     expect(result).toMatchObject({status: 'aborted', stopReason: 'user-aborted', cycles: 2});
     expect(cb.events.filter(event => event.type === 'goal_end')).toHaveLength(1);
     expect(result.resume).toBeUndefined();
+  });
+
+  it('reports an internal turn deadline as goal-deadline, not user-aborted', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('aborted', {abortReason: 'turn-deadline', evidence: {validationOutcome: 'absent', validationAfterMutation: false, mutationCount: 3, finishCause: undefined, recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}})},
+    ]);
+    const result = await runAgentGoal(baseOptions());
+    expect(result).toMatchObject({status: 'failed', stopReason: 'goal-deadline', cycles: 1, evidence: {mutationCount: 3}});
   });
 
   it('stops for hard failures without an incomplete-goal checkpoint', async () => {

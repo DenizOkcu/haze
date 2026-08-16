@@ -1,5 +1,17 @@
 import {describe, expect, it} from 'vitest';
-import {terminalTurnStatus} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
+import {projectGoalEvidence, terminalTurnStatus} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
+import {createTurnExecutionState} from '../../../../src/core/agent/completionController.js';
+import {createSessionGoal, observeGoalToolEvent} from '../../../../src/core/agent/goalPolicy.js';
+
+describe('projectGoalEvidence', () => {
+  it('preserves cumulative mutation and validation state for abnormal terminal paths', () => {
+    const goal = createSessionGoal('implement the CLI');
+    observeGoalToolEvent(goal, {toolName: 'writeFile', input: {path: 'cli.js'}, success: true, output: {ok: true}});
+    const state = createTurnExecutionState();
+    projectGoalEvidence(state, goal);
+    expect(state).toMatchObject({intent: 'implement', mutationCount: 1, validationOutcome: 'absent', validationAfterMutation: false});
+  });
+});
 
 describe('terminalTurnStatus', () => {
   it('requires a substantive answer after tools and rejects final failures/budget stops', () => {

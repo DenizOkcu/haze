@@ -5,6 +5,7 @@ import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt
 import {assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification} from '../../../core/agent/completionController.js';
 import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
 import {deriveValidationOutcome} from '../../../core/agent/workState.js';
+import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume} from './goalCheckpoint.js';
 import {formatSeconds} from '../formatters.js';
 import {retryDelayMs} from './turnRuntime.js';
@@ -58,6 +59,16 @@ export type AgentAttemptResult = TurnResult & {
   recovery?: AttemptRecovery;
 };
 
+/** Keep terminal evidence truthful on normal, timeout, and forced-settlement paths. */
+export function projectGoalEvidence(turnState: TurnExecutionState, goal: SessionGoal) {
+  turnState.intent = goal.intent;
+  turnState.validationOutcome = deriveValidationOutcome(goal);
+  turnState.mutationCount = goal.mutationCount;
+  turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
+  turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
+  turnState.taskProgress = goal.taskProgress;
+}
+
 export interface AttemptOutcomeDeps {
   value: string;
   callbacks: StreamCallbacks;
@@ -80,13 +91,9 @@ export interface AttemptOutcomeDeps {
 export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptResult {
   const {value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream} = deps;
   turnState.finishCause = normalizeFinishReason(stream.finishReason);
-  // Observable work evidence (Increment 3 surfaces this additively; tracked
-  // here so the turn-wide state is the single source of runtime evidence).
-  turnState.validationOutcome = deriveValidationOutcome(goal);
-  turnState.mutationCount = goal.mutationCount;
-  turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
-  turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
-  turnState.taskProgress = goal.taskProgress;
+  // Observable work evidence is projected through one helper so abnormal
+  // terminal paths report the same cumulative state.
+  projectGoalEvidence(turnState, goal);
   turnState.budgetBoundary = isBudgetExhausted(turnState, turnBudget);
   const completionEvidence: CompletionEvidence = {sawToolCall: stream.sawToolCall, assistantText: stream.assistantText, lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError};
   const readiness = assessCompletionReadiness(turnState, completionEvidence);
@@ -116,7 +123,11 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   // physical turns; a bare runAgentTurn caller surfaces them as resume info.
   const goalId = turnOptions.goalContext?.goalId ?? goal.id;
   const goalCycle = turnOptions.goalContext?.cycle ?? 1;
-  const checkpointResult = (): AgentAttemptResult => ({status: 'failed', resume: buildIncompleteGoalResume(value, goalId, goalCycle, turnState, readiness)});
+  const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
+  const checkpointResult = (): AgentAttemptResult => {
+    discardRejectedFinal();
+    return {status: 'failed', resume: buildIncompleteGoalResume(value, goalId, goalCycle, turnState, readiness)};
+  };
   if (!abortController.signal.aborted) {
     const lengthDecision = decideLengthRecovery(turnState, turnBudget);
     if (lengthDecision.action === 'continue') {
@@ -134,6 +145,8 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
         ? clampSlice(rescueDecision.slice, {steps: remainingSteps(turnState.stepsUsed, turnBudget), toolCalls: remainingToolCalls(turnState.toolCallsUsed, turnBudget)})
         : undefined;
       if (goalSlice && goalSlice.steps > 0) {
+        discardRejectedFinal();
+        if (readiness === 'validation_failed' || readiness === 'validation_stale' || readiness === 'validation_absent_after_mutation') turnState.validationContinuationUsed = true;
         return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress)), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
       } else if (rescueSlice && rescueSlice.steps > 0) {
         return {status: turnStatus, recovery: {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}}};
@@ -199,12 +212,12 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       turnState.aborted = true;
       callbacks.debugLog('turn exceeded the absolute deadline');
       callbacks.addMessage({role: 'system', text: `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? DEFAULT_TURN_DEADLINE_MS)} turn budget elapsed before the model finished. Completed steps are preserved in the conversation; send a follow-up to continue.`});
-      return {status: 'aborted'};
+      return {status: 'aborted', abortReason: 'turn-deadline'};
     }
     turnState.aborted = true;
     callbacks.debugLog('request aborted');
     callbacks.addMessage({role: 'system', text: 'Thinking aborted. You can type again.'});
-    return {status: 'aborted'};
+    return {status: 'aborted', abortReason: 'user'};
   }
   const text = error instanceof Error ? error.message : String(error);
   callbacks.debugLog(`error: ${text}`);

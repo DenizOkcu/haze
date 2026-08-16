@@ -34,6 +34,16 @@ export function withSyntheticControl(messages: ModelMessage[], control: string):
   ];
 }
 
+/** Drop only a trailing text-only assistant final that completion policy rejected. */
+export function withoutRejectedAssistantFinal(messages: ModelMessage[]): ModelMessage[] {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'assistant') return messages;
+  if (typeof last.content === 'string') return messages.slice(0, -1);
+  if (!Array.isArray(last.content)) return messages;
+  const hasToolCall = last.content.some(part => typeof part === 'object' && part != null && part.type === 'tool-call');
+  return hasToolCall ? messages : messages.slice(0, -1);
+}
+
 function resultValue(output: unknown) {
   return typeof output === 'object' && output != null && 'value' in output
     ? (output as {value?: unknown}).value

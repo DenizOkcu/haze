@@ -38,9 +38,9 @@ export interface GoalCheckpoint {
   noProgressCount: number;
 }
 
-/** Cumulative progress signature: mutations, validation outcome, task counts. */
+/** Cumulative outcome signature; monotonic mutation activity alone is not net progress. */
 export function goalCheckpointSignature(input: {mutationCount: number; validationOutcome: ValidationOutcome; taskCounts?: {pending: number; inProgress: number; completed: number; total: number}}): string {
-  return JSON.stringify([input.mutationCount, input.validationOutcome, input.taskCounts ? [input.taskCounts.total, input.taskCounts.pending, input.taskCounts.inProgress, input.taskCounts.completed] : null]);
+  return JSON.stringify([input.mutationCount > 0, input.validationOutcome, input.taskCounts ? [input.taskCounts.total, input.taskCounts.pending, input.taskCounts.inProgress, input.taskCounts.completed] : null]);
 }
 
 /**

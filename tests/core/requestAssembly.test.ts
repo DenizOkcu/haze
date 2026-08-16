@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
-import {compactToolHistory, stripSyntheticControls, withSyntheticControl} from '../../src/core/agent/requestAssembly.js';
+import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutRejectedAssistantFinal} from '../../src/core/agent/requestAssembly.js';
 
 describe('requestAssembly', () => {
   it('replaces prior synthetic controls instead of persisting them', () => {
@@ -11,6 +11,13 @@ describe('requestAssembly', () => {
     expect(second[1].content).toContain('second nudge');
     expect(JSON.stringify(second)).not.toContain('first nudge');
     expect(stripSyntheticControls(second)).toEqual(base);
+  });
+
+  it('drops a rejected trailing text final without disturbing tool-bearing messages', () => {
+    const base = [{role: 'user', content: 'implement'}, {role: 'assistant', content: 'Done, but unvalidated.'}] as ModelMessage[];
+    expect(withoutRejectedAssistantFinal(base)).toEqual(base.slice(0, -1));
+    const toolBearing = {role: 'assistant', content: [{type: 'tool-call', toolCallId: 'x', toolName: 'shell', input: {command: 'npm test'}}]} as unknown as ModelMessage;
+    expect(withoutRejectedAssistantFinal([...base.slice(0, -1), toolBearing])).toHaveLength(2);
   });
 
   it('compacts only older successful tool results and preserves protocol messages', () => {

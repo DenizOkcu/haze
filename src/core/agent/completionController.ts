@@ -55,6 +55,8 @@ export interface TurnExecutionState {
   taskProgress: WorkTaskProgress | undefined;
   /** Goal-continuation cycles issued this turn (bounded by the global budget + progress guard). */
   goalContinuationsUsed: number;
+  /** Whether the single focused post-edit validation-repair slice was admitted. */
+  validationContinuationUsed: boolean;
   /** Work/task evidence signature recorded when the latest goal continuation was issued. */
   goalContinuationProgress: string | undefined;
   /** Whether the single allowed no-progress corrective nudge has been consumed. */
@@ -79,6 +81,7 @@ export function createTurnExecutionState(): TurnExecutionState {
     intent: 'unknown',
     taskProgress: undefined,
     goalContinuationsUsed: 0,
+    validationContinuationUsed: false,
     goalContinuationProgress: undefined,
     goalContinuationCorrectiveUsed: false,
     budgetBoundary: false,
@@ -305,8 +308,9 @@ export function decideRescue(state: TurnExecutionState, evidence: CompletionEvid
   return {action: 'continue', reason: 'near tool-only boundary with no substantive answer', slice: RESCUE_SLICE};
 }
 
-/** Goal-continuation slice: real per-cycle work headroom, clamped to remaining global budget. */
+/** Pending-task continuation keeps room for implementation; evidence repair is deliberately smaller. */
 const GOAL_CONTINUATION_SLICE: RecoverySlice = {steps: 6, toolCalls: 12};
+const VALIDATION_CONTINUATION_SLICE: RecoverySlice = {steps: 3, toolCalls: 3};
 
 export interface GoalContinuationDecision {
   action: RecoveryAction;
@@ -364,7 +368,11 @@ export function classifyTerminalOutcome(state: TurnExecutionState, evidence: Com
 /** Compact signature of measurable work: mutations, validation outcome/kind, task counts. */
 export function goalProgressSignature(state: Pick<TurnExecutionState, 'mutationCount' | 'validationOutcome' | 'validationKind' | 'taskProgress'>): string {
   const tasks = state.taskProgress;
-  return JSON.stringify([state.mutationCount, state.validationOutcome, state.validationKind ?? '', tasks ? [tasks.revision, tasks.pending, tasks.inProgress, tasks.completed] : null]);
+  // Mutation counters and task revisions are monotonic activity signals, not
+  // proof of net progress: edit→revert and rewriting identical task counts must
+  // not keep an unfinished goal alive. Track only whether work exists plus
+  // validation/task outcomes that can actually move toward readiness.
+  return JSON.stringify([state.mutationCount > 0, state.validationOutcome, state.validationKind ?? '', tasks ? [tasks.pending, tasks.inProgress, tasks.completed] : null]);
 }
 
 /**
@@ -397,11 +405,13 @@ export function decideGoalContinuation(state: TurnExecutionState, evidence: Comp
   const readiness = assessCompletionReadiness(state, evidence);
   if (readiness === 'ready') return stop('completion readiness satisfied');
   if (!goalContinuationRecoverable(readiness)) return stop(`readiness '${readiness}' is not autonomously recoverable`);
+  const validationRepair = readiness === 'validation_failed' || readiness === 'validation_stale' || readiness === 'validation_absent_after_mutation';
+  if (validationRepair && state.validationContinuationUsed) return stop('focused validation-repair continuation already used');
   if (!hasRemainingRecoveryBudget(state, budget)) return stop('global budget exhausted');
   if (state.goalContinuationProgress != null && goalProgressSignature(state) === state.goalContinuationProgress && state.goalContinuationCorrectiveUsed) {
     return stop('no measurable progress after the corrective nudge');
   }
-  return {action: 'continue', reason: `premature final rejected: ${readiness}`, slice: GOAL_CONTINUATION_SLICE};
+  return {action: 'continue', reason: `premature final rejected: ${readiness}`, slice: validationRepair ? VALIDATION_CONTINUATION_SLICE : GOAL_CONTINUATION_SLICE};
 }
 
 /**

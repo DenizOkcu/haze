@@ -44,8 +44,8 @@ export interface GoalRunOptions {
   resumeFrom?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint};
 }
 
-/** Pause after this many consecutive physical turns without measurable progress (one corrective cycle allowed). */
-const GOAL_NO_PROGRESS_LIMIT = 2;
+/** Pause after one corrective physical turn without measurable outcome progress. */
+const GOAL_NO_PROGRESS_LIMIT = 1;
 
 function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: number): GoalCheckpoint {
   const validationOutcome: ValidationOutcome = resume.validationOutcome ?? 'not_applicable';
@@ -140,7 +140,11 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     lastEvidence = result.evidence;
 
     if (result.status === 'complete') return finish('complete', 'completed');
-    if (result.status === 'aborted') return finish('aborted', 'user-aborted');
+    if (result.status === 'aborted') {
+      return result.abortReason === 'turn-deadline'
+        ? finish('failed', 'goal-deadline', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined)
+        : finish('aborted', 'user-aborted');
+    }
 
     if (result.resume?.kind === 'incomplete-goal') {
       const next = checkpointFromResume(result.resume, 0);
@@ -148,7 +152,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       prevSignature = next.progressSignature;
       checkpoint = {...next, noProgressCount};
       if (noProgressCount >= GOAL_NO_PROGRESS_LIMIT) {
-        callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} cycles without measurable progress (${describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
+        callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
         return finish('failed', 'no-progress', {kind: 'incomplete-goal', checkpoint});
       }
       const remainingNow = options.goalDeadlineMs != null ? options.goalDeadlineMs - (Date.now() - startedAt) : undefined;
