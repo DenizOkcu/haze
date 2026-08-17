@@ -9,13 +9,19 @@ export class HazeToolError extends Error {
   reasonCode: ToolFailureReasonCode;
   recoveryTool?: string;
   recoveryInput?: unknown;
+  /** Overrides the caller's generic next step when this error knows its own recovery (e.g. secret-file refusals). */
+  suggestedNextStep?: string;
+  /** Overrides the default `recoverable: true` for terminal refusals the model must not retry. */
+  recoverable?: boolean;
 
-  constructor(message: string, reasonCode: ToolFailureReasonCode, options?: {recoveryTool?: string; recoveryInput?: unknown}) {
+  constructor(message: string, reasonCode: ToolFailureReasonCode, options?: {recoveryTool?: string; recoveryInput?: unknown; suggestedNextStep?: string; recoverable?: boolean}) {
     super(message);
     this.name = 'HazeToolError';
     this.reasonCode = reasonCode;
     this.recoveryTool = options?.recoveryTool;
     this.recoveryInput = options?.recoveryInput;
+    this.suggestedNextStep = options?.suggestedNextStep;
+    this.recoverable = options?.recoverable;
   }
 }
 
@@ -34,8 +40,8 @@ export function structuredToolFailure(toolName: string, error: unknown, suggeste
     path: pathForError,
     error: message,
     reasonCode: options?.reasonCode ?? hazeError?.reasonCode,
-    recoverable: true,
-    suggestedNextStep,
+    recoverable: hazeError?.recoverable ?? true,
+    suggestedNextStep: hazeError?.suggestedNextStep ?? suggestedNextStep,
     recoveryTool: options?.recoveryTool ?? hazeError?.recoveryTool,
     recoveryInput: options?.recoveryInput ?? hazeError?.recoveryInput,
     ...(options?.suggestedPaths?.length ? {suggestedPaths: options.suggestedPaths} : {}),

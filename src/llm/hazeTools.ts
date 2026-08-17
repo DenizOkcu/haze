@@ -23,6 +23,7 @@ import {processTool} from './tools/processTool.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './tools/fileToolShared.js';
 import {createIgnoreClassifier} from './tools/gitIgnore.js';
 import {runRipgrepBounded} from './tools/grepRunner.js';
+import {secretSearchExcludeGlobs} from '../core/safety/secretPaths.js';
 import {EXACT_MUTATION_BYTES} from '../core/limits.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
@@ -197,6 +198,10 @@ export const hazeTools = {
         ];
         if (caseInsensitive) args.push('--ignore-case');
         if (glob) args.push('--glob', glob);
+        // Secret-file exclusions come after any model-supplied glob: later
+        // ripgrep globs take precedence, and an explicit glob (which also
+        // re-enables hidden-file search) must never re-include secrets.
+        for (const secretGlob of secretSearchExcludeGlobs()) args.push('--glob', secretGlob);
         args.push('--', pattern, absolutePath);
 
         const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});

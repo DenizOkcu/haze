@@ -144,6 +144,11 @@ describe('toolResultSummary', () => {
     expect(toolResultSummary({success: false, output: {ok: false, error: 'structured failure'}})).toBe('failed: structured failure');
   });
 
+  it('labels secret-file refusals as blocked, distinct from failures, without echoing content', () => {
+    expect(toolResultSummary({success: true, output: {ok: false, reasonCode: 'secret_file_protected', path: '.env', error: 'Refusing to read protected secret file: .env.'}})).toBe('blocked: protected secret file (.env)');
+    expect(toolResultSummary({success: true, output: {ok: false, reasonCode: 'secret_file_protected', error: 'Refusing to mutate protected secret file.'}})).toBe('blocked: protected secret file');
+  });
+
   it('labels globally capped grep counts as lower bounds', () => {
     expect(toolResultSummary({success: true, output: {totalMatches: 3, matchCountIsLowerBound: true}})).toBe('at least 3 matches');
   });

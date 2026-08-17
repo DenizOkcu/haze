@@ -120,7 +120,7 @@ recreate the chart in @mockups/analytics.png with recharts</pre>
               <li><strong>Nested:</strong> subtree instruction files load lazily when tools touch that directory, and reload when their signature changes.</li>
             </ul>
             <p>Run <code class="cmd">/init</code> to generate a compact, budget-aware <code>AGENTS.md</code> for the current repo. Check context cost any time with <code class="cmd">/context</code>.</p>
-            <p>Type <code class="cmd">@</code> to browse workspace files, or mention a path containing <code>/</code> to bless an outside file for read-only access during that turn. Mutating tools always stay inside the workspace.</p>
+            <p>Type <code class="cmd">@</code> to browse workspace files, or mention a path containing <code>/</code> to bless an outside file for read-only access during that turn. Mutating tools always stay inside the workspace. Protected secret files (SSH keys, shell histories, <code>.env</code>, credentials) are never readable, even when explicitly mentioned.</p>
           </section>
 
           <section id="processes">

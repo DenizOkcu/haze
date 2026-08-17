@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Hard secret-file protection in every file tool: SSH keys (`~/.ssh/**`, `id_*` private keys), shell history files, `.env`/`.envrc` files (excluding `.example`/`.sample`/`.template` documentation variants), `*.pem`/`*.key`, `secrets.{json,yaml,yml,toml}`, and common home credential stores (`~/.aws`, `~/.gnupg`, `~/.netrc`, `~/.git-credentials`, and others; see `src/core/safety/secretPaths.ts`) are refused for reads *and* mutations before any filesystem access. The check covers lexical and real paths (symlink-proof in both directions), wins over user-typed `@path` read blessings and `allowIgnored`, and grep traversal excludes the protected names with negated-only globs appended after any model-supplied glob (a later ripgrep glob takes precedence, so an explicit glob cannot re-include secrets; positive re-include globs would whitelist the search, which is why documentation variants are excluded from traversal but stay readable via targeted `readFile`). Refusals are terminal structured results (`secret_file_protected`, `recoverable: false`, ask-the-user next step, no content echoed) so models do not burn steps retrying, and the transcript shows them as `blocked: protected secret file (path)`, distinct from ordinary failures. The `shell` tool is deliberately not command-filtered: secret avoidance in shell is instructed through the system prompt (`SECRET_FILE_RULE`), aligned with the file-tool refusal wording.
+
 ## 1.0.0 - 2026-08-16
 
 The first stable release. The CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape are now covered by the 1.x compatibility promise: breaking changes to them require a new major version.

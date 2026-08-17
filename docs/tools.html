@@ -76,6 +76,7 @@
                 <tr><td>lsp*</td><td>Optional symbol, definition, and reference lookup through a language server you configure with <code>/lsp</code>. Read-only; see below.</td></tr>
               </tbody>
             </table>
+            <p>All file tools refuse protected secret files before any filesystem access: SSH keys, shell history files, <code>.env</code>/<code>.envrc</code> files, <code>*.pem</code>/<code>*.key</code>, and common home credential stores. The refusal is terminal (<code>secret_file_protected</code>, <code>recoverable: false</code>), cannot be bypassed by user-typed path mentions, ignore overrides, or symlinks, and grep traversal skips those names entirely. Documentation variants (<code>.env.example</code>, <code>.env.sample</code>, <code>.env.template</code>, <code>id_*.pub</code>) stay readable.</p>
           </section>
 
           <section id="write">

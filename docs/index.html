@@ -935,9 +935,10 @@
       <div class="section-box principle-grid">
         <article>
           <h3>Workspace boundaries without approval loops</h3>
-          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: shell commands run with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
+          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Secret files — SSH keys, shell histories, <code>.env</code> files, credentials — are refused outright by every file tool, before any read, and show as <code>blocked: protected secret file</code> in the transcript. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: shell commands run with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
           <pre class="mini-terminal" aria-label="Workspace guardrail example"><span class="prompt">workspace</span>   current directory
 <span class="prompt">.gitignore</span>  respected by default
+<span class="prompt">.env/.ssh</span>   always refused
 <span class="prompt">@ui.png</span>    attached for vision</pre>
         </article>
         <article>

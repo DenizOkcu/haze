@@ -32,6 +32,9 @@ export const shellTool = tool({
   execute: async ({command, purpose, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, purpose, timeoutSeconds, background}, context, async () => {
     const cwd = workspaceRoot();
     const classification = classifyShellCommand(command);
+    // Note: secret-file protection is NOT hard-enforced here by decision — it
+    // lives in the file tools (workspaceFile.ts / grep globs). For shell, the
+    // behavior is instructed via the system prompt (SECRET_FILE_RULE).
     if (background) {
       if (hazeContext(context)?.isSubagent) {
         return {ok: false, command, reasonCode: 'background_not_allowed', recoverable: false, error: 'Background processes are available only to the main haze turn, not fleet workers.', suggestedNextStep: 'Run the server from the main conversation.'};

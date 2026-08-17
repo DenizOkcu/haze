@@ -119,6 +119,12 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       }
       return 'completed';
     }
+    if (output.reasonCode === 'secret_file_protected') {
+      // Protection events are visible but distinct from ordinary failures so
+      // the developer can audit them at a glance; never print file contents.
+      const protectedPath = typeof output.path === 'string' && output.path ? ` (${compact(output.path, 80)})` : '';
+      return `blocked: protected secret file${protectedPath}`;
+    }
     const reason = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
     return typeof output.error === 'string' ? `failed${reason}: ${compact(output.error)}` : `failed${reason}`;
   }

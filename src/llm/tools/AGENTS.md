@@ -11,6 +11,7 @@ Implementation helpers for haze built-in tools.
 - Keep path values in results workspace-relative and stable for model/UI consumption.
 - Mutating helpers must call scoped-context mutation checks before writing.
 - Read helpers (`prepareWorkspaceRead`) honour the turn-scoped bless set: paths the user mentioned in the prompt may be read outside the workspace and bypass `.gitignore`. Mutating helpers (`prepareWorkspaceMutation`, `prepareWorkspaceWritePath`) never consult the bless set — confinement is absolute for edits/writes.
+- Secret files (`core/safety/secretPaths.ts`: SSH keys, shell histories, `.env`/`.envrc`, `*.pem`/`*.key`, home credential stores) are refused for reads and mutations alike, before any filesystem access, with both lexical and real path checks. This overrides the bless set and `allowIgnored`. `grep` appends `secretSearchExcludeGlobs()` after any model glob (later ripgrep globs win; positive re-include globs would whitelist the search, so exclusions stay negated-only). The `shell` tool is deliberately not hard-filtered; shell-side avoidance is instructed by `SECRET_FILE_RULE` in `llm/systemPrompt.ts`.
 
 ## Turn-scoped tool context
 
@@ -38,7 +39,7 @@ Do not persist this state; it is valid only for one agent turn. If scoped contex
 
 Current behavior:
 
-- `shellTool.ts` always executes commands and returns informational risk classification. Known test/build commands are validation automatically; `purpose=validation` gives custom assertion commands structured pass/fail evidence from their real process result.
+- `shellTool.ts` always executes commands and returns informational risk classification (secret-file protection is not hard-enforced in shell; it is instructed via `SECRET_FILE_RULE` in the system prompt). Known test/build commands are validation automatically; `purpose=validation` gives custom assertion commands structured pass/fail evidence from their real process result.
 - Fetch helpers must cap by bytes, not characters, and preserve valid UTF-8 prefixes when truncating.
 
 - `shellTool.ts` runs the configured user login shell through the shared bounded subprocess primitive (`core/process`): stdout/stderr are byte-bounded during collection, timeout/abort terminate the process tree, it classifies commands, parses validation output, reduces output, stores raw handles where needed, and returns structured metadata including `aborted`/`signal`/`forcedTermination`. Its schema identifies the active dialect. With `background=true`, it instead registers a main-turn-only long-running process and returns immediately.
@@ -52,6 +53,7 @@ Current behavior:
 
 - Use `HazeToolError` and `structuredToolFailure` for recoverable/actionable failures.
 - Include `reasonCode`, `recoverable`, and `suggestedNextStep` when the model can retry safely.
+- A `HazeToolError` may carry its own `suggestedNextStep` and `recoverable` (the error wins over the caller's generic hint); terminal refusals such as `secret_file_protected` use `recoverable: false` so the model does not burn steps retrying.
 - Avoid throwing raw filesystem/process errors directly to tool output.
 
 ## Tests
