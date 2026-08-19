@@ -168,7 +168,7 @@ function ToolMessageText({text, streaming, width, toolDiffs, maxVisibleLines}: {
       const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;
       const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(rest);
       return <Text key={`${index}-${line}`} color={theme.muted}>
-        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.purple}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
+        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.accent}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
       </Text>;
     })}
     {clamped.visibleDiffs.map(diff => <ToolDiffView key={diff.id} diff={diff} width={width} />)}
@@ -196,7 +196,7 @@ export const AssistantMarkdownChunkView = React.memo(function AssistantMarkdownC
 }) {
   const completion = final ? messageElapsedLabel(message) : '';
   return <Box flexDirection="column" marginBottom={final ? 1 : 0}>
-    {first ? <Text color={theme.purple} bold>haze</Text> : null}
+{first ? <Text color={theme.accent} bold>haze</Text> : null}
     <MarkdownText content={content} width={width} />
     {completion ? <Text color={theme.muted}>{completion}</Text> : null}
   </Box>;
@@ -223,7 +223,7 @@ export const MessageView = React.memo(function MessageView({message, width, show
 
   return <Box flexDirection="column" marginBottom={1}>
     {showHeader ? <Text>
-      <Text color={message.role === 'assistant' ? theme.purple : message.role === 'tool' ? theme.blue : message.role === 'system' ? theme.success : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
+<Text color={message.role === 'assistant' ? theme.accent : message.role === 'tool' ? theme.info : message.role === 'system' ? theme.success : theme.muted} bold>{message.role === 'assistant' ? 'haze' : message.role === 'tool' ? 'Tool' : 'Info'}</Text>
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text> : null}
     {message.role === 'tool'

@@ -58,6 +58,14 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
+  it('round-trips a theme selection (validated by resolveTheme, not the schema)', async () => {
+    await fs.writeJson(settingsFile, {theme: 'robbyrussell'});
+    const {readSettings, updateSettings} = await loadSettings();
+    expect((await readSettings()).theme).toBe('robbyrussell');
+    await updateSettings({theme: 'af-magic'});
+    expect((await readSettings()).theme).toBe('af-magic');
+  });
+
   it('writeSettings creates the directory and writes pretty-printed JSON', async () => {
     const {writeSettings} = await loadSettings();
     await writeSettings({model: 'gpt-4o', apiKey: 'abc'});

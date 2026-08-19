@@ -13,6 +13,7 @@ describe('inputSuggestionsForState', () => {
     });
 
     expect(suggestions.map(suggestion => suggestion.value)).toContain('/help');
+    expect(suggestions.map(suggestion => suggestion.value)).toContain('/themes');
     expect(suggestions.map(suggestion => suggestion.value)).toContain('/enabled-skill');
     expect(suggestions.map(suggestion => suggestion.value)).not.toContain('/disabled-skill');
   });

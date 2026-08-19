@@ -5,6 +5,7 @@ import {configuredMcpServers} from '../../config/mcpSettings.js';
 import {activeProvider as resolveActiveProvider, configuredProviders, providerHasKey, providerImageCapable} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import type {HazeSettings} from '../../config/settings.js';
+import {DEFAULT_THEME_NAME} from '../../ui/theme.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 
 export async function formatSettingsSummary(settings: HazeSettings, contextFiles: ContextFile[]): Promise<string> {
@@ -33,6 +34,7 @@ export async function formatSettingsSummary(settings: HazeSettings, contextFiles
     `Model: ${settings.model ?? 'not set'}`,
     `Base URL: ${activeProvider?.url ?? settings.baseURL ?? 'not configured'}`,
     `API key: ${activeProvider && providerHasKey(settings, activeProvider) ? 'saved' : 'missing'}`,
+    `Theme: ${settings.theme ?? `${DEFAULT_THEME_NAME} (default)`}`,
     `Configured providers: ${providers.map(provider => `${provider.name}${providerImageCapable(provider) ? ' (images)' : ''}`).join(', ') || 'none'}`,
     `LSP servers: ${lspServers.map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,
     `MCP servers: ${configuredMcpServers(settings).map(server => `${server.name}${server.enabled === false ? ' (disabled)' : ''}`).join(', ') || 'none'}`,

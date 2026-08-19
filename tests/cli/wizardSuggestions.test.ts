@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import type {HazeSettings} from '../../src/config/settings.js';
 import type {LoadedSkill} from '../../src/skills/types.js';
+import {BUILT_IN_THEME_SPECS} from '../../src/ui/theme.js';
 import {
   providerSuggestions,
   providerActionSuggestions,
@@ -16,6 +17,7 @@ import {
   skillsSuggestions,
   skillsActionSuggestions,
   skillScopeSuggestions,
+  themeSuggestions,
 } from '../../src/cli/commands/wizardFlow.js';
 
 const settings = (overrides: Partial<HazeSettings> = {}): HazeSettings => ({...overrides});
@@ -153,6 +155,28 @@ describe('mcpSuggestions / mcpActionSuggestions', () => {
 describe('mcpTransportSuggestions', () => {
   it('lists the three transports', () => {
     expect(mcpTransportSuggestions().map(r => r.value).sort()).toEqual(['http', 'sse', 'stdio']);
+  });
+});
+
+describe('themeSuggestions', () => {
+  it('lists every built-in theme and marks the active one', () => {
+    const suggestions = themeSuggestions({theme: 'robbyrussell'});
+    expect(suggestions.map(suggestion => suggestion.value)).toEqual(Object.keys(BUILT_IN_THEME_SPECS));
+    expect(suggestions.find(suggestion => suggestion.value === 'robbyrussell')?.description).toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'purple')?.description).not.toContain('active');
+    expect(suggestions[0]?.kind).toBe('theme');
+  });
+
+  it('treats the default theme as active when none is set', () => {
+    expect(themeSuggestions({}).find(suggestion => suggestion.value === 'purple')?.description).toContain('active');
+  });
+
+  it('labels light and dark palettes', () => {
+    const suggestions = themeSuggestions({});
+    expect(suggestions.find(suggestion => suggestion.value === 'light')?.description).toContain('light palette');
+    expect(suggestions.find(suggestion => suggestion.value === 'solarized-light')?.description).toContain('light palette');
+    expect(suggestions.find(suggestion => suggestion.value === 'purple')?.description).toContain('dark palette');
+    expect(suggestions.find(suggestion => suggestion.value === 'solarized-dark')?.description).toContain('dark palette');
   });
 });
 

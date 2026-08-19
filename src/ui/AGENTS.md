@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-08-17 for the 1.0.0 release.
+Last updated: 2026-08-19 for the 1.1.0 release.
 
 Reusable Ink components, theme, and input-buffer logic.
 
@@ -8,7 +8,7 @@ Reusable Ink components, theme, and input-buffer logic.
 
 - Keep reusable presentation components here (`components/*`) and CLI-specific orchestration in `src/cli/**`.
 - Components should accept data/callback props and avoid importing settings/session/tool modules directly.
-- `theme.ts` is the shared visual palette; avoid hardcoded colors in components when theme values exist.
+- `theme.ts` is the shared visual palette (vocabulary + resolver); the themes themselves live one-per-file in `src/ui/themes/` (see its AGENTS.md for converting oh-my-zsh / VS Code / Sublime themes). `terminalColors.ts` owns the OSC 10/11 terminal-default adoption/restore (and the `/themes` live re-apply); helpers are write-only so they never race Ink for stdin. Avoid hardcoded colors in components when theme values exist. Theme values use the oh-my-zsh/zsh color vocabulary (zsh color names like `cyan`, xterm-256 indices like `'214'`, or `#rrggbb` hex).
 - `inputBuffer.ts` contains terminal text editing primitives independent of React where possible.
 
 ## Component contracts

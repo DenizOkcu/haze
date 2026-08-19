@@ -29,7 +29,7 @@ export function shouldInsertNewline(input: string, key: TextInputKey) {
 export type TextInputSuggestion = {
   value: string;
   description?: string;
-  kind?: 'command' | 'skill' | 'provider' | 'model' | 'lsp' | 'mcp' | 'session' | 'file';
+  kind?: 'command' | 'skill' | 'provider' | 'model' | 'lsp' | 'mcp' | 'session' | 'file' | 'theme';
 };
 
 /** Cursor-aware path completer for `@token` mentions; receives the token verbatim. */
@@ -361,7 +361,7 @@ export function TextInput({
       </Text>)}
     </Box>}
     {value.length === 0 ? <Text wrap="truncate-end">
-      <Text color={theme.purple}>› </Text>
+<Text color={theme.accent}>› </Text>
       <Text inverse> </Text>
       <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
     </Text> : visibleLines.map((line, index) => {
@@ -372,7 +372,7 @@ export function TextInput({
       const cursorChar = isCursorLine ? line.text[lineCursor] ?? ' ' : '';
       const afterCursor = isCursorLine ? line.text.slice(lineCursor + 1) : '';
       return <Text key={`${line.start}-${absoluteLineIndex}`} wrap="truncate-end">
-        <Text color={absoluteLineIndex === 0 ? theme.purple : theme.muted}>{absoluteLineIndex === 0 ? '› ' : '  '}</Text>
+<Text color={theme.accent}>{absoluteLineIndex === 0 ? '› ' : '  '}</Text>
         {isCursorLine ? <>
           {beforeCursor}
           <Text inverse>{cursorChar}</Text>

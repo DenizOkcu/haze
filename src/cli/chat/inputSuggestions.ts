@@ -10,6 +10,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/lsp', description: 'Manage LSP servers (semantic navigation)', kind: 'command'},
   {value: '/mcp', description: 'Manage MCP servers (Context7, etc.)', kind: 'command'},
   {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
+  {value: '/themes', description: 'Choose a terminal theme (light palettes and oh-my-zsh ports included)', kind: 'command'},
   {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
   {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
   {value: '/fleet ', description: 'Parallelize independent work in disposable contexts (flags: --review/--profile/--workers/--concurrency)', kind: 'command'},

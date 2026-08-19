@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| Latest minor (`1.0.x`) | Yes — security fixes |
+| Latest minor (`1.1.x`) | Yes — security fixes |
 | Older minors and pre-1.0 (`0.x`) | No — upgrade required |
 
 Security fixes are provided for the latest published minor release. Upgrade to the newest release before reporting an issue that may already have been fixed.

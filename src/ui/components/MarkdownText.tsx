@@ -121,7 +121,7 @@ function MarkdownBlock({token, width, source, textOverride, compactAfter}: {
     case 'space':
       return <Text> </Text>;
     case 'hr':
-      return <Text color={theme.deepPurple}>────────────────────────────────────────</Text>;
+      return <Text color={theme.accentDim}>────────────────────────────────────────</Text>;
     case 'blockquote': {
       const quote = token as Tokens.Blockquote;
       return <Box flexDirection="column" marginY={1}>
@@ -163,7 +163,7 @@ function ListItemView({item, ordered, index, width}: {
   const markerWidth = visibleLength(marker);
   const blocks = (item.tokens ?? []).filter(child => child.type !== 'space');
   if (blocks.length === 0) {
-    return <Box><Text color={theme.purple}>{marker}</Text></Box>;
+    return <Box><Text color={theme.accent}>{marker}</Text></Box>;
   }
   return <Box flexDirection="column">
     {blocks.map((block, blockIndex) => (
@@ -197,7 +197,7 @@ function ListItemBlock({token, marker, markerWidth, width}: {
     return <Box flexDirection="column">
       {lines.map((line, lineIndex) => (
         <Box key={lineIndex} flexDirection="row">
-          <Box flexShrink={0}><Text color={theme.purple}>{prefix(lineIndex)}</Text></Box>
+          <Box flexShrink={0}><Text color={theme.accent}>{prefix(lineIndex)}</Text></Box>
           <Text>{line.map((atom, atomIndex) => atom.type === 'space' ? <Text key={atomIndex}>{' '}</Text> : renderInlinePart(atom, atomIndex))}</Text>
         </Box>
       ))}
@@ -207,7 +207,7 @@ function ListItemBlock({token, marker, markerWidth, width}: {
   // sits on its own line when this is the first block; the block then renders
   // indented to align with the marker.
   return <Box flexDirection="column">
-    {marker ? <Text color={theme.purple}>{marker}</Text> : null}
+    {marker ? <Text color={theme.accent}>{marker}</Text> : null}
     <Box flexDirection="column" marginLeft={markerWidth}>
       <MarkdownBlock token={token} width={Math.max(20, width - markerWidth)} />
     </Box>
@@ -217,22 +217,22 @@ function ListItemBlock({token, marker, markerWidth, width}: {
 function HeadingBlock({heading, width}: {heading: Tokens.Heading; width: number}) {
   const title = stripInline(heading.text).trim();
   if (heading.depth === 1) return <Box flexDirection="column" marginTop={1} marginBottom={1}>
-    <Text color={theme.purple} bold>{title.toUpperCase()}</Text>
-    <Text color={theme.deepPurple}>{'─'.repeat(Math.min(width, Math.max(12, visibleLength(title))))}</Text>
+    <Text color={theme.accent} bold>{title.toUpperCase()}</Text>
+    <Text color={theme.accentDim}>{'─'.repeat(Math.min(width, Math.max(12, visibleLength(title))))}</Text>
   </Box>;
   if (heading.depth === 2) return <Box marginTop={1} marginBottom={1}>
-    <Text color={theme.purple} bold>{title}</Text>
+    <Text color={theme.accent} bold>{title}</Text>
   </Box>;
   return <Box marginTop={heading.depth <= 3 ? 1 : 0}>
-    <Text color={theme.purple} bold>{title}</Text>
+    <Text color={theme.accent} bold>{title}</Text>
   </Box>;
 }
 
 function TableLine({line}: {line: string}) {
-  if (isTableBorder(line)) return <Text color={theme.deepPurple}>{line}</Text>;
+  if (isTableBorder(line)) return <Text color={theme.accentDim}>{line}</Text>;
   return <Text>
     {[...line].map((char, index) => char === '│'
-      ? <Text key={index} color={theme.deepPurple}>{char}</Text>
+      ? <Text key={index} color={theme.accentDim}>{char}</Text>
       : <Text key={index}>{char}</Text>)}
   </Text>;
 }
@@ -313,7 +313,7 @@ function renderInlinePart(part: {kind: 'text' | 'code' | 'strong' | 'em' | 'link
   if (part.kind === 'code') return <Text key={index} color={theme.warning} backgroundColor={theme.codeBg}>{part.text}</Text>;
   if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
   if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
-  if (part.kind === 'link') return <Text key={index} color={theme.purple}>{part.text}</Text>;
+  if (part.kind === 'link') return <Text key={index} color={theme.accent}>{part.text}</Text>;
   return <Text key={index}>{part.text}</Text>;
 }
 

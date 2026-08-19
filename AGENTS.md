@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last updated: 2026-08-17 for the 1.0.0 release.
+Last updated: 2026-08-19 for the 1.1.0 release.
 
 Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
@@ -12,7 +12,7 @@ haze is a Node >=22 TypeScript ESM CLI package (`@denizokcu/haze`) for terminal-
 
 Core shape:
 
-- React + Ink interactive terminal chat UI.
+- React + Ink interactive terminal chat UI, themed through a built-in palette registry (`/themes`).
 - Vercel AI SDK with OpenAI-compatible providers.
 - Local tools for file discovery/read/search/edit/write, public URL fetch, foreground and managed background processes, LSP/MCP integration, global/project skills, image attachments, subagents/fleet, task tracking, session browsing/forking, and compaction.
 - Source lives in `src/`; generated `dist/` must not be edited.
@@ -46,7 +46,7 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 - `bin/haze.js` — thin npm binary shim to built CLI.
 - `dist/` — generated build output; never edit directly.
 - `examples/skills/` — packaged skill examples.
-- `docs/index.html` — static/generated docs page in repo.
+- `docs/*.html` — static docs pages in repo (`index.html` plus topic pages like `commands.html`, `tools.html`).
 - `calc-app/`, `haiku/` — sample/fixture directories.
 
 ## Global coding conventions
@@ -87,6 +87,7 @@ Recent decisions to preserve:
 - The Ink transcript is append-only static output above a dynamic tail. Streamed assistant Markdown may move into static output only after a root block is stable; the final root remains plain and dynamic until another root begins or the response finishes. The dynamic tail (streaming roots, live tool groups, task bar) is clamped to a viewport-derived row budget so Ink never enters its scrollback-wiping overflow path; row estimates mirror Ink's own `wrap-ansi` wrapping.
 - Context files: global `~/.haze/AGENTS.md` wins over `~/.claude/CLAUDE.md`; ancestor `CLAUDE.md`/`AGENTS.md` load at startup; nested subtree files load lazily when tools touch that subtree and are reread when their signature changes.
 - Skills are Markdown instruction packages under global `~/.haze/skills/<name>/SKILL.md` or project `<workspace>/.haze/skills/<name>/SKILL.md`; they do not execute code. Project skills are untrusted repo content, real-path-confined to the workspace, visibly labeled, and take precedence over same-named global skills unless the project scope is disabled.
+- Themes are a settings-name-keyed registry in `src/ui/themes/` (one file per theme; `resolveTheme` validates names loudly and `tests/ui/theme.test.ts` enforces folder↔registry parity). `theme` in settings selects the palette; `/themes` (picker or `/themes <name>`) switches it live — ChatScreen re-resolves on settings change. A theme owns both terminal defaults: OSC 10/11 are adopted at startup and restored on exit (`src/ui/terminalColors.ts`); already-rendered `<Static>` transcript keeps its old colors by design.
 
 ## Testing expectations
 

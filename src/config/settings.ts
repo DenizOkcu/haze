@@ -107,6 +107,8 @@ export interface HazeSettings {
   manualCompaction?: 'llm-summary' | 'heuristic';
   /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
   tips?: {enabled?: boolean};
+  /** Built-in theme name; unset means `purple`. Other options: `light`, oh-my-zsh ports like `robbyrussell`, palette ports like `solarized-dark`. Validated by `resolveTheme`. */
+  theme?: string;
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
@@ -179,6 +181,7 @@ const settingsSchema = z.object({
   modelRetries: modelRetriesSchema.optional(),
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
+  theme: z.string().optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
 }).passthrough();

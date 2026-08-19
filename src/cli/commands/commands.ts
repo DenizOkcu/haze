@@ -9,6 +9,7 @@ import {handleFleetCommand} from './fleetCommand.js';
 import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
+import {handleThemesCommand} from './themesCommand.js';
 import {formatSettingsSummary} from './settingsSummary.js';
 import type {TurnExecutionOptions} from './streaming.js';
 
@@ -81,6 +82,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
     ctx.addSystemMessage(`Tips rotation ${currentlyEnabled ? 'disabled' : 'enabled'}.`);
     return HANDLED;
   }},
+  {match: exactOrArgs('/themes'), run: async (args, ctx) => await handleThemesCommand(args, ctx)},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
 ];
 

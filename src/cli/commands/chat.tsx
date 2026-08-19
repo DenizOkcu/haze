@@ -15,7 +15,8 @@ import {activeModel, activeProvider} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
-import {theme} from '../../ui/theme.js';
+import {setActiveTheme, resolveTheme, theme, DEFAULT_THEME_NAME} from '../../ui/theme.js';
+import {applyTerminalColors, resetTerminalColors} from '../../ui/terminalColors.js';
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentGoal} from './streaming/goalSupervisor.js';
 import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
@@ -212,6 +213,25 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
   }, [busy]);
 
+  // Live theme switching: whenever the settings'
+  // theme name changes (/themes), re-resolve and adopt it so the whole UI
+  // repaints without a restart. Ink <Static> history stays as-rendered, so
+  // already-printed text keeps its old colors; the terminal defaults (OSC
+  // 10/11) follow the new theme. Skipped until settings have loaded once —
+  // chatCommand() already resolved the theme before the first render, and the
+  // pre-load {} state would briefly flash the default theme.
+  const settingsThemeLoadedRef = useRef(false);
+  const activeThemeName = settings.theme ?? DEFAULT_THEME_NAME;
+  useEffect(() => {
+    if (!settingsThemeLoadedRef.current) return;
+    try {
+      setActiveTheme(resolveTheme(activeThemeName));
+      applyTerminalColors(theme.foreground, theme.background);
+    } catch {
+      // Malformed theme names were reported at startup; keep the resolved default.
+    }
+  }, [activeThemeName]);
+
   useEffect(() => {
     void (async () => {
       const [settingsResult, branch, files] = await Promise.all([
@@ -221,6 +241,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       ]);
       const next = settingsResult.value;
       setSettings(next);
+      settingsThemeLoadedRef.current = true;
       setSettingsError(settingsResult.error);
       setBranchName(branch);
       setContextFiles(files);
@@ -731,7 +752,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={expandedTaskCap} />
     </Box>}
     {busy && <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />}
-    <Box borderStyle="round" borderColor={theme.deepPurple} paddingX={1} flexShrink={0}>
+    <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexShrink={0}>
       <Box flexGrow={1} minWidth={0}>
         <TextInput
           placeholder={placeholder}
@@ -785,15 +806,33 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 }
 
 export async function chatCommand(options: ChatOptions = {}) {
+  // Resolve the theme before any Ink output so every component renders with it.
+  // Settings failures must not block startup (the in-app banner already reports
+  // them), but an unknown theme name fails loudly with the valid names listed.
+  try {
+    setActiveTheme(resolveTheme((await readSettings()).theme));
+  } catch (error) {
+    console.error(`[haze] ${error instanceof Error ? error.message : String(error)}; using the ${DEFAULT_THEME_NAME} theme.`);
+  }
   if (process.stdout.isTTY) {
     process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
+    // Adopt the theme's foreground AND background as the terminal defaults
+    // (OSC 10 + 11; ignored by terminals without support). Both sides must be
+    // themed together: unstyled text inherits the terminal fg, so a light
+    // background without a light-mode fg would be unreadable. Restored
+    // (OSC 110 + 111) on exit below.
+    applyTerminalColors(theme.foreground, theme.background);
   }
   await clearTasksFromStore().catch(() => undefined);
   // Incremental rendering rewrites only changed lines of the live frame, removing
   // the full-frame erase/rewrite flicker while streaming. The fps cap aligns with
   // the ~80ms spinner cadence; faster renders would only repaint unchanged lines.
   const app = render(<ChatScreen debug={options.debug} version={options.version} build={options.build} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {incrementalRendering: true, maxFps: 15});
-  await app.waitUntilExit();
-  await teardownBackgroundProcesses().catch(() => undefined);
-  await clearTasksFromStore().catch(() => undefined);
+  try {
+    await app.waitUntilExit();
+    await teardownBackgroundProcesses().catch(() => undefined);
+    await clearTasksFromStore().catch(() => undefined);
+  } finally {
+    resetTerminalColors();
+  }
 }

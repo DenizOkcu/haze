@@ -26,7 +26,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.0.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.1.0</a>
       </nav>
     </div>
   </header>
@@ -92,6 +92,8 @@
                 <tr><td class="cmd-c"><code>/model list</code></td><td class="cmd-d">List all configured models.</td></tr>
                 <tr><td class="cmd-c"><code>/settings</code></td><td class="cmd-d">Show provider, model, API key and image-capability status, LSP/MCP servers, skills, and loaded context files.</td></tr>
                 <tr><td class="cmd-c"><code>/settings open</code></td><td class="cmd-d">Open <code>~/.haze/settings.json</code> with the OS default app.</td></tr>
+                <tr><td class="cmd-c"><code>/themes</code></td><td class="cmd-d">Choose a terminal theme from the built-in registry (light palettes and oh-my-zsh ports included). The pick applies immediately and is saved to <code>~/.haze/settings.json</code>.</td></tr>
+                <tr><td class="cmd-c"><code>/themes &lt;name&gt;</code></td><td class="cmd-d">Set a theme directly, such as <code>/themes solarized-dark</code>. Already-printed text keeps its old colors.</td></tr>
                 <tr><td class="cmd-c"><code>/logs [id]</code></td><td class="cmd-d">List recent LLM logs, or summarize one by id. Detailed logs exist only when haze started with <code>--debug</code>.</td></tr>
                 <tr><td class="cmd-c"><code>/lsp</code></td><td class="cmd-d">Configure language-server navigation: add a preset (<code>typescript</code>, <code>rust</code>, <code>python</code>, <code>go</code>, <code>php</code>) or a custom command, then enable/disable/remove. LSP tools appear only when an enabled server command is on <code>PATH</code>.</td></tr>
                 <tr><td class="cmd-c"><code>/mcp</code></td><td class="cmd-d">Configure Model Context Protocol servers. Add a preset (Context7) or custom <code>http</code>/<code>sse</code>/<code>stdio</code> server, enable/disable/remove it, or set a masked API key. MCP tools never shadow built-ins.</td></tr>

@@ -8,6 +8,7 @@ import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
+import {BUILT_IN_THEME_SPECS, DEFAULT_THEME_NAME, resolveTheme} from '../../ui/theme.js';
 import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
 
 /**
@@ -375,6 +376,24 @@ export function skillsActionSuggestions(settings: HazeSettings, skills: LoadedSk
   return result;
 }
 
+/** Perceptual-luminance check on a `#rrggbb` background so the theme picker can label light vs dark palettes. */
+function isLightBackground(hex: string): boolean {
+  const channels = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!channels) return false;
+  const [, r = '0', g = '0', b = '0'] = channels;
+  return (0.2126 * parseInt(r, 16) + 0.7152 * parseInt(g, 16) + 0.0722 * parseInt(b, 16)) / 255 > 0.5;
+}
+
+/** Every built-in theme with its palette brightness and the active one marked (`resolveTheme` validates names). */
+export function themeSuggestions(settings: HazeSettings): TextInputSuggestion[] {
+  const active = settings.theme ?? DEFAULT_THEME_NAME;
+  return Object.keys(BUILT_IN_THEME_SPECS).map(name => ({
+    value: name,
+    description: `${isLightBackground(resolveTheme(name).background) ? 'light' : 'dark'} palette${name === active ? ' · active' : ''}`,
+    kind: 'theme' as const,
+  }));
+}
+
 // ── The step table ──────────────────────────────────────────────────────────
 
 type WizardStepKind = 'pick' | 'input' | 'masked-input' | 'confirm';
@@ -453,6 +472,8 @@ export const WIZARD_STEPS = [
   {id: 'mcpAddKey', kind: 'masked-input', placeholder: 'API key, or blank to skip', optional: true, suggestions: () => []},
   {id: 'mcpSetKey', kind: 'masked-input', placeholder: 'API key', suggestions: () => []},
   {id: 'mcpConfirmRemove', kind: 'confirm', placeholder: 'Type "yes" to confirm', suggestions: () => []},
+  // Themes
+  {id: 'themes', kind: 'pick', placeholder: 'Choose a theme', suggestions: (s: WizardSuggestionState) => themeSuggestions(s.settings)},
 ] as const satisfies readonly WizardStepDef[];
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number]['id'];

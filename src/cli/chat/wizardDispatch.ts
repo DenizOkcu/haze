@@ -20,6 +20,7 @@ import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, SERVER_CHOICES, captu
 import {finishLspCustomResult, selectLspActionResult, selectLspPresetResult, selectLspServerResult, finishMcpCustomResult, selectMcpActionResult, selectMcpPresetResult, selectMcpServerResult, setMcpServerKeyResult} from '../commands/serverWizard.js';
 import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../commands/providerWizard.js';
 import {selectSkillActionResult, selectSkillResult, captureSkillDescription as captureSkillDescriptionResult, skillCreationFailure, skillCreationMessage, skillConfirmRemoveResult as skillConfirmRemove} from '../commands/skillsWizard.js';
+import {selectThemeResult} from '../commands/themesCommand.js';
 import {startupProviderInfo} from './startupInfo.js';
 import {SESSION_ACTIONS} from '../commands/sessionPicker.js';
 import {openBrowser, startChatGptBrowserLogin} from '../../llm/openaiCodexOAuth.js';
@@ -847,6 +848,15 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage(result.message);
   }
 
+  async function selectTheme(name: string) {
+    const result = selectThemeResult(name);
+    if (result.settingsPatch) {
+      setSettings(await updateSettings(result.settingsPatch));
+      setMode('chat');
+    }
+    showMessage(result.message);
+  }
+
   const handlers: Partial<Record<Mode, (value: string) => Promise<void>>> = {
     sessions: selectSession,
     sessionAction: selectSessionAction,
@@ -879,6 +889,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     mcpAddKey: finishMcpCustom,
     mcpSetKey: setMcpServerKey,
     mcpConfirmRemove: mcpConfirmRemoveMode,
+    themes: selectTheme,
   };
 
   /** Apply one field-transition effect at the submit boundary (was chat.tsx inline branching). */

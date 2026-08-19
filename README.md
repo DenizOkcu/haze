@@ -2,17 +2,16 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.0.0
+## What's new in 1.1.0
 
-haze 1.0.0 is the first stable release: the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape are now covered by the 1.x compatibility promise. It also lands a configurable model-retry pool and the four benchmark-driven reliability fixes below.
+haze 1.1.0 adds a terminal theme system and hard secret-file protection.
 
-- Configurable model-retry pool: the `modelRetries` setting (integer 0–10, default 2) sizes the shared bounded pool that retries transient model errors and idle-stream stalls. Raise it for providers that terminate long streams aggressively; `0` disables automatic retries (stalls pause with the goal preserved for a one-key resume). The effective pool size is visible in `timeout`/`retry` stream events (`maxRetries`) and stall diagnostics.
-- Benchmark-hardened completion evidence (found by the csv-query differential benchmark — same model across four harnesses isolates the harness): `writeFile` chunking guidance can no longer be shadowed by schema validation, reads fail open in Git-less workspaces while mutations still fail closed, the shell validation classifier recognizes Python/Go/Rust/Make/Maven/Gradle/Ruby/.NET/Deno/Bun test commands plus direct runs of files changed this goal, and `shell` accepts `purpose=validation` so ad hoc assertion scripts become structured completion evidence.
-- Validated with a differential Harbor benchmark on glm-5.3 (claude-code, nanocoder, pi, haze): haze passed 17/17 verifier tests with the fewest input tokens of the reporting harnesses, a clean goal envelope (1 cycle, structured passing validation), and zero stalls. Full report under [`benchmarks/harbor/results`](https://github.com/DenizOkcu/haze/tree/main/benchmarks/harbor/results).
-- Carried from 0.11.0: autonomous goal continuation across physical turns, runtime provenance and stale-install protection, model-aware context budgeting, headless `--timeout`, per-tool deadlines, incremental streaming, and model-written `/compact` summaries.
+- Terminal theming: 14 built-in palettes — the default `purple`, a `light` pair, and oh-my-zsh ports like `robbyrussell`, `af-magic`, `agnoster`, and `solarized-dark`/`solarized-light`. `/themes` opens a picker (each theme labeled light/dark, the active one marked); `/themes <name>` sets one directly. Switching applies live without a restart, and the selection persists as `theme` in `~/.haze/settings.json`. A theme owns both terminal defaults — haze adopts its foreground/background (OSC 10/11) on start and restores yours on exit — so already-printed transcript text keeps its old colors, which is accepted behavior. `src/ui/themes/AGENTS.md` documents the role vocabulary and conversion guides for porting more themes.
+- Hard secret-file protection in every file tool: SSH keys, shell history files, `.env`/`.envrc` (documentation variants excepted), `*.pem`/`*.key`, and common home credential stores are refused for reads and mutations before any filesystem access — terminal `secret_file_protected` results, symlink-proof in both directions, immune to user-granted read exceptions and ignore overrides, with grep traversal skipping the protected names. The `shell` tool remains unfiltered by design; secret avoidance there is instructed through the system prompt and stays inside your supervision boundary.
 
 Previous releases:
 
+- `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).
 - `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
 - `0.10.1`: OpenAI Subscription OAuth preset, SECURITY.md and the attended-use threat model, bounded completion recovery, compact colorized diffs, prompt-injection framing, hardened fetch/stdin/sessions, and a multi-page docs site.
 
@@ -93,6 +92,8 @@ Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) 
 API keys for HTTP/SSE servers are entered in a masked prompt and sent as `Authorization: Bearer <value>`. Stdio authentication belongs in the command or wrapper; haze does not attach HTTP headers to stdio. Servers persist in `~/.haze/settings.json` under `mcpServers`. Discovery and cleanup have bounded deadlines, failures are isolated, and MCP tools never shadow built-ins.
 
 Saved settings live in `~/.haze/settings.json`. ChatGPT OAuth credentials live separately in `~/.haze/auth.json`; both files use private permissions. Provider keys and MCP headers require HTTPS unless the endpoint uses loopback HTTP (`localhost`, `*.localhost`, `127/8`, or `::1`). Keyless HTTP remains available, and local OpenAI-compatible providers do not need a key. If a settings or authentication file is malformed, haze shows an actionable error instead of treating it as empty. Configure everything inside haze with `/provider`, `/model`, and `/settings`; there are no environment variables to set. Provider presets carry curated per-model metadata (context window and output cap from the models.dev catalog) which the wizard writes into `modelLimits`.
+
+Switch the interface palette with `/themes`. The picker lists every built-in theme — light palettes and oh-my-zsh ports like `robbyrussell`, `af-magic`, and `solarized-dark` — and applies the choice immediately; `/themes <name>` sets one directly. The selection persists as `theme` in `~/.haze/settings.json`, and text already on screen keeps its old colors.
 
 haze focuses on chat, local tools, context files, sessions, and Markdown skills. Use `/skills` for workflows outside that core. Its interactive picker can generate a skill from a description, then enable, disable, validate, or remove it. For reviews, release prep, deploy checks, debugging routines, or a team-specific checklist, ask haze to create a skill and edit the resulting Markdown as needed.
 
@@ -204,6 +205,8 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /model list
 /settings
 /settings open
+/themes
+/themes <name>
 /logs [id]
 /lsp
 /mcp
@@ -382,6 +385,7 @@ Most haze behaviour needs no configuration; a few optional keys in `~/.haze/sett
 - `modelRetries` (integer 0–10, default 2): size of the shared bounded retry pool for transient model errors and idle-stream stalls. Raise it for providers that terminate long streams aggressively; `0` disables automatic retries (a stalled stream pauses with the goal preserved for a one-key resume). The effective value is reported in `timeout` and `retry` stream events as `maxRetries`.
 - `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
 - `manualCompaction` (`"llm-summary"` default, or `"heuristic"`): whether manual `/compact` asks the active model for a continuity summary or keeps the model-free bounded excerpt.
+- `theme` (string, default `purple`): name of a built-in palette (`/themes` lists and sets them, with `light` and oh-my-zsh ports like `robbyrussell` included). Unknown names fail loudly at startup with the valid names listed.
 
 ## Safety model
 

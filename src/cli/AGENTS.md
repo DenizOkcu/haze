@@ -1,6 +1,6 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-08-17 for the 1.0.0 release.
+Last updated: 2026-08-19 for the 1.1.0 release.
 
 CLI and terminal UI orchestration instructions.
 
@@ -12,7 +12,7 @@ CLI and terminal UI orchestration instructions.
 - `commands/sessionPicker.ts` and `chat/sessionLifecycle.ts` own workspace session browsing, exact resume, and fork-from-snapshot behavior.
 - `chat/fileMentionSuggestions.ts` provides bounded, gitignore-aware `@` completion; `chat/tips.ts` is the data registry for busy-state tips.
 - `commands/commands.ts` routes slash commands. Keep command matching simple and testable; complex behavior belongs in focused helper modules.
-- `commands/wizardFlow.ts` is the single source of truth for every picker/wizard step (kind, placeholder, optional-submit flag, suggestions, pure field captures); `chatModes.ts` derives the `Mode` union and picker/masked/empty-submit classification from its step table. `commands/providerWizard.ts`, `commands/serverWizard.ts`, and `commands/skillsWizard.ts` hold the pure per-domain result functions. Keep all of them mostly pure and covered by unit tests.
+- `commands/wizardFlow.ts` is the single source of truth for every picker/wizard step (kind, placeholder, optional-submit flag, suggestions, pure field captures); `chatModes.ts` derives the `Mode` union and picker/masked/empty-submit classification from its step table. `commands/providerWizard.ts`, `commands/serverWizard.ts`, `commands/skillsWizard.ts`, and `commands/themesCommand.ts` hold the pure per-domain result functions. Keep all of them mostly pure and covered by unit tests.
 - `chat/*.ts(x)` contains chat-specific helpers/components extracted from `chat.tsx`: `sessionLifecycle.ts` (session init/continue/resume/new/clear/compact controller), `wizardDispatch.ts` (wizard submit engine: per-mode handlers, field-transition effects, and the `WizardUiState` reducer that owns selection/drafts/model-discovery state), `chatMetrics.ts` (token/status-bar math), and `messages.tsx` (ordered static/dynamic transcript partitioning and message views). `commands/streaming.ts` is the thin turn facade (`runAgentTurn` + turn types); the attempt phases (setup, stream loop, stall recovery, attempt outcome, forced-settlement lifecycle) live under `commands/streaming/` (see its AGENTS.md), including the authoritative `attemptOutcome.ts` status function.
 
 ## UI state rules
@@ -31,7 +31,8 @@ Maintainability focus:
 
 ## Slash command contracts
 
-- `/provider`, `/model`, `/settings`, `/skills`, `/lsp`, and `/mcp` are user-facing flows; update help text and tests when changing them.
+- `/provider`, `/model`, `/settings`, `/themes`, `/skills`, `/lsp`, and `/mcp` are user-facing flows; update help text and tests when changing them.
+- `/themes` opens the built-in theme picker (`themes` mode, one `WIZARD_STEPS` row) or sets a theme directly with `/themes <name>`; `themesCommand.ts` holds the pure validation result (`resolveTheme`), the selection persists as `theme` in settings, and ChatScreen applies it live (re-resolve + OSC 10/11 re-apply on settings change).
 - `/skills` displays every valid candidate, including shadowed global skills, with `project`/`global` provenance. Selection identity must remain unambiguous when names collide.
 - Skill creation asks for scope explicitly after the name. `this project` writes under `<cwd>/.haze/skills`; `global` writes under `~/.haze/skills`. Never infer the target silently.
 - `/clear` clears conversation display/conversation state and tasks.

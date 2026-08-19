@@ -10,6 +10,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/model <name-or-provider:name>', description: 'Set a model directly. Selecting a model also sets its provider.'},
   {usage: '/settings', description: 'Show the configured provider, model, API key status, LSP/MCP servers, skills, and loaded context files.'},
   {usage: '/settings open', description: 'Open ~/.haze/settings.json with the OS default app.'},
+  {usage: '/themes', description: 'Choose a terminal theme from the built-in registry (light palettes and oh-my-zsh ports included); applies immediately.'},
+  {usage: '/themes <name>', description: 'Set the theme directly, e.g. /themes robbyrussell. Saved to ~/.haze/settings.json; text already on screen keeps its old colors.'},
   {usage: '/skills', description: 'Manage Markdown skills: generate a custom skill, show info, enable/disable, validate, or remove.'},
   {usage: '/tips', description: 'Toggle the rotating tips shown under the busy label while the model is thinking.'},
   {usage: '/fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] [--] <prompt>', description: 'Run genuinely independent tasks through disposable contexts. Runtime enforces profile concurrency, deadlines, and mutation serialization; control guidance is not persisted. Declines non-parallel work.'},

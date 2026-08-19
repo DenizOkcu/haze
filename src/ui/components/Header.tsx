@@ -5,7 +5,7 @@ import {theme} from '../theme.js';
 export function Header({subtitle, version}: {subtitle?: React.ReactNode; version?: string}) {
   return <Box flexDirection="column" marginBottom={1}>
     <Box>
-      <Text color={theme.purple} bold>haze</Text>
+      <Text color={theme.accent} bold>haze</Text>
       {version ? <Text color={theme.muted}> v{version}</Text> : null}
     </Box>
     <Text> </Text>

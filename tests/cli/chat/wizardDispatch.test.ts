@@ -312,6 +312,34 @@ describe('wizardDispatch provider creation discovery', () => {
   });
 });
 
+describe('wizardDispatch themes', () => {
+  beforeEach(() => {
+    mocks.updateSettings.mockReset();
+    mocks.updateSettings.mockImplementation(async (patch: HazeSettings) => patch);
+  });
+
+  it('saves the selected theme and returns to chat', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('themes', 'robbyrussell');
+    expect(mocks.updateSettings).toHaveBeenCalledWith({theme: 'robbyrussell'});
+    expect(deps.setSettings).toHaveBeenCalledWith({theme: 'robbyrussell'});
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Theme set to robbyrussell'));
+  });
+
+  it('reports unknown theme names without leaving the picker', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('themes', 'pure');
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+    expect(deps.setMode).not.toHaveBeenCalledWith('chat');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Unknown theme name'));
+  });
+});
+
 describe('inputSuggestionsForState modelAddProvider mode', () => {
   it('lists configured providers without an add-provider entry', async () => {
     const {inputSuggestionsForState} = await import('../../../src/cli/chat/inputSuggestions.js');

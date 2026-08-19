@@ -118,6 +118,27 @@ describe('handleSlashCommand', () => {
     expect(ctx.setMode).toHaveBeenCalledWith('provider');
   });
 
+  it('opens the theme picker from /themes', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/themes', ctx)).toBe('handled');
+    expect(ctx.setMode).toHaveBeenCalledWith('themes');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Choose a theme'));
+  });
+
+  it('sets the theme directly with /themes <name>', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/themes robbyrussell', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith({theme: 'robbyrussell'});
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Theme set to robbyrussell'));
+  });
+
+  it('rejects unknown theme names with the valid names listed', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/themes nope', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown theme name "nope"'));
+  });
+
   it('treats /create-skill as an unknown command now that skills use the picker', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/create-skill ignored inline args', ctx)).toBe('handled');

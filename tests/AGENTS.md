@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-08-17 for the 1.0.0 release.
+Last updated: 2026-08-19 for the 1.1.0 release.
 
 Vitest test suite instructions.
 
@@ -25,7 +25,7 @@ Current regression priorities:
 - `tests/hazeTools/**` covers built-in tool behavior exposed from `src/llm/hazeTools.ts` and `src/llm/tools/**`.
 - `tests/llm/**` covers client/prompt/request context/LSP/MCP/web fetch/tool helper behavior.
 - `tests/skills/**` covers skill loader/registry/tool/builder, including project-over-global precedence, candidate retention, untrusted-content framing, and real-path confinement.
-- `tests/ui/**` covers input buffer, Markdown rendering, and stable root-level streamed Markdown chunks.
+- `tests/ui/**` covers input buffer, Markdown rendering, stable root-level streamed Markdown chunks, the theme registry (folder↔registry parity, resolved `#rrggbb` palettes, fg/bg contrast, famous port colors), and the OSC terminal-default sequences.
 - `tests/utils/**` covers shared utilities.
 
 ## Common validation commands
