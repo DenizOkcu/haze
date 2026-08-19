@@ -141,6 +141,30 @@ describe('tool diff messages', () => {
     expect(changedLine?.length).toBeLessThanOrEqual(30);
   });
 
+  it('indents wrapped tool rows under the tool name', () => {
+    const command = 'cd /Users/dev/haze && for d in src/*; do if [ -d "$d" ]; then echo "$d files"; fi; done';
+    const {lastFrame} = render(<MessageView width={40} message={{
+      role: 'tool',
+      streaming: false,
+      text: `1 calls · 0 changes · 0s\n  ✓ shell $ ${command} — exited with code 0 in 0.3s`,
+    }} />);
+
+    const frame = stripAnsi(lastFrame() ?? '');
+    const lines = frame.split('\n');
+    const shellIndex = lines.findIndex(line => line.includes('shell $'));
+    expect(shellIndex).toBeGreaterThan(-1);
+    expect(lines[shellIndex]).toMatch(/^ {2}✓ shell \$ /);
+    const continuations = lines.slice(shellIndex + 1).filter(line => line.trim().length > 0);
+    // Every wrapped row keeps the hanging indent (2 indent + icon + space) and
+    // stays within the terminal width, so Ink never re-wraps it to column 0.
+    for (const continuation of continuations) {
+      expect(continuation.startsWith('    ')).toBe(true);
+      expect(continuation.length).toBeLessThanOrEqual(40);
+    }
+    expect(continuations.length).toBeGreaterThan(0);
+    expect(continuations.map(line => line.trim()).join(' ')).toContain('exited with code 0');
+  });
+
   it('does not re-lex settled assistant Markdown across repeated partitions (RH-007)', () => {
     clearMarkdownRootChunksCacheForTests();
     const messages = Array.from({length: 40}, (_, index) => ({

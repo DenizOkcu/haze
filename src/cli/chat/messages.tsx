@@ -5,7 +5,7 @@ import type {Message} from '../commands/streaming.js';
 import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../commands/formatters.js';
 import {MarkdownText, markdownRootChunks} from '../../ui/components/MarkdownText.js';
-import {lineRows, clampTextTail} from './liveRegion.js';
+import {clampTextTail, wrapLine} from './liveRegion.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
 import {highlightedCodeLine, languageForPath} from '../../ui/codeHighlight.js';
@@ -109,6 +109,23 @@ function toolDiffRows(diff: ToolDisplayDiff) {
   return 1 + diff.lines.length + (diff.handle ? 1 : 0) + (diff.complete === false ? 1 : 0) + 1;
 }
 
+const TOOL_ROW_PATTERN = /^(\s*)([✓✗…])\s+(\S+)(.*)$/;
+
+/**
+ * Wrapped display rows for one tool-group line. Ink's wrapping has no hanging
+ * indent, so icon rows are pre-wrapped here (mirroring Ink's own wrap-ansi
+ * settings, see liveRegion.ts) and continuation rows are padded to align
+ * under the tool name instead of dropping back to the left edge.
+ */
+function toolGroupLineRows(line: string, width: number): string[] {
+  const match = TOOL_ROW_PATTERN.exec(line);
+  if (!match) return wrapLine(line, width);
+  const [, indent, icon, toolName, rest] = match;
+  const hang = indent.length + 2; // icon + separating space
+  const rows = wrapLine(`${toolName}${rest}`, Math.max(1, width - hang));
+  return rows.map((row, index) => (index === 0 ? `${indent}${icon} ${row}` : `${' '.repeat(hang)}${row}`));
+}
+
 /**
  * Live-region clamp for the streaming tool group (see liveRegion.ts): keep only
  * the rows that fit the viewport budget, dropping whole logical lines from the
@@ -119,7 +136,9 @@ function clampToolDisplay({text, width, toolDiffs, maxVisibleLines}: {text: stri
   const allLines = text.split('\n');
   const allDiffs = toolDiffs ?? [];
   if (maxVisibleLines == null) return {lines: allLines, hiddenTextRowCount: 0, visibleDiffs: allDiffs, hiddenDiffCount: 0};
-  const rows = allLines.map(line => lineRows(line, width));
+  // Row counts must mirror toolGroupLineRows so the budget matches what is
+  // actually rendered (icon rows consume one extra hang indent column).
+  const rows = allLines.map(line => toolGroupLineRows(line, width).length);
   const total = rows.reduce((sum, count) => sum + count, 0);
   let lines = allLines;
   let hiddenTextRowCount = 0;
@@ -153,23 +172,32 @@ function clampToolDisplay({text, width, toolDiffs, maxVisibleLines}: {text: stri
 
 function ToolMessageText({text, streaming, width, toolDiffs, maxVisibleLines}: {text: string; streaming?: boolean; width: number; toolDiffs?: ToolDisplayDiff[]; maxVisibleLines?: number}) {
   const clamped = clampToolDisplay({text, width, toolDiffs, maxVisibleLines});
-  const lines = clamped.lines;
   return <Box flexDirection="column">
     {clamped.hiddenTextRowCount > 0 ? <Text color={theme.muted}>{`⋯ +${clamped.hiddenTextRowCount} line${clamped.hiddenTextRowCount === 1 ? '' : 's'} above`}</Text> : null}
-    {lines.map((line, index) => {
-      const row = /^(\s*)([✓✗…])\s+(\S+)(.*)$/.exec(line);
-      if (!row) {
-        const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(line);
-        return <Text key={`${index}-${line}`} color={theme.muted}>
-          {index === 0 && streaming ? <><Spinner type="dots" /> </> : null}{timer ? timer[1] : line}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
-        </Text>;
+    {clamped.lines.flatMap((line, index) => {
+      const match = TOOL_ROW_PATTERN.exec(line);
+      if (!match) {
+        // Summary header / caption rows: plain muted rows (spinner on the
+        // first row while streaming).
+        return toolGroupLineRows(line, width).map((row, rowIndex) => <Text key={`${index}-${rowIndex}`} color={theme.muted}>
+          {index === 0 && rowIndex === 0 && streaming ? <><Spinner type="dots" /> </> : null}{row}
+        </Text>);
       }
-      const [, indent, icon, toolName, rest] = row;
+      const [, indent, icon, toolName] = match;
       const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;
-      const timer = /(.*) (\([0-9]+(?:h [0-9]+m [0-9]+(?:\.[0-9])?s|m [0-9]+(?:\.[0-9])?s|(?:\.[0-9])?s)\))$/.exec(rest);
-      return <Text key={`${index}-${line}`} color={theme.muted}>
-        {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.accent}>{toolName}</Text>{timer ? timer[1] : rest}{timer ? <Text color={theme.muted} bold={false}> {timer[2]}</Text> : null}
-      </Text>;
+      const hang = indent.length + 2; // icon + separating space
+      return toolGroupLineRows(line, width).map((row, rowIndex) => {
+        // Rows already carry their prefix; slice the content off to re-apply
+        // icon/tool-name colors on the first row.
+        const content = row.slice(hang);
+        return rowIndex === 0
+          ? <Text key={`${index}-${rowIndex}`} color={theme.muted}>
+              {indent}<Text color={iconColor}>{icon}</Text> <Text color={theme.accent}>{content.slice(0, toolName.length)}</Text>{content.slice(toolName.length)}
+            </Text>
+          // Continuation rows keep the hanging indent so wrapped tool lines
+          // stay aligned under the tool name.
+          : <Text key={`${index}-${rowIndex}`} color={theme.muted}>{row}</Text>;
+      });
     })}
     {clamped.visibleDiffs.map(diff => <ToolDiffView key={diff.id} diff={diff} width={width} />)}
     {clamped.hiddenDiffCount > 0 ? <Text color={theme.muted}>{`⋯ ${clamped.hiddenDiffCount} diff preview${clamped.hiddenDiffCount === 1 ? '' : 's'} hidden`}</Text> : null}
