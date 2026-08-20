@@ -3,7 +3,7 @@ import type {ModelMessage} from 'ai';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import type {ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
-import {createTurnExecutionState, recordGoalContinuation, toCompletionEvidence} from '../../core/agent/completionController.js';
+import {createTurnExecutionState, toCompletionEvidence} from '../../core/agent/completionController.js';
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
@@ -21,7 +21,8 @@ import {abortForTurn, createUserAbortCause} from './streaming/abortCause.js';
 import {runAgentAttempt} from './streaming/agentAttempt.js';
 import {projectGoalEvidence} from './streaming/attemptOutcome.js';
 import {awaitAttemptWithForcedSettlement, createAttemptCleanupRegistry, createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
-import {formatIdleMinutes} from './streaming/stallRecovery.js';
+import {startRecoverySlice} from './streaming/recoverySlices.js';
+import {formatIdleMinutes} from '../../utils/format.js';
 
 export type Message = {id?: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string; streaming?: boolean; hidden?: boolean; startedAt?: number; finishedAt?: number; tokensPerSecond?: number; displayOrder?: number; toolCount?: number; toolDiffs?: ToolDisplayDiff[]};
 
@@ -214,20 +215,11 @@ export async function runAgentTurn(
         continue;
       }
       // Bounded recovery slice (length-continuation, rescue, or goal
-      // continuation). Length/rescue credits are single-use, so a slice cannot
-      // trigger another of the same kind; goal continuation is repeatable but
-      // progress-guarded and counts against the shared turn budget. Abort is
-      // re-checked before and within the slice.
+      // continuation); see recoverySlices.ts. Abort is re-checked before and
+      // within the slice.
       if (result.recovery && !abortController.signal.aborted) {
-        const rec = result.recovery;
-        if (rec.kind === 'length') { turnState.lengthCreditUsed = true; turnState.lengthRecoveriesAttempted += 1; } else if (rec.kind === 'rescue') turnState.rescueUsed = true; else recordGoalContinuation(turnState);
-        // A new slice gets a fresh execution allowance, clamped once here; the
-        // slice budget persists across provider retries within the slice (C2).
-        sliceBudget.started = 0;
-        sliceBudget.exceeded = false;
-        activeOptions = {...activeOptions, ephemeralControl: rec.control, recoverySlice: {kind: rec.kind, maxSteps: rec.slice.maxSteps, maxToolCalls: rec.slice.maxToolCalls}};
+        activeOptions = startRecoverySlice(result.recovery, {turnState, sliceBudget, options: activeOptions}, callbacks.debugLog);
         retrying = true;
-        callbacks.debugLog(`starting ${rec.kind} recovery slice: ${rec.slice.maxSteps} steps / ${rec.slice.maxToolCalls} tool calls`);
         continue;
       }
       break;

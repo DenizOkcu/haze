@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {compactHomePath, estimateConversationTokens, formatTokenCount, statusBarMetrics, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
+import {compactHomePath, estimateConversationTokens, statusBarMetrics, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
+import {formatTokenCount} from '../../src/utils/format.js';
 import {EMPTY_TOKEN_USAGE} from '../../src/cli/chat/turnState.js';
 import type {Message} from '../../src/cli/commands/streaming.js';
 

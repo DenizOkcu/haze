@@ -9,11 +9,6 @@ import {logEntry} from './turnRuntime.js';
 /** What the stalled step had emitted when the stream went quiet. Only 'none' is auto-retryable. */
 type StallEmission = 'none' | 'text' | 'tool';
 
-export function formatIdleMinutes(milliseconds: number) {
-  const minutes = Math.round(milliseconds / 60_000);
-  return `${minutes} minute${minutes === 1 ? '' : 's'}`;
-}
-
 /** Auto-retry an idle stall only while the stalled step emitted nothing visible (no partial text or in-flight tool). */
 function idleStallAutoRetryEligible(retryAttempt: number, stallEmission: StallEmission, maxRetries: number) {
   return stallEmission === 'none' && retryAttempt < maxRetries;

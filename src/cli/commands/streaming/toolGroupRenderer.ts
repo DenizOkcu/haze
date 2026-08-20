@@ -1,6 +1,7 @@
 import {agentEvent, type AgentEventSink} from '../../../core/agent/events.js';
 import {appendLogEntry as logAppend, type LlmLog, type LlmLogEntry} from '../../../core/log/llmLog.js';
-import {toolCallSummary, compact, formatElapsedTimeWhole, formatSeconds} from '../formatters.js';
+import {toolCallSummary, compact} from '../formatters.js';
+import {formatElapsedTimeWhole, formatSeconds} from '../../../utils/format.js';
 
 /**
  * Live "tool group" renderer for the agent turn: batches concurrent/sequential

@@ -20,17 +20,17 @@
  *      values are written in the same vocabulary an oh-my-zsh theme uses:
  *      a zsh color name, an xterm-256 index string, or `#rrggbb` hex.
  *
- * The built-in themes live in `src/ui/themes/` (one file per theme, named like
- * its oh-my-zsh counterpart) — including ports of famous `.zsh-theme` files
- * where `robbyrussell`'s `$fg_bold[green]➜` becomes `accent: 'green'`, its
- * `$fg[cyan]%c` becomes `command: 'cyan'`, etc. See `src/ui/themes/AGENTS.md`
- * for the full conversion guide and the segment → role translation table.
+ * The built-in themes live in `src/ui/themes/registry.ts` — one data entry per
+ * theme, named like its oh-my-zsh counterpart — including ports of famous
+ * `.zsh-theme` files where `robbyrussell`'s `$fg_bold[green]➜` becomes
+ * `accent: 'green'`, its `$fg[cyan]%c` becomes `command: 'cyan'`, etc. See
+ * `src/ui/themes/AGENTS.md` for the full conversion guide and the segment →
+ * role translation table.
  */
 
-import {BUILT_IN_THEME_SPECS} from './themes/index.js';
-import {purple} from './themes/purple.js';
+import {BASE_THEME_SPEC, THEMES} from './themes/registry.js';
 
-export {BUILT_IN_THEME_SPECS};
+export {THEMES as BUILT_IN_THEME_SPECS};
 
 /** The theme used when settings name none; also the fallback base for roles another theme omits. */
 export const DEFAULT_THEME_NAME = 'purple';
@@ -167,9 +167,9 @@ export function resolveColorSpec(spec: string, palette: Record<ZshColorName, str
 
 /** Resolve a built-in theme name (+ optional role overrides) to a complete `HazeTheme`. Throws with valid names for unknown themes. */
 export function resolveTheme(name?: string, overrides?: Partial<Record<HazeThemeRole, string>>): HazeTheme {
-  const spec = BUILT_IN_THEME_SPECS[name ?? DEFAULT_THEME_NAME];
+  const spec = THEMES[name ?? DEFAULT_THEME_NAME];
   if (!spec) {
-    const validNames = Object.keys(BUILT_IN_THEME_SPECS).join(', ');
+    const validNames = Object.keys(THEMES).join(', ');
     throw new Error(`Unknown theme name "${name}". Valid themes: ${validNames}`);
   }
   const palette: Record<ZshColorName, string> = {...ZSH_NAMED_COLORS};
@@ -182,7 +182,7 @@ export function resolveTheme(name?: string, overrides?: Partial<Record<HazeTheme
     }
     palette[slot as ZshColorName] = value.toLowerCase();
   }
-  const merged: Record<HazeThemeRole, ColorSpec> = {...purple.roles, ...spec.roles, ...overrides} as Record<HazeThemeRole, ColorSpec>;
+  const merged: Record<HazeThemeRole, ColorSpec> = {...BASE_THEME_SPEC.roles, ...spec.roles, ...overrides} as Record<HazeThemeRole, ColorSpec>;
   const resolved = {} as HazeTheme;
   for (const role of THEME_ROLES) resolved[role] = resolveColorSpec(String(merged[role] ?? ''), palette);
   return resolved;

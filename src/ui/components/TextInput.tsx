@@ -12,7 +12,7 @@ import {
   wrapDisplayValue,
   type PasteBlock,
 } from '../inputBuffer.js';
-import {detectMentionAtCursor, type MentionContext} from '../../cli/chat/fileMentionSuggestions.js';
+import {useInputSuggestions} from './useInputSuggestions.js';
 
 const COMPACT_PASTE_MIN_LINES = 4;
 
@@ -79,10 +79,6 @@ export function TextInput({
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([]);
-  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
-  const [mentionContext, setMentionContext] = useState<MentionContext | undefined>();
-  const [mentionSuggestions, setMentionSuggestions] = useState<TextInputSuggestion[]>([]);
-  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   const history = useRef<string[]>(historyItems);
   const historyIndex = useRef<number | null>(null);
   const draft = useRef('');
@@ -98,20 +94,21 @@ export function TextInput({
       setValue('');
       setCursor(0);
       setPasteBlocks([]);
-      setSelectedSuggestionIndex(0);
       historyIndex.current = null;
       draft.current = '';
       nextPasteId.current = 1;
     }
   }, [disabled]);
 
+  const suggestionLayers = useInputSuggestions({value, cursor, suggestions, suggestionMode, mask, getMentionSuggestions});
+  const {detectedMention, inMentionMode, filteredSuggestions, mentionList, activeMentionIndex, activeSuggestionIndex, activeSuggestion} = suggestionLayers;
+
   function setInput(next: string, nextCursor = next.length, nextPasteBlocks: PasteBlock[] = []) {
     preferredColumn.current = null;
     setValue(next);
     setCursor(Math.max(0, Math.min(nextCursor, next.length)));
     setPasteBlocks(nextPasteBlocks);
-    setSelectedSuggestionIndex(0);
-    setMentionSelectedIndex(0);
+    suggestionLayers.resetSelection();
   }
 
   function replaceInput(start: number, end: number, inserted: string) {
@@ -131,41 +128,6 @@ export function TextInput({
     setInput(history.current[index] ?? '');
   }
 
-  const suggestionQuery = !mask && (suggestionMode === 'always' || value.startsWith('/'))
-    ? (suggestionMode === 'always' ? value : value.slice(1)).toLowerCase()
-    : undefined;
-  const filteredSuggestions = suggestionQuery == null ? [] : suggestions
-    .filter(suggestion => {
-      const suggestionValue = suggestionMode === 'always' ? suggestion.value : suggestion.value.slice(1);
-      return suggestionValue.toLowerCase().includes(suggestionQuery) || suggestion.description?.toLowerCase().includes(suggestionQuery);
-    })
-    .slice(0, 20);
-
-  // `@token` mention detection — only in chat mode (slash) so wizard pickers
-  // never grab `@`-prefixed tokens. Detection is sync; suggestion fetch is
-  // async with cancellation so fast typing does not race stale results.
-  const detectedMention = !mask && suggestionMode === 'slash' && !value.startsWith('/') && getMentionSuggestions
-    ? detectMentionAtCursor(value, cursor)
-    : undefined;
-  useEffect(() => {
-    setMentionContext(detectedMention);
-  }, [detectedMention?.token, detectedMention?.start, detectedMention?.end]);
-  useEffect(() => {
-    if (!mentionContext || !getMentionSuggestions) {
-      if (mentionSuggestions.length > 0) setMentionSuggestions([]);
-      return;
-    }
-    let cancelled = false;
-    Promise.resolve(getMentionSuggestions(mentionContext.token))
-      .then(results => { if (!cancelled) { setMentionSuggestions(results); setMentionSelectedIndex(0); } })
-      .catch(() => { if (!cancelled) setMentionSuggestions([]); });
-    return () => { cancelled = true; };
-  }, [mentionContext?.token, mentionContext?.start, mentionContext?.end]);
-  const inMentionMode = !!detectedMention;
-  const mentionList = inMentionMode ? mentionSuggestions : [];
-  const activeMentionIndex = Math.min(mentionSelectedIndex, Math.max(0, mentionList.length - 1));
-  const activeSuggestionIndex = Math.min(selectedSuggestionIndex, Math.max(0, filteredSuggestions.length - 1));
-  const activeSuggestion = inMentionMode ? mentionList[activeMentionIndex] : filteredSuggestions[activeSuggestionIndex];
   const displayValue = mask ? '•'.repeat(value.length) : compactPasteBlocksForDisplay(value, pasteBlocks);
   const displayCursor = mask ? cursor : displayCursorForValueCursor(pasteBlocks, cursor);
   const inputWidth = Math.max(1, width - 2);
@@ -269,16 +231,8 @@ export function TextInput({
     }
 
     if (key.upArrow) {
-      if (inMentionMode && mentionList.length > 0) {
-        if (activeMentionIndex > 0) setMentionSelectedIndex(current => Math.max(0, current - 1));
-        return;
-      }
-      if (filteredSuggestions.length > 0 && activeSuggestionIndex > 0) {
-        setSelectedSuggestionIndex(current => Math.max(0, current - 1));
-        return;
-      }
+      if (suggestionLayers.moveSelection(-1)) return;
       if (filteredSuggestions.length === 0 && !inMentionMode && moveCursorVertically(-1)) return;
-      if (inMentionMode) return; // no history navigation while completing
       preferredColumn.current = null;
       if (history.current.length === 0) return;
       if (historyIndex.current === null) {
@@ -291,16 +245,8 @@ export function TextInput({
     }
 
     if (key.downArrow) {
-      if (inMentionMode && mentionList.length > 0) {
-        if (activeMentionIndex < mentionList.length - 1) setMentionSelectedIndex(current => Math.min(mentionList.length - 1, current + 1));
-        return;
-      }
-      if (filteredSuggestions.length > 0 && activeSuggestionIndex < filteredSuggestions.length - 1) {
-        setSelectedSuggestionIndex(current => Math.min(filteredSuggestions.length - 1, current + 1));
-        return;
-      }
+      if (suggestionLayers.moveSelection(1)) return;
       if (filteredSuggestions.length === 0 && !inMentionMode && moveCursorVertically(1)) return;
-      if (inMentionMode) return;
       preferredColumn.current = null;
       if (historyIndex.current === null) return;
       if (historyIndex.current < history.current.length - 1) {

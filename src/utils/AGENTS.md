@@ -22,6 +22,7 @@ Maintainability focus:
 - `fs.ts` — directory walking and filesystem helpers used by tools.
 - `buildInfo.ts` — embedded build provenance (`dist/buildInfo.json`), the runtime capability registry, checkout-mismatch detection, and verbose-version formatting. The default-path `readBuildInfo()` cache uses a three-state sentinel: `undefined` = not loaded yet, `null` = loaded and absent (cached miss), object = cached manifest. Do not collapse `undefined` and `null` — treating "not loaded" as a cached miss returns before ever reading the manifest (the 0.11.0 regression). `resetBuildInfoCache()` exists for tests.
 - `collections.ts` — small collection operations such as name-based upsert/find.
+- `format.ts` — pure display formatters (bytes, token counts, seconds/minutes, elapsed time). No UI or product policy; `cli/commands/formatters.ts` keeps the UI-specific transcript formatting.
 - `version.ts` — cached package-version loading and dependency-free version comparison helpers.
 - `utf8.ts` — shared UTF-8-safe prefix and rolling-tail byte truncation.
 - `openPath.ts` — one platform opener for local paths and browser URLs.

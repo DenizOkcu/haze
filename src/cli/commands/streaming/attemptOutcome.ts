@@ -7,9 +7,10 @@ import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS
 import {deriveValidationOutcome} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume} from './goalCheckpoint.js';
-import {formatSeconds} from '../formatters.js';
+import {formatSeconds} from '../../../utils/format.js';
 import {retryDelayMs} from './turnRuntime.js';
-import {formatIdleMinutes, salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
+import {salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
+import {formatIdleMinutes} from '../../../utils/format.js';
 import type {TurnAbortCause} from './abortCause.js';
 import type {AttemptStreamOutcome} from './streamLoop.js';
 import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
@@ -50,7 +51,7 @@ export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; as
 }
 
 /** Bounded recovery slice an attempt proposes for the next agent call. */
-type AttemptRecovery = {kind: 'length' | 'rescue' | 'goal'; control: string; slice: {maxSteps: number; maxToolCalls: number}};
+export type AttemptRecovery = {kind: 'length' | 'rescue' | 'goal'; control: string; slice: {maxSteps: number; maxToolCalls: number}};
 
 /** Internal per-attempt result: the turn outcome plus retry/recovery directives for `runAgentTurn`. */
 export type AgentAttemptResult = TurnResult & {

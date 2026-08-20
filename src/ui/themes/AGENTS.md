@@ -2,19 +2,20 @@
 
 Last updated: 2026-08-19 for the 1.1.0 release.
 
-Instructions for coding agents converting themes into haze. One file per theme
-here, exactly like oh-my-zsh's `themes/` folder holds one `.zsh-theme` per
-theme. Haze's `default` theme is `purple.ts`.
+Instructions for coding agents converting themes into haze. All themes live as
+data entries in the single `registry.ts` (`THEMES` map), exactly like
+oh-my-zsh's `themes/` folder holds one `.zsh-theme` per theme. Haze's `default`
+theme is `purple` (also exported as `BASE_THEME_SPEC`).
 
 ## Layout rules
 
-- One theme per file: `src/ui/themes/<name>.ts`, kebab-case, named after the
-  source theme (`robbyrussell.ts`, `af-magic.ts`). The exported `const` is the
-  camelCase form (`afMagic`).
-- Each file exports a `HazeThemeSpec` and starts with a comment quoting the
-  source lines it ports (see any existing file).
-- Register the import in `index.ts` under a key that **equals the file name**
-  (minus `.ts`). `tests/ui/theme.test.ts` enforces folder↔registry parity.
+- One entry per theme in `src/ui/themes/registry.ts`: a `const` named after the
+  source theme (`robbyrussell`, `afMagic`), registered in `THEMES` under a
+  kebab-case key that equals the settings name (`af-magic`).
+- Each entry is a `HazeThemeSpec` preceded by a comment quoting the source
+  lines it ports (see any existing entry).
+- `tests/ui/theme.test.ts` pins the expected registry keys and forbids
+  per-theme files drifting back into the folder.
 - Never invent colors: every role value must come from the source theme
   (or be an explicitly documented neutral filler for roles the source lacks).
 
@@ -23,7 +24,7 @@ theme. Haze's `default` theme is `purple.ts`.
 ```ts
 import type {HazeThemeSpec} from '../theme.js';
 
-export const mytheme: HazeThemeSpec = {
+const mytheme: HazeThemeSpec = {
   // Optional: pin the terminal palette the source assumes (e.g. Solarized).
   // Keys: zsh color names. Values: '#rrggbb' only.
   palette: {green: '#859900', /* ... */},
@@ -36,6 +37,8 @@ export const mytheme: HazeThemeSpec = {
   },
 };
 ```
+
+Register the entry in the `THEMES` map with its kebab-case settings name.
 
 Color values accept exactly the three notations above (zsh name, `'nnn'`
 256-index string, `#rrggbb`). Bold/italic/underline are **not** colors — drop
@@ -135,7 +138,7 @@ npx vitest run tests/ui/theme.test.ts
 ```
 
 The test suite resolves every registered theme (all roles must produce valid
-`#rrggbb`), enforces folder↔registry parity, and checks famous ports' colors.
+`#rrggbb`), pins the registry keys, and checks famous ports' colors.
 For a visual check, render swatches from `dist/`.
-Update the valid-names assertion in `tests/ui/theme.test.ts` when the registry
+Update the expected-names assertion in `tests/ui/theme.test.ts` when the registry
 grows.

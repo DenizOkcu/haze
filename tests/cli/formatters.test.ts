@@ -1,5 +1,6 @@
 import {describe, it, expect} from 'vitest';
-import {compact, toolCallSummary, toolResultSummary, busyToolLabel, formatSeconds, formatElapsedTime, formatElapsedTimeWhole, formatContextReport, type ContextReportData} from '../../src/cli/commands/formatters.js';
+import {compact, toolCallSummary, toolResultSummary, busyToolLabel, formatContextReport, type ContextReportData} from '../../src/cli/commands/formatters.js';
+import {formatSeconds, formatElapsedTime, formatElapsedTimeWhole} from '../../src/utils/format.js';
 
 describe('compact', () => {
   it('returns short strings unchanged', () => {

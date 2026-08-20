@@ -3,7 +3,8 @@ import {describe, expect, it, vi} from 'vitest';
 import {render} from 'ink-testing-library';
 import stripAnsi from 'strip-ansi';
 import {marked} from 'marked';
-import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages} from '../../src/cli/chat/messages.js';
+import {AssistantMarkdownChunkView, MessageView} from '../../src/cli/chat/messages.js';
+import {partitionDisplayMessages} from '../../src/cli/chat/transcriptPartition.js';
 import {clearMarkdownRootChunksCacheForTests} from '../../src/ui/components/MarkdownText.js';
 
 describe('streaming assistant Markdown messages', () => {

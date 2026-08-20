@@ -18,7 +18,7 @@ Maintainability focus:
 - UI components should render explicit props only; avoid hidden/session state that is set but never displayed.
 
 - `Header.tsx` renders current app/session/model/status summary. Do not expose secrets.
-- `TextInput.tsx` handles terminal input/editing interactions and cursor-aware slash/`@path` suggestions; preserve keyboard, Tab, arrow, and Enter completion behavior covered by tests.
+- `TextInput.tsx` handles terminal input/editing interactions; the slash/`@path` suggestion layers (filtering, async mention fetch with cancellation, selection state) live in `useInputSuggestions.ts`. Preserve keyboard, Tab, arrow, and Enter completion behavior covered by tests.
 - `MarkdownText.tsx` renders Markdown-like assistant/tool text in terminal width constraints and exposes root-level chunking for streamed assistant output. Keep rendering robust for malformed/partial Markdown from streaming models.
 - Errors should be presented compactly without stack spam unless intentionally surfaced.
 

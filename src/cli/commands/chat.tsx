@@ -1,12 +1,9 @@
 import React, {useEffect, useReducer, useRef, useState} from 'react';
-import {execFile as execFileCallback} from 'node:child_process';
-import {promisify} from 'node:util';
 import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
 import Spinner from 'ink-spinner';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
-import {checkForUpdate} from '../../config/updateCheck.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
@@ -22,7 +19,7 @@ import {runAgentGoal} from './streaming/goalSupervisor.js';
 import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
 import {type Message} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
-import {formatElapsedTimeWhole, imageAttachmentLine} from './formatters.js';
+import {imageAttachmentLine} from './formatters.js';
 import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} from '../../core/attachments/imageAttachments.js';
 import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
@@ -31,20 +28,23 @@ import type {LoadedSkill} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
-import {AssistantMarkdownChunkView, MessageView, partitionDisplayMessages, type TranscriptStaticItem} from '../chat/messages.js';
+import {AssistantMarkdownChunkView, MessageView} from '../chat/messages.js';
+import {partitionDisplayMessages, type TranscriptStaticItem} from '../chat/transcriptPartition.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../chat/wizardDispatch.js';
 import {buildContextReport} from '../chat/contextReport.js';
-import {startupContextInfo, startupProviderInfo} from '../chat/startupInfo.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
 import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
-import {compactHomePath, formatTokenCount, statusBarMetrics} from '../chat/chatMetrics.js';
+import {compactHomePath, statusBarMetrics} from '../chat/chatMetrics.js';
+import {formatTokenCount} from '../../utils/format.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
+import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
+import {useFollowUpQueue} from '../chat/followUpQueue.js';
+import {useBusyIndicator} from '../chat/busyIndicator.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
-import {detectCheckoutMismatch, formatMismatchWarning, runtimeCapabilities} from '../../utils/buildInfo.js';
 import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
@@ -60,24 +60,6 @@ interface ChatOptions {
 }
 
 type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
-
-const execFile = promisify(execFileCallback);
-
-async function currentBranchName() {
-  try {
-    const {stdout} = await execFile('git', ['branch', '--show-current'], {cwd: process.cwd()});
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Elapsed-time label for the busy indicator heartbeat, or '' when no turn is active. */
-function busyElapsedLabel(startedAt: number | undefined) {
-  if (startedAt == null) return '';
-  const elapsed = Date.now() - startedAt;
-  return elapsed > 0 ? formatElapsedTimeWhole(elapsed) : '';
-}
 
 function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
@@ -145,25 +127,22 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const skillErrorSignatureRef = useRef('');
   const projectSkillSignatureRef = useRef('');
   const contextFileSignaturesRef = useRef<Map<string, string>>(new Map());
-  const followUpQueueRef = useRef<string[]>([]);
+  const followUps = useFollowUpQueue(text => setMessages(m => [...m, {role: 'system', text}]));
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
   const [mode, setMode] = useState<Mode>('chat');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [busy, setBusy] = useState(false);
+  // Busy indicator with a one-second heartbeat: ticks while haze is working so
+  // the developer always sees rolling activity (elapsed turn time) even when
+  // the model is thinking with no streamed output and no tool is running.
+  const {busy, setBusy: setBusyWithHeartbeat, elapsed: busyElapsed} = useBusyIndicator();
   const [backgroundCount, setBackgroundCount] = useState(backgroundProcessCount);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
-  // Heartbeat for the busy indicator: ticks every second while haze is working
-  // so the developer always sees rolling activity (elapsed turn time) even when
-  // the model is thinking with no streamed output and no tool is running.
-  const turnStartedAtRef = useRef<number | undefined>(undefined);
-  const [, setBusyTick] = useState(0);
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
-  const [queuedFollowUps, setQueuedFollowUps] = useState<string[]>([]);
   // A genuinely paused goal (no measurable progress, deadline, or a stalled
   // model stream) — automatic continuation has already been attempted by the
   // goal supervisor. Carries what a one-key resume needs; any new submission
@@ -177,22 +156,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const [wizardState, updateWizard] = useReducer(wizardUiReducer, undefined, initialWizardUiState);
   const {modelProviderFilter, discoveredModels, suggestedModels, selectedProviderName, providerDraft, selectedSkillName, selectedLspName, selectedMcpName} = wizardState;
 
-  // Wrap setBusy so the busy indicator knows when the turn started, and tick a
-  // heartbeat every second while busy so elapsed time keeps rolling. This keeps
-  // the UI visibly alive during long model thinking / blocked tool runs where
-  // otherwise no streamed output is produced (the "looks stuck" problem).
-  const setBusyWithHeartbeat = (nextBusy: boolean) => {
-    if (nextBusy && !busy) turnStartedAtRef.current = Date.now();
-    if (!nextBusy) turnStartedAtRef.current = undefined;
-    setBusy(nextBusy);
-  };
   useEffect(() => subscribeBackgroundProcesses(() => setBackgroundCount(backgroundProcessCount())), []);
-
-  useEffect(() => {
-    if (!busy) return;
-    const heartbeat = setInterval(() => setBusyTick(tick => tick + 1), 1000);
-    return () => clearInterval(heartbeat);
-  }, [busy]);
 
   // One tip per thinking section, shown under the busy label while the model
   // is purely thinking (no tool running) and the user has not disabled tips.
@@ -233,40 +197,20 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }, [activeThemeName]);
 
   useEffect(() => {
-    void (async () => {
-      const [settingsResult, branch, files] = await Promise.all([
-        readSettings().then(value => ({value, error: undefined as string | undefined})).catch(error => ({value: {} as HazeSettings, error: error instanceof Error ? error.message : String(error)})),
-        currentBranchName().catch(() => undefined),
-        readContextFiles().catch(() => [] as ContextFile[]),
-      ]);
-      const next = settingsResult.value;
-      setSettings(next);
-      settingsThemeLoadedRef.current = true;
-      setSettingsError(settingsResult.error);
-      setBranchName(branch);
-      setContextFiles(files);
-      contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
-      setMessages(m => [...m, {role: 'system', text: settingsResult.error ? settingsResult.error : `${startupProviderInfo(next)}\n\n${startupContextInfo(files)}`}]);
-      await sessionLifecycle.initializeSession().catch(error => {
-        const text = error instanceof Error ? error.message : String(error);
-        setMessages(m => [...m, {role: 'system', text: `Session disabled: ${text}`}]);
-      });
-      await refreshSkills().catch(() => undefined);
-      if (version) {
-        const result = await checkForUpdate({currentVersion: version, packageName: '@denizokcu/haze'}).catch(() => undefined);
-        if (result?.isOutdated) {
-          setMessages(m => [...m, {role: 'system', text: `A new version of haze is available: ${result.latestVersion} (you have ${version}). Update with:  npm i -g @denizokcu/haze`}]);
-        }
-      }
-      // Runtime/installation diagnostics: never switch runtimes silently, but
-      // make a stale binary serving a workspace with a newer checkout unmistakable.
-      const mismatch = detectCheckoutMismatch();
-      if (mismatch) {
-        setMessages(m => [...m, {role: 'system', text: formatMismatchWarning(mismatch)}]);
-      } else if (!runtimeCapabilities().goalSupervisorAvailable) {
-        setMessages(m => [...m, {role: 'system', text: 'Warning: this haze build lacks the goal supervisor module; exhausting a turn step/tool budget may pause the goal instead of continuing automatically. Reinstall or relink haze (npm run dev:link in the checkout).'}]);
-      }
-    })().catch(() => undefined);
+    void runStartupSequence({
+      version,
+      onLoaded({settings: next, settingsError, branchName: branch, contextFiles: files}) {
+        setSettings(next);
+        settingsThemeLoadedRef.current = true;
+        setSettingsError(settingsError);
+        setBranchName(branch);
+        setContextFiles(files);
+        contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+      },
+      initializeSession: () => sessionLifecycle.initializeSession(),
+      refreshSkills,
+      addSystemMessage: text => setMessages(m => [...m, {role: 'system', text}]),
+    }).catch(() => undefined);
     readInputHistory().then(setInputHistory).catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
     const branchTimer = setInterval(() => {
@@ -364,20 +308,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   function cancelThinking() {
     if (!busy) return;
     abortControllerRef.current?.abort('User pressed Esc.');
-    if (followUpQueueRef.current.length > 0) {
-      followUpQueueRef.current = [];
-      setQueuedFollowUps([]);
-      setMessages(m => [...m, {role: 'system', text: 'Cleared queued follow-ups after interrupt.'}]);
-    }
+    followUps.clear();
     setBusyWithHeartbeat(false);
-  }
-
-  function queueFollowUp(value: string) {
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    followUpQueueRef.current = [...followUpQueueRef.current, trimmed];
-    setQueuedFollowUps(followUpQueueRef.current);
-    setMessages(m => [...m, {role: 'system', text: `Queued follow-up (${followUpQueueRef.current.length}): ${trimmed}`}]);
   }
 
   function closeInputList() {
@@ -422,7 +354,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       }
     }
     if (busy) {
-      if (mode === 'chat') queueFollowUp(value);
+      if (mode === 'chat') followUps.queue(value);
       return;
     }
     // Any new submission supersedes a paused-task resume affordance.
@@ -540,11 +472,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       await clearTasksFromStore().catch(() => undefined);
     }
     await runSingleAgentTurn(value, displayValue, turnOptions);
-    while (followUpQueueRef.current.length > 0) {
-      const next = followUpQueueRef.current[0];
-      followUpQueueRef.current = followUpQueueRef.current.slice(1);
-      setQueuedFollowUps(followUpQueueRef.current);
-      setMessages(m => [...m, {role: 'system', text: `Running queued follow-up: ${next}`}]);
+    for (let next = followUps.takeNext(); next !== undefined; next = followUps.takeNext()) {
       const preparedFollowUp = await prepareUserInput(next);
       if (!preparedFollowUp) continue;
       await runSingleAgentTurn(preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
@@ -698,7 +626,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,
   ];
-  const busyElapsed = busyElapsedLabel(turnStartedAtRef.current);
   const contentWidth = Math.max(1, width - 2);
 
   // Live-region budget: once the dynamic frame exceeds the viewport, Ink falls
@@ -706,7 +633,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // jumps to the top on every render. Every dynamic section is therefore
   // clamped so the frame stays under one screen (see chat/liveRegion.ts).
   const busyRows = busy ? (showingTip ? 2 : 1) : 0;
-  const queuedRows = queuedFollowUps.length > 0 ? 2 + queuedFollowUps.length : 0;
+  const queuedRows = followUps.queued.length > 0 ? 2 + followUps.queued.length : 0;
   const collapsedTaskRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS);
   const expandedTaskCap = Math.max(MAX_VISIBLE_TASKS, terminalRows - 18);
   const expandedTaskRows = Math.min(visibleTasks.length, expandedTaskCap) + (visibleTasks.length > expandedTaskCap ? 1 : 0);
@@ -739,9 +666,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       <Text color={theme.muted} bold>Debug</Text>
       {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
     </Box>}
-    {queuedFollowUps.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
+    {followUps.queued.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
       <Text color={theme.muted}>Queued follow-ups:</Text>
-      {queuedFollowUps.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
+      {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
       <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal' ? 'Unfinished goal paused (no measurable progress)' : 'Unfinished goal paused (model stream stalled)'} · </Text>

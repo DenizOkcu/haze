@@ -80,12 +80,9 @@ describe('theme registry', () => {
     expect(Object.keys(BUILT_IN_THEME_SPECS)).toEqual(EXPECTED_THEMES);
   });
 
-  it('keeps one file per theme: folder contents match the registry (like omz themes/)', () => {
-    const files = fs.readdirSync(THEMES_DIR)
-      .filter(file => file.endsWith('.ts') && file !== 'index.ts')
-      .map(file => path.basename(file, '.ts'))
-      .sort();
-    expect(files).toEqual([...EXPECTED_THEMES].sort());
+  it('keeps every theme in the single registry file (no per-theme files)', () => {
+    const files = fs.readdirSync(THEMES_DIR).filter(file => file.endsWith('.ts')).sort();
+    expect(files).toEqual(['registry.ts']);
   });
 
   it(`defaults to ${DEFAULT_THEME_NAME}`, () => {

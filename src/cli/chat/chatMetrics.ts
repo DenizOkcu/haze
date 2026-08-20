@@ -3,6 +3,7 @@ import type {ModelMessage} from 'ai';
 import {modelMessageText} from '../../core/agent/compaction.js';
 import type {Message} from '../commands/streaming.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
+import {formatTokenCount} from '../../utils/format.js';
 
 export function toolCallCount(messages: Message[]) {
   return messages.reduce((total, message) => {
@@ -21,12 +22,6 @@ function estimateTokens(text: string) {
 export function compactHomePath(filePath: string, home = os.homedir()) {
   if (filePath === home) return '~';
   return filePath.startsWith(`${home}/`) ? `~/${filePath.slice(home.length + 1)}` : filePath;
-}
-
-export function formatTokenCount(tokens: number) {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}m`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 10_000 ? 0 : 1).replace(/\.0$/, '')}k`;
-  return String(tokens);
 }
 
 export function displayMessagesFromConversation(conversation: ModelMessage[]): Message[] {

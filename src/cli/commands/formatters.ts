@@ -170,37 +170,9 @@ export function busyToolLabel(toolName: string, input: unknown) {
   }
 }
 
-export function formatSeconds(milliseconds: number) {
-  return `${(milliseconds / 1000).toFixed(1)}s`;
-}
-
 /** Compact transcript row for a user-attached image (F03); never dumps bytes. */
 export function imageAttachmentLine(attachment: {fileName: string; bytes: number}) {
   return `🖼 ${attachment.fileName} (${formatBytes(attachment.bytes)})`;
-}
-
-export function formatElapsedTime(milliseconds: number) {
-  const totalSeconds = Math.max(0, milliseconds / 1000);
-  const wholeSeconds = Math.floor(totalSeconds);
-  const seconds = totalSeconds - Math.floor(wholeSeconds / 60) * 60;
-  const totalMinutes = Math.floor(wholeSeconds / 60);
-  const minutes = totalMinutes % 60;
-  const hours = Math.floor(totalMinutes / 60);
-  const secondsLabel = `${seconds.toFixed(1)}s`;
-  if (hours > 0) return `${hours}h ${minutes}m ${secondsLabel}`;
-  if (minutes > 0) return `${minutes}m ${secondsLabel}`;
-  return secondsLabel;
-}
-
-export function formatElapsedTimeWhole(milliseconds: number) {
-  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const seconds = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const minutes = totalMinutes % 60;
-  const hours = Math.floor(totalMinutes / 60);
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
 }
 
 type ContextReportCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
