@@ -107,3 +107,31 @@ export function buildSubagentPrompt(
 Current date: ${date}
 Current working directory: ${cwd}`;
 }
+
+/**
+ * Pointer brief for the independent verification slice (P3): the blind
+ * verifier sees the exact mission, the derived asks, the changed-file list,
+ * and the validation commands the author claims to have run — never the
+ * author's reasoning or synthesis (dispatch-site discipline). It must
+ * re-derive whether the asks are met by the repository state and end its
+ * deliverable with one machine-readable verdict line; a malformed or absent
+ * verdict defaults to not-verified.
+ */
+export function verifierBrief(input: {request: string; asks: string[]; changedFiles: string[]; claimedValidations: string[]}) {
+  const asks = input.asks.length > 0
+    ? input.asks.map((ask, index) => `${index + 1}. ${ask}`).join('\n')
+    : '1. The mission as stated.';
+  const files = input.changedFiles.length > 0 ? input.changedFiles.slice(0, 20).join(', ') : '(none reported)';
+  const validations = input.claimedValidations.length > 0 ? input.claimedValidations.slice(0, 10).join('; ') : '(none reported)';
+  return `Independent verification (blind review). You did not author this work; trust nothing you cannot re-derive from the repository.
+Mission (exact user request): ${input.request}
+Asks derived from the mission:
+${asks}
+Files reported changed: ${files}
+Validation commands the author claims to have run: ${validations}
+
+Re-derive whether each ask is actually met by the current repository state: inspect the changed files, run the claimed validation commands yourself (or the closest equivalent), and check for regressions the author may have missed. For fix work, judge whether the change addresses a cause or only a symptom. Do not read any prior conversation — judge only the repository.
+End your deliverable with exactly one machine-readable line, no text after it:
+<haze-verdict>{"verdict":"verified","asksMet":[true],"gaps":[],"regressions":[]}</haze-verdict>
+Replace the values: verdict is "verified" or "not-verified"; asksMet is one true/false per ask above, in order; gaps lists at most 5 short concrete sentences naming each unmet ask or failing check (empty when verified); regressions lists at most 5 short observed regressions.`;
+}

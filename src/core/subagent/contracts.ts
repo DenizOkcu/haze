@@ -79,6 +79,52 @@ export interface SubagentExecutionResult {
   error?: string;
 }
 
+/** Structured verdict block of the independent verification slice (P3). */
+export interface VerifierVerdict {
+  verdict: 'verified' | 'not-verified';
+  /** One boolean per mission ask, in order; absent when the verifier omitted it. */
+  asksMet?: boolean[];
+  /** Bounded, named gaps for each unmet ask or failing check. */
+  gaps: string[];
+  /** Bounded, observed regressions. */
+  regressions: string[];
+}
+
+const VERDICT_JSON_CHARS = 4_000;
+const VERDICT_BLOCK_PATTERN = new RegExp(`<haze-verdict>\\s*([\\s\\S]{1,${VERDICT_JSON_CHARS}}?)\\s*</haze-verdict>`);
+
+function boundedVerdictStrings(value: unknown, limit: number): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, limit).map(item => item.trim().slice(0, 200));
+}
+
+/**
+ * Parse the machine-readable verdict line from a verifier deliverable.
+ * Strict on purpose (autoprompt's default-FAIL): a malformed or absent block
+ * returns `undefined`, which callers must treat as not-verified.
+ */
+export function parseVerifierVerdict(deliverable: string): VerifierVerdict | undefined {
+  const match = deliverable.match(VERDICT_BLOCK_PATTERN);
+  if (!match) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(match[1]!);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (record.verdict !== 'verified' && record.verdict !== 'not-verified') return undefined;
+  const asksMet = Array.isArray(record.asksMet)
+    ? record.asksMet.filter((item): item is boolean => typeof item === 'boolean').slice(0, 16)
+    : undefined;
+  const gaps = boundedVerdictStrings(record.gaps, 5);
+  const regressions = boundedVerdictStrings(record.regressions, 5);
+  if (record.verdict === 'verified') return {verdict: 'verified', ...(asksMet ? {asksMet} : {}), gaps: [], regressions: regressions ?? []};
+  return {verdict: 'not-verified', ...(asksMet ? {asksMet} : {}), gaps: gaps ?? ['verifier named no specific gap'], regressions: regressions ?? []};
+}
+
 export interface ProviderCapabilities {
   reportsCacheUsage: boolean;
   supportsPromptCacheKey: boolean;

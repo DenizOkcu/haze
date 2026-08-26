@@ -23,6 +23,7 @@ Maintainability focus:
 - Deadline/cancellation returns logical control immediately, but abort-ignoring execution is quarantined and must retain its physical concurrency/mutation slot until it settles; events must distinguish terminal delivery from physical settlement.
 - V2 termination is authoritative (`completed`, `no_output`, limits, deadline, cancellation, provider error, policy block); retain the V1 raw projection only for compatibility.
 - Only the result capsule enters parent model context. Telemetry is bounded/out-of-band, and result handles are process-local.
+- The verifier path (P3) is `runVerifier`: a fresh `validate`-mode worker whose user message is the pointer brief (exact mission, asks, changed files, claimed validation commands — never the author's reasoning or synthesis, enforced at the dispatch site). `parseVerifierVerdict` (contracts.ts) strictly parses the machine-readable `<haze-verdict>` line; absent/malformed blocks default to not-verified (default-FAIL).
 - Mutation-capable workers share a turn-scoped reentrant workspace policy and are serialized.
 - Tool-call logs should be compact summaries, not full raw outputs.
 - Subagent prompt construction lives in `llm/systemPrompt.ts`; keep tool runner and prompt behavior in sync.

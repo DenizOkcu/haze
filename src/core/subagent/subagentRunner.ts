@@ -15,12 +15,13 @@ import {withSyntheticControl} from '../agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../agent/turnPolicy.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
-import {buildSubagentPrompt, projectContextSection} from '../../llm/systemPrompt.js';
+import {buildSubagentPrompt, projectContextSection, verifierBrief} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {
   fallbackWorkerRuntime,
   normalizeSubagentInput,
+  parseVerifierVerdict,
   subagentInputSchema,
   withLegacyProjection,
   type SubagentExecutionResult,
@@ -28,6 +29,7 @@ import {
   type SubagentTaskCapsule,
   type SubagentTelemetry,
   type SubagentToolInput,
+  type VerifierVerdict,
   type WorkerRuntime,
   type WorkerTermination,
 } from './contracts.js';
@@ -89,6 +91,60 @@ function terminalResult(task: SubagentTaskCapsule, runtime: WorkerRuntime, profi
 }
 
 export type SubagentResult = SubagentExecutionResult;
+
+/**
+ * Dispatch the independent verification slice (P3): a fresh `validate`-mode
+ * worker whose context contains only the pointer brief (exact mission, asks,
+ * changed files, claimed validation commands) — never the author's reasoning
+ * or synthesis. Independence is structural: `runSubagent` builds a fresh
+ * project-context assembly and passes no conversation by construction.
+ *
+ * Default-FAIL: a malformed or absent verdict block, an unusable capsule, or
+ * any non-ok termination is reported as `not-verified` with a named gap.
+ */
+export async function runVerifier(
+  input: {
+    request: string;
+    asks: string[];
+    changedFiles: string[];
+    claimedValidations: string[];
+    runtime: WorkerRuntime;
+    profile?: SubagentExecutionProfile;
+    contextFiles?: ContextFile[];
+    session?: PromptSession;
+    abortSignal?: AbortSignal;
+    deadlineExpired?: () => boolean;
+    mutationPolicy?: WorkspaceMutationPolicy;
+  },
+): Promise<{verdict: VerifierVerdict; capsule: SubagentResultCapsule; termination: WorkerTermination}> {
+  const profile = input.profile ?? COMPATIBILITY_PROFILE;
+  const task: SubagentTaskCapsule = {
+    id: 'verifier',
+    objective: verifierBrief({request: input.request, asks: input.asks, changedFiles: input.changedFiles, claimedValidations: input.claimedValidations}),
+    deliverable: 'A bounded verdict: for each ask, whether the repository satisfies it (with the evidence you re-derived), any regressions, then the final <haze-verdict> line.',
+    mode: 'validate',
+    scope: input.changedFiles.slice(0, 12),
+    acceptanceCriteria: input.asks.slice(0, 7),
+  };
+  const result = await runSubagent(task, {
+    runtime: input.runtime,
+    profile,
+    ...(input.contextFiles ? {contextFiles: input.contextFiles} : {}),
+    abortSignal: input.abortSignal,
+    deadlineExpired: input.deadlineExpired,
+    session: input.session,
+    mutationPolicy: input.mutationPolicy,
+  });
+  const parsed = result.capsule.usable ? parseVerifierVerdict(result.capsule.deliverable) : undefined;
+  if (!parsed) {
+    return {
+      verdict: {verdict: 'not-verified', gaps: [result.capsule.usable ? 'verifier deliverable carried no valid verdict line' : `verifier did not produce a usable deliverable (${result.capsule.termination})`], regressions: []},
+      capsule: result.capsule,
+      termination: result.capsule.termination,
+    };
+  }
+  return {verdict: parsed, capsule: result.capsule, termination: result.capsule.termination};
+}
 
 export async function runSubagent(
   taskInput: string | SubagentTaskCapsule,
