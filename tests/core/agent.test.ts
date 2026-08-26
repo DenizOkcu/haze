@@ -179,12 +179,24 @@ describe('ask extraction (P2: deterministic, request-derived)', () => {
     expect(deriveRequestAsks('add foo and bar to the config')).toEqual(['Add foo and bar to the config']);
   });
 
-  it('bounds, dedupes, and caps asks', () => {
-    const long = deriveRequestAsks(`add ${'x'.repeat(300)}`);
-    expect(long).toHaveLength(1);
-    expect(long[0]!.length).toBeLessThanOrEqual(160);
+  it('drops unclosable restatements instead of truncating them into vague asks', () => {
+    // A single clause restating the whole request cannot be made checkable;
+    // extraction degrades to no asks (the validation floor still gates) rather
+    // than manufacturing a no-progress failure on correct work.
+    expect(deriveRequestAsks(`add ${'x'.repeat(300)}`)).toEqual([]);
     const many = deriveRequestAsks('add one. add two. add three. add four. add five. add six. add seven. add eight.');
     expect(many).toHaveLength(7);
+  });
+
+  it('splits a trailing parenthetical enumeration into one checkable ask per item', () => {
+    const asks = deriveRequestAsks('Implement the complete CLI in /app conforming to all behavior in the spec (argument parsing, CSV parsing, and output formatting)');
+    expect(asks).toHaveLength(3);
+    expect(asks[0]).toContain('argument parsing');
+    expect(asks[1]).toContain('CSV parsing');
+    expect(asks[2]).toContain('output formatting');
+    // Nested parentheses and non-enumerations fall through unchanged.
+    expect(deriveRequestAsks('add the sum(a(b)) helper')).toEqual(['Add the sum(a(b)) helper']);
+    expect(deriveRequestAsks('fix the bug (it crashes on empty input)')).toEqual(['Fix the bug (it crashes on empty input)']);
   });
 
   it('degrades to an empty list (no ask gate) when no imperative clause exists', () => {

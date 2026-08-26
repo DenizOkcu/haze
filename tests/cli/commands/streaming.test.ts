@@ -1487,6 +1487,8 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     const outcome = await runAgentTurn('add the endpoint and document it', undefined, [], cb);
     expect(outcome).toMatchObject({status: 'complete'});
     expect(cb.messages.some(message => message.role === 'system' && message.text.includes('Assumed out of scope') && message.text.includes('no docs tooling configured'))).toBe(true);
+    // Gate decisions also surface as goal_notice events for headless consumers.
+    expect(cb.events.some(event => event.type === 'goal_notice' && String(event.text).includes('Assumed out of scope'))).toBe(true);
   });
 
   it('rejects a final the independent verifier did not confirm and carries the named gap', async () => {

@@ -98,6 +98,23 @@ afterEach(() => {
 
 describe('runAgentGoal: automatic continuation across physical turns', () => {
   let cycle0GoalId: string | undefined;
+  it('emits goal_continue with a descriptive text and a goal_notice on pause', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('failed', {resume: incompleteGoalResume()})},
+      {result: turnResult('failed', {resume: incompleteGoalResume({cycle: 2, mutationCount: 3, progressSignature: '["9","stale",[7,2,0,5]]'})},
+      )},
+      {result: turnResult('failed', {resume: incompleteGoalResume({cycle: 3, mutationCount: 3, progressSignature: '["9","stale",[7,2,0,5]]'})},
+      )},
+    ]);
+    const cb = makeCallbacks();
+    const result = await runAgentGoal(baseOptions({callbacks: cb}));
+    // Second no-progress cycle pauses the goal with a named, human-readable reason.
+    expect(result).toMatchObject({status: 'failed', stopReason: 'no-progress'});
+    const continueEvent = cb.events.find(event => event.type === 'goal_continue') as {reason?: string; text?: string};
+    expect(continueEvent?.text).toContain('pending');
+    expect(cb.events.some(event => event.type === 'goal_notice' && String(event.text).includes('Unfinished goal paused'))).toBe(true);
+  });
+
   it('continues automatically after a budget-boundary checkpoint and completes in the next physical turn', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {

@@ -13,6 +13,10 @@ Implementation helpers for haze built-in tools.
 - Read helpers (`prepareWorkspaceRead`) honour the turn-scoped bless set: paths the user mentioned in the prompt may be read outside the workspace and bypass `.gitignore`. Mutating helpers (`prepareWorkspaceMutation`, `prepareWorkspaceWritePath`) never consult the bless set — confinement is absolute for edits/writes.
 - Secret files (`core/safety/secretPaths.ts`: SSH keys, shell histories, `.env`/`.envrc`, `*.pem`/`*.key`, home credential stores) are refused for reads and mutations alike, before any filesystem access, with both lexical and real path checks. This overrides the bless set and `allowIgnored`. `grep` appends `secretSearchExcludeGlobs()` after any model glob (later ripgrep globs win; positive re-include globs would whitelist the search, so exclusions stay negated-only). The `shell` tool is deliberately not hard-filtered; shell-side avoidance is instructed by `SECRET_FILE_RULE` in `llm/systemPrompt.ts`.
 
+## writeTasks prose-size policy
+
+`taskTool.ts` never Zod-caps prose fields (titles, evidence, waiver reasons, ask texts). A schema `.max()` turns an over-long evidence string into an `AI_TypeValidationError` that rejects the whole call — the model retries the identical oversized input and burns steps (observed in the 2026-08-26 harbor differential). The schema validates shape only (enums, counts, object layouts stay strict); `execute` truncates prose to documented bounds. `askAmendments.add` additionally accepts plain strings and `{text}`-style objects (models emit both; normalized in `execute` rather than a union — the flat-schema rule for local OpenAI-compatible models).
+
 ## Turn-scoped tool context
 
 `toolContext.ts` owns per-turn execution state on AI SDK tool `context` values:

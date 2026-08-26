@@ -112,6 +112,24 @@ describe('runHeadless: output', () => {
     }
   });
 
+  it('surfaces goal notices (gate decisions) in the JSON envelope', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      status: 'complete',
+      runAgentTurnImpl: (cb) => {
+        cb.onEvent?.({type: 'goal_notice', text: 'Independent verification rejected completion. A fresh context found: tests fail.', at: 't1'});
+        cb.onEvent?.({type: 'goal_notice', text: 'Unfinished goal paused without measurable progress: asks remain unmet', at: 't2'});
+      },
+    });
+    await runHeadless({prompt: 'do the thing', output: 'json'});
+    const parsed = JSON.parse(writes.join(''));
+    // Notices reach non-streaming consumers too (bounded to the last 5).
+    expect(parsed.notices).toEqual([
+      'Independent verification rejected completion. A fresh context found: tests fail.',
+      'Unfinished goal paused without measurable progress: asks remain unmet',
+    ]);
+  });
+
   it('includes cumulative goal evidence (cycles, stop reason, totals) in the JSON envelope', async () => {
     const writes = captureStdout();
     const {runHeadless} = await loadRunCommand({

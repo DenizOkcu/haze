@@ -44,7 +44,8 @@ type HeadlessStreamEvent =
   | {type: 'turn_start'; request: string; at: string}
   | {type: 'turn_end'; request: string; status: TurnStatus; evidence?: TurnCompletionEvidence; at: string}
   | {type: 'goal_start'; goalId: string; request: string; at: string}
-  | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
+  | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; text?: string; at: string}
+  | {type: 'goal_notice'; text: string; at: string}
   | {type: 'goal_end'; goalId: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence; at: string}
   | {type: 'goal_resume'; goalId: string; relaunch: number; stopReason: string; reason: string; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
@@ -102,7 +103,9 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
     case 'goal_start':
       return {type: 'goal_start', goalId: event.goalId, request: event.request, at: event.at};
     case 'goal_continue':
-      return {type: 'goal_continue', goalId: event.goalId, cycle: event.cycle, reason: event.reason, at: event.at};
+      return {...(event.text ? {text: event.text} : {}), type: 'goal_continue', goalId: event.goalId, cycle: event.cycle, reason: event.reason, at: event.at};
+    case 'goal_notice':
+      return {type: 'goal_notice', text: event.text, at: event.at};
     case 'goal_end':
       return {...(event.stopReason ? {stopReason: event.stopReason} : {}), ...(event.evidence ? {evidence: event.evidence} : {}), type: 'goal_end', goalId: event.goalId, status: event.status, cycles: event.cycles, at: event.at};
     case 'goal_resume':
@@ -234,6 +237,15 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       }
     : undefined;
 
+  // Bounded, cross-output-mode collection of gate decisions (verification,
+  // sweep, waivers, pauses) so `--output json` consumers see *why* a goal
+  // continued or paused, not only that it did. The same events stream live in
+  // stream-json mode.
+  const goalNotices: string[] = [];
+  const recordEvent = (event: AgentEvent) => {
+    if (event.type === 'goal_notice' && goalNotices.length < 20) goalNotices.push(event.text);
+    emitStreamEvent?.(event);
+  };
   const callbacks: StreamCallbacks = {
     addMessage: (msg: Message) => {
       if (msg.role === 'assistant') segments.push({id: msg.id, text: msg.text, hidden: msg.hidden});
@@ -267,7 +279,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       conversation = result.messages;
       return true;
     },
-    onEvent: emitStreamEvent,
+    onEvent: recordEvent,
     log,
   };
 
@@ -360,7 +372,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     // them before the terminal result so ordering is preserved under backpressure.
     if (streamSink) await streamSink.flush().catch(() => undefined);
     // This terminal line is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
-    const resultLine = {type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {}), ...(goal ? {goal} : {})};
+    const resultLine = {type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {}), ...(goal ? {goal} : {}), ...(goalNotices.length > 0 ? {notices: goalNotices.slice(-5)} : {})};
     if (streamSink) await streamSink.write(resultLine).catch(() => undefined);
     else writeNdjson(resultLine);
     if (streamSink) await streamSink.flush().catch(() => undefined);

@@ -45,7 +45,7 @@ const IMPLIED_ASK_LEADS = /^(?:an?\s+|the\s+)?(?:unit\s+tests?|tests?|integratio
 const LEAD_NOISE = /^(?:please|also|then|additionally|finally|next|first(?:ly)?|secondly|can\s+you|could\s+you|you\s+(?:should|must|also)\b|and\b|but\b)\s+/gi;
 
 function clauseFragments(request: string): string[] {
-  const sentences = request.split(/[.!?(\n;]+/).map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const sentences = request.split(/[.!?\n;]+/).map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const fragments: string[] = [];
   for (const sentence of sentences) {
     // Split coordinating boundaries only when the right side can stand as its
@@ -77,8 +77,24 @@ function startsLikeAsk(fragment: string): boolean {
 
 function normalizeAskText(fragment: string): string {
   const cleaned = fragment.replace(LEAD_NOISE, '').replace(/^[,\s]+/, '');
-  const text = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return text.length > ASK_TEXT_CHARS ? `${text.slice(0, ASK_TEXT_CHARS - 1)}…` : text;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+/**
+ * Split a fragment that ends in a parenthetical enumeration into one ask per
+ * item: "implement the CLI (parsing, filtering, and output)" becomes three
+ * checkable asks instead of one unclosable restatement of the whole request
+ * (the misfire class observed in the 1.1.0-vs-HEAD harbor differential).
+ * Nested parentheses and non-enumerations fall through unchanged.
+ */
+function splitEnumeratedAsk(fragment: string): string[] {
+  const match = /^(.+?)\s*\(([^()]{8,400})\)\s*$/.exec(fragment);
+  if (!match) return [fragment];
+  const prefix = match[1]!.trim();
+  if (!prefix) return [fragment];
+  const items = match[2]!.split(/,|\band\b/i).map(item => item.trim()).filter(item => item.length >= 3 && item.length <= 80);
+  if (items.length < 2 || items.length > 7) return [fragment];
+  return items.map(item => `${prefix}: ${item}`);
 }
 
 /**
@@ -87,18 +103,24 @@ function normalizeAskText(fragment: string): string {
  * coordinating boundaries; no extra model call). Hints, not hard authorization:
  * an ask that is genuinely N/A must be waivable with a reason, and extraction
  * failure degrades to an empty list (no ask gate) rather than a deadlock.
+ * An ask that cannot be made checkable — a restatement of the whole request
+ * that still exceeds the text bound after enumeration splitting — is dropped:
+ * the validation/task floors still gate that work, and an unclosable ask only
+ * manufactures no-progress failures on correct code.
  */
 export function deriveRequestAsks(request: string): string[] {
   const asks: string[] = [];
   const seen = new Set<string>();
   for (const fragment of clauseFragments(request)) {
     if (!startsLikeAsk(fragment)) continue;
-    const ask = normalizeAskText(fragment);
-    const key = ask.toLowerCase();
-    if (!ask || seen.has(key)) continue;
-    seen.add(key);
-    asks.push(ask);
-    if (asks.length >= MAX_ASKS) break;
+    for (const candidate of splitEnumeratedAsk(fragment)) {
+      const ask = normalizeAskText(candidate);
+      const key = ask.toLowerCase();
+      if (!ask || seen.has(key) || ask.length > ASK_TEXT_CHARS) continue;
+      seen.add(key);
+      asks.push(ask);
+      if (asks.length >= MAX_ASKS) return asks;
+    }
   }
   return asks;
 }

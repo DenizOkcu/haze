@@ -60,9 +60,9 @@ function parseLedgerAsk(value: unknown): GoalLedgerAsk | undefined {
   if (typeof value !== 'object' || value == null) return undefined;
   const record = value as Record<string, unknown>;
   if (typeof record.id !== 'string' || typeof record.text !== 'string' || typeof record.status !== 'string' || !ASK_STATUSES.has(record.status)) return undefined;
-  const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.slice(0, 300) : undefined;
-  const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.slice(0, 300) : undefined;
-  return {id: record.id.slice(0, 64), text: record.text.slice(0, ASK_TEXT_LIMIT), status: record.status as 'open' | 'met' | 'waived', ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})};
+  const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.slice(0, 400) : undefined;
+  const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.slice(0, 400) : undefined;
+  return {id: record.id.slice(0, 200), text: record.text.slice(0, ASK_TEXT_LIMIT), status: record.status as 'open' | 'met' | 'waived', ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})};
 }
 
 function parseLedgerRedEvidence(value: unknown): GoalLedgerEntry['redEvidence'] | undefined {

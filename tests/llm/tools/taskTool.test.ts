@@ -96,14 +96,18 @@ describe('writeTasksTool.execute', () => {
     expect(result).toEqual({ok: false, error: 'Task 2: title cannot be empty.'});
   });
 
-  it('rejects an entry with an over-long title and reports its 1-based index', async () => {
+  it('truncates an over-long title instead of rejecting the call', async () => {
     const {writeTasksTool} = await loadTaskTool();
     const longTitle = 'a'.repeat(201);
     const result = await writeTasksTool.execute({tasks: [
       {title: 'fine'},
       {title: longTitle},
     ]}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(result).toEqual({ok: false, error: 'Task 2: title is too long (max 200 characters).'});
+    // Prose is truncated, never a hard reject: an over-long title must not
+    // burn a retry loop (harbor finding 1, same class as evidence caps).
+    expect(result).toMatchObject({ok: true});
+    const stored = await readStoredTasks() as Array<{title: string}>;
+    expect(stored[1]?.title.length).toBeLessThanOrEqual(200);
   });
 
   it('trims whitespace around titles before persisting', async () => {
@@ -128,5 +132,31 @@ describe('writeTasksTool.execute', () => {
     expect(withTasks?.summary).toContain('askAmendments recorded.');
     const none = await writeTasksTool.execute({tasks: [], askAmendments: {}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
     expect(none).not.toHaveProperty('askAmendments');
+  });
+
+  it('accepts both add-amendment shapes: plain strings and {text} objects', async () => {
+    const {writeTasksTool} = await loadTaskTool();
+    const result = await writeTasksTool.execute({
+      tasks: [],
+      askAmendments: {add: [{text: 'Add a changelog entry'}, 'Add docs']},
+    }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, askAmendments: {add: ['Add a changelog entry', 'Add docs']}});
+  });
+
+  it('truncates over-long prose instead of failing the whole call (harbor finding 1)', async () => {
+    const {writeTasksTool} = await loadTaskTool();
+    // Evidence 3x the bound: previously a Zod .max() hard-fail that rejected
+    // the entire call (AI_TypeValidationError); now it truncates and echoes.
+    const longEvidence = `Changed file /app/csv-query.js: full CLI per /app/SPEC.md — ${'detail '.repeat(120)}`;
+    const result = await writeTasksTool.execute({
+      tasks: [{title: 'T'.repeat(250)}],
+      askUpdates: [{id: `ask-1 ${'x'.repeat(100)}`, status: 'met', evidence: longEvidence}],
+    }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true});
+    const update = (result as {askUpdates?: Array<{id: string; evidence?: string}>}).askUpdates?.[0];
+    expect(update?.id.length).toBeLessThanOrEqual(200);
+    expect(update?.evidence?.length).toBeLessThanOrEqual(400);
+    const stored = await readStoredTasks() as Array<{title: string}>;
+    expect(stored[0]?.title.length).toBeLessThanOrEqual(200);
   });
 });

@@ -600,11 +600,11 @@ export function askUpdatesFromOutput(output: unknown): AskUpdateRequest[] {
   for (const item of candidate.slice(0, 10)) {
     if (typeof item !== 'object' || item == null) continue;
     const record = item as Record<string, unknown>;
-    const id = typeof record.id === 'string' ? record.id.trim().slice(0, 64) : '';
+    const id = typeof record.id === 'string' ? record.id.trim().slice(0, 200) : '';
     const status = record.status === 'met' || record.status === 'waived' ? record.status : undefined;
     if (!id || !status) continue;
-    const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.trim().slice(0, 300) : undefined;
-    const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.trim().slice(0, 300) : undefined;
+    const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.trim().slice(0, 400) : undefined;
+    const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.trim().slice(0, 400) : undefined;
     updates.push({id, status, ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})});
   }
   return updates;
@@ -615,7 +615,7 @@ function boundedEchoString(output: unknown, field: 'redWaiver' | 'greenSuccessor
   const record = output as Record<string, unknown>;
   if (record.ok !== true) return undefined;
   const value = record[field];
-  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 300) : undefined;
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 400) : undefined;
 }
 
 /** Structured red-evidence waiver echoed by a successful writeTasks result (P4). */
@@ -645,7 +645,7 @@ export function askAmendmentsFromOutput(output: unknown): AskAmendment | undefin
         && typeof (item as Record<string, unknown>).id === 'string' && (item as Record<string, unknown>).id!.toString().trim().length > 0
         && typeof (item as Record<string, unknown>).text === 'string')
       .slice(0, MAX_ASKS)
-      .map(item => ({id: item.id.trim().slice(0, 64), text: item.text.trim().slice(0, ASK_TEXT_CHARS), ...(typeof item.reason === 'string' && item.reason.trim() ? {reason: item.reason.trim().slice(0, 300)} : {})}))
+      .map(item => ({id: item.id.trim().slice(0, 200), text: item.text.trim().slice(0, ASK_TEXT_CHARS), ...(typeof item.reason === 'string' && item.reason.trim() ? {reason: item.reason.trim().slice(0, 400)} : {})}))
     : undefined;
   if ((!add || add.length === 0) && (!reword || reword.length === 0)) return undefined;
   return {...(add && add.length > 0 ? {add} : {}), ...(reword && reword.length > 0 ? {reword} : {})};

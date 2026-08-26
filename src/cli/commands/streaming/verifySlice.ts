@@ -1,4 +1,5 @@
 import type {ContextFile} from '../../../config/contextFiles.js';
+import {agentEvent} from '../../../core/agent/events.js';
 import {providerRequestSettings, type ModelRuntimeSelection} from '../../../llm/client.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
@@ -78,8 +79,11 @@ export async function runVerificationSlice(deps: {
     applyVerifierVerdict(goal, verdict);
     if (verdict.verdict === 'verified') {
       callbacks.addMessage({role: 'system', text: `Independent verification passed: a fresh context re-derived the request against the repository and confirmed it is met.${verdict.regressions.length > 0 ? ` Observed regressions to review: ${verdict.regressions.join('; ')}` : ''}`});
+      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: 'Independent verification passed: a fresh context re-derived the request against the repository and confirmed it is met.'}));
     } else {
-      callbacks.addMessage({role: 'system', text: `Independent verification rejected completion. A fresh context re-derived the request against the repository and found: ${verdict.gaps.join(' ')}`});
+      const text = `Independent verification rejected completion. A fresh context re-derived the request against the repository and found: ${verdict.gaps.join(' ')}`;
+      callbacks.addMessage({role: 'system', text});
+      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
       callbacks.debugLog(`verify slice rejected (${termination}): ${capsule.deliverable.slice(0, 300)}`);
     }
   } catch (error) {
@@ -87,7 +91,9 @@ export async function runVerificationSlice(deps: {
     // blocks the final — with the failure named, never a silent pass.
     const message = error instanceof Error ? error.message : String(error);
     applyVerifierVerdict(goal, {verdict: 'not-verified', gaps: [`verification slice failed to run: ${message.slice(0, 160)}`]});
-    callbacks.addMessage({role: 'system', text: 'Independent verification could not run; completion stays blocked until it passes. Retry will happen on the next completion attempt.'});
+    const text = 'Independent verification could not run; completion stays blocked until it passes. Retry will happen on the next completion attempt.';
+    callbacks.addMessage({role: 'system', text});
+    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
     callbacks.debugLog(`verify slice error: ${message}`);
   }
 }
@@ -133,10 +139,14 @@ export async function runSweepSlice(deps: {
     });
     applySweepVerdict(goal, sweep ?? {findings: [], regressions: []});
     if (sweep && sweep.regressions.length > 0) {
-      callbacks.addMessage({role: 'system', text: `Integration sweep found cross-lane regressions: ${sweep.regressions.join(' ')}. Completion stays blocked until they are fixed and re-validated.`});
+      const text = `Integration sweep found cross-lane regressions: ${sweep.regressions.join(' ')}. Completion stays blocked until they are fixed and re-validated.`;
+      callbacks.addMessage({role: 'system', text});
+      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
       callbacks.debugLog(`sweep slice regressions (${termination}): ${sweep.regressions.join(' | ')}`);
     } else if (sweep && sweep.findings.length > 0) {
-      callbacks.addMessage({role: 'system', text: `Integration sweep notes: ${sweep.findings.join(' ')}`});
+      const text = `Integration sweep notes: ${sweep.findings.join(' ')}`;
+      callbacks.addMessage({role: 'system', text});
+      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
     } else {
       callbacks.debugLog(`sweep slice clean (${termination})`);
     }
@@ -146,6 +156,7 @@ export async function runSweepSlice(deps: {
     const message = error instanceof Error ? error.message : String(error);
     applySweepVerdict(goal, {findings: [], regressions: []});
     callbacks.addMessage({role: 'system', text: 'Integration sweep could not run; treating it as a no-op.'});
+    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: 'Integration sweep could not run; treating it as a no-op.'}));
     callbacks.debugLog(`sweep slice error: ${message}`);
   }
 }

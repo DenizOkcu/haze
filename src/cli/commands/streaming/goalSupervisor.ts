@@ -243,6 +243,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       appendLedger('goal_continue');
       if (noProgressCount >= GOAL_NO_PROGRESS_LIMIT) {
         callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${checkpointReason(checkpoint)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
+        callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Unfinished goal paused without measurable progress: ${checkpointReason(checkpoint)}`}));
         return finish('failed', 'no-progress', {kind: 'incomplete-goal', checkpoint});
       }
       const remainingNow = options.goalDeadlineMs != null ? options.goalDeadlineMs - (Date.now() - startedAt) : undefined;
@@ -251,7 +252,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
         return finish('failed', 'goal-deadline', {kind: 'incomplete-goal', checkpoint});
       }
       const openTasks = checkpoint.taskCounts ? checkpoint.taskCounts.pending + checkpoint.taskCounts.inProgress : undefined;
-      callbacks.onEvent?.(agentEvent({type: 'goal_continue', goalId, cycle, reason: checkpoint.readiness ?? 'unfinished'}));
+      callbacks.onEvent?.(agentEvent({type: 'goal_continue', goalId, cycle, reason: checkpoint.readiness ?? 'unfinished', text: checkpointReason(checkpoint)}));
       callbacks.addMessage({role: 'system', text: `Continuing unfinished goal — cycle ${cycle + 1}${openTasks != null ? ` (${openTasks} task${openTasks === 1 ? '' : 's'} remaining)` : ''}: ${checkpointReason(checkpoint)}.`});
       continue;
     }

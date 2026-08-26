@@ -197,7 +197,9 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
     const redWaiverNote = goal.redWaiver ? `red→green repro assumed unobservable in this environment (${goal.redWaiver.reason})` : undefined;
     if (waivedAsks.length > 0 || redWaiverNote) {
       const parts = [...waivedAsks.map(ask => `${ask.text} (${ask.waiverReason ?? 'no reason recorded'})`), ...(redWaiverNote ? [redWaiverNote] : [])];
-      callbacks.addMessage({role: 'system', text: `Assumed out of scope: ${parts.join('; ')}.`});
+      const text = `Assumed out of scope: ${parts.join('; ')}.`;
+      callbacks.addMessage({role: 'system', text});
+      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
     }
   }
   return {status: turnStatus};
