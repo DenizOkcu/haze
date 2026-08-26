@@ -1,6 +1,6 @@
 # src/skills/AGENTS.md
 
-Last updated: 2026-08-19 for the 1.1.0 release.
+Last updated: 2026-08-26 for the 1.1.1 release.
 
 Markdown skill loading, registry, model-facing skill tool, and skill builder.
 

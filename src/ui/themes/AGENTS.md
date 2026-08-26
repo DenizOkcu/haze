@@ -1,6 +1,6 @@
 # src/ui/themes/AGENTS.md
 
-Last updated: 2026-08-19 for the 1.1.0 release.
+Last updated: 2026-08-26 for the 1.1.1 release.
 
 Instructions for coding agents converting themes into haze. All themes live as
 data entries in the single `registry.ts` (`THEMES` map), exactly like

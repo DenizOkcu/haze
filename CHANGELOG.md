@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.1 - 2026-08-26
+
+Durable goal resume and a smaller autonomy core. This patch keeps the concrete headless/recovery gains developed after 1.1.0 while removing unproven completion ceremony before publication.
+
+### Added
+
+- Durable goal ledger and crash-resume frontier: every logical-goal boundary can append bounded state to the session JSONL, including the exact request and its hash, cycle, mutation/validation outcome, task counts, and unresolved pre-edit failure evidence. Session restore finds the newest unfinished frontier without making goal-only files resumable, tolerates a truncated final line, and keeps the frontier through bounded ledger vacuuming.
+- Headless `--until-done`: print mode can relaunch the preserved logical goal after transient provider failures with exponential backoff, `goal_resume` stream events, the existing absolute goal timeout, and a three-strike no-progress poison guard. Relaunches reuse the conversation and frontier without duplicating the original request or granting additional authority.
+- Headless goal observability: `goal_notice` events and a bounded `notices` array expose continuation/pause decisions to stream and single-envelope consumers; `goal_continue` carries readable text.
+
+### Changed
+
+- Completion remains structural but proportional: pending model-declared tasks and missing/stale/failed post-mutation validation reject a final. Red→green evidence is opportunistic — fixes do not need a pre-edit failing repro, but a recognized validation that fails before the first mutation must be rerun successfully after the edit. The completing check is sequence-bound so a pre-edit pass cannot satisfy the rule.
+- `writeTasks` is task-only again. The experimental ask gate/refinement/amendment flow, independent verifier, goal shapes, multi-lane hints, final sweep, mandatory repro/depth prompt, waiver, and successor-command protocol were evaluated and removed before release. A three-attempt Harbor `csv-query` A/B found no success gain from the added ceremony and materially higher token/time cost; the final trimmed arms remained correct, but efficiency varied enough that this release makes no benchmark-speed claim.
+- Large orchestration modules were split into focused helpers: chat startup/transcript/follow-up handling, wizard fields and per-domain handlers, input suggestions, and streaming preparation/tool dispatch/assistant segments/recovery slices. Public CLI behavior is unchanged.
+- Theme definitions are consolidated into one typed registry, and provider presets use compact model tuples while preserving the resolved palette and preset data.
+- All built-in tool rows align wrapped output beneath the tool name, and shared formatting helpers replace duplicate elapsed-time/path logic.
+
+### Fixed
+
+- Overlong `writeTasks` titles are truncated in `execute` instead of causing a whole-call `AI_TypeValidationError` retry loop.
+- Unresolved same-check red evidence survives physical-turn and crash-resume boundaries, while a satisfied pair is dropped from carried state so later turns do not inherit obsolete completion debt.
+
 ## 1.1.0 - 2026-08-19
 
 Theming and secrets. Two user-facing layers landed in this release: a full terminal theme system (14 built-in palettes, live switching, terminal-default adoption) and hard secret-file protection across every file tool.

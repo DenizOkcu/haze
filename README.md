@@ -2,15 +2,18 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.1.0
+## What's new in 1.1.1
 
-haze 1.1.0 adds a terminal theme system and hard secret-file protection.
+haze 1.1.1 makes long-running goals resumable while keeping the autonomy core small and evidence-based.
 
-- Terminal theming: 14 built-in palettes — the default `purple`, a `light` pair, and oh-my-zsh ports like `robbyrussell`, `af-magic`, `agnoster`, and `solarized-dark`/`solarized-light`. `/themes` opens a picker (each theme labeled light/dark, the active one marked); `/themes <name>` sets one directly. Switching applies live without a restart, and the selection persists as `theme` in `~/.haze/settings.json`. A theme owns both terminal defaults — haze adopts its foreground/background (OSC 10/11) on start and restores yours on exit — so already-printed transcript text keeps its old colors, which is accepted behavior. `src/ui/themes/AGENTS.md` documents the role vocabulary and conversion guides for porting more themes.
-- Hard secret-file protection in every file tool: SSH keys, shell history files, `.env`/`.envrc` (documentation variants excepted), `*.pem`/`*.key`, and common home credential stores are refused for reads and mutations before any filesystem access — terminal `secret_file_protected` results, symlink-proof in both directions, immune to user-granted read exceptions and ignore overrides, with grep traversal skipping the protected names. The `shell` tool remains unfiltered by design; secret avoidance there is instructed through the system prompt and stays inside your supervision boundary.
+- Durable goal progress: logical-goal boundaries are appended to the session JSONL with an exact-request hash and bounded task/validation state, so interrupted work can resume from a crash-safe frontier instead of replaying completed work.
+- Headless persistence: `--until-done` relaunches a goal after transient provider failures with exponential backoff, `goal_resume` events, the existing absolute timeout, and a three-strike no-progress guard. JSON output includes bounded goal notices so scripts can see why work continued or paused.
+- Simpler completion: declared tasks and fresh post-edit validation remain authoritative. Fixes do not require a pre-edit reproduction, but when a recognized check does fail before the first edit, that same command must pass afterward. Experimental ask gates, verifier/sweep calls, lane hints, and goal shapes were evaluated and removed before release because they added cost without improving the measured task.
+- Smaller internals: theme data now lives in one typed registry, provider presets use compact model tuples, and the large chat, wizard, input-suggestion, and streaming paths are split into focused modules without changing their public behavior.
 
 Previous releases:
 
+- `1.1.0`: terminal theming with 14 built-in palettes and live `/themes` switching; hard secret-file protection across every file tool, including symlink, read-blessing, ignore-override, and grep-traversal defenses.
 - `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).
 - `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
 - `0.10.1`: OpenAI Subscription OAuth preset, SECURITY.md and the attended-use threat model, bounded completion recovery, compact colorized diffs, prompt-injection framing, hardened fetch/stdin/sessions, and a multi-page docs site.
