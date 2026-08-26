@@ -380,46 +380,19 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
   });
 });
 
-describe('assessCompletionReadiness (P2/P3/P4: asks, verification, red→green)', () => {
-  it('rejects a voluntary final while asks from the original request remain open', () => {
-    const s = state({intent: 'implement', mutationCount: 1, validationOutcome: 'passed', askProgress: {total: 3, open: 2, waived: 0, openTexts: ['Add the export button', 'Add a test for it']}});
-    expect(assessCompletionReadiness(s, evidence({lastToolOk: true}))).toBe('pending_asks');
-    expect(describeCompletionReadiness('pending_asks', undefined, ['Add the export button', 'Add a test for it'])).toContain('Add the export button');
-  });
-
-  it('keeps validation gates ahead of ask gates (most concrete blocker first)', () => {
-    const s = state({intent: 'implement', mutationCount: 1, validationOutcome: 'stale', askProgress: {total: 2, open: 2, waived: 0, openTexts: ['a', 'b']}});
-    expect(assessCompletionReadiness(s, evidence({lastToolOk: true}))).toBe('validation_stale');
-  });
-
+describe('assessCompletionReadiness (P4: red→green pair)', () => {
   it('demands the red→green pair for fix intents only after validation passes', () => {
     const base = {intent: 'fix' as const, mutationCount: 1};
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'failed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('validation_failed');
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('missing_red_evidence');
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'satisfied'}), evidence({lastToolOk: true}))).toBe('ready');
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'waived'}), evidence({lastToolOk: true}))).toBe('ready');
-    // Non-fix intents never hit the red gate.
     expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'passed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('ready');
   });
 
-  it('rejects a final the blind verifier did not confirm', () => {
-    const s = state({intent: 'implement', mutationCount: 2, validationOutcome: 'passed', verification: {verdict: 'not-verified', gaps: ['tests fail on the new file']}});
-    expect(assessCompletionReadiness(s, evidence({lastToolOk: true}))).toBe('verification_rejected');
-    expect(describeCompletionReadiness('verification_rejected')).toContain('independent verification');
-    expect(state({verification: {verdict: 'verified', gaps: []}}) && assessCompletionReadiness(state({intent: 'implement', mutationCount: 2, validationOutcome: 'passed'}), evidence({lastToolOk: true}))).toBe('ready');
-  });
-
-  it('treats the new readiness values as autonomously recoverable', () => {
-    expect(goalContinuationRecoverable('pending_asks')).toBe(true);
+  it('treats the red→green readiness as autonomously recoverable and projects it into evidence', () => {
     expect(goalContinuationRecoverable('missing_red_evidence')).toBe(true);
-    expect(goalContinuationRecoverable('verification_rejected')).toBe(true);
-  });
-
-  it('projects ask/red/verification evidence safely into turn completion evidence', () => {
-    const s = state({intent: 'fix', mutationCount: 1, validationOutcome: 'passed', askProgress: {total: 3, open: 1, waived: 1, openTexts: ['a', 'b', 'c']}, redPair: 'satisfied', verification: {verdict: 'not-verified', gaps: ['g1', 'g2', 'g3', 'g4']}});
-    const evidenceOut = toCompletionEvidence(s);
-    expect(evidenceOut.askProgress).toEqual({total: 3, open: 1, met: 1, waived: 1, openTexts: ['a', 'b', 'c'].slice(0, 3)});
-    expect(evidenceOut.redPair).toBe('satisfied');
-    expect(evidenceOut.verification).toEqual({verdict: 'not-verified', gaps: ['g1', 'g2', 'g3']});
+    const s = state({intent: 'fix', mutationCount: 1, validationOutcome: 'passed', redPair: 'satisfied'});
+    expect(toCompletionEvidence(s).redPair).toBe('satisfied');
   });
 });

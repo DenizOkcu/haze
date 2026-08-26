@@ -513,9 +513,9 @@ describe('goal ledger (P1: durable frontier)', () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix the login crash'});
     await appendSessionEntry(session, goalEntry());
-    await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 2, validationOutcome: 'stale', openAsks: ['Fix the login crash'], shape: 'debug'}));
+    await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 2, validationOutcome: 'stale', greenSuccessor: 'npm test'}));
     const frontier = await readGoalLedgerFrontier(session);
-    expect(frontier).toMatchObject({goalId: 'goal-1', cycle: 1, mutationCount: 2, validationOutcome: 'stale', asks: [{id: 'ask-1', text: 'Fix the login crash', status: 'open'}]});
+    expect(frontier).toMatchObject({goalId: 'goal-1', cycle: 1, mutationCount: 2, validationOutcome: 'stale'});
     // restoreSessionState surfaces the same frontier in one scan.
     const restored = await restoreSessionState(session);
     expect(restored.goalFrontier?.cycle).toBe(1);
@@ -560,47 +560,31 @@ describe('goal ledger (P1: durable frontier)', () => {
     expect(summaries.every(summary => summary.messageCount > 0)).toBe(true);
   });
 
-  it('carries full ask statuses and red/verification evidence for crash-resume parity', async () => {
+  it('carries red→green evidence for crash-resume parity', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix the crash'});
     await appendSessionEntry(session, goalEntry({
       phase: 'goal_continue',
       cycle: 2,
       mutationCount: 3,
-      asks: [
-        {id: 'ask-1', text: 'Fix the crash', status: 'met', evidence: 'npm test'},
-        {id: 'ask-2', text: 'Add a regression test', status: 'open'},
-      ],
       redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
       redWaiverReason: 'unobservable in CI',
       greenSuccessor: 'npm run test:ci',
-      verified: true,
     }));
     const frontier = await readGoalLedgerFrontier(session);
-    expect(frontier?.asks).toEqual([
-      {id: 'ask-1', text: 'Fix the crash', status: 'met', evidence: 'npm test'},
-      {id: 'ask-2', text: 'Add a regression test', status: 'open'},
-    ]);
     expect(frontier?.redEvidence).toEqual({command: 'npm test', commandKey: 'npm test', summary: 'red'});
     expect(frontier?.redWaiverReason).toBe('unobservable in CI');
     expect(frontier?.greenSuccessor).toBe('npm run test:ci');
-    expect(frontier?.verified).toBe(true);
-    // Legacy entries carrying only openAsks still map to open asks.
-    const legacy = await createSession({cwd, sessionsDir});
-    await appendSessionEntry(legacy, {type: 'ui_message', at: '1', role: 'user', text: 'work'});
-    await appendSessionEntry(legacy, goalEntry({openAsks: ['Do the thing']}));
-    expect((await readGoalLedgerFrontier(legacy))?.asks).toEqual([{id: 'ask-1', text: 'Do the thing', status: 'open'}]);
   });
 
-  it('rejects structurally invalid ask/red fields as parse errors, not guesses', async () => {
+  it('rejects structurally invalid red-evidence fields as parse errors, not guesses', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'work'});
     await appendSessionEntry(session, goalEntry());
-    await fs.appendFile(session.file, `${JSON.stringify({...goalEntry({phase: 'goal_continue'}), asks: [{id: 'x', text: 't', status: 'finished'}]})}\n`);
+    await fs.appendFile(session.file, `${JSON.stringify({...goalEntry({phase: 'goal_continue'}), redEvidence: {command: 5}})}\n`);
     const {parseErrors} = await readSessionEntries(session);
     expect(parseErrors.length).toBe(1);
   });
-
   it('survives the size vacuum: frontier entries are never dropped', async () => {
     setSessionVacuumThresholdForTests(1);
     const session = await createSession({cwd, sessionsDir});

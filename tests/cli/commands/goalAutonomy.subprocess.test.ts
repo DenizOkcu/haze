@@ -76,12 +76,6 @@ function textResponse(text: string) {
  * list, and answers.
  */
 function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unknown[]; label: string} {
-  // The independent verification slice (P3) runs in a fresh worker context:
-  // its single user message is the pointer brief. Answer it with a verified
-  // verdict line so the goal can structurally complete.
-  if (messages.some(message => typeof message.content === 'string' && message.content.includes('Independent verification (blind review)'))) {
-    return {kind: 'chunks', chunks: textResponse('Ask 1 met: greet.js returns "hello <name>". Ask 2 met: npm test passes (re-run by me).\n<haze-verdict>{"verdict":"verified","asksMet":[true,true],"gaps":[],"regressions":[]}</haze-verdict>'), label: 'verify verdict'};
-  }
   // Only the goal supervisor's cross-turn continuation control counts; other
   // synthetic controls (repeated-tool nudges) must not switch the script.
   const controlIndex = messages.map(message => typeof message.content === 'string' && message.content.includes('Continue the active goal')).lastIndexOf(true);
@@ -120,9 +114,6 @@ function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unkn
       {title: 'Write the greet module', status: 'completed'},
       {title: 'Make npm test pass', status: 'completed'},
       {title: 'Run the test suite and report', status: 'completed'},
-    ], askUpdates: [
-      {id: 'ask-1', status: 'met', evidence: 'npm test'},
-      {id: 'ask-2', status: 'met', evidence: 'npm test'},
     ]}), label: 'complete tasks'};
   }
   return {kind: 'chunks', chunks: textResponse('The greet module is implemented: greet(name) now returns "hello <name>", npm test passes, and all declared tasks are complete.'), label: 'final answer'};
@@ -268,10 +259,8 @@ describe.skipIf(!buildCurrent)('autonomous goal continuation (subprocess, real b
     if (build!.commit) expect(provenance.stdout).toContain(`commit: ${build!.commit}`);
 
     // The provider saw both physical cycles: a failed validation in cycle 1,
-    // then the continuation-controlled cycle 2 — and the independent
-    // verification slice re-derived the goal against the real workspace (P3).
+    // then the continuation-controlled cycle 2.
     expect(mock.calls.some(call => call.label === 'run failing npm test')).toBe(true);
     expect(mock.calls.some(call => call.continuation && call.label === 'run passing npm test')).toBe(true);
-    expect(mock.calls.some(call => call.label === 'verify verdict')).toBe(true);
   }, 240_000);
 });

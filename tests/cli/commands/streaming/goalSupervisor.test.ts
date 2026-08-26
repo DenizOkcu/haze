@@ -349,6 +349,8 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
     expect(start.requestHash).toMatch(/^[0-9a-f]{16}$/);
     expect(start.intent).toBe('implement');
     expect(start.cycle).toBe(0);
+    expect(start).not.toHaveProperty('asks');
+    expect(start).not.toHaveProperty('shape');
     const continueEntry = entries[1]!;
     expect(continueEntry.cycle).toBe(1);
     expect(continueEntry.mutationCount).toBe(3);
@@ -367,8 +369,7 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
       progressSignature: 'sig',
       noProgressCount: 0,
       requestHash: 'cafe1234',
-      asks: [{id: 'ask-1', text: 'Implement the roadmap feature', status: 'open'}],
-      shape: 'bounded',
+      redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
     };
     const {runAgentGoal} = await loadSupervisor([
       {
@@ -377,7 +378,7 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
           expect(retryingExistingRequest).toBe(true);
           expect(options.goalContext?.goalId).toBe('goal-crashed');
           expect(options.goalContext?.requestHash).toBe('cafe1234');
-          expect(options.goalContext?.carried).toMatchObject({asks: [{id: 'ask-1', text: 'Implement the roadmap feature', status: 'open'}], shape: 'bounded'});
+          expect(options.goalContext?.carried).toMatchObject({redEvidence: {command: 'npm test'}});
           expect(String(options.ephemeralControl)).toContain('Continue the active goal');
         },
       },
@@ -401,43 +402,30 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
 });
 
 describe('stored-goal frontier parity (P1: crash resume matches in-process continuation)', () => {
-  it('carries ask statuses, red evidence, and verification from the ledger frontier', async () => {
+  it('carries red→green evidence from the ledger frontier', async () => {
     const checkpoint = checkpointFromGoalFrontier({
       goalId: 'goal-crashed',
       request: 'fix the login crash',
       requestHash: 'deadbeef',
       intent: 'fix',
-      shape: 'debug',
       cycle: 3,
       mutationCount: 4,
       validationOutcome: 'stale',
       progressSignature: 'sig',
       at: 't0',
       taskCounts: {total: 4, pending: 1, inProgress: 0, completed: 3},
-      asks: [
-        {id: 'ask-1', text: 'Fix the login crash', status: 'met', evidence: 'npm test'},
-        {id: 'ask-2', text: 'Add a regression test', status: 'open'},
-        {id: 'ask-3', text: 'Document the fix', status: 'waived', waiverReason: 'no docs page exists'},
-      ],
       redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
       redWaiverReason: 'unobservable',
       greenSuccessor: 'npm run test:ci',
-      verified: true,
     });
     expect(checkpoint).toMatchObject({
       goalId: 'goal-crashed',
       requestHash: 'deadbeef',
       intent: 'fix',
       cycle: 3,
-      asks: [
-        {id: 'ask-1', status: 'met'},
-        {id: 'ask-2', status: 'open'},
-        {id: 'ask-3', status: 'waived'},
-      ],
       redEvidence: {command: 'npm test'},
       redWaiver: {reason: 'unobservable'},
       greenSuccessor: 'npm run test:ci',
-      verified: true,
     });
     // The stored-goal resume hydrates exactly this carried evidence.
     const {runAgentGoal} = await loadSupervisor([
@@ -445,72 +433,14 @@ describe('stored-goal frontier parity (P1: crash resume matches in-process conti
         result: turnResult('complete'),
         inspect: options => {
           expect(options.goalContext?.carried).toMatchObject({
-            asks: [{id: 'ask-1', status: 'met'}, {id: 'ask-2', status: 'open'}, {id: 'ask-3', status: 'waived'}],
             redEvidence: {command: 'npm test'},
             redWaiver: {reason: 'unobservable'},
             greenSuccessor: 'npm run test:ci',
-            verified: true,
           });
         },
       },
     ]);
     const result = await runAgentGoal(baseOptions({resumeFrom: {kind: 'stored-goal', checkpoint}}));
     expect(result).toMatchObject({status: 'complete', cycles: 4});
-  });
-});
-
-describe('runAgentGoal: ask refinement nudge (P2b)', () => {
-  it('rides the first request of a fresh mutating goal and disappears afterwards', async () => {
-    const seen: Array<string | undefined> = [];
-    const {runAgentGoal} = await loadSupervisor([
-      {
-        result: turnResult('failed', {resume: incompleteGoalResume()}),
-        inspect: options => {
-          seen.push(options.ephemeralControl);
-          expect(String(options.ephemeralControl)).toContain('derived the following asks');
-          expect(String(options.ephemeralControl)).toContain('askAmendments');
-        },
-      },
-      {
-        result: turnResult('complete'),
-        inspect: options => {
-          seen.push(options.ephemeralControl);
-          expect(String(options.ephemeralControl)).not.toContain('askAmendments');
-        },
-      },
-    ]);
-    const result = await runAgentGoal(baseOptions());
-    expect(result).toMatchObject({status: 'complete'});
-    expect(seen).toHaveLength(2);
-  });
-
-  it('never rides non-mutating goals, resumes, or caller-provided controls', async () => {
-    const {runAgentGoal} = await loadSupervisor([
-      {result: turnResult('complete'), inspect: options => { expect(options.ephemeralControl).toBeUndefined(); }},
-    ]);
-    await runAgentGoal(baseOptions({request: 'what does this repo do'}));
-    const {runAgentGoal: resumed} = await loadSupervisor([
-      {result: turnResult('complete'), inspect: options => { expect(String(options.ephemeralControl)).not.toContain('askAmendments'); }},
-    ]);
-    await resumed(baseOptions({resumeFrom: {kind: 'stored-goal', checkpoint: {goalId: 'g', request: 'add the export button', cycle: 1, mutationCount: 1, validationOutcome: 'stale', progressSignature: 's', noProgressCount: 0}}}));
-    const {runAgentGoal: fleet} = await loadSupervisor([
-      {result: turnResult('complete'), inspect: options => { expect(options.ephemeralControl).toBe('caller control'); }},
-    ]);
-    await fleet(baseOptions({turnOptions: {ephemeralControl: 'caller control'} as import('../../../../src/cli/commands/streaming.js').TurnExecutionOptions}));
-  });
-
-  it('passes the shape into multi-lane continuation prompts', async () => {
-    const {runAgentGoal} = await loadSupervisor([
-      {
-        result: turnResult('failed', {resume: incompleteGoalResume({shape: 'multi-lane'})}),
-        inspect: options => { expect(String(options.ephemeralControl)).not.toContain('parallel subagents'); },
-      },
-      {
-        result: turnResult('complete'),
-        inspect: options => { expect(String(options.ephemeralControl)).toContain('parallel subagents'); },
-      },
-    ]);
-    const result = await runAgentGoal(baseOptions({request: 'add the api layer, the ui layer, and integration tests'}));
-    expect(result).toMatchObject({status: 'complete'});
   });
 });

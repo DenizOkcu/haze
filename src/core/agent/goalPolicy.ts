@@ -7,7 +7,7 @@
  * work solely because of a heuristic. Plan-only requests should not lead to
  * source mutations unless the user asks for implementation.
  */
-import {ASK_TEXT_CHARS, createWorkState, observeWorkToolEvent, openAsksOf, type WorkAsk, type WorkState} from './workState.js';
+import {createWorkState, observeWorkToolEvent, type WorkState} from './workState.js';
 
 // ── Request intent classification ───────────────────────────────────────────
 
@@ -27,131 +27,6 @@ export function classifyRequestIntent(value: string): RequestIntent {
   return 'unknown';
 }
 
-// ── Ask extraction and goal shapes (P2/P5) ──────────────────────────────────
-
-/** Proportional goal shape: selects verification intensity; escalation up only. */
-export type GoalShape = 'trivial' | 'bounded' | 'multi-lane' | 'debug';
-
-const GOAL_SHAPE_RANK: Record<GoalShape, number> = {trivial: 0, bounded: 1, 'multi-lane': 2, debug: 3};
-
-/** 1–7 concrete asks per goal (autoprompt's mission re-derivation, haze-native). */
-export const MAX_ASKS = 7;
-
-const IMPERATIVE_LEADS = new Set(['add', 'create', 'write', 'implement', 'update', 'change', 'support', 'wire', 'document', 'fix', 'repair', 'resolve', 'remove', 'delete', 'rename', 'refactor', 'extract', 'move', 'migrate', 'ensure', 'include', 'use', 'make', 'build', 'run', 'handle', 'cover', 'configure', 'extend', 'split', 'introduce', 'adopt', 'port', 'clean', 'improve', 'optimize', 'guard', 'prevent', 'teach']);
-
-/** Fragments that imply an ask even without a leading imperative verb ("and a test for it"). */
-const IMPLIED_ASK_LEADS = /^(?:an?\s+|the\s+)?(?:unit\s+tests?|tests?|integration\s+tests?|e2e\s+tests?|docs?|documentation|comments?|changelog|readme|examples?|types?|validation|coverage)\b/i;
-
-const LEAD_NOISE = /^(?:please|also|then|additionally|finally|next|first(?:ly)?|secondly|can\s+you|could\s+you|you\s+(?:should|must|also)\b|and\b|but\b)\s+/gi;
-
-function clauseFragments(request: string): string[] {
-  const sentences = request.split(/[.!?\n;]+/).map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean);
-  const fragments: string[] = [];
-  for (const sentence of sentences) {
-    // Split coordinating boundaries only when the right side can stand as its
-    // own ask (starts with an imperative verb or an implied-ask noun); plain
-    // "add X and Y" stays one ask.
-    const parts = sentence.split(/\s+(?:and|then|plus|also|as\s+well\s+as)\s+/i);
-    let carried = '';
-    for (const part of parts) {
-      const fragment = part.replace(/^[,\s]+/, '').replace(/[,\s]+$/, '');
-      if (!fragment) continue;
-      if (carried && startsLikeAsk(fragment)) {
-        fragments.push(carried);
-        carried = fragment;
-      } else {
-        carried = carried ? `${carried} and ${fragment}` : fragment;
-      }
-    }
-    if (carried) fragments.push(carried);
-  }
-  return fragments;
-}
-
-function startsLikeAsk(fragment: string): boolean {
-  const cleaned = fragment.replace(LEAD_NOISE, '').trim();
-  if (!cleaned) return false;
-  const firstWord = cleaned.split(/\s+/)[0]!.toLowerCase().replace(/[^a-z]/g, '');
-  return IMPERATIVE_LEADS.has(firstWord) || IMPLIED_ASK_LEADS.test(cleaned);
-}
-
-function normalizeAskText(fragment: string): string {
-  const cleaned = fragment.replace(LEAD_NOISE, '').replace(/^[,\s]+/, '');
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-}
-
-/**
- * Split a fragment that ends in a parenthetical enumeration into one ask per
- * item: "implement the CLI (parsing, filtering, and output)" becomes three
- * checkable asks instead of one unclosable restatement of the whole request
- * (the misfire class observed in the 1.1.0-vs-HEAD harbor differential).
- * Nested parentheses and non-enumerations fall through unchanged.
- */
-function splitEnumeratedAsk(fragment: string): string[] {
-  const match = /^(.+?)\s*\(([^()]{8,400})\)\s*$/.exec(fragment);
-  if (!match) return [fragment];
-  const prefix = match[1]!.trim();
-  if (!prefix) return [fragment];
-  const items = match[2]!.split(/,|\band\b/i).map(item => item.trim()).filter(item => item.length >= 3 && item.length <= 80);
-  if (items.length < 2 || items.length > 7) return [fragment];
-  return items.map(item => `${prefix}: ${item}`);
-}
-
-/**
- * Deterministically derive 1–7 concrete, checkable asks from the exact user
- * request (P2a: seeded from the request text itself — imperative clauses and
- * coordinating boundaries; no extra model call). Hints, not hard authorization:
- * an ask that is genuinely N/A must be waivable with a reason, and extraction
- * failure degrades to an empty list (no ask gate) rather than a deadlock.
- * An ask that cannot be made checkable — a restatement of the whole request
- * that still exceeds the text bound after enumeration splitting — is dropped:
- * the validation/task floors still gate that work, and an unclosable ask only
- * manufactures no-progress failures on correct code.
- */
-export function deriveRequestAsks(request: string): string[] {
-  const asks: string[] = [];
-  const seen = new Set<string>();
-  for (const fragment of clauseFragments(request)) {
-    if (!startsLikeAsk(fragment)) continue;
-    for (const candidate of splitEnumeratedAsk(fragment)) {
-      const ask = normalizeAskText(candidate);
-      const key = ask.toLowerCase();
-      if (!ask || seen.has(key) || ask.length > ASK_TEXT_CHARS) continue;
-      seen.add(key);
-      asks.push(ask);
-      if (asks.length >= MAX_ASKS) return asks;
-    }
-  }
-  return asks;
-}
-
-/**
- * Proportional shape classification (P5), deterministic at goal start:
- * `debug` for fix intents (red→green required), `multi-lane` for 3+ asks,
- * `trivial` for single-ask short requests (lightweight loop, floor intact),
- * `bounded` otherwise. Heuristics are hints; escalation up only, never down.
- */
-export function classifyGoalShape(request: string, intent: RequestIntent, askCount: number): GoalShape {
-  if (intent === 'fix') return 'debug';
-  if (askCount >= 3) return 'multi-lane';
-  const compactLength = request.replace(/\s+/g, ' ').trim().length;
-  if (askCount <= 1 && compactLength <= 80 && intent !== 'unknown') return 'trivial';
-  return 'bounded';
-}
-
-/** Escalate a goal shape upward only (recorded); never downward (P5). */
-export function escalateGoalShape(current: GoalShape, proposed: GoalShape): {shape: GoalShape; escalated: boolean} {
-  return GOAL_SHAPE_RANK[proposed] > GOAL_SHAPE_RANK[current]
-    ? {shape: proposed, escalated: true}
-    : {shape: current, escalated: false};
-}
-
-export const GOAL_SHAPES: readonly GoalShape[] = ['trivial', 'bounded', 'multi-lane', 'debug'];
-
-export function isGoalShape(value: unknown): value is GoalShape {
-  return value === 'trivial' || value === 'bounded' || value === 'multi-lane' || value === 'debug';
-}
-
 // ── Session goal state ──────────────────────────────────────────────────────
 
 export type SessionGoal = WorkState;
@@ -163,29 +38,16 @@ function shortRequest(value: string) {
 
 export function createSessionGoal(request: string, now = Date.now()): SessionGoal {
   const intent = classifyRequestIntent(request);
-  // Ask-shaped completion (P2): request-derived asks replace the canned
-  // per-intent criteria for mutating intents; plan/review/answer keep the
-  // display-only canned criteria (asks are optional there).
-  const askTexts = intentExpectsValidationForAsks(intent) ? deriveRequestAsks(request) : [];
-  const asks: WorkAsk[] = askTexts.map((text, index) => ({id: `ask-${index + 1}`, text, status: 'open' as const}));
-  const shape = classifyGoalShape(request, intent, asks.length);
-  const successCriteria = asks.length > 0
-    ? asks.map(ask => ask.text)
-    : intent === 'plan'
-      ? ['Create or update the requested plan artifact/answer', 'Do not implement source changes unless asked']
-      : intent === 'test'
-        ? ['Run the requested validation or closest relevant check', 'Report pass/fail accurately']
-        : intent === 'review'
-          ? ['Inspect the relevant current project state', 'Return evidence-based findings with file paths']
-          : intent === 'answer'
-            ? ['Answer the user using current project context when needed']
-            : ['Inspect the relevant files', 'Make the requested change when needed', 'Validate the change when practical', 'Summarize only current-task changes and validation'];
-  return createWorkState(request, intent, successCriteria, now, {asks, shape});
-}
-
-/** Asks gate completion only for intents with a mutating deliverable (P2). */
-export function intentExpectsValidationForAsks(intent: RequestIntent): boolean {
-  return intent === 'implement' || intent === 'fix' || intent === 'test';
+  const successCriteria = intent === 'plan'
+    ? ['Create or update the requested plan artifact/answer', 'Do not implement source changes unless asked']
+    : intent === 'test'
+      ? ['Run the requested validation or closest relevant check', 'Report pass/fail accurately']
+      : intent === 'review'
+        ? ['Inspect the relevant current project state', 'Return evidence-based findings with file paths']
+        : intent === 'answer'
+          ? ['Answer the user using current project context when needed']
+          : ['Inspect the relevant files', 'Make the requested change when needed', 'Validate the change when practical', 'Summarize only current-task changes and validation'];
+  return createWorkState(request, intent, successCriteria, now);
 }
 
 export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, now = Date.now()) {
@@ -199,12 +61,7 @@ export function formatGoalStatus(goal: SessionGoal) {
         : goal.phase === 'validating' ? `validation ${goal.validationCommands.at(-1)?.status ?? 'running'}`
           : goal.phase === 'summarizing' ? 'summarizing'
             : 'done';
-  // The proportional shape rides the status line (P5) so users can see why a
-  // small fix ran light and a big feature ran heavy.
-  const shapeLine = goal.shape ? ` · ${goal.shape}` : '';
-  const openAskCount = openAsksOf(goal).length;
-  const askLine = openAskCount > 0 ? ` · ${openAskCount} open ask${openAskCount === 1 ? '' : 's'}` : '';
-  return `Goal: ${shortRequest(goal.originalUserRequest)} · ${action}${shapeLine}${askLine}`;
+  return `Goal: ${shortRequest(goal.originalUserRequest)} · ${action}`;
 }
 
 // ── Completion/continuation control prompts ─────────────────────────────────
@@ -251,48 +108,22 @@ export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
  * Ephemeral control for a goal-continuation slice or a fresh continuation
  * turn. The model's stop was rejected (or its physical turn hit a budget
  * boundary) while structured evidence — declared task counts, post-edit
- * validation, open asks, red→green pairs, verifier gaps — shows unfinished
- * work; this nudge requires resuming concrete work rather than summarizing
+ * validation, or red→green pairs — shows unfinished work; this nudge requires
+ * resuming concrete work rather than summarizing
  * again. One-request nudge only.
  */
-export function goalContinuationPrompt(reason: string, taskCounts?: {total: number; pending: number; inProgress: number; completed: number}, openAsks?: string[], detail?: string, shape?: GoalShape) {
+export function goalContinuationPrompt(reason: string, taskCounts?: {total: number; pending: number; inProgress: number; completed: number}, detail?: string) {
   const taskLine = taskCounts
     ? ` The task list currently shows ${taskCounts.pending + taskCounts.inProgress} open item${taskCounts.pending + taskCounts.inProgress === 1 ? '' : 's'} of ${taskCounts.total}; update writeTasks as you complete them.`
     : '';
   const validationLine = reason.includes('validation')
     ? ' No recognized post-edit validation was recorded. Run one standard test/build command, directly execute the changed artifact as one unchained command, or call shell with purpose=validation for a custom assertion check.'
     : '';
-  const askLine = openAsks && openAsks.length > 0
-    ? ` Unmet asks from the original request: ${openAsks.slice(0, 3).join('; ')}. Close each one with structured evidence — mark it met via writeTasks askUpdates citing a passing validation command or a changed file — or waive it with a waiverReason if it is genuinely out of scope.`
-    : '';
   const redLine = reason.includes('red')
     ? ' No failing repro was captured before the fix landed. Reproduce the reported failure from the report on the unpatched state (or the closest observable equivalent), record it, then make the same check pass — or declare redWaiver via writeTasks with a reason if the failure is genuinely unobservable in this environment.'
     : '';
-  // Multi-lane goals (P5): disjoint asks on different files are parallel
-  // read-only/implement lanes; advisory hint, mutation serialization stays intact.
-  const laneLine = shape === 'multi-lane'
-    ? ' These asks split into disjoint lanes: where asks touch different files, dispatch them to parallel subagents (one substantial, independently describable task per worker, mode implement for edits or inspect/research for read-only lanes) instead of serial edits. Keep shared-file or order-dependent work in the main context — mutating workers stay serialized.'
-    : '';
   const detailLine = detail ? ` ${detail}` : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${askLine}${redLine}${laneLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
-}
-
-/**
- * Ephemeral control riding the first request of a fresh mutating goal (P2b):
- * asks derived from the request text are hints — the model gets exactly one
- * pre-work chance to review them and amend structurally (adds/rewords via
- * writeTasks askAmendments; drops must be waivers with reasons). The runtime
- * locks amendments after the first mutation or validation, and this nudge is
- * never durable conversation history.
- */
-export function askRefinementPrompt(request: string, asks: string[]) {
-  const list = asks.length > 0
-    ? asks.map((ask, index) => `${index + 1}. ${ask}`).join('\n')
-    : '(none derived — the request phrasing yielded no imperative clauses)';
-  const amendLine = asks.length > 0
-    ? 'If an ask is imprecise, reword it (with a reason); if the request contains a concrete deliverable that is missing, add it as a new ask.'
-    : 'Derive the concrete, checkable deliverables this request implies and declare each as a new ask.';
-  return `Before starting work: haze derived the following asks from the user's request, and they gate completion — nothing reports done while an ask stays open.\nRequest (exact): ${request}\nDerived asks:\n${list}\n${amendLine} Do this now via one writeTasks call (tasks + askAmendments), before any file edit or command. Dropping an ask is not an amendment: a genuinely out-of-scope ask must be waived with a waiverReason instead, and it will be shown to the user in the final summary. Ask amendments are ignored after the first edit or command, so review the list first. If the derived asks already cover every concrete deliverable, proceed with the work and do not respond about the asks.`;
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }
 
 /** Fix-intent depth discipline (P4, prompt-level): state the suspected root cause and one competing hypothesis before editing. */

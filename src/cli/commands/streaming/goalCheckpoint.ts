@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import type {CompletionReadiness, TurnExecutionState} from '../../../core/agent/completionController.js';
-import type {GoalShape, RequestIntent} from '../../../core/agent/goalPolicy.js';
-import type {RedEvidence, ValidationOutcome, WorkAsk, WorkTaskProgress} from '../../../core/agent/workState.js';
+import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
+import type {RedEvidence, ValidationOutcome, WorkTaskProgress} from '../../../core/agent/workState.js';
 import type {GoalLedgerFrontier} from '../../../core/session/sessionStore.js';
 
 /**
  * Bounded continuation checkpoint for a logical goal whose work is recoverably
- * unfinished. Safe metadata only — reasons, counts, enums, ask texts derived
- * from the user request, red-evidence command strings without output bodies —
+ * unfinished. Safe metadata only — reasons, counts, enums, and red-evidence
+ * command strings without output bodies —
  * never raw content or credentials. Carried on `TurnResult.resume` so a goal
  * supervisor (or the interactive resume affordance) can continue the same
  * logical goal in a fresh physical turn without replaying completed work.
@@ -25,20 +25,12 @@ export interface IncompleteGoalResume {
   mutationCount: number;
   taskCounts?: {total: number; pending: number; inProgress: number; completed: number};
   validationOutcome?: ValidationOutcome;
-  /** sha256 prefix of the exact request bytes; binds downstream evidence to the mission (P1/P2). */
+  /** sha256 prefix of the exact request bytes; binds downstream evidence to the mission (P1). */
   requestHash?: string;
-  /** Ask statuses carried across the boundary (P2). */
-  asks?: WorkAsk[];
-  /** Proportional goal shape (P5). */
-  shape?: GoalShape;
   /** Captured pre-mutation failing repro for fix goals (P4). */
   redEvidence?: RedEvidence;
   redWaiver?: {reason: string};
   greenSuccessor?: string;
-  /** Independent verification already passed for this logical goal (P3). */
-  verified?: boolean;
-  /** The multi-lane final sweep ran (P5); one per logical goal. */
-  sweepDone?: boolean;
 }
 
 /** Supervisor-level checkpoint persisted between physical turns (in memory and, via the goal ledger, in the session JSONL). */
@@ -62,14 +54,9 @@ export interface GoalCheckpoint {
   noProgressCount: number;
   requestHash?: string;
   intent?: RequestIntent;
-  asks?: WorkAsk[];
-  shape?: GoalShape;
   redEvidence?: RedEvidence;
   redWaiver?: {reason: string};
   greenSuccessor?: string;
-  verified?: boolean;
-  /** The multi-lane final sweep ran (P5); one per logical goal. */
-  sweepDone?: boolean;
 }
 
 /** Durable goal-ledger append (P1): one entry per supervisor boundary; the writer stamps `type`/`at`. Shared by the supervisor and the session recorder. */
@@ -83,17 +70,10 @@ export interface GoalLedgerAppend {
   mutationCount: number;
   validationOutcome: ValidationOutcome;
   progressSignature: string;
-  shape?: GoalShape;
   taskCounts?: {total: number; pending: number; inProgress: number; completed: number};
-  openAsks?: string[];
-  /** Full ask statuses (supersedes `openAsks` for crash-resume parity). */
-  asks?: WorkAsk[];
   redEvidence?: RedEvidence;
   redWaiverReason?: string;
   greenSuccessor?: string;
-  verified?: boolean;
-  /** The multi-lane final sweep ran (P5); one per logical goal. */
-  sweepDone?: boolean;
   stopReason?: string;
   status?: 'complete' | 'failed' | 'aborted';
 }
@@ -112,14 +92,9 @@ export function goalCheckpointSignature(input: {mutationCount: number; validatio
 export interface CarriedGoalEvidence {
   requestHash?: string;
   intent?: RequestIntent;
-  asks?: WorkAsk[];
-  shape?: GoalShape;
   redEvidence?: RedEvidence;
   redWaiver?: {reason: string};
   greenSuccessor?: string;
-  verified?: boolean;
-  /** The multi-lane final sweep ran (P5); one per logical goal. */
-  sweepDone?: boolean;
 }
 
 /**
@@ -153,9 +128,8 @@ const VALIDATION_OUTCOMES: ReadonlySet<string> = new Set(['passed', 'failed', 's
 /**
  * Rebuild a supervisor checkpoint from a durable ledger frontier (P1 resume
  * path): safe metadata only, tolerant of ledger fields written by older
- * versions. Carries full ask statuses and red→green/verification evidence so
- * a crash resume matches in-process continuation (met asks stay met, a
- * captured red repro stays captured, a passed verification stays passed).
+ * versions. Carries red→green evidence so a crash resume matches in-process
+ * continuation (a captured red repro stays captured).
  * `readiness` stays unset — the frontier predates a specific readiness, so
  * continuation uses the generic unfinished reason.
  */
@@ -172,10 +146,8 @@ export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCh
     requestHash: frontier.requestHash,
     ...(frontier.intent ? {intent: frontier.intent as RequestIntent} : {}),
     ...(frontier.taskCounts ? {taskCounts: frontier.taskCounts} : {}),
-    ...(frontier.asks ? {asks: frontier.asks.map(ask => ({...ask}))} : {}),
     ...(frontier.redEvidence ? {redEvidence: {...frontier.redEvidence}} : {}),
     ...(frontier.redWaiverReason ? {redWaiver: {reason: frontier.redWaiverReason}} : {}),
     ...(frontier.greenSuccessor ? {greenSuccessor: frontier.greenSuccessor} : {}),
-    ...(frontier.verified ? {verified: true} : {}),
   };
 }

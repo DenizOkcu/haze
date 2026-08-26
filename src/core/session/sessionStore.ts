@@ -16,7 +16,7 @@ export type SessionEntry =
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string}
-  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; shape?: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; openAsks?: string[]; asks?: Array<{id: string; text: string; status: 'open' | 'met' | 'waived'; evidence?: string; waiverReason?: string}>; redEvidence?: {command: string; commandKey: string; summary: string}; redWaiverReason?: string; greenSuccessor?: string; verified?: boolean; stopReason?: string; status?: string};
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; redWaiverReason?: string; greenSuccessor?: string; stopReason?: string; status?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
 export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
@@ -27,42 +27,16 @@ export interface GoalLedgerFrontier {
   request: string;
   requestHash: string;
   intent: string;
-  shape?: string;
   cycle: number;
   mutationCount: number;
   validationOutcome: string;
   progressSignature: string;
   taskCounts?: GoalLedgerEntry['taskCounts'];
-  /** Full ask statuses so a crash-resumed goal never re-opens met/waived asks (P2 parity). */
-  asks?: GoalLedgerAsk[];
-  /** Carried red→green/verification state so a crash resume keeps its evidence (P3/P4 parity). */
+  /** Carried red→green state so a crash resume keeps its evidence (P4 parity). */
   redEvidence?: GoalLedgerEntry['redEvidence'];
   redWaiverReason?: string;
   greenSuccessor?: string;
-  verified?: boolean;
   at: string;
-}
-
-/** Ask record as persisted in goal-ledger entries (safe metadata only). */
-export interface GoalLedgerAsk {
-  id: string;
-  text: string;
-  status: 'open' | 'met' | 'waived';
-  evidence?: string;
-  waiverReason?: string;
-}
-
-const ASK_TEXT_LIMIT = 200;
-const ASK_STATUSES: ReadonlySet<string> = new Set(['open', 'met', 'waived']);
-
-/** Strict, bounded parse of a ledger ask record; malformed entries are rejected, not guessed. */
-function parseLedgerAsk(value: unknown): GoalLedgerAsk | undefined {
-  if (typeof value !== 'object' || value == null) return undefined;
-  const record = value as Record<string, unknown>;
-  if (typeof record.id !== 'string' || typeof record.text !== 'string' || typeof record.status !== 'string' || !ASK_STATUSES.has(record.status)) return undefined;
-  const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.slice(0, 400) : undefined;
-  const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.slice(0, 400) : undefined;
-  return {id: record.id.slice(0, 200), text: record.text.slice(0, ASK_TEXT_LIMIT), status: record.status as 'open' | 'met' | 'waived', ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})};
 }
 
 function parseLedgerRedEvidence(value: unknown): GoalLedgerEntry['redEvidence'] | undefined {
@@ -277,16 +251,6 @@ function optionalTaskCounts(value: unknown): boolean {
   return ['total', 'pending', 'inProgress', 'completed'].every(key => typeof value[key] === 'number');
 }
 
-function optionalBoundedStrings(value: unknown, limit: number): boolean {
-  if (value === undefined) return true;
-  return Array.isArray(value) && value.length <= limit && value.every(item => typeof item === 'string');
-}
-
-function optionalLedgerAsks(value: unknown): boolean {
-  if (value === undefined) return true;
-  return Array.isArray(value) && value.length <= 7 && value.every(item => parseLedgerAsk(item) !== undefined);
-}
-
 function optionalLedgerRedEvidence(value: unknown): boolean {
   return value === undefined || parseLedgerRedEvidence(value) !== undefined;
 }
@@ -297,17 +261,14 @@ function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
     request: entry.request,
     requestHash: entry.requestHash,
     intent: entry.intent,
-    ...(entry.shape ? {shape: entry.shape} : {}),
     cycle: entry.cycle,
     mutationCount: entry.mutationCount,
     validationOutcome: entry.validationOutcome,
     progressSignature: entry.progressSignature,
     ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
-    ...(entry.asks ? {asks: entry.asks} : entry.openAsks ? {asks: entry.openAsks.map((text, index) => ({id: `ask-${index + 1}`, text, status: 'open' as const}))} : {}),
     ...(entry.redEvidence ? {redEvidence: entry.redEvidence} : {}),
     ...(entry.redWaiverReason ? {redWaiverReason: entry.redWaiverReason} : {}),
     ...(entry.greenSuccessor ? {greenSuccessor: entry.greenSuccessor} : {}),
-    ...(entry.verified ? {verified: true} : {}),
     at: entry.at,
   };
 }
@@ -348,11 +309,10 @@ function parseSessionEntry(value: unknown): SessionEntry {
         || typeof value.request !== 'string' || typeof value.requestHash !== 'string' || typeof value.intent !== 'string'
         || typeof value.cycle !== 'number' || typeof value.mutationCount !== 'number'
         || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
-        || !optionalString(value.shape) || !optionalTaskCounts(value.taskCounts)
-        || !optionalBoundedStrings(value.openAsks, 7) || !optionalString(value.stopReason) || !optionalString(value.status)
-        || !optionalLedgerAsks(value.asks) || !optionalLedgerRedEvidence(value.redEvidence)
-        || !optionalString(value.redWaiverReason) || !optionalString(value.greenSuccessor)
-        || !(value.verified === undefined || typeof value.verified === 'boolean')) return invalid('invalid goal');
+        || !optionalTaskCounts(value.taskCounts)
+        || !optionalString(value.stopReason) || !optionalString(value.status)
+        || !optionalLedgerRedEvidence(value.redEvidence)
+        || !optionalString(value.redWaiverReason) || !optionalString(value.greenSuccessor)) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);

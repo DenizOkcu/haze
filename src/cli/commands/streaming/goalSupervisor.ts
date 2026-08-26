@@ -4,7 +4,7 @@ import {DEFAULT_TURN_DEADLINE_MS} from '../../../core/agent/budgets.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
-import {askRefinementPrompt, classifyGoalShape, classifyRequestIntent, deriveRequestAsks, goalContinuationPrompt, intentExpectsValidationForAsks} from '../../../core/agent/goalPolicy.js';
+import {classifyRequestIntent, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
 import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type TurnResult} from '../streaming.js';
@@ -66,13 +66,9 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     progressSignature: goalCheckpointSignature({mutationCount: resume.mutationCount, validationOutcome, taskCounts: resume.taskCounts}),
     noProgressCount,
     ...(resume.requestHash ? {requestHash: resume.requestHash} : {}),
-    ...(resume.asks ? {asks: resume.asks.map(ask => ({...ask}))} : {}),
-    ...(resume.shape ? {shape: resume.shape} : {}),
     ...(resume.redEvidence ? {redEvidence: {...resume.redEvidence}} : {}),
     ...(resume.redWaiver ? {redWaiver: {...resume.redWaiver}} : {}),
     ...(resume.greenSuccessor ? {greenSuccessor: resume.greenSuccessor} : {}),
-    ...(resume.verified ? {verified: true} : {}),
-    ...(resume.sweepDone ? {sweepDone: true} : {}),
   };
 }
 
@@ -83,13 +79,8 @@ function countsToTaskProgress(counts: NonNullable<GoalCheckpoint['taskCounts']>)
 /** Human-readable continuation reason for a checkpoint; stored-goal frontiers may predate a specific readiness. */
 function checkpointReason(checkpoint: GoalCheckpoint): string {
   return checkpoint.readiness
-    ? describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined, checkpoint.asks?.filter(ask => ask.status === 'open').map(ask => ask.text))
+    ? describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)
     : 'the previous run ended before the goal was complete';
-}
-
-function checkpointOpenAsks(checkpoint: GoalCheckpoint | undefined): string[] | undefined {
-  const open = checkpoint?.asks?.filter(ask => ask.status === 'open').map(ask => ask.text);
-  return open && open.length > 0 ? open.slice(0, 7) : undefined;
 }
 
 function carriedOf(checkpoint: GoalCheckpoint | undefined) {
@@ -98,13 +89,9 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
       mutationCount: checkpoint.mutationCount,
       validationOutcome: checkpoint.validationOutcome,
       ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {}),
-      ...(checkpoint.asks ? {asks: checkpoint.asks.map(ask => ({...ask}))} : {}),
-      ...(checkpoint.shape ? {shape: checkpoint.shape} : {}),
       ...(checkpoint.redEvidence ? {redEvidence: {...checkpoint.redEvidence}} : {}),
       ...(checkpoint.redWaiver ? {redWaiver: {...checkpoint.redWaiver}} : {}),
       ...(checkpoint.greenSuccessor ? {greenSuccessor: checkpoint.greenSuccessor} : {}),
-      ...(checkpoint.verified ? {verified: true} : {}),
-      ...(checkpoint.sweepDone ? {sweepDone: true} : {}),
     }
     : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
@@ -156,16 +143,12 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       mutationCount: source?.mutationCount ?? 0,
       validationOutcome: source?.validationOutcome ?? 'not_applicable',
       progressSignature: source?.progressSignature ?? '',
-      ...(source ? {shape: source.shape ?? classifyGoalShape(request, intent, source.asks?.length ?? deriveRequestAsks(request).length)} : {shape: classifyGoalShape(request, intent, deriveRequestAsks(request).length)}),
       ...(source?.taskCounts ? {taskCounts: source.taskCounts} : {}),
-      // Full ask statuses and red/verification evidence keep crash resumes at
-      // parity with in-process continuation (P1 frontier).
-      ...(source?.asks ? {asks: source.asks.map(ask => ({...ask}))} : {}),
+      // Red→green evidence keeps crash resumes at parity with in-process
+      // continuation (P1/P4 frontier).
       ...(source?.redEvidence ? {redEvidence: {...source.redEvidence}} : {}),
       ...(source?.redWaiver ? {redWaiverReason: source.redWaiver.reason} : {}),
       ...(source?.greenSuccessor ? {greenSuccessor: source.greenSuccessor} : {}),
-      ...(source?.verified ? {verified: true} : {}),
-      ...(source?.sweepDone ? {sweepDone: true} : {}),
       ...extra,
     });
   };
@@ -189,16 +172,6 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       return finish('failed', 'goal-deadline', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
     }
     const continuing = cycle > 0 || checkpoint != null || initialRetryAttempt > 0 || Boolean(options.conversationCarriesRequest);
-    // P2b quality nudge: the derived asks are heuristics, so the first request
-    // of a fresh mutating goal carries a one-time refinement control (verify
-    // coverage, amend structurally before any edit). Never on resumes or
-    // continuation turns, never alongside a caller-provided control, and never
-    // durable conversation — attemptSetup strips synthetic controls.
-    const refinementControl = !continuing
-      && !options.turnOptions?.ephemeralControl
-      && intentExpectsValidationForAsks(intent)
-      ? askRefinementPrompt(request, deriveRequestAsks(request))
-      : undefined;
     const turnOptions: TurnExecutionOptions = {
       ...options.turnOptions,
       ...(checkpoint
@@ -206,10 +179,10 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
           // The conversation already carries the user message; a continuation
           // turn rides it with a synthetic control. Attachments belong to the
           // first attempt only.
-          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts, checkpointOpenAsks(checkpoint), undefined, checkpoint.shape),
+          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts),
           attachments: undefined,
         }
-        : refinementControl ? {ephemeralControl: refinementControl} : {}),
+        : {}),
       // Always tag the turn with the logical goal id/cycle so cycle-0
       // checkpoints carry the supervisor's goal identity, and hydrate carried
       // evidence on continuation turns (a no-op seed for a fresh goal).

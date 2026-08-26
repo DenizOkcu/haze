@@ -1,7 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/core/subagent/subagentRunner.js';
-import {parseSweepVerdict, parseVerifierVerdict} from '../../../src/core/subagent/contracts.js';
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 
@@ -507,46 +506,5 @@ describe('subagent V2 boundary', () => {
     const profile = {name: 'test', maxConcurrency: 1, maxSteps: 8, maxToolCalls: 6, maxOutputTokens: 2048, maxSummaryChars: 4000, maxInputTokens: 40000, deadlineMs: 1000, maxRetries: 1};
     await runSubagent('provider parity', {contextFiles: [], runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
     expect(captured).toMatchObject({providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}, maxRetries: 1, maxOutputTokens: 2048});
-  });
-});
-
-describe('parseVerifierVerdict (P3: default-FAIL)', () => {
-  it('parses a well-formed verdict line at the end of a deliverable', () => {
-    const deliverable = 'Ask 1 met: tests pass. Ask 2 unmet: no docs.\n<haze-verdict>{"verdict":"not-verified","asksMet":[true,false],"gaps":["docs page missing"],"regressions":["lint fails"]}</haze-verdict>';
-    expect(parseVerifierVerdict(deliverable)).toEqual({verdict: 'not-verified', asksMet: [true, false], gaps: ['docs page missing'], regressions: ['lint fails']});
-  });
-
-  it('normalizes a verified verdict to empty gaps and bounds arrays', () => {
-    const verdict = parseVerifierVerdict(`<haze-verdict>{"verdict":"verified","asksMet":[true],"gaps":["still named"],"regressions":[]}</haze-verdict>`);
-    expect(verdict).toEqual({verdict: 'verified', asksMet: [true], gaps: [], regressions: []});
-    const noisy = parseVerifierVerdict(`<haze-verdict>{"verdict":"not-verified","asksMet":[true,"x",null],"gaps":["a","","b","c","d","e","f","g","h"],"regressions":[]}</haze-verdict>`);
-    expect(noisy?.asksMet).toEqual([true]);
-    expect(noisy?.gaps).toHaveLength(5);
-  });
-
-  it('returns undefined (treated as not-verified) for absent, malformed, or invalid verdicts', () => {
-    expect(parseVerifierVerdict('All good, no verdict line.')).toBeUndefined();
-    expect(parseVerifierVerdict('<haze-verdict>not json</haze-verdict>')).toBeUndefined();
-    expect(parseVerifierVerdict('<haze-verdict>{"verdict":"maybe"}</haze-verdict>')).toBeUndefined();
-    expect(parseVerifierVerdict('<haze-verdict>[1,2]</haze-verdict>')).toBeUndefined();
-  });
-});
-
-describe('parseSweepVerdict (P5: advisory, default no-op)', () => {
-  it('parses findings and regressions from a well-formed line', () => {
-    expect(parseSweepVerdict('Review done.\n<haze-sweep>{"findings":["config duplicated"],"regressions":["src/api.ts exports validateUser but ui.ts imports validate_user"]}</haze-sweep>'))
-      .toEqual({findings: ['config duplicated'], regressions: ['src/api.ts exports validateUser but ui.ts imports validate_user']});
-  });
-
-  it('bounds arrays and drops non-string entries', () => {
-    const verdict = parseSweepVerdict(`<haze-sweep>{"findings":["a","","b","c","d"],"regressions":[1,null,"r1"]}</haze-sweep>`);
-    expect(verdict?.findings).toEqual(['a', 'b', 'c']);
-    expect(verdict?.regressions).toEqual(['r1']);
-  });
-
-  it('treats absent or malformed lines as a no-op sweep (unlike the verifier default-FAIL)', () => {
-    expect(parseSweepVerdict('Nothing found, no line.')).toBeUndefined();
-    expect(parseSweepVerdict('<haze-sweep>not json</haze-sweep>')).toBeUndefined();
-    expect(parseSweepVerdict('<haze-sweep>{"findings":[],"regressions":[]}</haze-sweep>')).toBeUndefined();
   });
 });

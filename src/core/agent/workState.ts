@@ -1,5 +1,4 @@
-import type {GoalShape, RequestIntent} from './goalPolicy.js';
-import {escalateGoalShape, isGoalShape, MAX_ASKS} from './goalPolicy.js';
+import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
@@ -24,163 +23,6 @@ export function intentExpectsValidation(intent: RequestIntent): boolean {
   return intent === 'implement' || intent === 'fix' || intent === 'test';
 }
 
-export type AskStatus = 'open' | 'met' | 'waived';
-
-/** One concrete, checkable ask re-derived from the exact user request (P2). */
-export interface WorkAsk {
-  id: string;
-  text: string;
-  status: AskStatus;
-  /** Bounded reference to the validating event that closed the ask. */
-  evidence?: string;
-  /** Required when the ask is waived (assumed out of scope, with reason). */
-  waiverReason?: string;
-}
-
-/** Captured failing repro observed before the first mutation of a fix goal (P4). Safe metadata: command + status, never output bodies. */
-export interface RedEvidence {
-  command: string;
-  commandKey: string;
-  summary: string;
-}
-
-/** Structured ask-update request echoed by a successful writeTasks result. */
-export interface AskUpdateRequest {
-  id: string;
-  status: 'met' | 'waived';
-  evidence?: string;
-  waiverReason?: string;
-}
-
-/** Structured ask-list amendment (P2b): add a missing ask or reword an imprecise one. Drops are waivers, never amendments. */
-export interface AskAmendment {
-  add?: string[];
-  reword?: Array<{id: string; text: string; reason?: string}>;
-}
-
-/** Outcome of applying one structured ask amendment batch. */
-export interface AskAmendmentOutcome {
-  applied: boolean;
-  added: string[];
-  reworded: string[];
-  ignored?: string;
-}
-
-/** Outcome of applying one structured ask update. */
-export interface AskUpdateOutcome {
-  id: string;
-  applied: boolean;
-  reason?: string;
-}
-
-/** Independent verifier verdict recorded as completion evidence (P3). */
-export interface VerifyVerdictState {
-  verdict: 'verified' | 'not-verified';
-  gaps: string[];
-}
-
-/** Final sweep findings for multi-lane goals (P5): bounded advisory notes plus optional concrete regressions. */
-export interface SweepVerdict {
-  findings: string[];
-  regressions: string[];
-}
-
-/** Upper bound for ask text; extraction never emits longer asks. */
-export const ASK_TEXT_CHARS = 160;
-
-/** Open (unmet, unwaived) asks of a goal state. */
-export function openAsksOf(state: Pick<WorkState, 'asks'>): WorkAsk[] {
-  return (state.asks ?? []).filter(ask => ask.status === 'open');
-}
-
-/** Waived asks with their recorded reasons (surfaced in the final synthesis). */
-export function waivedAsksOf(state: Pick<WorkState, 'asks'>): WorkAsk[] {
-  return (state.asks ?? []).filter(ask => ask.status === 'waived');
-}
-
-function normalizeEvidenceText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-/**
- * Structural validation for closing an ask (P2: no prose-override channel).
- * `met` requires an evidence reference that matches a *passing* validation
- * command or a file actually changed during this goal; `waived` requires a
- * reason. Anything else is rejected and the ask stays open.
- */
-export function applyAskUpdate(state: WorkState, update: AskUpdateRequest): AskUpdateOutcome {
-  const ask = (state.asks ?? []).find(item => item.id === update.id || item.text === update.id);
-  if (!ask) return {id: update.id, applied: false, reason: 'unknown ask id'};
-  if (update.status === 'waived') {
-    const reason = update.waiverReason?.trim();
-    if (!reason) return {id: update.id, applied: false, reason: 'waiving an ask requires a waiverReason'};
-    ask.status = 'waived';
-    ask.waiverReason = reason;
-    delete ask.evidence;
-    return {id: update.id, applied: true};
-  }
-  const evidence = update.evidence?.trim();
-  if (!evidence) return {id: update.id, applied: false, reason: 'marking an ask met requires evidence referencing a passing validation or a changed file'};
-  const needle = normalizeEvidenceText(evidence);
-  const matchesValidation = state.validations.some(validation => validation.status === 'passed'
-    && (normalizeEvidenceText(validation.command).includes(needle) || needle.includes(normalizeEvidenceText(validation.command))));
-  const matchesTouchedFile = state.touchedFiles.some(file => {
-    const fileKey = normalizeEvidenceText(file);
-    return needle.includes(fileKey) || fileKey.includes(needle);
-  });
-  if (!matchesValidation && !matchesTouchedFile) {
-    return {id: update.id, applied: false, reason: 'evidence does not match any passing validation command or changed file'};
-  }
-  ask.status = 'met';
-  ask.evidence = evidence;
-  delete ask.waiverReason;
-  return {id: update.id, applied: true};
-}
-
-/** Apply a bounded batch of echoed ask updates; returns per-update outcomes. */
-export function applyAskUpdates(state: WorkState, updates: readonly AskUpdateRequest[]): AskUpdateOutcome[] {
-  return updates.slice(0, 10).map(update => applyAskUpdate(state, update));
-}
-
-/**
- * Apply structured ask-list amendments (P2b). Locked after the first mutation
- * or validation — refinement is a pre-work act; once evidence exists, only
- * `met`/`waived` updates apply. Adds never exceed MAX_ASKS total asks; rewords
- * must reference an existing ask and keep its status/evidence; nothing here
- * can drop an ask (drops are waivers with reasons, by design).
- */
-export function applyAskAmendments(state: WorkState, amendment: AskAmendment): AskAmendmentOutcome {
-  const locked = state.mutationSeq > 0 || state.validationSeq > 0;
-  const outcome: AskAmendmentOutcome = {applied: false, added: [], reworded: []};
-  if (locked) return {...outcome, ignored: 'ask amendments are locked after the first edit or command'};
-  state.asks ??= [];
-  const seen = new Set(state.asks.map(ask => ask.text.toLowerCase()));
-  for (const text of amendment.add ?? []) {
-    if (state.asks.length >= MAX_ASKS) {
-      outcome.ignored = `ask list is capped at ${MAX_ASKS}`;
-      break;
-    }
-    const bounded = text.trim().slice(0, ASK_TEXT_CHARS);
-    const key = bounded.toLowerCase();
-    if (!bounded || seen.has(key)) continue;
-    state.asks.push({id: `ask-${state.asks.length + 1}`, text: bounded, status: 'open'});
-    seen.add(key);
-    outcome.added.push(bounded);
-    outcome.applied = true;
-  }
-  for (const reword of amendment.reword ?? []) {
-    const bounded = reword.text?.trim().slice(0, ASK_TEXT_CHARS);
-    const ask = state.asks.find(item => item.id === reword.id || item.text === reword.id);
-    if (!ask || !bounded || seen.has(bounded.toLowerCase())) continue;
-    seen.delete(ask.text.toLowerCase());
-    seen.add(bounded.toLowerCase());
-    ask.text = bounded;
-    outcome.reworded.push(bounded);
-    outcome.applied = true;
-  }
-  return outcome;
-}
-
 /**
  * Normalize a validation command into a matching key so a green run can be
  * bound to the red repro it must supersede (P4). Whitespace-insensitive; a
@@ -198,8 +40,8 @@ export function validationCommandKey(command: string): string {
  * carry a pre-mutation failing repro (or a structured waiver), and a passing
  * validation of that same command (or an explicitly recorded successor).
  */
-export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'shape' | 'mutationCount' | 'redEvidence' | 'redWaiver' | 'greenSuccessor' | 'validations'>): 'not-required' | 'missing' | 'satisfied' | 'waived' {
-  if (state.normalizedIntent !== 'fix' || state.shape === 'trivial' || state.mutationCount === 0) return 'not-required';
+export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'mutationCount' | 'redEvidence' | 'redWaiver' | 'greenSuccessor' | 'validations'>): 'not-required' | 'missing' | 'satisfied' | 'waived' {
+  if (state.normalizedIntent !== 'fix' || state.mutationCount === 0) return 'not-required';
   if (state.redWaiver) return 'waived';
   const red = state.redEvidence;
   if (!red) return 'missing';
@@ -207,42 +49,6 @@ export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'shape
   const green = state.validations.some(validation => validation.status === 'passed'
     && (validationCommandKey(validation.command) === red.commandKey || (successorKey !== undefined && validationCommandKey(validation.command) === successorKey)));
   return green ? 'satisfied' : 'missing';
-}
-
-/** Record an independent verifier verdict as goal evidence (P3). */
-export function applyVerifierVerdict(state: WorkState, verdict: {verdict: 'verified' | 'not-verified'; asksMet?: boolean[]; gaps?: string[]}) {
-  const gaps = (verdict.gaps ?? []).filter(gap => typeof gap === 'string' && gap.trim().length > 0).slice(0, 5).map(gap => gap.trim().slice(0, 200));
-  if (verdict.verdict === 'verified') {
-    state.verified = true;
-    state.verifyVerdict = undefined;
-    // Corroborate asks the blind verifier explicitly confirmed.
-    (verdict.asksMet ?? []).forEach((met, index) => {
-      const ask = state.asks?.[index];
-      if (met === true && ask && ask.status === 'open') {
-        ask.status = 'met';
-        ask.evidence = 'independent verification';
-      }
-    });
-    return;
-  }
-  state.verifyVerdict = {verdict: 'not-verified', gaps};
-}
-
-/**
- * Record the final sweep verdict (P5): the sweep runs once per multi-lane goal
- * after verification passes. Advisory findings are surfaced by the caller;
- * concrete regressions gate completion through the existing verifier-verdict
- * path (named gaps, continuation, fresh re-validation) — the sweep never
- * re-arms budgets or the verifier itself.
- */
-export function applySweepVerdict(state: WorkState, sweep: SweepVerdict) {
-  const bound = (values: string[] | undefined) => (values ?? []).filter(value => typeof value === 'string' && value.trim().length > 0).slice(0, 3).map(value => value.trim().slice(0, 200));
-  state.sweepDone = true;
-  state.sweepFindings = bound(sweep.findings);
-  const regressions = bound(sweep.regressions);
-  if (regressions.length > 0) {
-    state.verifyVerdict = {verdict: 'not-verified', gaps: regressions};
-  }
 }
 
 export interface WorkState {
@@ -280,24 +86,12 @@ export interface WorkState {
    * command or output.
    */
   carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
-  /** Asks re-derived from the exact request (P2); gate applies to mutating intents. */
-  asks?: WorkAsk[];
-  /** Proportional goal shape (P5); escalation up only, never down. */
-  shape?: GoalShape;
   /** Captured pre-mutation failing repro for fix goals (P4). */
   redEvidence?: RedEvidence;
   /** Structured waiver when the failing repro is genuinely unobservable here (P4). */
   redWaiver?: {reason: string};
   /** Explicitly recorded successor command binding green to red (P4). */
   greenSuccessor?: string;
-  /** Independent verification passed for this logical goal (P3). */
-  verified?: boolean;
-  /** Latest independent verifier rejection (P3); cleared on continuation. */
-  verifyVerdict?: VerifyVerdictState;
-  /** The multi-lane final sweep ran for this logical goal (P5); one per goal. */
-  sweepDone?: boolean;
-  /** Bounded advisory findings from the final sweep (P5). */
-  sweepFindings?: string[];
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -306,6 +100,13 @@ export interface WorkState {
   phase: WorkPhase;
   lastProgressAt: number;
   revision: number;
+}
+
+/** Captured failing repro observed before the first mutation of a fix goal (P4). Safe metadata: command + status, never output bodies. */
+export interface RedEvidence {
+  command: string;
+  commandKey: string;
+  summary: string;
 }
 
 /** Compact current-turn task-list evidence parsed from a successful `writeTasks` result. */
@@ -318,46 +119,7 @@ export interface WorkTaskProgress {
   revision: number;
 }
 
-/** Upper bound for parsed task counts; anything larger is treated as malformed. */
-const TASK_COUNT_LIMIT = 10_000;
-
-function boundedTaskCount(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= TASK_COUNT_LIMIT) return value;
-  if (typeof value === 'string' && /^(0|[1-9]\d{0,4})$/.test(value)) return Number(value);
-  return undefined;
-}
-
-/**
- * Extract bounded task counts from a successful `writeTasks` structured result.
- * Parses only numeric counts (`taskCount`, `counts.pending/in_progress/completed`),
- * never titles or raw output. A non-empty list without a fully valid counts
- * breakdown is ignored (rather than guessed) so partial shapes stay inert.
- */
-export function taskProgressFromOutput(output: unknown, revision: number): WorkTaskProgress | undefined {
-  if (typeof output !== 'object' || output == null) return undefined;
-  const candidate = output as {ok?: unknown; taskCount?: unknown; counts?: unknown};
-  if (candidate.ok !== true) return undefined;
-  const total = boundedTaskCount(candidate.taskCount);
-  if (total === undefined) return undefined;
-  if (total === 0) return {total: 0, pending: 0, inProgress: 0, completed: 0, revision};
-  if (typeof candidate.counts !== 'object' || candidate.counts === null) return undefined;
-  const counts = candidate.counts as Record<string, unknown>;
-  const pending = boundedTaskCount(counts.pending);
-  const inProgress = boundedTaskCount(counts.in_progress);
-  const completed = boundedTaskCount(counts.completed);
-  if (pending === undefined || inProgress === undefined || completed === undefined) return undefined;
-  return {total, pending, inProgress, completed, revision};
-}
-
-/**
- * Seed a fresh per-turn work state with cumulative evidence from earlier
- * physical turns of the same logical goal, so a new turn cannot complete while
- * previously-declared tasks remain or previously-made edits still lack fresh
- * validation. Seq baselines keep `deriveValidationOutcome` truthful across the
- * boundary: a carried `stale`/`absent` outcome keeps demanding validation, a
- * carried `passed`/`failed` outcome stands until this turn mutates or validates.
- */
-export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; asks?: WorkAsk[]; shape?: GoalShape; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string; verified?: boolean; sweepDone?: boolean}) {
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string}) {
   if (carried.taskProgress && carried.taskProgress.total > 0) {
     state.taskProgress = {...carried.taskProgress, revision: 1};
   }
@@ -369,16 +131,12 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
     state.validationSeq = 1;
     state.carriedValidation = carried.validationOutcome === 'passed' ? {status: 'passed'} : {status: 'failed'};
   }
-  // Ask/red/shape/verification state is goal-scoped and rides the checkpoint
-  // across physical turns so a continuation cannot complete while carried
-  // asks stay open or a carried red→green pair stays unsatisfied.
-  if (carried.asks?.length) state.asks = carried.asks.map(ask => ({...ask}));
-  if (carried.shape) state.shape = carried.shape;
+  // Red→green evidence is goal-scoped and rides the checkpoint across
+  // physical turns so a continuation cannot complete while a carried pair
+  // stays unsatisfied.
   if (carried.redEvidence) state.redEvidence = {...carried.redEvidence};
   if (carried.redWaiver) state.redWaiver = {...carried.redWaiver};
   if (carried.greenSuccessor) state.greenSuccessor = carried.greenSuccessor;
-  if (carried.verified) state.verified = true;
-  if (carried.sweepDone) state.sweepDone = true;
 }
 
 export interface WorkToolEvent {
@@ -471,7 +229,7 @@ export function validationSummaryFromOutput(output: unknown): ValidationSummary 
   return isValidationSummary(candidate) ? candidate : undefined;
 }
 
-export function createWorkState(goal: string, intent: RequestIntent, successCriteria: string[], now = Date.now(), options: {asks?: WorkAsk[]; shape?: GoalShape} = {}): WorkState {
+export function createWorkState(goal: string, intent: RequestIntent, successCriteria: string[], now = Date.now()): WorkState {
   return {
     id: `goal-${now}-${Math.random().toString(36).slice(2)}`,
     goal,
@@ -488,8 +246,6 @@ export function createWorkState(goal: string, intent: RequestIntent, successCrit
     mutationCount: 0,
     mutationSeq: 0,
     validationSeq: 0,
-    ...(options.asks?.length ? {asks: options.asks.map(ask => ({...ask}))} : {}),
-    ...(options.shape ? {shape: options.shape} : {}),
     blockers: [],
     pending: [],
     status: 'active',
@@ -556,58 +312,49 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
   }
 
   // Task-list coordination: a successful writeTasks result records bounded
-  // current-turn task counts as completion evidence, plus any structured ask
-  // updates / red waivers the model declared (validated against real events —
-  // prose alone can never close an ask or waive the red→green pair). It is not
-  // a file mutation, and a failed call leaves prior evidence untouched.
+  // current-turn task counts as completion evidence, plus structured red
+  // waivers / green-successor declarations (P4). It is not a file mutation,
+  // and a failed call leaves prior evidence untouched.
   if (ok && event.toolName === 'writeTasks') {
     const progress = taskProgressFromOutput(event.output, seq);
     if (progress) {
       state.taskProgress = progress;
       state.lastProgressAt = now;
     }
-    for (const update of askUpdatesFromOutput(event.output)) {
-      applyAskUpdate(state, update);
-    }
-    const amendments = askAmendmentsFromOutput(event.output);
-    if (amendments) applyAskAmendments(state, amendments);
     const redWaiver = redWaiverFromOutput(event.output);
     if (redWaiver && !state.redWaiver) state.redWaiver = {reason: redWaiver};
     const greenSuccessor = greenSuccessorFromOutput(event.output);
     if (greenSuccessor && !state.greenSuccessor) state.greenSuccessor = greenSuccessor;
-    // Recorded shape escalation (P5): up-only, never downward; inert when the
-    // goal never classified a shape.
-    const proposedShape = goalShapeFromOutput(event.output);
-    if (proposedShape && state.shape) state.shape = escalateGoalShape(state.shape, proposedShape).shape;
   }
 
   state.revision = seq;
   return state;
 }
 
-/**
- * Extract bounded structured ask updates echoed by a successful writeTasks
- * result. Parses only validated shapes (`id`/`status`/optional bounded
- * strings) so malformed tool output can never fabricate ask evidence.
- */
-export function askUpdatesFromOutput(output: unknown): AskUpdateRequest[] {
-  if (typeof output !== 'object' || output == null) return [];
-  const record = output as {ok?: unknown; askUpdates?: unknown};
-  if (record.ok !== true) return [];
-  const candidate = record.askUpdates;
-  if (!Array.isArray(candidate)) return [];
-  const updates: AskUpdateRequest[] = [];
-  for (const item of candidate.slice(0, 10)) {
-    if (typeof item !== 'object' || item == null) continue;
-    const record = item as Record<string, unknown>;
-    const id = typeof record.id === 'string' ? record.id.trim().slice(0, 200) : '';
-    const status = record.status === 'met' || record.status === 'waived' ? record.status : undefined;
-    if (!id || !status) continue;
-    const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.trim().slice(0, 400) : undefined;
-    const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.trim().slice(0, 400) : undefined;
-    updates.push({id, status, ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})});
-  }
-  return updates;
+/** Upper bound for parsed task counts; anything larger is treated as malformed. */
+const TASK_COUNT_LIMIT = 10_000;
+
+function boundedTaskCount(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= TASK_COUNT_LIMIT) return value;
+  if (typeof value === 'string' && /^(0|[1-9]\d{0,4})$/.test(value)) return Number(value);
+  return undefined;
+}
+
+/** Extract bounded task counts from a successful `writeTasks` structured result. */
+export function taskProgressFromOutput(output: unknown, revision: number): WorkTaskProgress | undefined {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const candidate = output as {ok?: unknown; taskCount?: unknown; counts?: unknown};
+  if (candidate.ok !== true) return undefined;
+  const total = boundedTaskCount(candidate.taskCount);
+  if (total === undefined) return undefined;
+  if (total === 0) return {total: 0, pending: 0, inProgress: 0, completed: 0, revision};
+  if (typeof candidate.counts !== 'object' || candidate.counts === null) return undefined;
+  const counts = candidate.counts as Record<string, unknown>;
+  const pending = boundedTaskCount(counts.pending);
+  const inProgress = boundedTaskCount(counts.in_progress);
+  const completed = boundedTaskCount(counts.completed);
+  if (pending === undefined || inProgress === undefined || completed === undefined) return undefined;
+  return {total, pending, inProgress, completed, revision};
 }
 
 function boundedEchoString(output: unknown, field: 'redWaiver' | 'greenSuccessor'): string | undefined {
@@ -623,51 +370,9 @@ export function redWaiverFromOutput(output: unknown): string | undefined {
   return boundedEchoString(output, 'redWaiver');
 }
 
-/**
- * Extract bounded structured ask amendments echoed by a successful writeTasks
- * result (P2b). Parses only validated shapes — bounded add texts and
- * id/text reword records — so malformed tool output can never rewrite the ask
- * list. `reason` is accepted for rewords (audit trail) but not required.
- */
-export function askAmendmentsFromOutput(output: unknown): AskAmendment | undefined {
-  if (typeof output !== 'object' || output == null) return undefined;
-  const record = output as {ok?: unknown; askAmendments?: unknown};
-  if (record.ok !== true) return undefined;
-  const raw = record.askAmendments;
-  if (typeof raw !== 'object' || raw == null) return undefined;
-  const candidate = raw as {add?: unknown; reword?: unknown};
-  const add = Array.isArray(candidate.add)
-    ? candidate.add.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, MAX_ASKS).map(item => item.trim().slice(0, ASK_TEXT_CHARS))
-    : undefined;
-  const reword = Array.isArray(candidate.reword)
-    ? candidate.reword
-      .filter((item): item is {id: string; text: string; reason?: string} => typeof item === 'object' && item != null
-        && typeof (item as Record<string, unknown>).id === 'string' && (item as Record<string, unknown>).id!.toString().trim().length > 0
-        && typeof (item as Record<string, unknown>).text === 'string')
-      .slice(0, MAX_ASKS)
-      .map(item => ({id: item.id.trim().slice(0, 200), text: item.text.trim().slice(0, ASK_TEXT_CHARS), ...(typeof item.reason === 'string' && item.reason.trim() ? {reason: item.reason.trim().slice(0, 400)} : {})}))
-    : undefined;
-  if ((!add || add.length === 0) && (!reword || reword.length === 0)) return undefined;
-  return {...(add && add.length > 0 ? {add} : {}), ...(reword && reword.length > 0 ? {reword} : {})};
-}
-
 /** Explicit green-successor command echoed by a successful writeTasks result (P4). */
 export function greenSuccessorFromOutput(output: unknown): string | undefined {
   return boundedEchoString(output, 'greenSuccessor');
-}
-
-/**
- * Model-proposed shape escalation echoed by a successful writeTasks result
- * (P5): the classification heuristics are hints, and the model may record that
- * the goal turned out bigger than classified. Downward proposals and unknown
- * values are ignored; the escalation is up-only.
- */
-export function goalShapeFromOutput(output: unknown): GoalShape | undefined {
-  if (typeof output !== 'object' || output == null) return undefined;
-  const record = output as {ok?: unknown; goalShape?: unknown};
-  if (record.ok !== true) return undefined;
-  const candidate = record.goalShape;
-  return isGoalShape(candidate) ? candidate : undefined;
 }
 
 /**

@@ -117,16 +117,16 @@ describe('runHeadless: output', () => {
     const {runHeadless} = await loadRunCommand({
       status: 'complete',
       runAgentTurnImpl: (cb) => {
-        cb.onEvent?.({type: 'goal_notice', text: 'Independent verification rejected completion. A fresh context found: tests fail.', at: 't1'});
-        cb.onEvent?.({type: 'goal_notice', text: 'Unfinished goal paused without measurable progress: asks remain unmet', at: 't2'});
+        cb.onEvent?.({type: 'goal_notice', text: 'Assumed out of scope: red→green repro is unobservable in this environment.', at: 't1'});
+        cb.onEvent?.({type: 'goal_notice', text: 'Unfinished goal paused without measurable progress: validation remains stale.', at: 't2'});
       },
     });
     await runHeadless({prompt: 'do the thing', output: 'json'});
     const parsed = JSON.parse(writes.join(''));
     // Notices reach non-streaming consumers too (bounded to the last 5).
     expect(parsed.notices).toEqual([
-      'Independent verification rejected completion. A fresh context found: tests fail.',
-      'Unfinished goal paused without measurable progress: asks remain unmet',
+      'Assumed out of scope: red→green repro is unobservable in this environment.',
+      'Unfinished goal paused without measurable progress: validation remains stale.',
     ]);
   });
 

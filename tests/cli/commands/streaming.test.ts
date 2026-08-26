@@ -44,10 +44,6 @@ interface MocksConfig {
   ignoreAbort?: boolean;
   /** With `ignoreAbort`: yield these parts once aborted, then hang forever (late zombie output). */
   latePartsAfterAbort?: FakeFullStreamPart[];
-  /** Verdict the (mocked) independent verification slice returns; default 'verified'. */
-  verifyVerdict?: 'verified' | 'not-verified';
-  /** Verdict the (mocked) multi-lane final sweep returns; default no-op (undefined). */
-  sweepVerdict?: {findings: string[]; regressions: string[]};
 }
 
 const mocks = vi.hoisted(() => {
@@ -114,34 +110,6 @@ async function loadStreaming(config: MocksConfig) {
   vi.doMock('../../../src/config/settings.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../../../src/config/settings.js')>();
     return {...actual, readSettings: async () => ({})};
-  });
-
-  // The independent verification slice (P3) is runtime-dispatched, not a tool
-  // call the scripted model makes — mock it so turn-stack tests control the
-  // verdict deterministically (default verified; script 'not-verified' to
-  // exercise rejection).
-  vi.doMock('../../../src/cli/commands/streaming/verifySlice.js', async () => {
-    const actual = await vi.importActual<typeof import('../../../src/cli/commands/streaming/verifySlice.js')>('../../../src/cli/commands/streaming/verifySlice.js');
-    const workState = await vi.importActual<typeof import('../../../src/core/agent/workState.js')>('../../../src/core/agent/workState.js');
-    const verdict = config.verifyVerdict ?? 'verified';
-    return {
-      ...actual,
-      runVerificationSlice: async ({goal, callbacks}: {goal: import('../../../src/core/agent/workState.js').WorkState; callbacks: {addMessage: (msg: {role: string; text: string}) => void}}) => {
-        workState.applyVerifierVerdict(goal, {verdict, ...(verdict === 'not-verified' ? {gaps: ['scripted verifier gap']} : {})});
-        callbacks.addMessage(verdict === 'not-verified'
-          ? {role: 'system', text: 'Independent verification rejected completion. A fresh context re-derived the request against the repository and found: scripted verifier gap'}
-          : {role: 'system', text: 'Independent verification passed: a fresh context re-derived the request against the repository and confirmed it is met.'});
-      },
-      runSweepSlice: async ({goal, callbacks}: {goal: import('../../../src/core/agent/workState.js').WorkState; callbacks: {addMessage: (msg: {role: string; text: string}) => void}}) => {
-        const sweep = config.sweepVerdict;
-        workState.applySweepVerdict(goal, sweep ?? {findings: [], regressions: []});
-        if (sweep && sweep.regressions.length > 0) {
-          callbacks.addMessage({role: 'system', text: `Integration sweep found cross-lane regressions: ${sweep.regressions.join(' ')}. Completion stays blocked until they are fixed and re-validated.`});
-        } else if (sweep && sweep.findings.length > 0) {
-          callbacks.addMessage({role: 'system', text: `Integration sweep notes: ${sweep.findings.join(' ')}`});
-        }
-      },
-    };
   });
 
   vi.doMock('ai', async () => {
@@ -1406,7 +1374,7 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     expect(outcome).toMatchObject({status: 'complete'});
   });
 
-  it('continues when edits land after a failing repro, then completes on the red→green pair with the ask closed', async () => {
+  it('continues when edits land after a failing repro, then completes on the red→green pair', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle,
       availableTools: tools,
@@ -1421,11 +1389,8 @@ describe('runAgentTurn: autonomous goal continuation', () => {
           {type: 'finish', finishReason: 'stop'},
         ],
         [
-          // Green (P4): the same check passes, and the ask closes on structured
-          // evidence citing that passing validation (P2).
+          // Green (P4): the same check now passes.
           ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
           {type: 'text-delta', text: 'Validation passes after the edit.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -1438,90 +1403,8 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     expect(outcome).toMatchObject({status: 'complete', evidence: {validationOutcome: 'passed', redPair: 'satisfied', recoveryUsed: {goal: 1}}});
   });
 
-  it('rejects a voluntary final while asks from the request remain open and names them', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'text-delta', text: 'Done with the button.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-        [
-          ...passedValidation('v2'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}]}},
-          {type: 'text-delta', text: 'Both parts are done and validated.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn('add the export button and a test for it', undefined, [], cb);
-    // The ask gate fires only after validation passes (concrete blocker first).
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/A test for it/);
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/Unmet asks from the original request/);
-    expect(outcome).toMatchObject({status: 'complete', evidence: {askProgress: {total: 2, open: 0}}});
-  });
 
-  it('surfaces waived asks in the final synthesis line instead of silently dropping scope', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'waived', waiverReason: 'no docs tooling configured'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'waived', waiverReason: 'no docs tooling configured'}]}},
-          {type: 'text-delta', text: 'Done.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn('add the endpoint and document it', undefined, [], cb);
-    expect(outcome).toMatchObject({status: 'complete'});
-    expect(cb.messages.some(message => message.role === 'system' && message.text.includes('Assumed out of scope') && message.text.includes('no docs tooling configured'))).toBe(true);
-    // Gate decisions also surface as goal_notice events for headless consumers.
-    expect(cb.events.some(event => event.type === 'goal_notice' && String(event.text).includes('Assumed out of scope'))).toBe(true);
-  });
 
-  it('rejects a final the independent verifier did not confirm and carries the named gap', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      verifyVerdict: 'not-verified',
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}]}},
-          {type: 'text-delta', text: 'Feature complete.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-        [
-          {type: 'text-delta', text: 'Addressing the verifier gap now.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn('implement the export feature across the api and ui layers and add integration tests for both', undefined, [], cb);
-    // The blind verifier rejected the first final; the message and the
-    // continuation prompt both name the concrete gap.
-    expect(cb.messages.some(message => message.text.includes('Independent verification rejected completion') && message.text.includes('scripted verifier gap'))).toBe(true);
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/Independent verification named these gaps: scripted verifier gap/);
-    // One verify slice per physical turn (bounded): after the continuation
-    // chance, the turn completes with the gap addressed.
-    expect(outcome).toMatchObject({status: 'complete'});
-  });
 
   it('demands a red→green pair before accepting a fix final', async () => {
     const {runAgentTurn} = await loadStreaming({
@@ -1532,10 +1415,6 @@ describe('runAgentTurn: autonomous goal continuation', () => {
           {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
           {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
           ...passedValidation('v1'),
-          // The ask closes on structured evidence so the red→green gate is the
-          // reason that fires (ask readiness would otherwise mask it).
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
           {type: 'text-delta', text: 'Fixed.'},
           {type: 'finish', finishReason: 'stop'},
         ],
@@ -1549,94 +1428,6 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     const outcome = await runAgentTurn('fix the login crash in the auth module', undefined, [], cb);
     expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/red→green pair missing/);
     expect(outcome).toMatchObject({status: 'failed', evidence: {redPair: 'missing'}});
-  });
-  // Three imperative sentences -> three asks -> multi-lane shape (sweep applies).
-  const laneRequest = 'Implement the export feature. Add the import parser. Document both in the changelog.';
-
-  it('gates a multi-lane final on sweep regressions, then completes once re-validated', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      verifyVerdict: 'verified',
-      sweepVerdict: {findings: [], regressions: ['src/api.ts exports validateUser but ui.ts imports validate_user']},
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
-          {type: 'text-delta', text: 'All lanes landed.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-        [
-          // Fix the regression, re-validate, answer again. The sweep is
-          // consumed (one per goal) and verification stands, so this completes.
-          {type: 'tool-call', toolCallId: 'e2', toolName: 'editFile', input: {path: 'ui.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e2', toolName: 'editFile', input: {path: 'ui.ts'}, output: {ok: true}},
-          ...passedValidation('v2'),
-          {type: 'text-delta', text: 'Regression fixed and re-validated.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn(laneRequest, undefined, [], cb);
-    expect(cb.messages.some(message => message.text.includes('Integration sweep found cross-lane regressions') && message.text.includes('validateUser'))).toBe(true);
-    // The sweep regression rode the verifier-verdict path into continuation.
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/validateUser/);
-    expect(outcome).toMatchObject({status: 'complete'});
-  });
-
-  it('surfaces advisory sweep findings without gating', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      verifyVerdict: 'verified',
-      sweepVerdict: {findings: ['config duplicated across lanes'], regressions: []},
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
-          {type: 'text-delta', text: 'All lanes landed.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn(laneRequest, undefined, [], cb);
-    expect(outcome).toMatchObject({status: 'complete'});
-    expect(mocks.streamedMessages).toHaveLength(1);
-    expect(cb.messages.some(message => message.text.includes('Integration sweep notes: config duplicated across lanes'))).toBe(true);
-  });
-
-  it('refines the derived ask list through pre-work amendments', async () => {
-    const {runAgentTurn} = await loadStreaming({
-      modelHandle,
-      availableTools: tools,
-      callStreams: [
-        [
-          // Refinement first: the model declares a missing ask, then works.
-          {type: 'tool-call', toolCallId: 'r1', toolName: 'writeTasks', input: {tasks: [], askAmendments: {add: ['Add a changelog entry']}}},
-          {type: 'tool-result', toolCallId: 'r1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askAmendments: {add: ['Add a changelog entry']}}},
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'a.ts'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'a.ts'}]}},
-          {type: 'text-delta', text: 'Everything including the changelog.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-      ],
-    });
-    const cb = makeCallbacks();
-    const outcome = await runAgentTurn('implement the export feature across the api and ui layers and add integration tests for both', undefined, [], cb);
-    // The amended ask entered the gate: closing only the derived asks would
-    // have left the added ask open and triggered continuation.
-    expect(outcome).toMatchObject({status: 'complete', evidence: {askProgress: {total: 3, open: 0}}});
   });
 });
 
@@ -1758,13 +1549,10 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
         // Cycle 2 tries to stop with tasks done but no fresh validation — the
         // carried stale/absent evidence must reject it and continue once more.
         [{type: 'text-delta', text: 'Tasks are done; stopping here.'}, {type: 'finish', finishReason: 'stop'}],
-        // Cycle 3: validation lands, the ask closes on structured evidence
-        // citing it (P2), and the red→green pair completes (P4).
+        // Cycle 3: validation lands and the red→green pair completes (P4).
         [
           {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}},
           {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
-          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
-          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]}},
           {type: 'text-delta', text: 'Validation passes after the edits.'},
           {type: 'finish', finishReason: 'stop'},
         ],

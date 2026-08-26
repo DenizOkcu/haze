@@ -4,10 +4,9 @@ import {isContextOverflowError, isRetryableModelError} from '../../../core/agent
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification} from '../../../core/agent/completionController.js';
 import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, DEFAULT_MODEL_RETRIES, type TurnBudget} from '../../../core/agent/budgets.js';
-import {deriveValidationOutcome, intentExpectsValidation, openAsksOf, redPairStatus, waivedAsksOf} from '../../../core/agent/workState.js';
+import {deriveValidationOutcome, redPairStatus} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
-import {openAskTexts} from './verifySlice.js';
 import {formatSeconds} from '../../../utils/format.js';
 import {retryDelayMs} from './turnRuntime.js';
 import {salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
@@ -28,7 +27,7 @@ import type {ValidationOutcome, WorkTaskProgress} from '../../../core/agent/work
  * progress) project the turn-wide `TurnExecutionState`; when omitted, the
  * defaults cannot reject a turn (unknown intent, no mutations, no task list).
  */
-export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; askProgress?: {total?: number; open: number; openTexts: string[]}; redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived'; verification?: {verdict: 'verified' | 'not-verified'; gaps: string[]}}): TurnStatus {
+export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived'}): TurnStatus {
   void input.error;
   const state: TurnExecutionState = {
     ...createTurnExecutionState(),
@@ -38,9 +37,7 @@ export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; as
     mutationCount: input.mutationCount ?? 0,
     ...(input.validationOutcome ? {validationOutcome: input.validationOutcome} : {}),
     ...(input.taskProgress ? {taskProgress: input.taskProgress} : {}),
-    ...(input.askProgress ? {askProgress: {total: input.askProgress.total ?? input.askProgress.open, open: input.askProgress.open, waived: 0, openTexts: input.askProgress.openTexts}} : {}),
     ...(input.redPair ? {redPair: input.redPair} : {}),
-    ...(input.verification ? {verification: input.verification} : {}),
   };
   return decideTerminalStatus(
     state,
@@ -72,16 +69,8 @@ export function projectGoalEvidence(turnState: TurnExecutionState, goal: Session
   turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
   turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
   turnState.taskProgress = goal.taskProgress;
-  // Ask-shaped completion (P2): the gate applies only to mutating intents and
-  // only when extraction produced asks; `trivial` shapes keep the floor but
-  // skip ask ceremony (P5 proportionality).
-  const asks = goal.asks ?? [];
-  turnState.askProgress = asks.length > 0 && intentExpectsValidation(goal.intent) && goal.shape !== 'trivial'
-    ? {total: asks.length, open: openAsksOf(goal).length, waived: waivedAsksOf(goal).length, openTexts: openAskTexts(goal)}
-    : undefined;
-  // Red→green pair (P4) and the independent verification verdict (P3).
+  // Red→green pair (P4).
   turnState.redPair = redPairStatus(goal);
-  turnState.verification = goal.verifyVerdict;
 }
 
 export interface AttemptOutcomeDeps {
@@ -113,9 +102,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const completionEvidence: CompletionEvidence = {sawToolCall: stream.sawToolCall, assistantText: stream.assistantText, lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError};
   const readiness = assessCompletionReadiness(turnState, completionEvidence);
   const classification: TerminalClassification = classifyTerminalOutcome(turnState, completionEvidence);
-  const openAskTextsForPrompt = turnState.askProgress?.openTexts ?? [];
-  const verifierGaps = turnState.verification?.verdict === 'not-verified' ? turnState.verification.gaps : undefined;
-  const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, ...(turnState.askProgress ? {askProgress: {total: turnState.askProgress.total, open: turnState.askProgress.open, openTexts: turnState.askProgress.openTexts}} : {}), ...(turnState.redPair ? {redPair: turnState.redPair} : {}), ...(turnState.verification ? {verification: turnState.verification} : {})});
+  const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
   if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
   goal.phase = 'done';
   // Goal status reflects completion readiness, not the shallow text status:
@@ -142,13 +129,9 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const goalCycle = turnOptions.goalContext?.cycle ?? 1;
   const carriedEvidence: CarriedGoalEvidence = {
     ...(turnOptions.goalContext?.requestHash ? {requestHash: turnOptions.goalContext.requestHash} : {}),
-    ...(goal.asks?.length ? {asks: goal.asks.map(ask => ({...ask}))} : {}),
-    ...(goal.shape ? {shape: goal.shape} : {}),
     ...(goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
     ...(goal.redWaiver ? {redWaiver: {...goal.redWaiver}} : {}),
     ...(goal.greenSuccessor ? {greenSuccessor: goal.greenSuccessor} : {}),
-    ...(goal.verified ? {verified: true} : {}),
-    ...(goal.sweepDone ? {sweepDone: true} : {}),
   };
   const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
   const checkpointResult = (): AgentAttemptResult => {
@@ -174,12 +157,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
       if (goalSlice && goalSlice.steps > 0) {
         discardRejectedFinal();
         if (readiness === 'validation_failed' || readiness === 'validation_stale' || readiness === 'validation_absent_after_mutation') turnState.validationContinuationUsed = true;
-        // A rejected final means the recorded verifier rejection has been
-        // consumed: clear it so the next attempt re-verifies freshly instead of
-        // failing readiness on a stale verdict (one verify per physical turn).
-        if (readiness === 'verification_rejected') goal.verifyVerdict = undefined;
-        const continuationDetail = verifierGaps ? `Independent verification named these gaps: ${verifierGaps.slice(0, 3).join(' ')}` : undefined;
-        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress, openAskTextsForPrompt), taskCountsOf(turnState.taskProgress), openAskTextsForPrompt, continuationDetail, goal.shape), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
+        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress), taskCountsOf(turnState.taskProgress)), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
       } else if (rescueSlice && rescueSlice.steps > 0) {
         return {status: turnStatus, recovery: {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}}};
       } else if (classification === 'recoverable-incomplete') {
@@ -190,17 +168,12 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
       }
     }
   }
-  // Honest completion surfacing (P2/P4): waived asks and red waivers are
-  // assumptions, not silent scope cuts — they ride the final synthesis line.
-  if (turnStatus === 'complete') {
-    const waivedAsks = waivedAsksOf(goal);
-    const redWaiverNote = goal.redWaiver ? `red→green repro assumed unobservable in this environment (${goal.redWaiver.reason})` : undefined;
-    if (waivedAsks.length > 0 || redWaiverNote) {
-      const parts = [...waivedAsks.map(ask => `${ask.text} (${ask.waiverReason ?? 'no reason recorded'})`), ...(redWaiverNote ? [redWaiverNote] : [])];
-      const text = `Assumed out of scope: ${parts.join('; ')}.`;
-      callbacks.addMessage({role: 'system', text});
-      callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
-    }
+  // Honest completion surfacing (P4): a red waiver is an assumption, not a
+  // silent scope cut — it rides the final synthesis line.
+  if (turnStatus === 'complete' && goal.redWaiver) {
+    const text = `Assumed out of scope: red→green repro assumed unobservable in this environment (${goal.redWaiver.reason}).`;
+    callbacks.addMessage({role: 'system', text});
+    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
   }
   return {status: turnStatus};
 }

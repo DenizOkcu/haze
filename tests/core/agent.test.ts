@@ -3,7 +3,7 @@ import type {ModelMessage} from 'ai';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, modelMessageText, splitForCompaction} from '../../src/core/agent/compaction.js';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {isContextOverflowError, isRetryableModelError} from '../../src/core/agent/errors.js';
-import {askRefinementPrompt, classifyGoalShape, createSessionGoal, deriveRequestAsks, escalateGoalShape, goalContinuationPrompt} from '../../src/core/agent/goalPolicy.js';
+import {goalContinuationPrompt} from '../../src/core/agent/goalPolicy.js';
 
 function msg(role: 'user' | 'assistant' | 'system', content: string): ModelMessage {
   return {role, content};
@@ -169,117 +169,10 @@ describe('LLM-summarized compaction pieces (F-09)', () => {
   });
 });
 
-describe('ask extraction (P2: deterministic, request-derived)', () => {
-  it('derives separate asks for coordinated imperatives and implied asks', () => {
-    expect(deriveRequestAsks('add the export button and a test for it')).toEqual(['Add the export button', 'A test for it']);
-    expect(deriveRequestAsks('create the parser. Then document it and update the docs page')).toEqual(['Create the parser', 'Document it', 'Update the docs page']);
-  });
-
-  it('keeps plain noun conjunctions as one ask', () => {
-    expect(deriveRequestAsks('add foo and bar to the config')).toEqual(['Add foo and bar to the config']);
-  });
-
-  it('drops unclosable restatements instead of truncating them into vague asks', () => {
-    // A single clause restating the whole request cannot be made checkable;
-    // extraction degrades to no asks (the validation floor still gates) rather
-    // than manufacturing a no-progress failure on correct work.
-    expect(deriveRequestAsks(`add ${'x'.repeat(300)}`)).toEqual([]);
-    const many = deriveRequestAsks('add one. add two. add three. add four. add five. add six. add seven. add eight.');
-    expect(many).toHaveLength(7);
-  });
-
-  it('splits a trailing parenthetical enumeration into one checkable ask per item', () => {
-    const asks = deriveRequestAsks('Implement the complete CLI in /app conforming to all behavior in the spec (argument parsing, CSV parsing, and output formatting)');
-    expect(asks).toHaveLength(3);
-    expect(asks[0]).toContain('argument parsing');
-    expect(asks[1]).toContain('CSV parsing');
-    expect(asks[2]).toContain('output formatting');
-    // Nested parentheses and non-enumerations fall through unchanged.
-    expect(deriveRequestAsks('add the sum(a(b)) helper')).toEqual(['Add the sum(a(b)) helper']);
-    expect(deriveRequestAsks('fix the bug (it crashes on empty input)')).toEqual(['Fix the bug (it crashes on empty input)']);
-  });
-
-  it('degrades to an empty list (no ask gate) when no imperative clause exists', () => {
-    expect(deriveRequestAsks('what does this repo do')).toEqual([]);
-    expect(deriveRequestAsks('')).toEqual([]);
-  });
-});
-
-describe('goal shapes (P5: proportional ceremony)', () => {
-  it('classifies deterministically: fix→debug, 3+ asks→multi-lane, short single-ask→trivial, else bounded', () => {
-    expect(classifyGoalShape('fix the crash', 'fix', 1)).toBe('debug');
-    expect(classifyGoalShape('do a, b, c', 'implement', 3)).toBe('multi-lane');
-    expect(classifyGoalShape('rename X to Y', 'implement', 1)).toBe('trivial');
-    expect(classifyGoalShape('add a feature', 'implement', 1)).toBe('trivial');
-    expect(classifyGoalShape(`refactor the whole subsystem carefully across ${'many '.repeat(30)}files`, 'implement', 1)).toBe('bounded');
-  });
-
-  it('escalates upward only, never downward', () => {
-    expect(escalateGoalShape('trivial', 'bounded')).toEqual({shape: 'bounded', escalated: true});
-    expect(escalateGoalShape('bounded', 'debug')).toEqual({shape: 'debug', escalated: true});
-    expect(escalateGoalShape('multi-lane', 'bounded')).toEqual({shape: 'multi-lane', escalated: false});
-    expect(escalateGoalShape('debug', 'trivial')).toEqual({shape: 'debug', escalated: false});
-  });
-});
-
-describe('createSessionGoal (P2/P5 wiring)', () => {
-  it('seeds request-derived asks and a shape for mutating intents', () => {
-    const goal = createSessionGoal('add the endpoint and a test for it');
-    expect(goal.asks!.map(ask => ask.text)).toEqual(['Add the endpoint', 'A test for it']);
-    expect(goal.shape).toBe('bounded');
-    expect(goal.successCriteria).toEqual(goal.asks!.map(ask => ask.text));
-  });
-
-  it('keeps plan/review/answer goals ask-free (regression-safe)', () => {
-    expect(createSessionGoal('create a plan for the refactor').asks).toBeUndefined();
-    expect(createSessionGoal('review the auth flow').asks).toBeUndefined();
-    expect(createSessionGoal('what is haze').asks).toBeUndefined();
-  });
-});
-
-describe('goal continuation prompt (P2/P4 payload)', () => {
-  it('names unmet asks and the structured closure path', () => {
-    const prompt = goalContinuationPrompt('asks from the original request remain unmet: Add a test for it', undefined, ['Add a test for it']);
-    expect(prompt).toContain('Unmet asks from the original request: Add a test for it');
-    expect(prompt).toContain('askUpdates');
-  });
-
+describe('goal continuation prompt (P4 payload)', () => {
   it('names the red→green requirement and waiver path for fix readiness', () => {
     const prompt = goalContinuationPrompt('no failing repro was captured before the fix landed (red→green pair missing)');
     expect(prompt).toContain('redWaiver');
     expect(prompt).toContain('Reproduce the reported failure');
-  });
-
-  it('appends verifier-provided gap detail', () => {
-    const prompt = goalContinuationPrompt('independent verification rejected completion', undefined, undefined, 'Independent verification named these gaps: the new file has no test');
-    expect(prompt).toContain('the new file has no test');
-  });
-});
-
-describe('ask refinement nudge (P2b)', () => {
-  it('lists the derived asks and requires one pre-work writeTasks amendment', () => {
-    const prompt = askRefinementPrompt('add the export button and a test for it', ['Add the export button', 'A test for it']);
-    expect(prompt).toContain('Add the export button');
-    expect(prompt).toContain('askAmendments');
-    expect(prompt).toContain('before any file edit or command');
-    expect(prompt).toContain('waived with a waiverReason');
-  });
-
-  it('asks for declarations when extraction produced no asks', () => {
-    const prompt = askRefinementPrompt('make the CLI nicer', []);
-    expect(prompt).toContain('none derived');
-    expect(prompt).toContain('declare each as a new ask');
-  });
-});
-
-describe('multi-lane continuation hint (P5)', () => {
-  it('encourages parallel lanes only for multi-lane goals', () => {
-    const lane = goalContinuationPrompt('asks from the original request remain unmet: a', undefined, ['a'], undefined, 'multi-lane');
-    expect(lane).toContain('disjoint lanes');
-    expect(lane).toContain('parallel subagents');
-    expect(lane).toContain('serialized');
-    const bounded = goalContinuationPrompt('asks from the original request remain unmet: a', undefined, ['a'], undefined, 'bounded');
-    expect(bounded).not.toContain('parallel subagents');
-    expect(goalContinuationPrompt('asks remain', undefined, ['a'])).not.toContain('parallel subagents');
   });
 });

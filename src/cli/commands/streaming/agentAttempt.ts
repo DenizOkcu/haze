@@ -12,9 +12,7 @@ import {createToolGroupRenderer} from './toolGroupRenderer.js';
 import {prepareAttempt} from './attemptSetup.js';
 import {createAttemptLoopState, runAttemptStream} from './streamLoop.js';
 import {createStreamStallGuard, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
-import {finalizeAttemptOutcome, handleAttemptFailure, projectGoalEvidence, type AgentAttemptResult} from './attemptOutcome.js';
-import {VERIFY_SLICE_MIN_REMAINING_MS, runSweepSlice, runVerificationSlice, sweepRequired, verificationRequired} from './verifySlice.js';
-import {assessCompletionReadiness} from '../../../core/agent/completionController.js';
+import {finalizeAttemptOutcome, handleAttemptFailure, type AgentAttemptResult} from './attemptOutcome.js';
 import type {AttemptCleanupRegistry} from './attemptLifecycle.js';
 import {ATTEMPT_TEARDOWN_BOUND_MS} from './attemptLifecycle.js';
 import type {TurnAbortCause} from './abortCause.js';
@@ -105,47 +103,6 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
     });
 
     const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage});
-    // Independent verification slice (P3): before the first accepted voluntary
-    // final of a mutating goal, one blind verifier per physical turn re-derives
-    // the request against the repository. Admission mirrors the recovery-slice
-    // discipline: only when every other readiness gate already passes, the
-    // finish is a voluntary stop with a substantive answer, and enough turn
-    // time remains. The slice never re-arms budgets; its verdict becomes
-    // completion evidence (verified accepts, not-verified rejects with named gaps).
-    if (
-      !turnState.verifySliceUsed
-      && verificationRequired(goal)
-      && !abortController.signal.aborted
-      && stream.finishReason === 'stop'
-      && stream.assistantText.trim().length > 0
-      && stream.lastToolOk !== false
-      && !stream.unresolvedToolInputError
-    ) {
-      projectGoalEvidence(turnState, goal);
-      const readiness = assessCompletionReadiness(turnState, {lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError});
-      if (readiness === 'ready' && remainingTurnDeadlineMs() > VERIFY_SLICE_MIN_REMAINING_MS) {
-        turnState.verifySliceUsed = true;
-        await runVerificationSlice({goal, runtime: attemptSetupResult.runtime, contextFiles: setup.contextFiles, session, abortSignal: abortController.signal, turnScope, callbacks});
-      }
-    }
-    // Multi-lane final sweep (P5): after verification passed (this turn or an
-    // earlier one), one read-only integration sweep per logical goal checks the
-    // landed lanes. Same admission discipline as the verify slice; advisory
-    // except for explicitly reported concrete regressions.
-    if (
-      !abortController.signal.aborted
-      && sweepRequired(goal)
-      && stream.finishReason === 'stop'
-      && stream.assistantText.trim().length > 0
-      && stream.lastToolOk !== false
-      && !stream.unresolvedToolInputError
-    ) {
-      projectGoalEvidence(turnState, goal);
-      const readiness = assessCompletionReadiness(turnState, {lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError});
-      if (readiness === 'ready' && remainingTurnDeadlineMs() > VERIFY_SLICE_MIN_REMAINING_MS) {
-        await runSweepSlice({goal, runtime: attemptSetupResult.runtime, contextFiles: setup.contextFiles, session, abortSignal: abortController.signal, callbacks});
-      }
-    }
     return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream});
   } catch (error) {
     return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries});

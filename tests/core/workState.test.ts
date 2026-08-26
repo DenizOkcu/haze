@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {applyAskAmendments, applyAskUpdate, applySweepVerdict, applyVerifierVerdict, askAmendmentsFromOutput, askUpdatesFromOutput, createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, redPairStatus, seedCarriedGoalEvidence, taskProgressFromOutput, validationCommandKey, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
+import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, redPairStatus, seedCarriedGoalEvidence, taskProgressFromOutput, validationCommandKey, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
 
 function passedSummary(text = 'tests passed') {
   return {kind: 'test', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
@@ -230,45 +230,6 @@ describe('work state task progress (writeTasks observation)', () => {
   });
 });
 
-describe('ask updates (P2: no prose-override channel)', () => {
-  it('marks an ask met only with evidence matching a passing validation or changed file', () => {
-    const state = createWorkState('add the endpoint', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add the endpoint', status: 'open'}]});
-    expect(applyAskUpdate(state, {id: 'ask-1', status: 'met', evidence: 'npm test'}).applied).toBe(false);
-    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'src/api.ts'}, success: true, output: {ok: true}});
-    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
-    expect(applyAskUpdate(state, {id: 'ask-1', status: 'met', evidence: 'npm test'}).applied).toBe(true);
-    expect(state.asks![0]!.status).toBe('met');
-    // Changed-file evidence also closes an ask.
-    const state2 = createWorkState('add the config', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add the config', status: 'open'}]});
-    observeWorkToolEvent(state2, {toolName: 'writeFile', input: {path: 'config/next.json'}, success: true, output: {ok: true}});
-    expect(applyAskUpdate(state2, {id: 'ask-1', status: 'met', evidence: 'config/next.json'}).applied).toBe(true);
-  });
-
-  it('requires a reason to waive and rejects unknown ids', () => {
-    const state = createWorkState('x', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Do x', status: 'open'}]});
-    expect(applyAskUpdate(state, {id: 'ask-1', status: 'waived'}).applied).toBe(false);
-    expect(applyAskUpdate(state, {id: 'ask-1', status: 'waived', waiverReason: 'out of scope for this goal'}).applied).toBe(true);
-    expect(state.asks![0]!.status).toBe('waived');
-    expect(applyAskUpdate(state, {id: 'ask-9', status: 'met', evidence: 'npm test'}).applied).toBe(false);
-  });
-
-  it('parses bounded ask updates from a successful writeTasks result only', () => {
-    expect(askUpdatesFromOutput({ok: true, askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]})).toEqual([{id: 'ask-1', status: 'met', evidence: 'npm test'}]);
-    expect(askUpdatesFromOutput({ok: false, askUpdates: [{id: 'ask-1', status: 'met'}]})).toEqual([]);
-    expect(askUpdatesFromOutput({ok: true})).toEqual([]);
-    expect(askUpdatesFromOutput({ok: true, askUpdates: [{id: '', status: 'met'}, {id: 'x', status: 'deleted'}, 'junk']})).toEqual([]);
-  });
-
-  it('applies echoed ask updates, red waivers, and green successors from writeTasks results', () => {
-    const state = createWorkState('fix it', 'fix', [], Date.now(), {asks: [{id: 'ask-1', text: 'Fix it', status: 'open'}]});
-    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
-    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}], redWaiver: 'flaky env', greenSuccessor: 'npm run test:ci'}});
-    expect(state.asks![0]!.status).toBe('met');
-    expect(state.redWaiver).toEqual({reason: 'flaky env'});
-    expect(state.greenSuccessor).toBe('npm run test:ci');
-  });
-});
-
 describe('red→green pair (P4)', () => {
   it('captures the first failing repro before the first mutation of a fix goal', () => {
     const state = createWorkState('fix the crash', 'fix', []);
@@ -313,144 +274,25 @@ describe('red→green pair (P4)', () => {
     expect(redPairStatus(state)).toBe('waived');
   });
 
-  it('is not required without mutations or for trivial shapes', () => {
-    expect(redPairStatus(createWorkState('fix it', 'fix', [])).status).toBeUndefined();
+  it('is not required without mutations', () => {
     const noMutation = createWorkState('fix it', 'fix', []);
     expect(redPairStatus(noMutation)).toBe('not-required');
-    const trivial = createWorkState('fix the typo in the label text', 'fix', [], Date.now(), {shape: 'trivial'});
-    observeWorkToolEvent(trivial, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
-    expect(redPairStatus(trivial)).toBe('not-required');
   });
 });
 
-describe('verifier verdicts (P3)', () => {
-  it('marks the goal verified and corroborates confirmed asks', () => {
-    const state = createWorkState('add x and docs', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add x', status: 'open'}, {id: 'ask-2', text: 'Add docs', status: 'open'}]});
-    applyVerifierVerdict(state, {verdict: 'verified', asksMet: [true, false]});
-    expect(state.verified).toBe(true);
-    expect(state.asks![0]!.status).toBe('met');
-    expect(state.asks![1]!.status).toBe('open');
-    expect(state.verifyVerdict).toBeUndefined();
-  });
-
-  it('records a bounded not-verified verdict with named gaps', () => {
-    const state = createWorkState('add x', 'implement', []);
-    applyVerifierVerdict(state, {verdict: 'not-verified', gaps: ['tests fail', '  ', 'x'.repeat(500)]});
-    expect(state.verified).toBeUndefined();
-    expect(state.verifyVerdict).toEqual({verdict: 'not-verified', gaps: ['tests fail', 'x'.repeat(200)]});
-  });
-});
-
-describe('seedCarriedGoalEvidence (goal-scoped P2/P3/P4/P5 state)', () => {
-  it('carries asks, shape, red evidence, waivers, and verification across the boundary', () => {
+describe('seedCarriedGoalEvidence (goal-scoped P4 state)', () => {
+  it('carries red evidence and waivers across the boundary', () => {
     const state = createWorkState('fix it', 'fix', []);
     seedCarriedGoalEvidence(state, {
       mutationCount: 2,
       validationOutcome: 'stale',
-      asks: [{id: 'ask-1', text: 'Fix it', status: 'open'}],
-      shape: 'debug',
       redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
-      verified: true,
+      redWaiver: {reason: 'kept from earlier turn'},
+      greenSuccessor: 'npm run test:ci',
     });
-    expect(state.asks).toEqual([{id: 'ask-1', text: 'Fix it', status: 'open'}]);
-    expect(state.shape).toBe('debug');
     expect(state.redEvidence!.command).toBe('npm test');
-    expect(state.verified).toBe(true);
+    expect(state.redWaiver).toEqual({reason: 'kept from earlier turn'});
+    expect(state.greenSuccessor).toBe('npm run test:ci');
     expect(state.mutationCount).toBe(2);
-  });
-});
-
-describe('recorded shape escalation (P5: up-only)', () => {
-  it('escalates upward from a writeTasks goalShape echo', () => {
-    const state = createWorkState('add the endpoint', 'implement', [], Date.now(), {shape: 'trivial'});
-    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'multi-lane'}});
-    expect(state.shape).toBe('multi-lane');
-  });
-
-  it('ignores downward proposals, failed calls, unknown values, and shapeless goals', () => {
-    const downward = createWorkState('do it all', 'implement', [], Date.now(), {shape: 'debug'});
-    observeWorkToolEvent(downward, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'trivial'}});
-    expect(downward.shape).toBe('debug');
-    const failed = createWorkState('x', 'implement', [], Date.now(), {shape: 'trivial'});
-    observeWorkToolEvent(failed, {toolName: 'writeTasks', input: {tasks: []}, success: false, output: {ok: false, error: 'nope', goalShape: 'multi-lane'}});
-    expect(failed.shape).toBe('trivial');
-    const unknown = createWorkState('x', 'implement', [], Date.now(), {shape: 'bounded'});
-    observeWorkToolEvent(unknown, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'gigantic'}});
-    expect(unknown.shape).toBe('bounded');
-    const shapeless = createWorkState('x', 'implement', []);
-    observeWorkToolEvent(shapeless, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'debug'}});
-    expect(shapeless.shape).toBeUndefined();
-  });
-});
-
-describe('ask amendments (P2b: refine before work starts)', () => {
-  it('adds missing asks and rewords imprecise ones, preserving status and evidence', () => {
-    const state = createWorkState('improve the CLI', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Make it nicer', status: 'open'}]});
-    const outcome = applyAskAmendments(state, {add: ['Add a changelog entry'], reword: [{id: 'ask-1', text: 'Improve the CLI help output', reason: 'original was vague'}]});
-    expect(outcome.applied).toBe(true);
-    expect(outcome.added).toEqual(['Add a changelog entry']);
-    expect(outcome.reworded).toEqual(['Improve the CLI help output']);
-    expect(state.asks).toEqual([{id: 'ask-1', text: 'Improve the CLI help output', status: 'open'}, {id: 'ask-2', text: 'Add a changelog entry', status: 'open'}]);
-  });
-
-  it('keeps reworded status/evidence and never drops an ask', () => {
-    const state = createWorkState('x', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add tests', status: 'met', evidence: 'npm test'}]});
-    applyAskAmendments(state, {reword: [{id: 'ask-1', text: 'Add unit tests'}]});
-    expect(state.asks![0]).toEqual({id: 'ask-1', text: 'Add unit tests', status: 'met', evidence: 'npm test'});
-    expect(state.asks).toHaveLength(1);
-  });
-
-  it('locks after the first mutation or validation, and bounds/dedupes adds', () => {
-    const state = createWorkState('x', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add tests', status: 'open'}]});
-    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
-    expect(applyAskAmendments(state, {add: ['Add docs']}).applied).toBe(false);
-    const validated = createWorkState('x', 'fix', [], Date.now(), {asks: [{id: 'ask-1', text: 'Fix it', status: 'open'}]});
-    observeWorkToolEvent(validated, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
-    expect(applyAskAmendments(validated, {add: ['Add docs']}).applied).toBe(false);
-    // Dedupe against existing texts and cap the list at MAX_ASKS.
-    const capped = createWorkState('x', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add tests', status: 'open'}]});
-    expect(applyAskAmendments(capped, {add: ['add tests', 'Add docs']}).added).toEqual(['Add docs']);
-    const many = createWorkState('x', 'implement', [], Date.now(), {asks: Array.from({length: 7}, (_, i) => ({id: `ask-${i + 1}`, text: `Ask ${i + 1}`, status: 'open' as const}))});
-    expect(applyAskAmendments(many, {add: ['One more']}).applied).toBe(false);
-  });
-
-  it('parses bounded amendments from a successful writeTasks result only', () => {
-    expect(askAmendmentsFromOutput({ok: true, askAmendments: {add: ['Add docs']}})).toEqual({add: ['Add docs']});
-    expect(askAmendmentsFromOutput({ok: false, askAmendments: {add: ['Add docs']}})).toBeUndefined();
-    expect(askAmendmentsFromOutput({ok: true})).toBeUndefined();
-    expect(askAmendmentsFromOutput({ok: true, askAmendments: {add: ['x'], reword: [{id: 'ask-1', text: 'y', reason: 'z'}]}})).toEqual({add: ['x'], reword: [{id: 'ask-1', text: 'y', reason: 'z'}]});
-    expect(askAmendmentsFromOutput({ok: true, askAmendments: {reword: [{id: '', text: 'y'}]}})).toBeUndefined();
-  });
-
-  it('applies echoed amendments through the writeTasks observation path', () => {
-    const state = createWorkState('improve the CLI', 'implement', []);
-    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', askAmendments: {add: ['Add a changelog entry']}}});
-    expect(state.asks?.map(ask => ask.text)).toEqual(['Add a changelog entry']);
-    // After an edit, later amendments are ignored (lock).
-    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
-    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', askAmendments: {add: ['Too late']}}});
-    expect(state.asks?.map(ask => ask.text)).toEqual(['Add a changelog entry']);
-  });
-});
-
-describe('final sweep verdict (P5)', () => {
-  it('records advisory findings without gating', () => {
-    const state = createWorkState('x', 'implement', []);
-    applySweepVerdict(state, {findings: ['config duplicated across lanes'], regressions: []});
-    expect(state.sweepDone).toBe(true);
-    expect(state.sweepFindings).toEqual(['config duplicated across lanes']);
-    expect(state.verifyVerdict).toBeUndefined();
-  });
-
-  it('gates on concrete regressions through the verifier-verdict path', () => {
-    const state = createWorkState('x', 'implement', []);
-    applySweepVerdict(state, {findings: [], regressions: ['src/api.ts exports validateUser but ui.ts imports validate_user']});
-    expect(state.verifyVerdict).toEqual({verdict: 'not-verified', gaps: ['src/api.ts exports validateUser but ui.ts imports validate_user']});
-  });
-
-  it('seeds sweepDone across physical turns (one sweep per logical goal)', () => {
-    const state = createWorkState('x', 'implement', []);
-    seedCarriedGoalEvidence(state, {mutationCount: 1, validationOutcome: 'passed', verified: true, sweepDone: true});
-    expect(state.sweepDone).toBe(true);
   });
 });

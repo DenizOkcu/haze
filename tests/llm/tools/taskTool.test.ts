@@ -123,39 +123,31 @@ describe('writeTasksTool.execute', () => {
     expect(await fs.pathExists(path.join(tmp, 'tasks.json'))).toBe(true);
   });
 
-  it('echoes bounded ask amendments, including on an empty task list', async () => {
-    const {writeTasksTool} = await loadTaskTool();
-    const cleared = await writeTasksTool.execute({tasks: [], askAmendments: {add: ['Add a changelog entry'], reword: [{id: 'ask-1', text: 'Improve help output', reason: 'vague'}]}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(cleared).toMatchObject({ok: true, taskCount: 0, askAmendments: {add: ['Add a changelog entry'], reword: [{id: 'ask-1', text: 'Improve help output', reason: 'vague'}]}});
-    const withTasks = await writeTasksTool.execute({tasks: [{title: 'work'}], askAmendments: {add: ['Add docs']}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(withTasks).toMatchObject({askAmendments: {add: ['Add docs']}});
-    expect(withTasks?.summary).toContain('askAmendments recorded.');
-    const none = await writeTasksTool.execute({tasks: [], askAmendments: {}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(none).not.toHaveProperty('askAmendments');
-  });
-
-  it('accepts both add-amendment shapes: plain strings and {text} objects', async () => {
+  it('records retained fix evidence while clearing the task list', async () => {
     const {writeTasksTool} = await loadTaskTool();
     const result = await writeTasksTool.execute({
       tasks: [],
-      askAmendments: {add: [{text: 'Add a changelog entry'}, 'Add docs']},
+      redWaiver: 'failure is not observable in this environment',
+      greenSuccessor: 'npm run test:ci',
     }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(result).toMatchObject({ok: true, askAmendments: {add: ['Add a changelog entry', 'Add docs']}});
+    expect(result).toMatchObject({
+      ok: true,
+      taskCount: 0,
+      redWaiver: 'failure is not observable in this environment',
+      greenSuccessor: 'npm run test:ci',
+    });
   });
 
   it('truncates over-long prose instead of failing the whole call (harbor finding 1)', async () => {
     const {writeTasksTool} = await loadTaskTool();
-    // Evidence 3x the bound: previously a Zod .max() hard-fail that rejected
-    // the entire call (AI_TypeValidationError); now it truncates and echoes.
-    const longEvidence = `Changed file /app/csv-query.js: full CLI per /app/SPEC.md — ${'detail '.repeat(120)}`;
     const result = await writeTasksTool.execute({
       tasks: [{title: 'T'.repeat(250)}],
-      askUpdates: [{id: `ask-1 ${'x'.repeat(100)}`, status: 'met', evidence: longEvidence}],
+      redWaiver: `cannot reproduce ${'because '.repeat(120)}`,
+      greenSuccessor: `npm run test:ci ${'--verbose '.repeat(80)}`,
     }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
     expect(result).toMatchObject({ok: true});
-    const update = (result as {askUpdates?: Array<{id: string; evidence?: string}>}).askUpdates?.[0];
-    expect(update?.id.length).toBeLessThanOrEqual(200);
-    expect(update?.evidence?.length).toBeLessThanOrEqual(400);
+    expect((result as {redWaiver?: string}).redWaiver?.length).toBeLessThanOrEqual(400);
+    expect((result as {greenSuccessor?: string}).greenSuccessor?.length).toBeLessThanOrEqual(400);
     const stored = await readStoredTasks() as Array<{title: string}>;
     expect(stored[0]?.title.length).toBeLessThanOrEqual(200);
   });

@@ -15,7 +15,7 @@ Implementation helpers for haze built-in tools.
 
 ## writeTasks prose-size policy
 
-`taskTool.ts` never Zod-caps prose fields (titles, evidence, waiver reasons, ask texts). A schema `.max()` turns an over-long evidence string into an `AI_TypeValidationError` that rejects the whole call — the model retries the identical oversized input and burns steps (observed in the 2026-08-26 harbor differential). The schema validates shape only (enums, counts, object layouts stay strict); `execute` truncates prose to documented bounds. `askAmendments.add` additionally accepts plain strings and `{text}`-style objects (models emit both; normalized in `execute` rather than a union — the flat-schema rule for local OpenAI-compatible models).
+`taskTool.ts` never Zod-caps prose fields (titles and fix-evidence reasons). A schema `.max()` turns an over-long string into an `AI_TypeValidationError` that rejects the whole call — the model retries the identical oversized input and burns steps (observed in the 2026-08-26 Harbor differential). The schema validates structure only (enums and object layouts stay strict); `execute` truncates prose to documented bounds.
 
 ## Turn-scoped tool context
 
