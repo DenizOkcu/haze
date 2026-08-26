@@ -6,7 +6,7 @@ import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWith
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {modelWithConfig} from '../../llm/client.js';
-import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type HazeSession} from '../../core/session/sessionStore.js';
+import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message} from '../commands/streaming.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
@@ -43,6 +43,8 @@ export interface SessionLifecycleDeps {
   setTokenUsage: (usage: TokenUsage) => void;
   /** Manual /compact mode: model-written summary (default) or heuristic excerpt. */
   manualCompaction?: () => 'llm-summary' | 'heuristic';
+  /** Called when a resumed session carries an unterminated goal frontier (P1): the UI offers the one-key continue. */
+  onGoalFrontier?: (frontier: GoalLedgerFrontier) => void;
   debugLog: (line: string) => void;
   showPersistenceWarning: (error: unknown) => void;
 }
@@ -96,7 +98,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
   }
 
   async function resumeSession(session: HazeSession, replaceTranscript: boolean) {
-    const {messages: conversation, workState, parseErrors} = await restoreSessionState(session);
+    const {messages: conversation, workState, parseErrors, goalFrontier} = await restoreSessionState(session);
     deps.sessionRef.current = session;
     deps.conversationRef.current = conversation;
     deps.setLiveMessagesState(() => []);
@@ -110,6 +112,10 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       const restored = [{role: 'system', text: `Resumed session: ${formatSession(session)}`} as Message, ...restoredMessages];
       return replaceTranscript ? restored : [...messages, ...restored];
     });
+    // P1 resume path: a durable, unterminated goal frontier surfaces in the
+    // resume flow (system note + one-key continue, mirroring the R-resume UX)
+    // instead of silently starting fresh.
+    if (goalFrontier) deps.onGoalFrontier?.(goalFrontier);
   }
 
   /** Heuristic-excerpt compaction shared by the sync path and the LLM fallback (F-09). */

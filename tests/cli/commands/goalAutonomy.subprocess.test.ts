@@ -76,6 +76,12 @@ function textResponse(text: string) {
  * list, and answers.
  */
 function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unknown[]; label: string} {
+  // The independent verification slice (P3) runs in a fresh worker context:
+  // its single user message is the pointer brief. Answer it with a verified
+  // verdict line so the goal can structurally complete.
+  if (messages.some(message => typeof message.content === 'string' && message.content.includes('Independent verification (blind review)'))) {
+    return {kind: 'chunks', chunks: textResponse('Ask 1 met: greet.js returns "hello <name>". Ask 2 met: npm test passes (re-run by me).\n<haze-verdict>{"verdict":"verified","asksMet":[true,true],"gaps":[],"regressions":[]}</haze-verdict>'), label: 'verify verdict'};
+  }
   // Only the goal supervisor's cross-turn continuation control counts; other
   // synthetic controls (repeated-tool nudges) must not switch the script.
   const controlIndex = messages.map(message => typeof message.content === 'string' && message.content.includes('Continue the active goal')).lastIndexOf(true);
@@ -114,6 +120,9 @@ function nextResponse(messages: RequestMessage[]): {kind: 'chunks'; chunks: unkn
       {title: 'Write the greet module', status: 'completed'},
       {title: 'Make npm test pass', status: 'completed'},
       {title: 'Run the test suite and report', status: 'completed'},
+    ], askUpdates: [
+      {id: 'ask-1', status: 'met', evidence: 'npm test'},
+      {id: 'ask-2', status: 'met', evidence: 'npm test'},
     ]}), label: 'complete tasks'};
   }
   return {kind: 'chunks', chunks: textResponse('The greet module is implemented: greet(name) now returns "hello <name>", npm test passes, and all declared tasks are complete.'), label: 'final answer'};
@@ -128,14 +137,28 @@ async function startMockProvider(): Promise<{server: http.Server; url: string; c
     request.on('data', (data: Buffer) => bodyChunks.push(data));
     request.on('end', () => {
       let messages: RequestMessage[] = [];
+      let stream = true;
       try {
-        messages = (JSON.parse(Buffer.concat(bodyChunks).toString('utf8')) as {messages?: RequestMessage[]}).messages ?? [];
+        const parsed = JSON.parse(Buffer.concat(bodyChunks).toString('utf8')) as {messages?: RequestMessage[]; stream?: boolean};
+        messages = parsed.messages ?? [];
+        stream = parsed.stream === true;
       } catch {
         messages = [];
       }
       const decision = nextResponse(messages);
       const continuation = messages.some(message => typeof message.content === 'string' && message.content.includes('Continue the active goal'));
       calls.push({label: decision.label, toolMessages: messages.filter(message => message.role === 'tool').length, continuation});
+      if (!stream) {
+        // Non-streaming consumers (the verification slice's generateText) need a
+        // plain JSON completion, not an SSE stream.
+        const text = decision.chunks.filter((item): item is {choices?: Array<{delta?: {content?: string}}>} => 'choices' in (item as object))
+          .map(item => item.choices?.[0]?.delta?.content ?? '')
+          .join('');
+        const completion = {id: 'chatcmpl-mock', object: 'chat.completion', created: 1_700_000_000, model: 'mock-1', choices: [{index: 0, message: {role: 'assistant', content: text}, finish_reason: 'stop'}], usage: {prompt_tokens: 25, completion_tokens: 5}};
+        response.writeHead(200, {'Content-Type': 'application/json'});
+        response.end(JSON.stringify(completion));
+        return;
+      }
       response.writeHead(200, {'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache'});
       for (const item of decision.chunks) response.write(`data: ${JSON.stringify(item)}\n\n`);
       response.write('data: [DONE]\n\n');
@@ -245,8 +268,10 @@ describe.skipIf(!buildCurrent)('autonomous goal continuation (subprocess, real b
     if (build!.commit) expect(provenance.stdout).toContain(`commit: ${build!.commit}`);
 
     // The provider saw both physical cycles: a failed validation in cycle 1,
-    // then the continuation-controlled cycle 2.
+    // then the continuation-controlled cycle 2 — and the independent
+    // verification slice re-derived the goal against the real workspace (P3).
     expect(mock.calls.some(call => call.label === 'run failing npm test')).toBe(true);
     expect(mock.calls.some(call => call.continuation && call.label === 'run passing npm test')).toBe(true);
+    expect(mock.calls.some(call => call.label === 'verify verdict')).toBe(true);
   }, 240_000);
 });

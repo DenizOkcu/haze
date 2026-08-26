@@ -7,7 +7,8 @@ import {createTurnExecutionState, toCompletionEvidence} from '../../core/agent/c
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
-import type {ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
+import type {RedEvidence, ValidationOutcome, WorkAsk, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
+import type {GoalShape} from '../../core/agent/goalPolicy.js';
 import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
 import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import type {SubagentOverrides, TurnExecutionScope} from '../../llm/requestContext.js';
@@ -60,9 +61,11 @@ interface TurnGoalContext {
   /** 1-based physical-turn counter for the logical goal. */
   cycle: number;
   /** Cumulative evidence carried from earlier physical turns. */
-  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress};
+  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; asks?: WorkAsk[]; shape?: GoalShape; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string; verified?: boolean};
   /** Consecutive no-progress physical turns at goal level (diagnostics). */
   noProgressCount: number;
+  /** Hash binding of the exact mission bytes (P1); rides every checkpoint downstream. */
+  requestHash?: string;
 }
 
 export interface TurnExecutionOptions {

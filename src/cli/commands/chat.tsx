@@ -17,6 +17,7 @@ import {applyTerminalColors, resetTerminalColors} from '../../ui/terminalColors.
 import {handleSlashCommand, type CommandContext} from './commands.js';
 import {runAgentGoal} from './streaming/goalSupervisor.js';
 import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
+import {checkpointFromGoalFrontier} from './streaming/goalCheckpoint.js';
 import {type Message} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
 import {imageAttachmentLine} from './formatters.js';
@@ -285,6 +286,14 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     setLiveMessagesState,
     setTokenUsage,
     manualCompaction: () => settings.manualCompaction ?? 'llm-summary',
+    // P1 resume path: an unterminated goal frontier detected on resume becomes
+    // the same one-key continue affordance the in-process pause uses — the
+    // goal continues from the stored frontier without re-sending the request.
+    onGoalFrontier: frontier => {
+      const checkpoint = checkpointFromGoalFrontier(frontier);
+      setPausedResume({kind: 'incomplete-goal', request: frontier.request, retryAttempt: 0, checkpoint});
+      setMessages(m => [...m, {role: 'system', text: `This session ended with an unfinished goal (cycle ${frontier.cycle}, ${frontier.mutationCount} change${frontier.mutationCount === 1 ? '' : 's'} so far). Press R to resume it from where it stopped.`}]);
+    },
     debugLog,
     showPersistenceWarning,
   });
@@ -583,6 +592,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       log: llmLogRef.current,
     },
     ...(resumeExisting ? {resumeFrom: resumeExisting} : {}),
+    // Durable goal ledger (P1): every supervisor boundary appends to the
+    // session JSONL so a crash or restart leaves a resumable frontier.
+    goalLedger: {append: entry => sessionRecorder.recordGoalEntry(entry)},
     ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})});
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);

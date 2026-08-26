@@ -4,14 +4,17 @@ import {DEFAULT_TURN_DEADLINE_MS} from '../../../core/agent/budgets.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
+import type {GoalShape} from '../../../core/agent/goalPolicy.js';
+import {classifyRequestIntent, classifyGoalShape, deriveRequestAsks, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
-import {goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type TurnResult} from '../streaming.js';
-import {goalCheckpointSignature, type GoalCheckpoint, type IncompleteGoalResume} from './goalCheckpoint.js';
+import {goalCheckpointSignature, hashRequest, type GoalCheckpoint, type GoalLedgerAppend, type IncompleteGoalResume} from './goalCheckpoint.js';
 
 /** Why a logical goal stopped. `completed` is the only success. */
 export type GoalStopReason = 'completed' | 'no-progress' | 'goal-deadline' | 'blocked' | 'model-error' | 'model-stream-idle' | 'user-aborted';
+
+export type {GoalLedgerAppend};
 
 /** Authoritative outcome of a logical goal (one or more physical turns). */
 export interface GoalRunResult {
@@ -40,8 +43,12 @@ export interface GoalRunOptions {
   goalDeadlineMs?: number;
   /** Base per-turn options (attachments, blessed paths); attachments apply to the first physical turn only. */
   turnOptions?: TurnExecutionOptions;
-  /** Explicit resume of a paused goal: an idle-stalled turn pool or a stored goal checkpoint. */
-  resumeFrom?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint};
+  /** Explicit resume of a paused goal: an idle-stalled turn pool, a stored goal checkpoint, or a durable ledger frontier. */
+  resumeFrom?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint} | {kind: 'stored-goal'; checkpoint: GoalCheckpoint};
+  /** The preserved conversation already carries the user request (headless until-done relaunch): do not re-add it. */
+  conversationCarriesRequest?: boolean;
+  /** Durable goal-ledger sink (P1): the interactive UI wires the session recorder; headless runs stay in-process. */
+  goalLedger?: {append(entry: GoalLedgerAppend): void};
 }
 
 /** Pause after one corrective physical turn without measurable outcome progress. */
@@ -59,11 +66,46 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     validationOutcome,
     progressSignature: goalCheckpointSignature({mutationCount: resume.mutationCount, validationOutcome, taskCounts: resume.taskCounts}),
     noProgressCount,
+    ...(resume.requestHash ? {requestHash: resume.requestHash} : {}),
+    ...(resume.asks ? {asks: resume.asks.map(ask => ({...ask}))} : {}),
+    ...(resume.shape ? {shape: resume.shape} : {}),
+    ...(resume.redEvidence ? {redEvidence: {...resume.redEvidence}} : {}),
+    ...(resume.redWaiver ? {redWaiver: {...resume.redWaiver}} : {}),
+    ...(resume.greenSuccessor ? {greenSuccessor: resume.greenSuccessor} : {}),
+    ...(resume.verified ? {verified: true} : {}),
   };
 }
 
 function countsToTaskProgress(counts: NonNullable<GoalCheckpoint['taskCounts']>) {
   return {total: counts.total, pending: counts.pending, inProgress: counts.inProgress, completed: counts.completed, revision: 1};
+}
+
+/** Human-readable continuation reason for a checkpoint; stored-goal frontiers may predate a specific readiness. */
+function checkpointReason(checkpoint: GoalCheckpoint): string {
+  return checkpoint.readiness
+    ? describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined, checkpoint.asks?.filter(ask => ask.status === 'open').map(ask => ask.text))
+    : 'the previous run ended before the goal was complete';
+}
+
+function checkpointOpenAsks(checkpoint: GoalCheckpoint | undefined): string[] | undefined {
+  const open = checkpoint?.asks?.filter(ask => ask.status === 'open').map(ask => ask.text);
+  return open && open.length > 0 ? open.slice(0, 7) : undefined;
+}
+
+function carriedOf(checkpoint: GoalCheckpoint | undefined) {
+  return checkpoint
+    ? {
+      mutationCount: checkpoint.mutationCount,
+      validationOutcome: checkpoint.validationOutcome,
+      ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {}),
+      ...(checkpoint.asks ? {asks: checkpoint.asks.map(ask => ({...ask}))} : {}),
+      ...(checkpoint.shape ? {shape: checkpoint.shape} : {}),
+      ...(checkpoint.redEvidence ? {redEvidence: {...checkpoint.redEvidence}} : {}),
+      ...(checkpoint.redWaiver ? {redWaiver: {...checkpoint.redWaiver}} : {}),
+      ...(checkpoint.greenSuccessor ? {greenSuccessor: checkpoint.greenSuccessor} : {}),
+      ...(checkpoint.verified ? {verified: true} : {}),
+    }
+    : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
 
 /**
@@ -79,26 +121,57 @@ function countsToTaskProgress(counts: NonNullable<GoalCheckpoint['taskCounts']>)
  * repeated no-progress cycles. Conversation and completed tool results carry
  * across turns, so mutations are never replayed. Emits exactly one `goal_start`
  * and one terminal `goal_end`, plus `goal_continue` between physical turns.
+ *
+ * Every boundary also appends to the durable goal ledger (P1) when a sink is
+ * wired: the append-only frontier survives crashes and session restarts, and
+ * `resumeFrom: {kind: 'stored-goal'}` continues a frontier without re-sending
+ * the user request.
  */
 export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResult> {
   const {request, contextFiles, callbacks} = options;
   const startedAt = Date.now();
-  const goalId = options.resumeFrom?.kind === 'incomplete-goal' ? options.resumeFrom.checkpoint.goalId : `goal-${startedAt}-${Math.random().toString(36).slice(2)}`;
+  const resumedCheckpoint = options.resumeFrom?.kind === 'incomplete-goal' || options.resumeFrom?.kind === 'stored-goal' ? options.resumeFrom.checkpoint : undefined;
+  const goalId = resumedCheckpoint?.goalId ?? `goal-${startedAt}-${Math.random().toString(36).slice(2)}`;
+  const requestHash = resumedCheckpoint?.requestHash ?? hashRequest(request);
+  const intent = resumedCheckpoint?.intent ?? classifyRequestIntent(request);
   const sharedTurnScope: {executionScope?: TurnExecutionScope} = {};
-  let checkpoint: GoalCheckpoint | undefined = options.resumeFrom?.kind === 'incomplete-goal' ? options.resumeFrom.checkpoint : undefined;
+  let checkpoint: GoalCheckpoint | undefined = resumedCheckpoint;
   let initialRetryAttempt = options.resumeFrom?.kind === 'model-stream-idle' ? options.resumeFrom.retryAttempt : 0;
   let cycle = checkpoint?.cycle ?? 0;
   let noProgressCount = checkpoint?.noProgressCount ?? 0;
   let prevSignature = checkpoint?.progressSignature;
   let lastEvidence: TurnCompletionEvidence | undefined;
 
+  const appendLedger = (phase: GoalLedgerAppend['phase'], extra: Partial<GoalLedgerAppend> = {}) => {
+    if (!options.goalLedger) return;
+    const source = checkpoint;
+    const shape: GoalShape = source?.shape ?? classifyGoalShape(request, intent, source?.asks?.length ?? deriveRequestAsks(request).length);
+    options.goalLedger.append({
+      goalId,
+      phase,
+      request,
+      requestHash,
+      intent,
+      cycle,
+      mutationCount: source?.mutationCount ?? 0,
+      validationOutcome: source?.validationOutcome ?? 'not_applicable',
+      progressSignature: source?.progressSignature ?? '',
+      shape,
+      ...(source?.taskCounts ? {taskCounts: source.taskCounts} : {}),
+      ...(checkpointOpenAsks(source) ? {openAsks: checkpointOpenAsks(source)} : {}),
+      ...extra,
+    });
+  };
+
   callbacks.onEvent?.(agentEvent({type: 'goal_start', goalId, request}));
+  appendLedger('goal_start');
   // Observable capability line at every goal start (debug panel, --debug LLM
   // log, headless stderr): failures can be tied to runtime behavior, not
   // guessed from semantic versions.
   callbacks.debugLog('goal supervisor enabled; automatic continuation across physical-turn budgets');
 
   const finish = (status: GoalRunResult['status'], stopReason: GoalStopReason, resume?: GoalRunResult['resume']): GoalRunResult => {
+    appendLedger('goal_end', {status, ...(stopReason !== 'completed' ? {stopReason} : {})});
     callbacks.onEvent?.(agentEvent({type: 'goal_end', goalId, status, cycles: cycle, ...(stopReason !== 'completed' ? {stopReason} : {}), ...(lastEvidence ? {evidence: lastEvidence} : {})}));
     return {status, stopReason, cycles: cycle, ...(lastEvidence ? {evidence: lastEvidence} : {}), ...(resume ? {resume} : {})};
   };
@@ -108,7 +181,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     if (cycle > 0 && remainingMs != null && remainingMs <= 0) {
       return finish('failed', 'goal-deadline', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
     }
-    const continuing = cycle > 0 || checkpoint != null || initialRetryAttempt > 0;
+    const continuing = cycle > 0 || checkpoint != null || initialRetryAttempt > 0 || Boolean(options.conversationCarriesRequest);
     const turnOptions: TurnExecutionOptions = {
       ...options.turnOptions,
       ...(checkpoint
@@ -116,7 +189,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
           // The conversation already carries the user message; a continuation
           // turn rides it with a synthetic control. Attachments belong to the
           // first attempt only.
-          ephemeralControl: goalContinuationPrompt(describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined), checkpoint.taskCounts),
+          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts, checkpointOpenAsks(checkpoint)),
           attachments: undefined,
         }
         : {}),
@@ -126,10 +199,9 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       goalContext: {
         goalId,
         cycle: cycle + 1,
-        carried: checkpoint
-          ? {mutationCount: checkpoint.mutationCount, validationOutcome: checkpoint.validationOutcome, ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {})}
-          : {mutationCount: 0, validationOutcome: 'not_applicable'},
+        carried: carriedOf(checkpoint),
         noProgressCount,
+        requestHash,
       },
       sharedTurnScope,
       ...(remainingMs != null ? {turnDeadlineMs: Math.min(remainingMs, DEFAULT_TURN_DEADLINE_MS)} : {}),
@@ -151,8 +223,9 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       noProgressCount = prevSignature != null && next.progressSignature === prevSignature ? noProgressCount + 1 : 0;
       prevSignature = next.progressSignature;
       checkpoint = {...next, noProgressCount};
+      appendLedger('goal_continue');
       if (noProgressCount >= GOAL_NO_PROGRESS_LIMIT) {
-        callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
+        callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${checkpointReason(checkpoint)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
         return finish('failed', 'no-progress', {kind: 'incomplete-goal', checkpoint});
       }
       const remainingNow = options.goalDeadlineMs != null ? options.goalDeadlineMs - (Date.now() - startedAt) : undefined;
@@ -161,8 +234,8 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
         return finish('failed', 'goal-deadline', {kind: 'incomplete-goal', checkpoint});
       }
       const openTasks = checkpoint.taskCounts ? checkpoint.taskCounts.pending + checkpoint.taskCounts.inProgress : undefined;
-      callbacks.onEvent?.(agentEvent({type: 'goal_continue', goalId, cycle, reason: checkpoint.readiness}));
-      callbacks.addMessage({role: 'system', text: `Continuing unfinished goal — cycle ${cycle + 1}${openTasks != null ? ` (${openTasks} task${openTasks === 1 ? '' : 's'} remaining)` : ''}: ${describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)}.`});
+      callbacks.onEvent?.(agentEvent({type: 'goal_continue', goalId, cycle, reason: checkpoint.readiness ?? 'unfinished'}));
+      callbacks.addMessage({role: 'system', text: `Continuing unfinished goal — cycle ${cycle + 1}${openTasks != null ? ` (${openTasks} task${openTasks === 1 ? '' : 's'} remaining)` : ''}: ${checkpointReason(checkpoint)}.`});
       continue;
     }
 

@@ -316,3 +316,68 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     expect(cb.events.find(event => event.type === 'goal_start')).toMatchObject({goalId: 'goal-persisted'});
   });
 });
+
+describe('runAgentGoal: durable goal ledger (P1)', () => {
+  it('appends one entry per boundary: start, continue, and terminal end with hash binding', async () => {
+    const entries: Array<{phase: string; [key: string]: unknown}> = [];
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('failed', {resume: incompleteGoalResume()})},
+      {result: turnResult('complete', {evidence: {validationOutcome: 'passed', validationAfterMutation: true, mutationCount: 3, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}})},
+    ]);
+    const result = await runAgentGoal(baseOptions({goalLedger: {append: entry => entries.push({...entry, phase: entry.phase})}}));
+    expect(result).toMatchObject({status: 'complete'});
+    expect(entries.map(entry => entry.phase)).toEqual(['goal_start', 'goal_continue', 'goal_end']);
+    const start = entries[0]!;
+    expect(start.requestHash).toMatch(/^[0-9a-f]{16}$/);
+    expect(start.intent).toBe('implement');
+    expect(start.cycle).toBe(0);
+    const continueEntry = entries[1]!;
+    expect(continueEntry.cycle).toBe(1);
+    expect(continueEntry.mutationCount).toBe(3);
+    const end = entries[2]!;
+    expect(end.phase).toBe('goal_end');
+    expect(end.status).toBe('complete');
+  });
+
+  it('resumes from a stored-goal frontier without re-sending the request', async () => {
+    const checkpoint: GoalCheckpoint = {
+      goalId: 'goal-crashed',
+      request: 'implement the roadmap feature',
+      cycle: 4,
+      mutationCount: 6,
+      validationOutcome: 'stale',
+      progressSignature: 'sig',
+      noProgressCount: 0,
+      requestHash: 'cafe1234',
+      asks: [{id: 'ask-1', text: 'Implement the roadmap feature', status: 'open'}],
+      shape: 'bounded',
+    };
+    const {runAgentGoal} = await loadSupervisor([
+      {
+        result: turnResult('complete'),
+        inspect: (options, {retryingExistingRequest}) => {
+          expect(retryingExistingRequest).toBe(true);
+          expect(options.goalContext?.goalId).toBe('goal-crashed');
+          expect(options.goalContext?.requestHash).toBe('cafe1234');
+          expect(options.goalContext?.carried).toMatchObject({asks: [{id: 'ask-1', text: 'Implement the roadmap feature', status: 'open'}], shape: 'bounded'});
+          expect(String(options.ephemeralControl)).toContain('Continue the active goal');
+        },
+      },
+    ]);
+    const result = await runAgentGoal(baseOptions({resumeFrom: {kind: 'stored-goal', checkpoint}}));
+    expect(result).toMatchObject({status: 'complete', cycles: 5});
+  });
+
+  it('re-enters against a preserved conversation without a checkpoint when asked (P6 relaunch)', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {
+        result: turnResult('complete'),
+        inspect: (options, {retryingExistingRequest}) => {
+          expect(retryingExistingRequest).toBe(true);
+        },
+      },
+    ]);
+    const result = await runAgentGoal(baseOptions({conversationCarriesRequest: true}));
+    expect(result).toMatchObject({status: 'complete'});
+  });
+});

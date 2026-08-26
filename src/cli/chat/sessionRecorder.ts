@@ -1,5 +1,6 @@
 import type {ModelMessage} from 'ai';
 import {appendSessionEntry, type HazeSession, type SessionEntry} from '../../core/session/sessionStore.js';
+import type {GoalLedgerAppend} from '../commands/streaming/goalCheckpoint.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {OrderedFileWriter} from '../../core/persistence/orderedFileWriter.js';
@@ -83,6 +84,12 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
       // not pay serialization or queueing cost in the durable writer.
       if (event.type === 'message_update') return;
       appendEntry({type: 'event', at: event.at, name: event.type, text: JSON.stringify(event)});
+    },
+    // Durable goal-ledger append (P1): the supervisor calls this once per
+    // boundary (start/continue/end); the append-only frontier is the last
+    // non-terminal entry, and a truncated tail line parses as absent.
+    recordGoalEntry(entry: GoalLedgerAppend) {
+      appendEntry({type: 'goal', at: new Date().toISOString(), ...entry} as SessionEntry);
     },
     recordNamedEvent(name: string, text: string) {
       appendEntry({type: 'event', at: new Date().toISOString(), name, text});
