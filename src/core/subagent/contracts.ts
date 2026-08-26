@@ -92,6 +92,7 @@ export interface VerifierVerdict {
 
 const VERDICT_JSON_CHARS = 4_000;
 const VERDICT_BLOCK_PATTERN = new RegExp(`<haze-verdict>\\s*([\\s\\S]{1,${VERDICT_JSON_CHARS}}?)\\s*</haze-verdict>`);
+const SWEEP_BLOCK_PATTERN = new RegExp(`<haze-sweep>\\s*([\\s\\S]{1,${VERDICT_JSON_CHARS}}?)\\s*</haze-sweep>`);
 
 function boundedVerdictStrings(value: unknown, limit: number): string[] | undefined {
   if (value === undefined) return undefined;
@@ -123,6 +124,29 @@ export function parseVerifierVerdict(deliverable: string): VerifierVerdict | und
   const regressions = boundedVerdictStrings(record.regressions, 5);
   if (record.verdict === 'verified') return {verdict: 'verified', ...(asksMet ? {asksMet} : {}), gaps: [], regressions: regressions ?? []};
   return {verdict: 'not-verified', ...(asksMet ? {asksMet} : {}), gaps: gaps ?? ['verifier named no specific gap'], regressions: regressions ?? []};
+}
+
+/**
+ * Parse the machine-readable sweep line from a final-sweep deliverable. Unlike
+ * the verifier, a malformed or absent block is NOT a failure: the sweep is
+ * advisory ceremony (the verifier stays default-FAIL), so callers treat
+ * `undefined` as "no findings".
+ */
+export function parseSweepVerdict(deliverable: string): {findings: string[]; regressions: string[]} | undefined {
+  const match = deliverable.match(SWEEP_BLOCK_PATTERN);
+  if (!match) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(match[1]!);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const record = raw as Record<string, unknown>;
+  const findings = boundedVerdictStrings(record.findings, 3);
+  const regressions = boundedVerdictStrings(record.regressions, 3);
+  if ((!findings || findings.length === 0) && (!regressions || regressions.length === 0)) return undefined;
+  return {findings: findings ?? [], regressions: regressions ?? []};
 }
 
 export interface ProviderCapabilities {

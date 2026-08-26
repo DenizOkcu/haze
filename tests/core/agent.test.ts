@@ -3,7 +3,7 @@ import type {ModelMessage} from 'ai';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, modelMessageText, splitForCompaction} from '../../src/core/agent/compaction.js';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {isContextOverflowError, isRetryableModelError} from '../../src/core/agent/errors.js';
-import {classifyGoalShape, createSessionGoal, deriveRequestAsks, escalateGoalShape, goalContinuationPrompt} from '../../src/core/agent/goalPolicy.js';
+import {askRefinementPrompt, classifyGoalShape, createSessionGoal, deriveRequestAsks, escalateGoalShape, goalContinuationPrompt} from '../../src/core/agent/goalPolicy.js';
 
 function msg(role: 'user' | 'assistant' | 'system', content: string): ModelMessage {
   return {role, content};
@@ -241,5 +241,33 @@ describe('goal continuation prompt (P2/P4 payload)', () => {
   it('appends verifier-provided gap detail', () => {
     const prompt = goalContinuationPrompt('independent verification rejected completion', undefined, undefined, 'Independent verification named these gaps: the new file has no test');
     expect(prompt).toContain('the new file has no test');
+  });
+});
+
+describe('ask refinement nudge (P2b)', () => {
+  it('lists the derived asks and requires one pre-work writeTasks amendment', () => {
+    const prompt = askRefinementPrompt('add the export button and a test for it', ['Add the export button', 'A test for it']);
+    expect(prompt).toContain('Add the export button');
+    expect(prompt).toContain('askAmendments');
+    expect(prompt).toContain('before any file edit or command');
+    expect(prompt).toContain('waived with a waiverReason');
+  });
+
+  it('asks for declarations when extraction produced no asks', () => {
+    const prompt = askRefinementPrompt('make the CLI nicer', []);
+    expect(prompt).toContain('none derived');
+    expect(prompt).toContain('declare each as a new ask');
+  });
+});
+
+describe('multi-lane continuation hint (P5)', () => {
+  it('encourages parallel lanes only for multi-lane goals', () => {
+    const lane = goalContinuationPrompt('asks from the original request remain unmet: a', undefined, ['a'], undefined, 'multi-lane');
+    expect(lane).toContain('disjoint lanes');
+    expect(lane).toContain('parallel subagents');
+    expect(lane).toContain('serialized');
+    const bounded = goalContinuationPrompt('asks from the original request remain unmet: a', undefined, ['a'], undefined, 'bounded');
+    expect(bounded).not.toContain('parallel subagents');
+    expect(goalContinuationPrompt('asks remain', undefined, ['a'])).not.toContain('parallel subagents');
   });
 });

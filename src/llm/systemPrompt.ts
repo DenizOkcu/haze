@@ -135,3 +135,27 @@ End your deliverable with exactly one machine-readable line, no text after it:
 <haze-verdict>{"verdict":"verified","asksMet":[true],"gaps":[],"regressions":[]}</haze-verdict>
 Replace the values: verdict is "verified" or "not-verified"; asksMet is one true/false per ask above, in order; gaps lists at most 5 short concrete sentences naming each unmet ask or failing check (empty when verified); regressions lists at most 5 short observed regressions.`;
 }
+
+/**
+ * Pointer brief for the multi-lane final sweep (P5): a read-only inspect worker
+ * that looks for cross-lane integration misses after the lanes landed. It sees
+ * the mission, the asks, and the changed files — never the author's reasoning.
+ * Unlike the verifier, an absent/malformed verdict block is a no-op (the sweep
+ * is advisory ceremony; the verifier remains the default-FAIL gate).
+ */
+export function sweepBrief(input: {request: string; asks: string[]; changedFiles: string[]}) {
+  const asks = input.asks.length > 0
+    ? input.asks.map((ask, index) => `${index + 1}. ${ask}`).join('\n')
+    : '1. The mission as stated.';
+  const files = input.changedFiles.length > 0 ? input.changedFiles.slice(0, 20).join(', ') : '(none reported)';
+  return `Final integration sweep (read-only, blind). Work across several parallel lanes just landed for one mission; you did not author it.
+Mission (exact user request): ${input.request}
+Asks:
+${asks}
+Changed files: ${files}
+
+Look only for cross-lane integration misses: edits that conflict or contradict, an export/import wired on one side but missing on the other, a lane's change that invalidates another lane's assumption, shared types/configs updated by one lane but not the others, or a declared ask whose deliverable is not actually reachable from the repository. Read files; do not run commands or edit anything. Claim a regression only when you can point to the concrete file and what is broken.
+End your deliverable with exactly one machine-readable line, no text after it:
+<haze-sweep>{"findings":["short advisory note"],"regressions":["concrete cross-lane break with file"]}</haze-sweep>
+findings: at most 3 short advisory notes worth telling the user (empty is fine). regressions: at most 3 concrete breaks; each names the file and the break. Omit the line entirely if you find nothing.`;
+}

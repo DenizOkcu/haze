@@ -162,7 +162,7 @@ export function createSessionGoal(request: string, now = Date.now()): SessionGoa
 }
 
 /** Asks gate completion only for intents with a mutating deliverable (P2). */
-function intentExpectsValidationForAsks(intent: RequestIntent): boolean {
+export function intentExpectsValidationForAsks(intent: RequestIntent): boolean {
   return intent === 'implement' || intent === 'fix' || intent === 'test';
 }
 
@@ -233,7 +233,7 @@ export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
  * work; this nudge requires resuming concrete work rather than summarizing
  * again. One-request nudge only.
  */
-export function goalContinuationPrompt(reason: string, taskCounts?: {total: number; pending: number; inProgress: number; completed: number}, openAsks?: string[], detail?: string) {
+export function goalContinuationPrompt(reason: string, taskCounts?: {total: number; pending: number; inProgress: number; completed: number}, openAsks?: string[], detail?: string, shape?: GoalShape) {
   const taskLine = taskCounts
     ? ` The task list currently shows ${taskCounts.pending + taskCounts.inProgress} open item${taskCounts.pending + taskCounts.inProgress === 1 ? '' : 's'} of ${taskCounts.total}; update writeTasks as you complete them.`
     : '';
@@ -246,8 +246,31 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
   const redLine = reason.includes('red')
     ? ' No failing repro was captured before the fix landed. Reproduce the reported failure from the report on the unpatched state (or the closest observable equivalent), record it, then make the same check pass — or declare redWaiver via writeTasks with a reason if the failure is genuinely unobservable in this environment.'
     : '';
+  // Multi-lane goals (P5): disjoint asks on different files are parallel
+  // read-only/implement lanes; advisory hint, mutation serialization stays intact.
+  const laneLine = shape === 'multi-lane'
+    ? ' These asks split into disjoint lanes: where asks touch different files, dispatch them to parallel subagents (one substantial, independently describable task per worker, mode implement for edits or inspect/research for read-only lanes) instead of serial edits. Keep shared-file or order-dependent work in the main context — mutating workers stay serialized.'
+    : '';
   const detailLine = detail ? ` ${detail}` : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${askLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${askLine}${redLine}${laneLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+}
+
+/**
+ * Ephemeral control riding the first request of a fresh mutating goal (P2b):
+ * asks derived from the request text are hints — the model gets exactly one
+ * pre-work chance to review them and amend structurally (adds/rewords via
+ * writeTasks askAmendments; drops must be waivers with reasons). The runtime
+ * locks amendments after the first mutation or validation, and this nudge is
+ * never durable conversation history.
+ */
+export function askRefinementPrompt(request: string, asks: string[]) {
+  const list = asks.length > 0
+    ? asks.map((ask, index) => `${index + 1}. ${ask}`).join('\n')
+    : '(none derived — the request phrasing yielded no imperative clauses)';
+  const amendLine = asks.length > 0
+    ? 'If an ask is imprecise, reword it (with a reason); if the request contains a concrete deliverable that is missing, add it as a new ask.'
+    : 'Derive the concrete, checkable deliverables this request implies and declare each as a new ask.';
+  return `Before starting work: haze derived the following asks from the user's request, and they gate completion — nothing reports done while an ask stays open.\nRequest (exact): ${request}\nDerived asks:\n${list}\n${amendLine} Do this now via one writeTasks call (tasks + askAmendments), before any file edit or command. Dropping an ask is not an amendment: a genuinely out-of-scope ask must be waived with a waiverReason instead, and it will be shown to the user in the final summary. Ask amendments are ignored after the first edit or command, so review the list first. If the derived asks already cover every concrete deliverable, proceed with the work and do not respond about the asks.`;
 }
 
 /** Fix-intent depth discipline (P4, prompt-level): state the suspected root cause and one competing hypothesis before editing. */

@@ -37,6 +37,8 @@ export interface IncompleteGoalResume {
   greenSuccessor?: string;
   /** Independent verification already passed for this logical goal (P3). */
   verified?: boolean;
+  /** The multi-lane final sweep ran (P5); one per logical goal. */
+  sweepDone?: boolean;
 }
 
 /** Supervisor-level checkpoint persisted between physical turns (in memory and, via the goal ledger, in the session JSONL). */
@@ -66,6 +68,8 @@ export interface GoalCheckpoint {
   redWaiver?: {reason: string};
   greenSuccessor?: string;
   verified?: boolean;
+  /** The multi-lane final sweep ran (P5); one per logical goal. */
+  sweepDone?: boolean;
 }
 
 /** Durable goal-ledger append (P1): one entry per supervisor boundary; the writer stamps `type`/`at`. Shared by the supervisor and the session recorder. */
@@ -88,6 +92,8 @@ export interface GoalLedgerAppend {
   redWaiverReason?: string;
   greenSuccessor?: string;
   verified?: boolean;
+  /** The multi-lane final sweep ran (P5); one per logical goal. */
+  sweepDone?: boolean;
   stopReason?: string;
   status?: 'complete' | 'failed' | 'aborted';
 }
@@ -112,6 +118,8 @@ export interface CarriedGoalEvidence {
   redWaiver?: {reason: string};
   greenSuccessor?: string;
   verified?: boolean;
+  /** The multi-lane final sweep ran (P5); one per logical goal. */
+  sweepDone?: boolean;
 }
 
 /**

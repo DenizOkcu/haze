@@ -4,7 +4,7 @@ import {DEFAULT_TURN_DEADLINE_MS} from '../../../core/agent/budgets.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
-import {classifyRequestIntent, classifyGoalShape, deriveRequestAsks, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
+import {askRefinementPrompt, classifyGoalShape, classifyRequestIntent, deriveRequestAsks, goalContinuationPrompt, intentExpectsValidationForAsks} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
 import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type TurnResult} from '../streaming.js';
@@ -72,6 +72,7 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     ...(resume.redWaiver ? {redWaiver: {...resume.redWaiver}} : {}),
     ...(resume.greenSuccessor ? {greenSuccessor: resume.greenSuccessor} : {}),
     ...(resume.verified ? {verified: true} : {}),
+    ...(resume.sweepDone ? {sweepDone: true} : {}),
   };
 }
 
@@ -103,6 +104,7 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
       ...(checkpoint.redWaiver ? {redWaiver: {...checkpoint.redWaiver}} : {}),
       ...(checkpoint.greenSuccessor ? {greenSuccessor: checkpoint.greenSuccessor} : {}),
       ...(checkpoint.verified ? {verified: true} : {}),
+      ...(checkpoint.sweepDone ? {sweepDone: true} : {}),
     }
     : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
@@ -163,6 +165,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       ...(source?.redWaiver ? {redWaiverReason: source.redWaiver.reason} : {}),
       ...(source?.greenSuccessor ? {greenSuccessor: source.greenSuccessor} : {}),
       ...(source?.verified ? {verified: true} : {}),
+      ...(source?.sweepDone ? {sweepDone: true} : {}),
       ...extra,
     });
   };
@@ -186,6 +189,16 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       return finish('failed', 'goal-deadline', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
     }
     const continuing = cycle > 0 || checkpoint != null || initialRetryAttempt > 0 || Boolean(options.conversationCarriesRequest);
+    // P2b quality nudge: the derived asks are heuristics, so the first request
+    // of a fresh mutating goal carries a one-time refinement control (verify
+    // coverage, amend structurally before any edit). Never on resumes or
+    // continuation turns, never alongside a caller-provided control, and never
+    // durable conversation — attemptSetup strips synthetic controls.
+    const refinementControl = !continuing
+      && !options.turnOptions?.ephemeralControl
+      && intentExpectsValidationForAsks(intent)
+      ? askRefinementPrompt(request, deriveRequestAsks(request))
+      : undefined;
     const turnOptions: TurnExecutionOptions = {
       ...options.turnOptions,
       ...(checkpoint
@@ -193,10 +206,10 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
           // The conversation already carries the user message; a continuation
           // turn rides it with a synthetic control. Attachments belong to the
           // first attempt only.
-          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts, checkpointOpenAsks(checkpoint)),
+          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts, checkpointOpenAsks(checkpoint), undefined, checkpoint.shape),
           attachments: undefined,
         }
-        : {}),
+        : refinementControl ? {ephemeralControl: refinementControl} : {}),
       // Always tag the turn with the logical goal id/cycle so cycle-0
       // checkpoints carry the supervisor's goal identity, and hydrate carried
       // evidence on continuation turns (a no-op seed for a fresh goal).

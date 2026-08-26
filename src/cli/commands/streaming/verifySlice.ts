@@ -2,8 +2,8 @@ import type {ContextFile} from '../../../config/contextFiles.js';
 import {providerRequestSettings, type ModelRuntimeSelection} from '../../../llm/client.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {applyVerifierVerdict, intentExpectsValidation, openAsksOf} from '../../../core/agent/workState.js';
-import {runVerifier} from '../../../core/subagent/subagentRunner.js';
+import {applySweepVerdict, applyVerifierVerdict, intentExpectsValidation, openAsksOf} from '../../../core/agent/workState.js';
+import {runSweep, runVerifier} from '../../../core/subagent/subagentRunner.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
 import type {StreamCallbacks} from '../streaming.js';
 
@@ -23,6 +23,18 @@ export function verificationRequired(goal: SessionGoal): boolean {
     && goal.mutationCount > 0
     && intentExpectsValidation(goal.intent)
     && goal.shape !== 'trivial';
+}
+
+/**
+ * Multi-lane final sweep trigger (P5): once per logical goal, after independent
+ * verification passed, before the goal's final is accepted. Bounded to the
+ * multi-lane shape — trivial/bounded/debug goals do not pay for it.
+ */
+export function sweepRequired(goal: SessionGoal): boolean {
+  return goal.shape === 'multi-lane'
+    && goal.verified === true
+    && goal.sweepDone !== true
+    && goal.mutationCount > 0;
 }
 
 /**
@@ -83,4 +95,57 @@ export async function runVerificationSlice(deps: {
 /** Open ask texts for prompts and evidence (bounded, top 3 by policy in the prompt). */
 export function openAskTexts(goal: SessionGoal): string[] {
   return openAsksOf(goal).map(ask => ask.text);
+}
+
+/**
+ * Dispatch the read-only integration sweep and record its verdict (P5).
+ * Advisory by default: findings surface as a system line the user sees with
+ * the final answer; explicitly reported concrete regressions gate completion
+ * through the existing verifier-verdict path. One sweep per logical goal
+ * (`goal.sweepDone`); never re-arms budgets.
+ */
+export async function runSweepSlice(deps: {
+  goal: SessionGoal;
+  runtime: ModelRuntimeSelection;
+  contextFiles: ContextFile[];
+  session: PromptSession | undefined;
+  abortSignal: AbortSignal;
+  callbacks: StreamCallbacks;
+}): Promise<void> {
+  const {goal, runtime, contextFiles, session, abortSignal, callbacks} = deps;
+  callbacks.setBusyLabel?.('integration sweep');
+  callbacks.debugLog('sweep slice: dispatching read-only integration sweep');
+  try {
+    const {sweep, termination} = await runSweep({
+      request: goal.originalUserRequest,
+      asks: goal.asks?.map(ask => ask.text) ?? [],
+      changedFiles: goal.touchedFiles,
+      runtime: {
+        model: runtime.model,
+        selector: runtime.selector,
+        providerName: runtime.config.providerName,
+        capabilities: runtime.config.capabilities,
+        requestOptions: providerRequestSettings(runtime.config),
+      },
+      contextFiles,
+      session,
+      abortSignal,
+    });
+    applySweepVerdict(goal, sweep ?? {findings: [], regressions: []});
+    if (sweep && sweep.regressions.length > 0) {
+      callbacks.addMessage({role: 'system', text: `Integration sweep found cross-lane regressions: ${sweep.regressions.join(' ')}. Completion stays blocked until they are fixed and re-validated.`});
+      callbacks.debugLog(`sweep slice regressions (${termination}): ${sweep.regressions.join(' | ')}`);
+    } else if (sweep && sweep.findings.length > 0) {
+      callbacks.addMessage({role: 'system', text: `Integration sweep notes: ${sweep.findings.join(' ')}`});
+    } else {
+      callbacks.debugLog(`sweep slice clean (${termination})`);
+    }
+  } catch (error) {
+    // The sweep is advisory ceremony: a dispatch failure must never block an
+    // otherwise complete goal. Record it as consumed and surface a note.
+    const message = error instanceof Error ? error.message : String(error);
+    applySweepVerdict(goal, {findings: [], regressions: []});
+    callbacks.addMessage({role: 'system', text: 'Integration sweep could not run; treating it as a no-op.'});
+    callbacks.debugLog(`sweep slice error: ${message}`);
+  }
 }

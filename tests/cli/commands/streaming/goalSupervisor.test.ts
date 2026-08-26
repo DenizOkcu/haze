@@ -441,3 +441,59 @@ describe('stored-goal frontier parity (P1: crash resume matches in-process conti
     expect(result).toMatchObject({status: 'complete', cycles: 4});
   });
 });
+
+describe('runAgentGoal: ask refinement nudge (P2b)', () => {
+  it('rides the first request of a fresh mutating goal and disappears afterwards', async () => {
+    const seen: Array<string | undefined> = [];
+    const {runAgentGoal} = await loadSupervisor([
+      {
+        result: turnResult('failed', {resume: incompleteGoalResume()}),
+        inspect: options => {
+          seen.push(options.ephemeralControl);
+          expect(String(options.ephemeralControl)).toContain('derived the following asks');
+          expect(String(options.ephemeralControl)).toContain('askAmendments');
+        },
+      },
+      {
+        result: turnResult('complete'),
+        inspect: options => {
+          seen.push(options.ephemeralControl);
+          expect(String(options.ephemeralControl)).not.toContain('askAmendments');
+        },
+      },
+    ]);
+    const result = await runAgentGoal(baseOptions());
+    expect(result).toMatchObject({status: 'complete'});
+    expect(seen).toHaveLength(2);
+  });
+
+  it('never rides non-mutating goals, resumes, or caller-provided controls', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('complete'), inspect: options => { expect(options.ephemeralControl).toBeUndefined(); }},
+    ]);
+    await runAgentGoal(baseOptions({request: 'what does this repo do'}));
+    const {runAgentGoal: resumed} = await loadSupervisor([
+      {result: turnResult('complete'), inspect: options => { expect(String(options.ephemeralControl)).not.toContain('askAmendments'); }},
+    ]);
+    await resumed(baseOptions({resumeFrom: {kind: 'stored-goal', checkpoint: {goalId: 'g', request: 'add the export button', cycle: 1, mutationCount: 1, validationOutcome: 'stale', progressSignature: 's', noProgressCount: 0}}}));
+    const {runAgentGoal: fleet} = await loadSupervisor([
+      {result: turnResult('complete'), inspect: options => { expect(options.ephemeralControl).toBe('caller control'); }},
+    ]);
+    await fleet(baseOptions({turnOptions: {ephemeralControl: 'caller control'} as import('../../../../src/cli/commands/streaming.js').TurnExecutionOptions}));
+  });
+
+  it('passes the shape into multi-lane continuation prompts', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {
+        result: turnResult('failed', {resume: incompleteGoalResume({shape: 'multi-lane'})}),
+        inspect: options => { expect(String(options.ephemeralControl)).not.toContain('parallel subagents'); },
+      },
+      {
+        result: turnResult('complete'),
+        inspect: options => { expect(String(options.ephemeralControl)).toContain('parallel subagents'); },
+      },
+    ]);
+    const result = await runAgentGoal(baseOptions({request: 'add the api layer, the ui layer, and integration tests'}));
+    expect(result).toMatchObject({status: 'complete'});
+  });
+});

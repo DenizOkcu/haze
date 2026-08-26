@@ -15,12 +15,13 @@ import {withSyntheticControl} from '../agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../agent/turnPolicy.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
-import {buildSubagentPrompt, projectContextSection, verifierBrief} from '../../llm/systemPrompt.js';
+import {buildSubagentPrompt, projectContextSection, sweepBrief, verifierBrief} from '../../llm/systemPrompt.js';
 import {hazeTools} from '../../llm/hazeTools.js';
 import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
 import {
   fallbackWorkerRuntime,
   normalizeSubagentInput,
+  parseSweepVerdict,
   parseVerifierVerdict,
   subagentInputSchema,
   withLegacyProjection,
@@ -144,6 +145,44 @@ export async function runVerifier(
     };
   }
   return {verdict: parsed, capsule: result.capsule, termination: result.capsule.termination};
+}
+
+/**
+ * Dispatch the multi-lane final sweep (P5): a fresh read-only `inspect` worker
+ * scanning the landed lanes for integration misses. Blind by construction
+ * (pointer brief only). Advisory: a missing verdict line or an unusable
+ * capsule is a no-op sweep, not a rejection; only explicitly reported concrete
+ * regressions gate completion (via the caller's `applySweepVerdict`).
+ */
+export async function runSweep(
+  input: {
+    request: string;
+    asks: string[];
+    changedFiles: string[];
+    runtime: WorkerRuntime;
+    profile?: SubagentExecutionProfile;
+    contextFiles?: ContextFile[];
+    session?: PromptSession;
+    abortSignal?: AbortSignal;
+  },
+): Promise<{sweep: {findings: string[]; regressions: string[]} | undefined; termination: WorkerTermination}> {
+  const task: SubagentTaskCapsule = {
+    id: 'sweep',
+    objective: sweepBrief({request: input.request, asks: input.asks, changedFiles: input.changedFiles}),
+    deliverable: 'A short read-only integration review across the changed files, ending with the <haze-sweep> line (or no line when nothing was found).',
+    mode: 'inspect',
+    scope: input.changedFiles.slice(0, 12),
+    acceptanceCriteria: ['Every claim names a file', 'No regressions without a concrete break'],
+  };
+  const result = await runSubagent(task, {
+    runtime: input.runtime,
+    ...(input.profile ? {profile: input.profile} : {}),
+    ...(input.contextFiles ? {contextFiles: input.contextFiles} : {}),
+    abortSignal: input.abortSignal,
+    session: input.session,
+  });
+  const sweep = result.capsule.usable ? parseSweepVerdict(result.capsule.deliverable) : undefined;
+  return {sweep, termination: result.capsule.termination};
 }
 
 export async function runSubagent(

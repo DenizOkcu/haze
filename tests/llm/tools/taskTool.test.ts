@@ -118,4 +118,15 @@ describe('writeTasksTool.execute', () => {
     await writeTasksTool.execute({tasks: [{title: 'on disk'}]}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
     expect(await fs.pathExists(path.join(tmp, 'tasks.json'))).toBe(true);
   });
+
+  it('echoes bounded ask amendments, including on an empty task list', async () => {
+    const {writeTasksTool} = await loadTaskTool();
+    const cleared = await writeTasksTool.execute({tasks: [], askAmendments: {add: ['Add a changelog entry'], reword: [{id: 'ask-1', text: 'Improve help output', reason: 'vague'}]}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(cleared).toMatchObject({ok: true, taskCount: 0, askAmendments: {add: ['Add a changelog entry'], reword: [{id: 'ask-1', text: 'Improve help output', reason: 'vague'}]}});
+    const withTasks = await writeTasksTool.execute({tasks: [{title: 'work'}], askAmendments: {add: ['Add docs']}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(withTasks).toMatchObject({askAmendments: {add: ['Add docs']}});
+    expect(withTasks?.summary).toContain('askAmendments recorded.');
+    const none = await writeTasksTool.execute({tasks: [], askAmendments: {}}, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(none).not.toHaveProperty('askAmendments');
+  });
 });

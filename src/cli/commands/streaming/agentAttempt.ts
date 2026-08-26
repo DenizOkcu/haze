@@ -13,7 +13,7 @@ import {prepareAttempt} from './attemptSetup.js';
 import {createAttemptLoopState, runAttemptStream} from './streamLoop.js';
 import {createStreamStallGuard, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
 import {finalizeAttemptOutcome, handleAttemptFailure, projectGoalEvidence, type AgentAttemptResult} from './attemptOutcome.js';
-import {VERIFY_SLICE_MIN_REMAINING_MS, runVerificationSlice, verificationRequired} from './verifySlice.js';
+import {VERIFY_SLICE_MIN_REMAINING_MS, runSweepSlice, runVerificationSlice, sweepRequired, verificationRequired} from './verifySlice.js';
 import {assessCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {AttemptCleanupRegistry} from './attemptLifecycle.js';
 import {ATTEMPT_TEARDOWN_BOUND_MS} from './attemptLifecycle.js';
@@ -126,6 +126,24 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
       if (readiness === 'ready' && remainingTurnDeadlineMs() > VERIFY_SLICE_MIN_REMAINING_MS) {
         turnState.verifySliceUsed = true;
         await runVerificationSlice({goal, runtime: attemptSetupResult.runtime, contextFiles: setup.contextFiles, session, abortSignal: abortController.signal, turnScope, callbacks});
+      }
+    }
+    // Multi-lane final sweep (P5): after verification passed (this turn or an
+    // earlier one), one read-only integration sweep per logical goal checks the
+    // landed lanes. Same admission discipline as the verify slice; advisory
+    // except for explicitly reported concrete regressions.
+    if (
+      !abortController.signal.aborted
+      && sweepRequired(goal)
+      && stream.finishReason === 'stop'
+      && stream.assistantText.trim().length > 0
+      && stream.lastToolOk !== false
+      && !stream.unresolvedToolInputError
+    ) {
+      projectGoalEvidence(turnState, goal);
+      const readiness = assessCompletionReadiness(turnState, {lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError});
+      if (readiness === 'ready' && remainingTurnDeadlineMs() > VERIFY_SLICE_MIN_REMAINING_MS) {
+        await runSweepSlice({goal, runtime: attemptSetupResult.runtime, contextFiles: setup.contextFiles, session, abortSignal: abortController.signal, callbacks});
       }
     }
     return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream});

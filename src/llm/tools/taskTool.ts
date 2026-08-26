@@ -11,7 +11,7 @@ import {generateTaskId, saveTasks, type Task, type TaskStatus} from '../../core/
  * real work events, so prose alone can never close an ask or waive evidence.
  */
 export const writeTasksTool = tool({
-  description: 'Replace the task list for substantial work, and (optionally) update structured goal evidence. Update tasks at meaningful phase changes, blockers, and completion; pass the complete list. askUpdates close asks re-derived from the original request: met requires evidence citing a passing validation command or a changed file; waived requires a waiverReason. redWaiver records why a failing repro could not be captured before a fix; greenSuccessor names the command that supersedes the captured failing repro. goalShape records that the goal is bigger than classified (upward only).',
+  description: 'Replace the task list for substantial work, and (optionally) update structured goal evidence. Update tasks at meaningful phase changes, blockers, and completion; pass the complete list. askUpdates close asks re-derived from the original request: met requires evidence citing a passing validation command or a changed file; waived requires a waiverReason. askAmendments refine the derived ask list before any edit or command runs (add missing asks, reword imprecise ones; never drops — waive instead); ignored after the first edit or command. redWaiver records why a failing repro could not be captured before a fix; greenSuccessor names the command that supersedes the captured failing repro. goalShape records that the goal is bigger than classified (upward only).',
   inputSchema: z.object({
     tasks: z.array(z.object({
       title: z.string().max(200).describe('Short task description'),
@@ -23,11 +23,19 @@ export const writeTasksTool = tool({
       evidence: z.string().max(400).optional().describe('Required for met: cite the passing validation command or a changed file path.'),
       waiverReason: z.string().max(400).optional().describe('Required for waived: why the ask is out of scope.'),
     })).max(10).optional().describe('Structured updates for asks derived from the original request.'),
+    askAmendments: z.object({
+      add: z.array(z.string().min(1).max(200)).max(7).optional().describe('Missing concrete deliverables from the request, each as a short checkable ask.'),
+      reword: z.array(z.object({
+        id: z.string().max(64).describe('Existing ask id or exact current text.'),
+        text: z.string().min(1).max(200).describe('The corrected ask text.'),
+        reason: z.string().max(400).optional().describe('Why the derived wording was imprecise.'),
+      })).max(7).optional().describe('Imprecise derived asks, reworded. Status and evidence carry over.'),
+    }).optional().describe('One-time refinement of the derived ask list; only honored before the first edit or command.'),
     redWaiver: z.string().min(1).max(400).optional().describe('Reason the pre-fix failing repro is genuinely unobservable in this environment.'),
     greenSuccessor: z.string().min(1).max(400).optional().describe('Validation command that supersedes the captured failing repro command (when the completing check legitimately differs).'),
     goalShape: z.enum(['trivial', 'bounded', 'multi-lane', 'debug']).optional().describe('Proposed goal shape when the work turned out bigger or smaller than classified. Escalation upward only; downward proposals are ignored.'),
   }),
-  execute: async ({tasks: inputTasks, askUpdates, redWaiver, greenSuccessor, goalShape}) => {
+  execute: async ({tasks: inputTasks, askUpdates, askAmendments, redWaiver, greenSuccessor, goalShape}) => {
     if (!Array.isArray(inputTasks)) {
       return {ok: false, error: 'Tasks must be an array. Pass an empty array to clear the list.'};
     }
@@ -54,6 +62,12 @@ export const writeTasksTool = tool({
       });
     }
     const now = new Date().toISOString();
+    // Shape-validate amendments only; semantic validation (the pre-work lock,
+    // bounds, dedupe) happens in the agent runtime's work-state observer,
+    // the single choke point for completion evidence.
+    const echoedAmendments = askAmendments && ((askAmendments.add?.length ?? 0) > 0 || (askAmendments.reword?.length ?? 0) > 0)
+      ? {...(askAmendments.add?.length ? {add: askAmendments.add} : {}), ...(askAmendments.reword?.length ? {reword: askAmendments.reword} : {})}
+      : undefined;
     const tasks: Task[] = inputTasks.map((input: {title: string; status?: TaskStatus}) => ({
       id: generateTaskId(),
       title: input.title.trim(),
@@ -68,8 +82,9 @@ export const writeTasksTool = tool({
       completed: tasks.filter(t => t.status === 'completed').length,
     };
     const summaryParts = [`Tasks: ${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed.`];
-    if (tasks.length === 0) return {ok: true, taskCount: 0, summary: 'Task list cleared.'};
+    if (tasks.length === 0) return {ok: true, taskCount: 0, ...(echoedAmendments ? {askAmendments: echoedAmendments} : {}), summary: 'Task list cleared.'};
     if (echoedAskUpdates.length > 0) summaryParts.push(`${echoedAskUpdates.length} ask update${echoedAskUpdates.length === 1 ? '' : 's'} recorded.`);
+    if (echoedAmendments) summaryParts.push('askAmendments recorded.');
     if (redWaiver?.trim()) summaryParts.push('redWaiver recorded.');
     if (greenSuccessor?.trim()) summaryParts.push('greenSuccessor recorded.');
     if (goalShape) summaryParts.push(`goalShape ${goalShape} recorded.`);
@@ -78,6 +93,7 @@ export const writeTasksTool = tool({
       taskCount: tasks.length,
       counts,
       ...(echoedAskUpdates.length > 0 ? {askUpdates: echoedAskUpdates} : {}),
+      ...(echoedAmendments ? {askAmendments: echoedAmendments} : {}),
       ...(redWaiver?.trim() ? {redWaiver: redWaiver.trim()} : {}),
       ...(greenSuccessor?.trim() ? {greenSuccessor: greenSuccessor.trim()} : {}),
       ...(goalShape ? {goalShape} : {}),

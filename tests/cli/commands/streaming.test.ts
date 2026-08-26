@@ -44,6 +44,10 @@ interface MocksConfig {
   ignoreAbort?: boolean;
   /** With `ignoreAbort`: yield these parts once aborted, then hang forever (late zombie output). */
   latePartsAfterAbort?: FakeFullStreamPart[];
+  /** Verdict the (mocked) independent verification slice returns; default 'verified'. */
+  verifyVerdict?: 'verified' | 'not-verified';
+  /** Verdict the (mocked) multi-lane final sweep returns; default no-op (undefined). */
+  sweepVerdict?: {findings: string[]; regressions: string[]};
 }
 
 const mocks = vi.hoisted(() => {
@@ -127,6 +131,15 @@ async function loadStreaming(config: MocksConfig) {
         callbacks.addMessage(verdict === 'not-verified'
           ? {role: 'system', text: 'Independent verification rejected completion. A fresh context re-derived the request against the repository and found: scripted verifier gap'}
           : {role: 'system', text: 'Independent verification passed: a fresh context re-derived the request against the repository and confirmed it is met.'});
+      },
+      runSweepSlice: async ({goal, callbacks}: {goal: import('../../../src/core/agent/workState.js').WorkState; callbacks: {addMessage: (msg: {role: string; text: string}) => void}}) => {
+        const sweep = config.sweepVerdict;
+        workState.applySweepVerdict(goal, sweep ?? {findings: [], regressions: []});
+        if (sweep && sweep.regressions.length > 0) {
+          callbacks.addMessage({role: 'system', text: `Integration sweep found cross-lane regressions: ${sweep.regressions.join(' ')}. Completion stays blocked until they are fixed and re-validated.`});
+        } else if (sweep && sweep.findings.length > 0) {
+          callbacks.addMessage({role: 'system', text: `Integration sweep notes: ${sweep.findings.join(' ')}`});
+        }
       },
     };
   });
@@ -1534,6 +1547,94 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     const outcome = await runAgentTurn('fix the login crash in the auth module', undefined, [], cb);
     expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/red→green pair missing/);
     expect(outcome).toMatchObject({status: 'failed', evidence: {redPair: 'missing'}});
+  });
+  // Three imperative sentences -> three asks -> multi-lane shape (sweep applies).
+  const laneRequest = 'Implement the export feature. Add the import parser. Document both in the changelog.';
+
+  it('gates a multi-lane final on sweep regressions, then completes once re-validated', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      verifyVerdict: 'verified',
+      sweepVerdict: {findings: [], regressions: ['src/api.ts exports validateUser but ui.ts imports validate_user']},
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          ...passedValidation('v1'),
+          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
+          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
+          {type: 'text-delta', text: 'All lanes landed.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        [
+          // Fix the regression, re-validate, answer again. The sweep is
+          // consumed (one per goal) and verification stands, so this completes.
+          {type: 'tool-call', toolCallId: 'e2', toolName: 'editFile', input: {path: 'ui.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e2', toolName: 'editFile', input: {path: 'ui.ts'}, output: {ok: true}},
+          ...passedValidation('v2'),
+          {type: 'text-delta', text: 'Regression fixed and re-validated.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn(laneRequest, undefined, [], cb);
+    expect(cb.messages.some(message => message.text.includes('Integration sweep found cross-lane regressions') && message.text.includes('validateUser'))).toBe(true);
+    // The sweep regression rode the verifier-verdict path into continuation.
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/validateUser/);
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('surfaces advisory sweep findings without gating', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      verifyVerdict: 'verified',
+      sweepVerdict: {findings: ['config duplicated across lanes'], regressions: []},
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          ...passedValidation('v1'),
+          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
+          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'npm test'}]}},
+          {type: 'text-delta', text: 'All lanes landed.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn(laneRequest, undefined, [], cb);
+    expect(outcome).toMatchObject({status: 'complete'});
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(cb.messages.some(message => message.text.includes('Integration sweep notes: config duplicated across lanes'))).toBe(true);
+  });
+
+  it('refines the derived ask list through pre-work amendments', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle,
+      availableTools: tools,
+      callStreams: [
+        [
+          // Refinement first: the model declares a missing ask, then works.
+          {type: 'tool-call', toolCallId: 'r1', toolName: 'writeTasks', input: {tasks: [], askAmendments: {add: ['Add a changelog entry']}}},
+          {type: 'tool-result', toolCallId: 'r1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askAmendments: {add: ['Add a changelog entry']}}},
+          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+          ...passedValidation('v1'),
+          {type: 'tool-call', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: [], askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'a.ts'}]}},
+          {type: 'tool-result', toolCallId: 'a1', toolName: 'writeTasks', input: {tasks: []}, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}, {id: 'ask-2', status: 'met', evidence: 'npm test'}, {id: 'ask-3', status: 'met', evidence: 'a.ts'}]}},
+          {type: 'text-delta', text: 'Everything including the changelog.'},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+      ],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('implement the export feature across the api and ui layers and add integration tests for both', undefined, [], cb);
+    // The amended ask entered the gate: closing only the derived asks would
+    // have left the added ask open and triggered continuation.
+    expect(outcome).toMatchObject({status: 'complete', evidence: {askProgress: {total: 3, open: 0}}});
   });
 });
 

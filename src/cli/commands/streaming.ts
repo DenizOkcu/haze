@@ -61,7 +61,7 @@ interface TurnGoalContext {
   /** 1-based physical-turn counter for the logical goal. */
   cycle: number;
   /** Cumulative evidence carried from earlier physical turns. */
-  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; asks?: WorkAsk[]; shape?: GoalShape; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string; verified?: boolean};
+  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; asks?: WorkAsk[]; shape?: GoalShape; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string; verified?: boolean; sweepDone?: boolean};
   /** Consecutive no-progress physical turns at goal level (diagnostics). */
   noProgressCount: number;
   /** Hash binding of the exact mission bytes (P1); rides every checkpoint downstream. */

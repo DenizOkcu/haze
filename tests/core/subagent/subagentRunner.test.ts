@@ -1,7 +1,7 @@
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/core/subagent/subagentRunner.js';
-import {parseVerifierVerdict} from '../../../src/core/subagent/contracts.js';
+import {parseSweepVerdict, parseVerifierVerdict} from '../../../src/core/subagent/contracts.js';
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 
@@ -529,5 +529,24 @@ describe('parseVerifierVerdict (P3: default-FAIL)', () => {
     expect(parseVerifierVerdict('<haze-verdict>not json</haze-verdict>')).toBeUndefined();
     expect(parseVerifierVerdict('<haze-verdict>{"verdict":"maybe"}</haze-verdict>')).toBeUndefined();
     expect(parseVerifierVerdict('<haze-verdict>[1,2]</haze-verdict>')).toBeUndefined();
+  });
+});
+
+describe('parseSweepVerdict (P5: advisory, default no-op)', () => {
+  it('parses findings and regressions from a well-formed line', () => {
+    expect(parseSweepVerdict('Review done.\n<haze-sweep>{"findings":["config duplicated"],"regressions":["src/api.ts exports validateUser but ui.ts imports validate_user"]}</haze-sweep>'))
+      .toEqual({findings: ['config duplicated'], regressions: ['src/api.ts exports validateUser but ui.ts imports validate_user']});
+  });
+
+  it('bounds arrays and drops non-string entries', () => {
+    const verdict = parseSweepVerdict(`<haze-sweep>{"findings":["a","","b","c","d"],"regressions":[1,null,"r1"]}</haze-sweep>`);
+    expect(verdict?.findings).toEqual(['a', 'b', 'c']);
+    expect(verdict?.regressions).toEqual(['r1']);
+  });
+
+  it('treats absent or malformed lines as a no-op sweep (unlike the verifier default-FAIL)', () => {
+    expect(parseSweepVerdict('Nothing found, no line.')).toBeUndefined();
+    expect(parseSweepVerdict('<haze-sweep>not json</haze-sweep>')).toBeUndefined();
+    expect(parseSweepVerdict('<haze-sweep>{"findings":[],"regressions":[]}</haze-sweep>')).toBeUndefined();
   });
 });

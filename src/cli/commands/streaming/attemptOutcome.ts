@@ -148,6 +148,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
     ...(goal.redWaiver ? {redWaiver: {...goal.redWaiver}} : {}),
     ...(goal.greenSuccessor ? {greenSuccessor: goal.greenSuccessor} : {}),
     ...(goal.verified ? {verified: true} : {}),
+    ...(goal.sweepDone ? {sweepDone: true} : {}),
   };
   const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
   const checkpointResult = (): AgentAttemptResult => {
@@ -178,7 +179,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
         // failing readiness on a stale verdict (one verify per physical turn).
         if (readiness === 'verification_rejected') goal.verifyVerdict = undefined;
         const continuationDetail = verifierGaps ? `Independent verification named these gaps: ${verifierGaps.slice(0, 3).join(' ')}` : undefined;
-        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress, openAskTextsForPrompt), taskCountsOf(turnState.taskProgress), openAskTextsForPrompt, continuationDetail), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
+        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress, openAskTextsForPrompt), taskCountsOf(turnState.taskProgress), openAskTextsForPrompt, continuationDetail, goal.shape), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
       } else if (rescueSlice && rescueSlice.steps > 0) {
         return {status: turnStatus, recovery: {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}}};
       } else if (classification === 'recoverable-incomplete') {
