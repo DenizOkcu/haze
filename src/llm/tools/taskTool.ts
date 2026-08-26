@@ -11,7 +11,7 @@ import {generateTaskId, saveTasks, type Task, type TaskStatus} from '../../core/
  * real work events, so prose alone can never close an ask or waive evidence.
  */
 export const writeTasksTool = tool({
-  description: 'Replace the task list for substantial work, and (optionally) update structured goal evidence. Update tasks at meaningful phase changes, blockers, and completion; pass the complete list. askUpdates close asks re-derived from the original request: met requires evidence citing a passing validation command or a changed file; waived requires a waiverReason. redWaiver records why a failing repro could not be captured before a fix; greenSuccessor names the command that supersedes the captured failing repro.',
+  description: 'Replace the task list for substantial work, and (optionally) update structured goal evidence. Update tasks at meaningful phase changes, blockers, and completion; pass the complete list. askUpdates close asks re-derived from the original request: met requires evidence citing a passing validation command or a changed file; waived requires a waiverReason. redWaiver records why a failing repro could not be captured before a fix; greenSuccessor names the command that supersedes the captured failing repro. goalShape records that the goal is bigger than classified (upward only).',
   inputSchema: z.object({
     tasks: z.array(z.object({
       title: z.string().max(200).describe('Short task description'),
@@ -25,8 +25,9 @@ export const writeTasksTool = tool({
     })).max(10).optional().describe('Structured updates for asks derived from the original request.'),
     redWaiver: z.string().min(1).max(400).optional().describe('Reason the pre-fix failing repro is genuinely unobservable in this environment.'),
     greenSuccessor: z.string().min(1).max(400).optional().describe('Validation command that supersedes the captured failing repro command (when the completing check legitimately differs).'),
+    goalShape: z.enum(['trivial', 'bounded', 'multi-lane', 'debug']).optional().describe('Proposed goal shape when the work turned out bigger or smaller than classified. Escalation upward only; downward proposals are ignored.'),
   }),
-  execute: async ({tasks: inputTasks, askUpdates, redWaiver, greenSuccessor}) => {
+  execute: async ({tasks: inputTasks, askUpdates, redWaiver, greenSuccessor, goalShape}) => {
     if (!Array.isArray(inputTasks)) {
       return {ok: false, error: 'Tasks must be an array. Pass an empty array to clear the list.'};
     }
@@ -71,6 +72,7 @@ export const writeTasksTool = tool({
     if (echoedAskUpdates.length > 0) summaryParts.push(`${echoedAskUpdates.length} ask update${echoedAskUpdates.length === 1 ? '' : 's'} recorded.`);
     if (redWaiver?.trim()) summaryParts.push('redWaiver recorded.');
     if (greenSuccessor?.trim()) summaryParts.push('greenSuccessor recorded.');
+    if (goalShape) summaryParts.push(`goalShape ${goalShape} recorded.`);
     return {
       ok: true,
       taskCount: tasks.length,
@@ -78,6 +80,7 @@ export const writeTasksTool = tool({
       ...(echoedAskUpdates.length > 0 ? {askUpdates: echoedAskUpdates} : {}),
       ...(redWaiver?.trim() ? {redWaiver: redWaiver.trim()} : {}),
       ...(greenSuccessor?.trim() ? {greenSuccessor: greenSuccessor.trim()} : {}),
+      ...(goalShape ? {goalShape} : {}),
       summary: summaryParts.join(' '),
     };
   },

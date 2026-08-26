@@ -124,6 +124,12 @@ export function escalateGoalShape(current: GoalShape, proposed: GoalShape): {sha
     : {shape: current, escalated: false};
 }
 
+export const GOAL_SHAPES: readonly GoalShape[] = ['trivial', 'bounded', 'multi-lane', 'debug'];
+
+export function isGoalShape(value: unknown): value is GoalShape {
+  return value === 'trivial' || value === 'bounded' || value === 'multi-lane' || value === 'debug';
+}
+
 // ── Session goal state ──────────────────────────────────────────────────────
 
 export type SessionGoal = WorkState;

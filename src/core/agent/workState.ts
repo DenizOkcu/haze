@@ -1,4 +1,5 @@
 import type {GoalShape, RequestIntent} from './goalPolicy.js';
+import {escalateGoalShape, isGoalShape} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
@@ -491,6 +492,10 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
     if (redWaiver && !state.redWaiver) state.redWaiver = {reason: redWaiver};
     const greenSuccessor = greenSuccessorFromOutput(event.output);
     if (greenSuccessor && !state.greenSuccessor) state.greenSuccessor = greenSuccessor;
+    // Recorded shape escalation (P5): up-only, never downward; inert when the
+    // goal never classified a shape.
+    const proposedShape = goalShapeFromOutput(event.output);
+    if (proposedShape && state.shape) state.shape = escalateGoalShape(state.shape, proposedShape).shape;
   }
 
   state.revision = seq;
@@ -538,6 +543,20 @@ export function redWaiverFromOutput(output: unknown): string | undefined {
 /** Explicit green-successor command echoed by a successful writeTasks result (P4). */
 export function greenSuccessorFromOutput(output: unknown): string | undefined {
   return boundedEchoString(output, 'greenSuccessor');
+}
+
+/**
+ * Model-proposed shape escalation echoed by a successful writeTasks result
+ * (P5): the classification heuristics are hints, and the model may record that
+ * the goal turned out bigger than classified. Downward proposals and unknown
+ * values are ignored; the escalation is up-only.
+ */
+export function goalShapeFromOutput(output: unknown): GoalShape | undefined {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const record = output as {ok?: unknown; goalShape?: unknown};
+  if (record.ok !== true) return undefined;
+  const candidate = record.goalShape;
+  return isGoalShape(candidate) ? candidate : undefined;
 }
 
 /**

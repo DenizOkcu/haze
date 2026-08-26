@@ -359,3 +359,26 @@ describe('seedCarriedGoalEvidence (goal-scoped P2/P3/P4/P5 state)', () => {
     expect(state.mutationCount).toBe(2);
   });
 });
+
+describe('recorded shape escalation (P5: up-only)', () => {
+  it('escalates upward from a writeTasks goalShape echo', () => {
+    const state = createWorkState('add the endpoint', 'implement', [], Date.now(), {shape: 'trivial'});
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'multi-lane'}});
+    expect(state.shape).toBe('multi-lane');
+  });
+
+  it('ignores downward proposals, failed calls, unknown values, and shapeless goals', () => {
+    const downward = createWorkState('do it all', 'implement', [], Date.now(), {shape: 'debug'});
+    observeWorkToolEvent(downward, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'trivial'}});
+    expect(downward.shape).toBe('debug');
+    const failed = createWorkState('x', 'implement', [], Date.now(), {shape: 'trivial'});
+    observeWorkToolEvent(failed, {toolName: 'writeTasks', input: {tasks: []}, success: false, output: {ok: false, error: 'nope', goalShape: 'multi-lane'}});
+    expect(failed.shape).toBe('trivial');
+    const unknown = createWorkState('x', 'implement', [], Date.now(), {shape: 'bounded'});
+    observeWorkToolEvent(unknown, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'gigantic'}});
+    expect(unknown.shape).toBe('bounded');
+    const shapeless = createWorkState('x', 'implement', []);
+    observeWorkToolEvent(shapeless, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', goalShape: 'debug'}});
+    expect(shapeless.shape).toBeUndefined();
+  });
+});
