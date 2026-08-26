@@ -1,4 +1,4 @@
-import type {RequestIntent} from './goalPolicy.js';
+import type {GoalShape, RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
@@ -21,6 +21,151 @@ export type ValidationOutcome = 'passed' | 'failed' | 'stale' | 'absent' | 'not_
 /** Request intents where a missing validation is itself meaningful evidence. */
 export function intentExpectsValidation(intent: RequestIntent): boolean {
   return intent === 'implement' || intent === 'fix' || intent === 'test';
+}
+
+export type AskStatus = 'open' | 'met' | 'waived';
+
+/** One concrete, checkable ask re-derived from the exact user request (P2). */
+export interface WorkAsk {
+  id: string;
+  text: string;
+  status: AskStatus;
+  /** Bounded reference to the validating event that closed the ask. */
+  evidence?: string;
+  /** Required when the ask is waived (assumed out of scope, with reason). */
+  waiverReason?: string;
+}
+
+/** Captured failing repro observed before the first mutation of a fix goal (P4). Safe metadata: command + status, never output bodies. */
+export interface RedEvidence {
+  command: string;
+  commandKey: string;
+  summary: string;
+}
+
+/** Structured ask-update request echoed by a successful writeTasks result. */
+export interface AskUpdateRequest {
+  id: string;
+  status: 'met' | 'waived';
+  evidence?: string;
+  waiverReason?: string;
+}
+
+/** Outcome of applying one structured ask update. */
+export interface AskUpdateOutcome {
+  id: string;
+  applied: boolean;
+  reason?: string;
+}
+
+/** Independent verifier verdict recorded as completion evidence (P3). */
+export interface VerifyVerdictState {
+  verdict: 'verified' | 'not-verified';
+  gaps: string[];
+}
+
+/** Upper bound for ask text; extraction never emits longer asks. */
+export const ASK_TEXT_CHARS = 160;
+
+/** Open (unmet, unwaived) asks of a goal state. */
+export function openAsksOf(state: Pick<WorkState, 'asks'>): WorkAsk[] {
+  return (state.asks ?? []).filter(ask => ask.status === 'open');
+}
+
+/** Waived asks with their recorded reasons (surfaced in the final synthesis). */
+export function waivedAsksOf(state: Pick<WorkState, 'asks'>): WorkAsk[] {
+  return (state.asks ?? []).filter(ask => ask.status === 'waived');
+}
+
+function normalizeEvidenceText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * Structural validation for closing an ask (P2: no prose-override channel).
+ * `met` requires an evidence reference that matches a *passing* validation
+ * command or a file actually changed during this goal; `waived` requires a
+ * reason. Anything else is rejected and the ask stays open.
+ */
+export function applyAskUpdate(state: WorkState, update: AskUpdateRequest): AskUpdateOutcome {
+  const ask = (state.asks ?? []).find(item => item.id === update.id || item.text === update.id);
+  if (!ask) return {id: update.id, applied: false, reason: 'unknown ask id'};
+  if (update.status === 'waived') {
+    const reason = update.waiverReason?.trim();
+    if (!reason) return {id: update.id, applied: false, reason: 'waiving an ask requires a waiverReason'};
+    ask.status = 'waived';
+    ask.waiverReason = reason;
+    delete ask.evidence;
+    return {id: update.id, applied: true};
+  }
+  const evidence = update.evidence?.trim();
+  if (!evidence) return {id: update.id, applied: false, reason: 'marking an ask met requires evidence referencing a passing validation or a changed file'};
+  const needle = normalizeEvidenceText(evidence);
+  const matchesValidation = state.validations.some(validation => validation.status === 'passed'
+    && (normalizeEvidenceText(validation.command).includes(needle) || needle.includes(normalizeEvidenceText(validation.command))));
+  const matchesTouchedFile = state.touchedFiles.some(file => {
+    const fileKey = normalizeEvidenceText(file);
+    return needle.includes(fileKey) || fileKey.includes(needle);
+  });
+  if (!matchesValidation && !matchesTouchedFile) {
+    return {id: update.id, applied: false, reason: 'evidence does not match any passing validation command or changed file'};
+  }
+  ask.status = 'met';
+  ask.evidence = evidence;
+  delete ask.waiverReason;
+  return {id: update.id, applied: true};
+}
+
+/** Apply a bounded batch of echoed ask updates; returns per-update outcomes. */
+export function applyAskUpdates(state: WorkState, updates: readonly AskUpdateRequest[]): AskUpdateOutcome[] {
+  return updates.slice(0, 10).map(update => applyAskUpdate(state, update));
+}
+
+/**
+ * Normalize a validation command into a matching key so a green run can be
+ * bound to the red repro it must supersede (P4). Whitespace-insensitive; a
+ * leading `time`/`env`/`nice` prefix and a trailing `--` separator are noise.
+ */
+export function validationCommandKey(command: string): string {
+  const words = command.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  while (words.length > 1 && ['time', 'env', 'nice', '\\'].includes(words[0]!)) words.shift();
+  while (words.length > 1 && words.at(-1) === '--') words.pop();
+  return words.join(' ');
+}
+
+/**
+ * Red→green pair state for fix intents (P4): a fix goal with mutations must
+ * carry a pre-mutation failing repro (or a structured waiver), and a passing
+ * validation of that same command (or an explicitly recorded successor).
+ */
+export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'shape' | 'mutationCount' | 'redEvidence' | 'redWaiver' | 'greenSuccessor' | 'validations'>): 'not-required' | 'missing' | 'satisfied' | 'waived' {
+  if (state.normalizedIntent !== 'fix' || state.shape === 'trivial' || state.mutationCount === 0) return 'not-required';
+  if (state.redWaiver) return 'waived';
+  const red = state.redEvidence;
+  if (!red) return 'missing';
+  const successorKey = state.greenSuccessor ? validationCommandKey(state.greenSuccessor) : undefined;
+  const green = state.validations.some(validation => validation.status === 'passed'
+    && (validationCommandKey(validation.command) === red.commandKey || (successorKey !== undefined && validationCommandKey(validation.command) === successorKey)));
+  return green ? 'satisfied' : 'missing';
+}
+
+/** Record an independent verifier verdict as goal evidence (P3). */
+export function applyVerifierVerdict(state: WorkState, verdict: {verdict: 'verified' | 'not-verified'; asksMet?: boolean[]; gaps?: string[]}) {
+  const gaps = (verdict.gaps ?? []).filter(gap => typeof gap === 'string' && gap.trim().length > 0).slice(0, 5).map(gap => gap.trim().slice(0, 200));
+  if (verdict.verdict === 'verified') {
+    state.verified = true;
+    state.verifyVerdict = undefined;
+    // Corroborate asks the blind verifier explicitly confirmed.
+    (verdict.asksMet ?? []).forEach((met, index) => {
+      const ask = state.asks?.[index];
+      if (met === true && ask && ask.status === 'open') {
+        ask.status = 'met';
+        ask.evidence = 'independent verification';
+      }
+    });
+    return;
+  }
+  state.verifyVerdict = {verdict: 'not-verified', gaps};
 }
 
 export interface WorkState {
@@ -58,6 +203,20 @@ export interface WorkState {
    * command or output.
    */
   carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
+  /** Asks re-derived from the exact request (P2); gate applies to mutating intents. */
+  asks?: WorkAsk[];
+  /** Proportional goal shape (P5); escalation up only, never down. */
+  shape?: GoalShape;
+  /** Captured pre-mutation failing repro for fix goals (P4). */
+  redEvidence?: RedEvidence;
+  /** Structured waiver when the failing repro is genuinely unobservable here (P4). */
+  redWaiver?: {reason: string};
+  /** Explicitly recorded successor command binding green to red (P4). */
+  greenSuccessor?: string;
+  /** Independent verification passed for this logical goal (P3). */
+  verified?: boolean;
+  /** Latest independent verifier rejection (P3); cleared on continuation. */
+  verifyVerdict?: VerifyVerdictState;
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -117,7 +276,7 @@ export function taskProgressFromOutput(output: unknown, revision: number): WorkT
  * boundary: a carried `stale`/`absent` outcome keeps demanding validation, a
  * carried `passed`/`failed` outcome stands until this turn mutates or validates.
  */
-export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress}) {
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; asks?: WorkAsk[]; shape?: GoalShape; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string; verified?: boolean}) {
   if (carried.taskProgress && carried.taskProgress.total > 0) {
     state.taskProgress = {...carried.taskProgress, revision: 1};
   }
@@ -129,6 +288,15 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
     state.validationSeq = 1;
     state.carriedValidation = carried.validationOutcome === 'passed' ? {status: 'passed'} : {status: 'failed'};
   }
+  // Ask/red/shape/verification state is goal-scoped and rides the checkpoint
+  // across physical turns so a continuation cannot complete while carried
+  // asks stay open or a carried red→green pair stays unsatisfied.
+  if (carried.asks?.length) state.asks = carried.asks.map(ask => ({...ask}));
+  if (carried.shape) state.shape = carried.shape;
+  if (carried.redEvidence) state.redEvidence = {...carried.redEvidence};
+  if (carried.redWaiver) state.redWaiver = {...carried.redWaiver};
+  if (carried.greenSuccessor) state.greenSuccessor = carried.greenSuccessor;
+  if (carried.verified) state.verified = true;
 }
 
 export interface WorkToolEvent {
@@ -221,7 +389,7 @@ export function validationSummaryFromOutput(output: unknown): ValidationSummary 
   return isValidationSummary(candidate) ? candidate : undefined;
 }
 
-export function createWorkState(goal: string, intent: RequestIntent, successCriteria: string[], now = Date.now()): WorkState {
+export function createWorkState(goal: string, intent: RequestIntent, successCriteria: string[], now = Date.now(), options: {asks?: WorkAsk[]; shape?: GoalShape} = {}): WorkState {
   return {
     id: `goal-${now}-${Math.random().toString(36).slice(2)}`,
     goal,
@@ -238,6 +406,8 @@ export function createWorkState(goal: string, intent: RequestIntent, successCrit
     mutationCount: 0,
     mutationSeq: 0,
     validationSeq: 0,
+    ...(options.asks?.length ? {asks: options.asks.map(ask => ({...ask}))} : {}),
+    ...(options.shape ? {shape: options.shape} : {}),
     blockers: [],
     pending: [],
     status: 'active',
@@ -293,23 +463,81 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       state.lastProgressAt = now;
       if (status === 'failed') {
         state.blockers = [...new Set([...state.blockers, `Validation failed: ${command}`])];
+        // Red evidence (P4): the first failing repro observed before any
+        // mutation of a fix-intent goal is the red half of the red→green pair.
+        // Only consumed as a completion requirement — never a mutation blocker.
+        if (state.normalizedIntent === 'fix' && state.mutationSeq === 0 && !state.redEvidence) {
+          state.redEvidence = {command, commandKey: validationCommandKey(command), summary: summaryText.slice(0, 200)};
+        }
       }
     }
   }
 
   // Task-list coordination: a successful writeTasks result records bounded
-  // current-turn task counts as completion evidence. It is not a file mutation,
-  // and a failed call leaves prior evidence untouched.
+  // current-turn task counts as completion evidence, plus any structured ask
+  // updates / red waivers the model declared (validated against real events —
+  // prose alone can never close an ask or waive the red→green pair). It is not
+  // a file mutation, and a failed call leaves prior evidence untouched.
   if (ok && event.toolName === 'writeTasks') {
     const progress = taskProgressFromOutput(event.output, seq);
     if (progress) {
       state.taskProgress = progress;
       state.lastProgressAt = now;
     }
+    for (const update of askUpdatesFromOutput(event.output)) {
+      applyAskUpdate(state, update);
+    }
+    const redWaiver = redWaiverFromOutput(event.output);
+    if (redWaiver && !state.redWaiver) state.redWaiver = {reason: redWaiver};
+    const greenSuccessor = greenSuccessorFromOutput(event.output);
+    if (greenSuccessor && !state.greenSuccessor) state.greenSuccessor = greenSuccessor;
   }
 
   state.revision = seq;
   return state;
+}
+
+/**
+ * Extract bounded structured ask updates echoed by a successful writeTasks
+ * result. Parses only validated shapes (`id`/`status`/optional bounded
+ * strings) so malformed tool output can never fabricate ask evidence.
+ */
+export function askUpdatesFromOutput(output: unknown): AskUpdateRequest[] {
+  if (typeof output !== 'object' || output == null) return [];
+  const record = output as {ok?: unknown; askUpdates?: unknown};
+  if (record.ok !== true) return [];
+  const candidate = record.askUpdates;
+  if (!Array.isArray(candidate)) return [];
+  const updates: AskUpdateRequest[] = [];
+  for (const item of candidate.slice(0, 10)) {
+    if (typeof item !== 'object' || item == null) continue;
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' ? record.id.trim().slice(0, 64) : '';
+    const status = record.status === 'met' || record.status === 'waived' ? record.status : undefined;
+    if (!id || !status) continue;
+    const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.trim().slice(0, 300) : undefined;
+    const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.trim().slice(0, 300) : undefined;
+    updates.push({id, status, ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})});
+  }
+  return updates;
+}
+
+function boundedEchoString(output: unknown, field: 'redWaiver' | 'greenSuccessor'): string | undefined {
+  if (typeof output !== 'object' || output == null) return undefined;
+  const record = output as Record<string, unknown>;
+  if (record.ok !== true) return undefined;
+  const value = record[field];
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 300) : undefined;
+}
+
+/** Structured red-evidence waiver echoed by a successful writeTasks result (P4). */
+export function redWaiverFromOutput(output: unknown): string | undefined {
+  return boundedEchoString(output, 'redWaiver');
+}
+
+/** Explicit green-successor command echoed by a successful writeTasks result (P4). */
+export function greenSuccessorFromOutput(output: unknown): string | undefined {
+  return boundedEchoString(output, 'greenSuccessor');
 }
 
 /**

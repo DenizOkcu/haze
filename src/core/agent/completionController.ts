@@ -61,6 +61,14 @@ export interface TurnExecutionState {
   goalContinuationProgress: string | undefined;
   /** Whether the single allowed no-progress corrective nudge has been consumed. */
   goalContinuationCorrectiveUsed: boolean;
+  /** Open asks re-derived from the request (P2); absent when the ask gate does not apply. */
+  askProgress: {total: number; open: number; waived: number; openTexts: string[]} | undefined;
+  /** Red→green pair state for fix intents (P4). */
+  redPair: 'not-required' | 'missing' | 'satisfied' | 'waived' | undefined;
+  /** Independent verifier verdict (P3); absent when verification has not run this turn. */
+  verification: {verdict: 'verified' | 'not-verified'; gaps: string[]} | undefined;
+  /** Whether this physical turn's single independent verification slice was dispatched (P3). */
+  verifySliceUsed: boolean;
   budgetBoundary: boolean;
   aborted: boolean;
 }
@@ -84,6 +92,10 @@ export function createTurnExecutionState(): TurnExecutionState {
     validationContinuationUsed: false,
     goalContinuationProgress: undefined,
     goalContinuationCorrectiveUsed: false,
+    askProgress: undefined,
+    redPair: undefined,
+    verification: undefined,
+    verifySliceUsed: false,
     budgetBoundary: false,
     aborted: false,
   };
@@ -101,6 +113,12 @@ export interface TurnCompletionEvidence {
   mutationCount: number;
   /** Current-turn task counts from writeTasks, when a task list was declared. */
   taskProgress?: {total: number; pending: number; inProgress: number; completed: number};
+  /** Ask-shaped completion state (P2): counts plus bounded open-ask texts. */
+  askProgress?: {total: number; open: number; met: number; waived: number; openTexts: string[]};
+  /** Red→green pair state for fix intents (P4). */
+  redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived';
+  /** Independent verification verdict (P3). */
+  verification?: {verdict: 'verified' | 'not-verified'; gaps: string[]};
   finishCause: FinishCause | undefined;
   recoveryUsed: {length: boolean; rescue: boolean; goal: number};
   budgetBoundary: boolean;
@@ -114,6 +132,9 @@ export function toCompletionEvidence(state: TurnExecutionState): TurnCompletionE
     validationAfterMutation: state.validationAfterMutation,
     mutationCount: state.mutationCount,
     ...(state.taskProgress ? {taskProgress: {total: state.taskProgress.total, pending: state.taskProgress.pending, inProgress: state.taskProgress.inProgress, completed: state.taskProgress.completed}} : {}),
+    ...(state.askProgress ? {askProgress: {total: state.askProgress.total, open: state.askProgress.open, met: state.askProgress.total - state.askProgress.open - state.askProgress.waived, waived: state.askProgress.waived, openTexts: state.askProgress.openTexts.slice(0, 3)}} : {}),
+    ...(state.redPair && state.redPair !== 'not-required' ? {redPair: state.redPair} : {}),
+    ...(state.verification ? {verification: {verdict: state.verification.verdict, gaps: state.verification.gaps.slice(0, 3)}} : {}),
     finishCause: state.finishCause,
     recoveryUsed: {length: state.lengthCreditUsed, rescue: state.rescueUsed, goal: state.goalContinuationsUsed},
     budgetBoundary: state.budgetBoundary,
@@ -134,14 +155,18 @@ export type TurnStatus = 'complete' | 'aborted' | 'failed';
  * Reasoned completion readiness from structured current-turn evidence. A
  * voluntary final is acceptable only when the declared work is actually done;
  * prose alone is never evidence of completion (no semantic judge — task,
- * mutation, validation, tool, and budget evidence is authoritative).
+ * mutation, validation, ask, red→green, verification, tool, and budget
+ * evidence is authoritative).
  */
 export type CompletionReadiness =
   | 'ready'
   | 'pending_tasks'
+  | 'pending_asks'
   | 'validation_failed'
   | 'validation_stale'
   | 'validation_absent_after_mutation'
+  | 'missing_red_evidence'
+  | 'verification_rejected'
   | 'tool_failure'
   | 'unresolved_tool_input'
   | 'aborted';
@@ -153,14 +178,24 @@ export interface CompletionReadinessInput {
   mutationCount: number;
   validationOutcome: ValidationOutcome;
   taskProgress: WorkTaskProgress | undefined;
+  /** Open asks from the exact request (P2); present only when the ask gate applies. */
+  askProgress?: {open: number; openTexts: string[]};
+  /** Red→green pair state (P4); absent/not-required disables the gate. */
+  redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived';
+  /** Independent verifier verdict (P3); a not-verified verdict rejects the final. */
+  verification?: {verdict: 'verified' | 'not-verified'; gaps: string[]};
 }
 
 /**
  * Pure completion-readiness assessment. Priority: abort, unresolved tool
- * input, failed tool, declared task progress, then intent-sensitive validation
- * policy (implement/fix/test turns with successful mutations require fresh
- * passing validation; plan/review/answer turns never do). A task list is
- * enforced only when this turn declared one via a successful writeTasks call.
+ * input, failed tool, declared task progress, then intent-sensitive
+ * validation policy (implement/fix/test turns with successful mutations
+ * require fresh passing validation; plan/review/answer turns never do), open
+ * asks, the fix-intent red→green pair, and finally the independent
+ * verification verdict. A task list is enforced only when this turn declared
+ * one via a successful writeTasks call; asks only when extraction produced
+ * them for a mutating intent (never for `trivial` shapes — proportionality
+ * keeps the floor).
  */
 export function assessCompletionReadiness(state: CompletionReadinessInput, evidence: Pick<CompletionEvidence, 'lastToolOk' | 'unresolvedToolInputError'>): CompletionReadiness {
   if (state.aborted) return 'aborted';
@@ -172,19 +207,28 @@ export function assessCompletionReadiness(state: CompletionReadinessInput, evide
     if (state.validationOutcome === 'stale') return 'validation_stale';
     if (state.validationOutcome === 'absent' && state.mutationCount > 0) return 'validation_absent_after_mutation';
   }
+  if (state.askProgress && state.askProgress.open > 0) return 'pending_asks';
+  if (state.intent === 'fix' && state.redPair === 'missing') return 'missing_red_evidence';
+  if (state.verification && state.verification.verdict === 'not-verified') return 'verification_rejected';
   return 'ready';
 }
 
 /** Human-readable, safe (no commands/content) description of a readiness result. */
-export function describeCompletionReadiness(readiness: CompletionReadiness, taskProgress?: WorkTaskProgress): string {
+export function describeCompletionReadiness(readiness: CompletionReadiness, taskProgress?: WorkTaskProgress, openAsks?: string[]): string {
   switch (readiness) {
     case 'pending_tasks': {
       const open = taskProgress ? taskProgress.pending + taskProgress.inProgress : 0;
       return `${open} declared task${open === 1 ? '' : 's'} still pending or in progress`;
     }
+    case 'pending_asks': {
+      const top = (openAsks ?? []).slice(0, 3);
+      return `ask${(openAsks ?? []).length === 1 ? '' : 's'} from the original request remain unmet${top.length > 0 ? `: ${top.join('; ')}` : ''}`;
+    }
     case 'validation_failed': return 'the latest validation failed and remains unresolved';
     case 'validation_stale': return 'edits landed after the latest validation';
     case 'validation_absent_after_mutation': return 'edits landed without any relevant validation';
+    case 'missing_red_evidence': return 'no failing repro was captured before the fix landed (red→green pair missing)';
+    case 'verification_rejected': return 'independent verification rejected completion';
     case 'tool_failure': return 'the last tool call failed';
     case 'unresolved_tool_input': return 'a tool call never executed because its input was invalid';
     case 'aborted': return 'the turn was aborted';
@@ -320,13 +364,14 @@ export interface GoalContinuationDecision {
 }
 
 /** Readiness reasons a bounded continuation can plausibly resolve with more work. */
-
-/** Readiness reasons a bounded continuation can plausibly resolve with more work. */
 export function goalContinuationRecoverable(readiness: CompletionReadiness): boolean {
   return readiness === 'pending_tasks'
+    || readiness === 'pending_asks'
     || readiness === 'validation_failed'
     || readiness === 'validation_stale'
-    || readiness === 'validation_absent_after_mutation';
+    || readiness === 'validation_absent_after_mutation'
+    || readiness === 'missing_red_evidence'
+    || readiness === 'verification_rejected';
 }
 
 /**

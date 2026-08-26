@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, seedCarriedGoalEvidence, taskProgressFromOutput, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
+import {applyAskUpdate, applyVerifierVerdict, askUpdatesFromOutput, createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, redPairStatus, seedCarriedGoalEvidence, taskProgressFromOutput, validationCommandKey, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
 
 function passedSummary(text = 'tests passed') {
   return {kind: 'test', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
@@ -227,5 +227,135 @@ describe('work state task progress (writeTasks observation)', () => {
     const state = createWorkState('do the roadmap', 'implement', []);
     observeWorkToolEvent(state, {toolName: 'writeTasks', success: true, output: {ok: true, taskCount: 1, counts: {pending: 1, in_progress: 0, completed: 0}}, duplicateSkipped: true});
     expect(state.taskProgress).toBeUndefined();
+  });
+});
+
+describe('ask updates (P2: no prose-override channel)', () => {
+  it('marks an ask met only with evidence matching a passing validation or changed file', () => {
+    const state = createWorkState('add the endpoint', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add the endpoint', status: 'open'}]});
+    expect(applyAskUpdate(state, {id: 'ask-1', status: 'met', evidence: 'npm test'}).applied).toBe(false);
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'src/api.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(applyAskUpdate(state, {id: 'ask-1', status: 'met', evidence: 'npm test'}).applied).toBe(true);
+    expect(state.asks![0]!.status).toBe('met');
+    // Changed-file evidence also closes an ask.
+    const state2 = createWorkState('add the config', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add the config', status: 'open'}]});
+    observeWorkToolEvent(state2, {toolName: 'writeFile', input: {path: 'config/next.json'}, success: true, output: {ok: true}});
+    expect(applyAskUpdate(state2, {id: 'ask-1', status: 'met', evidence: 'config/next.json'}).applied).toBe(true);
+  });
+
+  it('requires a reason to waive and rejects unknown ids', () => {
+    const state = createWorkState('x', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Do x', status: 'open'}]});
+    expect(applyAskUpdate(state, {id: 'ask-1', status: 'waived'}).applied).toBe(false);
+    expect(applyAskUpdate(state, {id: 'ask-1', status: 'waived', waiverReason: 'out of scope for this goal'}).applied).toBe(true);
+    expect(state.asks![0]!.status).toBe('waived');
+    expect(applyAskUpdate(state, {id: 'ask-9', status: 'met', evidence: 'npm test'}).applied).toBe(false);
+  });
+
+  it('parses bounded ask updates from a successful writeTasks result only', () => {
+    expect(askUpdatesFromOutput({ok: true, askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}]})).toEqual([{id: 'ask-1', status: 'met', evidence: 'npm test'}]);
+    expect(askUpdatesFromOutput({ok: false, askUpdates: [{id: 'ask-1', status: 'met'}]})).toEqual([]);
+    expect(askUpdatesFromOutput({ok: true})).toEqual([]);
+    expect(askUpdatesFromOutput({ok: true, askUpdates: [{id: '', status: 'met'}, {id: 'x', status: 'deleted'}, 'junk']})).toEqual([]);
+  });
+
+  it('applies echoed ask updates, red waivers, and green successors from writeTasks results', () => {
+    const state = createWorkState('fix it', 'fix', [], Date.now(), {asks: [{id: 'ask-1', text: 'Fix it', status: 'open'}]});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'writeTasks', input: {tasks: []}, success: true, output: {ok: true, taskCount: 0, summary: 'cleared', askUpdates: [{id: 'ask-1', status: 'met', evidence: 'npm test'}], redWaiver: 'flaky env', greenSuccessor: 'npm run test:ci'}});
+    expect(state.asks![0]!.status).toBe('met');
+    expect(state.redWaiver).toEqual({reason: 'flaky env'});
+    expect(state.greenSuccessor).toBe('npm run test:ci');
+  });
+});
+
+describe('red→green pair (P4)', () => {
+  it('captures the first failing repro before the first mutation of a fix goal', () => {
+    const state = createWorkState('fix the crash', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary('crash repro')}});
+    expect(state.redEvidence).toMatchObject({command: 'npm test', summary: 'crash repro'});
+    // A second failure does not overwrite the first red.
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm run other'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary('second')}});
+    expect(state.redEvidence!.command).toBe('npm test');
+  });
+
+  it('does not capture red after a mutation or for non-fix intents', () => {
+    const fix = createWorkState('fix it', 'fix', []);
+    observeWorkToolEvent(fix, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(fix, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    expect(fix.redEvidence).toBeUndefined();
+    const implement = createWorkState('add it', 'implement', []);
+    observeWorkToolEvent(implement, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    expect(implement.redEvidence).toBeUndefined();
+  });
+
+  it('normalizes commands so formatting noise cannot break pair matching', () => {
+    expect(validationCommandKey('  npm   test ')).toBe('npm test');
+    expect(validationCommandKey('time npm test')).toBe('npm test');
+    expect(validationCommandKey('npm test --')).toBe('npm test');
+    expect(validationCommandKey('npm test')).not.toBe('npm run build');
+  });
+
+  it('derives the pair status: missing, satisfied by same command, successor, or waiver', () => {
+    const state = createWorkState('fix it', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    expect(redPairStatus(state)).toBe('missing'); // green not yet run
+    // An unrelated green does not satisfy the pair.
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm run build'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(redPairStatus(state)).toBe('missing');
+    state.greenSuccessor = 'npm run build';
+    expect(redPairStatus(state)).toBe('satisfied'); // explicit successor
+    state.greenSuccessor = undefined;
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'time npm   test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(redPairStatus(state)).toBe('satisfied'); // normalized same command
+    state.redWaiver = {reason: 'unobservable'};
+    expect(redPairStatus(state)).toBe('waived');
+  });
+
+  it('is not required without mutations or for trivial shapes', () => {
+    expect(redPairStatus(createWorkState('fix it', 'fix', [])).status).toBeUndefined();
+    const noMutation = createWorkState('fix it', 'fix', []);
+    expect(redPairStatus(noMutation)).toBe('not-required');
+    const trivial = createWorkState('fix the typo in the label text', 'fix', [], Date.now(), {shape: 'trivial'});
+    observeWorkToolEvent(trivial, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    expect(redPairStatus(trivial)).toBe('not-required');
+  });
+});
+
+describe('verifier verdicts (P3)', () => {
+  it('marks the goal verified and corroborates confirmed asks', () => {
+    const state = createWorkState('add x and docs', 'implement', [], Date.now(), {asks: [{id: 'ask-1', text: 'Add x', status: 'open'}, {id: 'ask-2', text: 'Add docs', status: 'open'}]});
+    applyVerifierVerdict(state, {verdict: 'verified', asksMet: [true, false]});
+    expect(state.verified).toBe(true);
+    expect(state.asks![0]!.status).toBe('met');
+    expect(state.asks![1]!.status).toBe('open');
+    expect(state.verifyVerdict).toBeUndefined();
+  });
+
+  it('records a bounded not-verified verdict with named gaps', () => {
+    const state = createWorkState('add x', 'implement', []);
+    applyVerifierVerdict(state, {verdict: 'not-verified', gaps: ['tests fail', '  ', 'x'.repeat(500)]});
+    expect(state.verified).toBeUndefined();
+    expect(state.verifyVerdict).toEqual({verdict: 'not-verified', gaps: ['tests fail', 'x'.repeat(200)]});
+  });
+});
+
+describe('seedCarriedGoalEvidence (goal-scoped P2/P3/P4/P5 state)', () => {
+  it('carries asks, shape, red evidence, waivers, and verification across the boundary', () => {
+    const state = createWorkState('fix it', 'fix', []);
+    seedCarriedGoalEvidence(state, {
+      mutationCount: 2,
+      validationOutcome: 'stale',
+      asks: [{id: 'ask-1', text: 'Fix it', status: 'open'}],
+      shape: 'debug',
+      redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
+      verified: true,
+    });
+    expect(state.asks).toEqual([{id: 'ask-1', text: 'Fix it', status: 'open'}]);
+    expect(state.shape).toBe('debug');
+    expect(state.redEvidence!.command).toBe('npm test');
+    expect(state.verified).toBe(true);
+    expect(state.mutationCount).toBe(2);
   });
 });
