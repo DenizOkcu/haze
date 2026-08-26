@@ -15,7 +15,7 @@ describe('work state', () => {
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'src/a.ts'}, success: true, output: {ok: true}});
     observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary('10 tests passed')}});
     expect(state.files).toEqual([{path: 'src/a.ts', action: 'modified'}]);
-    expect(state.validations).toEqual([{command: 'npm test', status: 'passed', summary: '10 tests passed', kind: 'test'}]);
+    expect(state.validations).toEqual([{command: 'npm test', status: 'passed', summary: '10 tests passed', revision: 3, kind: 'test'}]);
     expect(workStatePrompt(state)).toContain('<work_state>');
   });
 
@@ -257,42 +257,45 @@ describe('red→green pair (P4)', () => {
     expect(validationCommandKey('npm test')).not.toBe('npm run build');
   });
 
-  it('derives the pair status: missing, satisfied by same command, successor, or waiver', () => {
+  it('requires same-check green only when a red was actually captured', () => {
     const state = createWorkState('fix it', 'fix', []);
     observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
-    expect(redPairStatus(state)).toBe('missing'); // green not yet run
-    // An unrelated green does not satisfy the pair.
+    expect(redPairStatus(state)).toBe('missing');
+    // An unrelated green does not satisfy the captured red.
     observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm run build'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
     expect(redPairStatus(state)).toBe('missing');
-    state.greenSuccessor = 'npm run build';
-    expect(redPairStatus(state)).toBe('satisfied'); // explicit successor
-    state.greenSuccessor = undefined;
     observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'time npm   test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
-    expect(redPairStatus(state)).toBe('satisfied'); // normalized same command
-    state.redWaiver = {reason: 'unobservable'};
-    expect(redPairStatus(state)).toBe('waived');
+    expect(redPairStatus(state)).toBe('satisfied');
   });
 
-  it('is not required without mutations', () => {
-    const noMutation = createWorkState('fix it', 'fix', []);
-    expect(redPairStatus(noMutation)).toBe('not-required');
+  it('does not accept a same-command green that predates the mutation', () => {
+    const state = createWorkState('fix it', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm run build'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(redPairStatus(state)).toBe('missing');
+  });
+
+  it('is not required without mutations or without a captured red', () => {
+    expect(redPairStatus(createWorkState('fix it', 'fix', []))).toBe('not-required');
+    const greenOnly = createWorkState('fix it', 'fix', []);
+    observeWorkToolEvent(greenOnly, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(greenOnly, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(redPairStatus(greenOnly)).toBe('not-required');
   });
 });
 
-describe('seedCarriedGoalEvidence (goal-scoped P4 state)', () => {
-  it('carries red evidence and waivers across the boundary', () => {
+describe('seedCarriedGoalEvidence (goal-scoped red state)', () => {
+  it('carries unresolved red evidence across the boundary', () => {
     const state = createWorkState('fix it', 'fix', []);
     seedCarriedGoalEvidence(state, {
       mutationCount: 2,
       validationOutcome: 'stale',
       redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
-      redWaiver: {reason: 'kept from earlier turn'},
-      greenSuccessor: 'npm run test:ci',
     });
     expect(state.redEvidence!.command).toBe('npm test');
-    expect(state.redWaiver).toEqual({reason: 'kept from earlier turn'});
-    expect(state.greenSuccessor).toBe('npm run test:ci');
     expect(state.mutationCount).toBe(2);
   });
 });

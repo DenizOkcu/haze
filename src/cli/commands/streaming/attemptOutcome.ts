@@ -27,7 +27,7 @@ import type {ValidationOutcome, WorkTaskProgress} from '../../../core/agent/work
  * progress) project the turn-wide `TurnExecutionState`; when omitted, the
  * defaults cannot reject a turn (unknown intent, no mutations, no task list).
  */
-export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived'}): TurnStatus {
+export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; redPair?: 'not-required' | 'missing' | 'satisfied'}): TurnStatus {
   void input.error;
   const state: TurnExecutionState = {
     ...createTurnExecutionState(),
@@ -69,7 +69,7 @@ export function projectGoalEvidence(turnState: TurnExecutionState, goal: Session
   turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
   turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
   turnState.taskProgress = goal.taskProgress;
-  // Red→green pair (P4).
+  // Opportunistic red→green: only an actually observed red can gate.
   turnState.redPair = redPairStatus(goal);
 }
 
@@ -129,9 +129,9 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const goalCycle = turnOptions.goalContext?.cycle ?? 1;
   const carriedEvidence: CarriedGoalEvidence = {
     ...(turnOptions.goalContext?.requestHash ? {requestHash: turnOptions.goalContext.requestHash} : {}),
-    ...(goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
-    ...(goal.redWaiver ? {redWaiver: {...goal.redWaiver}} : {}),
-    ...(goal.greenSuccessor ? {greenSuccessor: goal.greenSuccessor} : {}),
+    // Carry red evidence until the same check passes after the mutation. This
+    // includes boundaries reached after red capture but before the first edit.
+    ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
   };
   const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
   const checkpointResult = (): AgentAttemptResult => {
@@ -167,13 +167,6 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
         return checkpointResult();
       }
     }
-  }
-  // Honest completion surfacing (P4): a red waiver is an assumption, not a
-  // silent scope cut — it rides the final synthesis line.
-  if (turnStatus === 'complete' && goal.redWaiver) {
-    const text = `Assumed out of scope: red→green repro assumed unobservable in this environment (${goal.redWaiver.reason}).`;
-    callbacks.addMessage({role: 'system', text});
-    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text}));
   }
   return {status: turnStatus};
 }

@@ -4,7 +4,7 @@ Six phases, ordered by autonomy payoff per unit of risk. Each phase is independe
 
 Guiding rule throughout: **port autoprompt's semantics into haze's existing enforcement skeleton** (`completionController`, `workState`, `goalSupervisor`, subagents, session store). Do not build a parallel orchestration engine.
 
-> **Superseded plan:** P1, P4, and P6 remain in the product. P2/P2b, P3, and P5 were implemented, measured with Harbor, and then removed because they increased token/time cost without improving success on the tested task. The phase descriptions below are retained as implementation history, not active requirements.
+> **Superseded plan:** P1 and P6 remain; P4 remains only as opportunistic same-check red→green evidence, without a mandatory repro, depth prompt, waiver, or successor declaration. P2/P2b, P3, and P5 were implemented, measured with Harbor, and then removed because they increased token/time cost without improving success on the tested task. The phase descriptions below are retained as implementation history, not active requirements.
 
 ---
 

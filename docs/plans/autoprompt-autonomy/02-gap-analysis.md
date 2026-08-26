@@ -2,7 +2,7 @@
 
 Mechanism-by-mechanism comparison. Haze code references are to the current tree as of 2026-08-19. "Haze already has (stronger)" means the property is enforced structurally in TypeScript, where autoprompt can only state it as Markdown doctrine.
 
-> **Historical note:** The later implementation and Harbor A/B retained P1, P4, and P6 but removed P2/P2b, P3, and P5 because the measured ceremony added substantial cost without improving success on the tested task. This document preserves the original decision inputs; it does not describe the current runtime.
+> **Historical note:** The later implementation and Harbor A/B retained P1 and P6, simplified P4 to opportunistic same-check red→green evidence, and removed P2/P2b, P3, and P5 because the measured ceremony added substantial cost without improving success on the tested task. This document preserves the original decision inputs; it does not describe the current runtime.
 
 ## Legend
 

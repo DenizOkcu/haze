@@ -27,10 +27,8 @@ export interface IncompleteGoalResume {
   validationOutcome?: ValidationOutcome;
   /** sha256 prefix of the exact request bytes; binds downstream evidence to the mission (P1). */
   requestHash?: string;
-  /** Captured pre-mutation failing repro for fix goals (P4). */
+  /** Unresolved pre-mutation failing repro for fix goals. */
   redEvidence?: RedEvidence;
-  redWaiver?: {reason: string};
-  greenSuccessor?: string;
 }
 
 /** Supervisor-level checkpoint persisted between physical turns (in memory and, via the goal ledger, in the session JSONL). */
@@ -55,8 +53,6 @@ export interface GoalCheckpoint {
   requestHash?: string;
   intent?: RequestIntent;
   redEvidence?: RedEvidence;
-  redWaiver?: {reason: string};
-  greenSuccessor?: string;
 }
 
 /** Durable goal-ledger append (P1): one entry per supervisor boundary; the writer stamps `type`/`at`. Shared by the supervisor and the session recorder. */
@@ -72,8 +68,6 @@ export interface GoalLedgerAppend {
   progressSignature: string;
   taskCounts?: {total: number; pending: number; inProgress: number; completed: number};
   redEvidence?: RedEvidence;
-  redWaiverReason?: string;
-  greenSuccessor?: string;
   stopReason?: string;
   status?: 'complete' | 'failed' | 'aborted';
 }
@@ -93,8 +87,6 @@ export interface CarriedGoalEvidence {
   requestHash?: string;
   intent?: RequestIntent;
   redEvidence?: RedEvidence;
-  redWaiver?: {reason: string};
-  greenSuccessor?: string;
 }
 
 /**
@@ -147,7 +139,5 @@ export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCh
     ...(frontier.intent ? {intent: frontier.intent as RequestIntent} : {}),
     ...(frontier.taskCounts ? {taskCounts: frontier.taskCounts} : {}),
     ...(frontier.redEvidence ? {redEvidence: {...frontier.redEvidence}} : {}),
-    ...(frontier.redWaiverReason ? {redWaiver: {reason: frontier.redWaiverReason}} : {}),
-    ...(frontier.greenSuccessor ? {greenSuccessor: frontier.greenSuccessor} : {}),
   };
 }

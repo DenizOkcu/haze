@@ -415,8 +415,6 @@ describe('stored-goal frontier parity (P1: crash resume matches in-process conti
       at: 't0',
       taskCounts: {total: 4, pending: 1, inProgress: 0, completed: 3},
       redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
-      redWaiverReason: 'unobservable',
-      greenSuccessor: 'npm run test:ci',
     });
     expect(checkpoint).toMatchObject({
       goalId: 'goal-crashed',
@@ -424,8 +422,6 @@ describe('stored-goal frontier parity (P1: crash resume matches in-process conti
       intent: 'fix',
       cycle: 3,
       redEvidence: {command: 'npm test'},
-      redWaiver: {reason: 'unobservable'},
-      greenSuccessor: 'npm run test:ci',
     });
     // The stored-goal resume hydrates exactly this carried evidence.
     const {runAgentGoal} = await loadSupervisor([
@@ -434,8 +430,6 @@ describe('stored-goal frontier parity (P1: crash resume matches in-process conti
         inspect: options => {
           expect(options.goalContext?.carried).toMatchObject({
             redEvidence: {command: 'npm test'},
-            redWaiver: {reason: 'unobservable'},
-            greenSuccessor: 'npm run test:ci',
           });
         },
       },

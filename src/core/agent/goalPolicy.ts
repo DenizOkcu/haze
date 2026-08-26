@@ -119,14 +119,9 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
   const validationLine = reason.includes('validation')
     ? ' No recognized post-edit validation was recorded. Run one standard test/build command, directly execute the changed artifact as one unchained command, or call shell with purpose=validation for a custom assertion check.'
     : '';
-  const redLine = reason.includes('red')
-    ? ' No failing repro was captured before the fix landed. Reproduce the reported failure from the report on the unpatched state (or the closest observable equivalent), record it, then make the same check pass — or declare redWaiver via writeTasks with a reason if the failure is genuinely unobservable in this environment.'
+  const redLine = reason.includes('failing check')
+    ? ' Rerun the same validation command that failed before the edit and resolve it; a different check does not close the captured red evidence.'
     : '';
   const detailLine = detail ? ` ${detail}` : '';
   return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
-}
-
-/** Fix-intent depth discipline (P4, prompt-level): state the suspected root cause and one competing hypothesis before editing. */
-export function fixDepthPrompt() {
-  return 'Before changing code for a fix: name the deepest-cause function or module you suspect, state one competing hypothesis, and prove the reported failure RED (a failing repro derived from the report) before patching. The completing validation must be the same check turning green. Judge the fix against the cause, not the symptom.';
 }

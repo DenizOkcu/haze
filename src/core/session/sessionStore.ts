@@ -16,7 +16,7 @@ export type SessionEntry =
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string}
-  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; redWaiverReason?: string; greenSuccessor?: string; stopReason?: string; status?: string};
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; stopReason?: string; status?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
 export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
@@ -32,10 +32,8 @@ export interface GoalLedgerFrontier {
   validationOutcome: string;
   progressSignature: string;
   taskCounts?: GoalLedgerEntry['taskCounts'];
-  /** Carried red→green state so a crash resume keeps its evidence (P4 parity). */
+  /** Unresolved red evidence carried so crash resume preserves the pending same-check green requirement. */
   redEvidence?: GoalLedgerEntry['redEvidence'];
-  redWaiverReason?: string;
-  greenSuccessor?: string;
   at: string;
 }
 
@@ -267,8 +265,6 @@ function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
     progressSignature: entry.progressSignature,
     ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
     ...(entry.redEvidence ? {redEvidence: entry.redEvidence} : {}),
-    ...(entry.redWaiverReason ? {redWaiverReason: entry.redWaiverReason} : {}),
-    ...(entry.greenSuccessor ? {greenSuccessor: entry.greenSuccessor} : {}),
     at: entry.at,
   };
 }
@@ -311,8 +307,7 @@ function parseSessionEntry(value: unknown): SessionEntry {
         || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
         || !optionalTaskCounts(value.taskCounts)
         || !optionalString(value.stopReason) || !optionalString(value.status)
-        || !optionalLedgerRedEvidence(value.redEvidence)
-        || !optionalString(value.redWaiverReason) || !optionalString(value.greenSuccessor)) return invalid('invalid goal');
+        || !optionalLedgerRedEvidence(value.redEvidence)) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);

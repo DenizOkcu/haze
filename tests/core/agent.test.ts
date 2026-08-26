@@ -169,10 +169,10 @@ describe('LLM-summarized compaction pieces (F-09)', () => {
   });
 });
 
-describe('goal continuation prompt (P4 payload)', () => {
-  it('names the red→green requirement and waiver path for fix readiness', () => {
-    const prompt = goalContinuationPrompt('no failing repro was captured before the fix landed (red→green pair missing)');
-    expect(prompt).toContain('redWaiver');
-    expect(prompt).toContain('Reproduce the reported failure');
+describe('goal continuation prompt (opportunistic red→green)', () => {
+  it('asks for the same captured failing check to turn green', () => {
+    const prompt = goalContinuationPrompt('the captured pre-edit failing check has not passed after the fix');
+    expect(prompt).toContain('same validation command');
+    expect(prompt).not.toContain('waiver');
   });
 });

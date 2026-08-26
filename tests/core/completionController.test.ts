@@ -380,18 +380,18 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
   });
 });
 
-describe('assessCompletionReadiness (P4: red→green pair)', () => {
-  it('demands the red→green pair for fix intents only after validation passes', () => {
+describe('assessCompletionReadiness (opportunistic red→green)', () => {
+  it('gates only a captured red that has not turned green', () => {
     const base = {intent: 'fix' as const, mutationCount: 1};
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'failed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('validation_failed');
-    expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('missing_red_evidence');
+    expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('red_check_not_green');
     expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'satisfied'}), evidence({lastToolOk: true}))).toBe('ready');
-    expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'waived'}), evidence({lastToolOk: true}))).toBe('ready');
+    expect(assessCompletionReadiness(state({...base, validationOutcome: 'passed', redPair: 'not-required'}), evidence({lastToolOk: true}))).toBe('ready');
     expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'passed', redPair: 'missing'}), evidence({lastToolOk: true}))).toBe('ready');
   });
 
-  it('treats the red→green readiness as autonomously recoverable and projects it into evidence', () => {
-    expect(goalContinuationRecoverable('missing_red_evidence')).toBe(true);
+  it('treats an unresolved captured red as autonomously recoverable and projects satisfied evidence', () => {
+    expect(goalContinuationRecoverable('red_check_not_green')).toBe(true);
     const s = state({intent: 'fix', mutationCount: 1, validationOutcome: 'passed', redPair: 'satisfied'});
     expect(toCompletionEvidence(s).redPair).toBe('satisfied');
   });

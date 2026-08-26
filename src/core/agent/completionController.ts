@@ -61,8 +61,8 @@ export interface TurnExecutionState {
   goalContinuationProgress: string | undefined;
   /** Whether the single allowed no-progress corrective nudge has been consumed. */
   goalContinuationCorrectiveUsed: boolean;
-  /** Red→green pair state for fix intents (P4). */
-  redPair: 'not-required' | 'missing' | 'satisfied' | 'waived' | undefined;
+  /** Opportunistic red→green state for fix intents. */
+  redPair: 'not-required' | 'missing' | 'satisfied' | undefined;
   budgetBoundary: boolean;
   aborted: boolean;
 }
@@ -104,8 +104,8 @@ export interface TurnCompletionEvidence {
   mutationCount: number;
   /** Current-turn task counts from writeTasks, when a task list was declared. */
   taskProgress?: {total: number; pending: number; inProgress: number; completed: number};
-  /** Red→green pair state for fix intents (P4). */
-  redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived';
+  /** Opportunistic red→green state for fix intents. */
+  redPair?: 'not-required' | 'missing' | 'satisfied';
   finishCause: FinishCause | undefined;
   recoveryUsed: {length: boolean; rescue: boolean; goal: number};
   budgetBoundary: boolean;
@@ -149,7 +149,7 @@ export type CompletionReadiness =
   | 'validation_failed'
   | 'validation_stale'
   | 'validation_absent_after_mutation'
-  | 'missing_red_evidence'
+  | 'red_check_not_green'
   | 'tool_failure'
   | 'unresolved_tool_input'
   | 'aborted';
@@ -161,8 +161,8 @@ export interface CompletionReadinessInput {
   mutationCount: number;
   validationOutcome: ValidationOutcome;
   taskProgress: WorkTaskProgress | undefined;
-  /** Red→green pair state (P4); absent/not-required disables the gate. */
-  redPair?: 'not-required' | 'missing' | 'satisfied' | 'waived';
+  /** Red→green pair state; absent/not-required disables the gate. */
+  redPair?: 'not-required' | 'missing' | 'satisfied';
 }
 
 /**
@@ -183,7 +183,7 @@ export function assessCompletionReadiness(state: CompletionReadinessInput, evide
     if (state.validationOutcome === 'stale') return 'validation_stale';
     if (state.validationOutcome === 'absent' && state.mutationCount > 0) return 'validation_absent_after_mutation';
   }
-  if (state.intent === 'fix' && state.redPair === 'missing') return 'missing_red_evidence';
+  if (state.intent === 'fix' && state.redPair === 'missing') return 'red_check_not_green';
   return 'ready';
 }
 
@@ -197,7 +197,7 @@ export function describeCompletionReadiness(readiness: CompletionReadiness, task
     case 'validation_failed': return 'the latest validation failed and remains unresolved';
     case 'validation_stale': return 'edits landed after the latest validation';
     case 'validation_absent_after_mutation': return 'edits landed without any relevant validation';
-    case 'missing_red_evidence': return 'no failing repro was captured before the fix landed (red→green pair missing)';
+    case 'red_check_not_green': return 'the captured pre-edit failing check has not passed after the fix';
     case 'tool_failure': return 'the last tool call failed';
     case 'unresolved_tool_input': return 'a tool call never executed because its input was invalid';
     case 'aborted': return 'the turn was aborted';
@@ -338,7 +338,7 @@ export function goalContinuationRecoverable(readiness: CompletionReadiness): boo
     || readiness === 'validation_failed'
     || readiness === 'validation_stale'
     || readiness === 'validation_absent_after_mutation'
-    || readiness === 'missing_red_evidence';
+    || readiness === 'red_check_not_green';
 }
 
 /**

@@ -117,7 +117,7 @@ describe('runHeadless: output', () => {
     const {runHeadless} = await loadRunCommand({
       status: 'complete',
       runAgentTurnImpl: (cb) => {
-        cb.onEvent?.({type: 'goal_notice', text: 'Assumed out of scope: red→green repro is unobservable in this environment.', at: 't1'});
+        cb.onEvent?.({type: 'goal_notice', text: 'Goal continuation budget reached; checkpoint saved.', at: 't1'});
         cb.onEvent?.({type: 'goal_notice', text: 'Unfinished goal paused without measurable progress: validation remains stale.', at: 't2'});
       },
     });
@@ -125,7 +125,7 @@ describe('runHeadless: output', () => {
     const parsed = JSON.parse(writes.join(''));
     // Notices reach non-streaming consumers too (bounded to the last 5).
     expect(parsed.notices).toEqual([
-      'Assumed out of scope: red→green repro is unobservable in this environment.',
+      'Goal continuation budget reached; checkpoint saved.',
       'Unfinished goal paused without measurable progress: validation remains stale.',
     ]);
   });

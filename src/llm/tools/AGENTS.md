@@ -15,7 +15,7 @@ Implementation helpers for haze built-in tools.
 
 ## writeTasks prose-size policy
 
-`taskTool.ts` never Zod-caps prose fields (titles and fix-evidence reasons). A schema `.max()` turns an over-long string into an `AI_TypeValidationError` that rejects the whole call — the model retries the identical oversized input and burns steps (observed in the 2026-08-26 Harbor differential). The schema validates structure only (enums and object layouts stay strict); `execute` truncates prose to documented bounds.
+`taskTool.ts` never Zod-caps task titles. A schema `.max()` turns an over-long string into an `AI_TypeValidationError` that rejects the whole call — the model retries the identical oversized input and burns steps (observed in the 2026-08-26 Harbor differential). The schema validates structure only (enums and object layouts stay strict); `execute` truncates titles to the documented bound.
 
 ## Turn-scoped tool context
 

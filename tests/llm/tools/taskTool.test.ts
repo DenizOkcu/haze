@@ -123,32 +123,4 @@ describe('writeTasksTool.execute', () => {
     expect(await fs.pathExists(path.join(tmp, 'tasks.json'))).toBe(true);
   });
 
-  it('records retained fix evidence while clearing the task list', async () => {
-    const {writeTasksTool} = await loadTaskTool();
-    const result = await writeTasksTool.execute({
-      tasks: [],
-      redWaiver: 'failure is not observable in this environment',
-      greenSuccessor: 'npm run test:ci',
-    }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(result).toMatchObject({
-      ok: true,
-      taskCount: 0,
-      redWaiver: 'failure is not observable in this environment',
-      greenSuccessor: 'npm run test:ci',
-    });
-  });
-
-  it('truncates over-long prose instead of failing the whole call (harbor finding 1)', async () => {
-    const {writeTasksTool} = await loadTaskTool();
-    const result = await writeTasksTool.execute({
-      tasks: [{title: 'T'.repeat(250)}],
-      redWaiver: `cannot reproduce ${'because '.repeat(120)}`,
-      greenSuccessor: `npm run test:ci ${'--verbose '.repeat(80)}`,
-    }, {toolCallId: 'x', messages: [], abortSignal: new AbortController().signal} as never);
-    expect(result).toMatchObject({ok: true});
-    expect((result as {redWaiver?: string}).redWaiver?.length).toBeLessThanOrEqual(400);
-    expect((result as {greenSuccessor?: string}).greenSuccessor?.length).toBeLessThanOrEqual(400);
-    const stored = await readStoredTasks() as Array<{title: string}>;
-    expect(stored[0]?.title.length).toBeLessThanOrEqual(200);
-  });
 });

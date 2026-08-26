@@ -67,8 +67,6 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     noProgressCount,
     ...(resume.requestHash ? {requestHash: resume.requestHash} : {}),
     ...(resume.redEvidence ? {redEvidence: {...resume.redEvidence}} : {}),
-    ...(resume.redWaiver ? {redWaiver: {...resume.redWaiver}} : {}),
-    ...(resume.greenSuccessor ? {greenSuccessor: resume.greenSuccessor} : {}),
   };
 }
 
@@ -90,8 +88,6 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
       validationOutcome: checkpoint.validationOutcome,
       ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {}),
       ...(checkpoint.redEvidence ? {redEvidence: {...checkpoint.redEvidence}} : {}),
-      ...(checkpoint.redWaiver ? {redWaiver: {...checkpoint.redWaiver}} : {}),
-      ...(checkpoint.greenSuccessor ? {greenSuccessor: checkpoint.greenSuccessor} : {}),
     }
     : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
@@ -144,11 +140,9 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       validationOutcome: source?.validationOutcome ?? 'not_applicable',
       progressSignature: source?.progressSignature ?? '',
       ...(source?.taskCounts ? {taskCounts: source.taskCounts} : {}),
-      // Red→green evidence keeps crash resumes at parity with in-process
-      // continuation (P1/P4 frontier).
+      // Unresolved red evidence keeps crash resumes at parity with in-process
+      // continuation; satisfied pairs are deliberately not carried.
       ...(source?.redEvidence ? {redEvidence: {...source.redEvidence}} : {}),
-      ...(source?.redWaiver ? {redWaiverReason: source.redWaiver.reason} : {}),
-      ...(source?.greenSuccessor ? {greenSuccessor: source.greenSuccessor} : {}),
       ...extra,
     });
   };

@@ -36,18 +36,18 @@ export function validationCommandKey(command: string): string {
 }
 
 /**
- * Red→green pair state for fix intents (P4): a fix goal with mutations must
- * carry a pre-mutation failing repro (or a structured waiver), and a passing
- * validation of that same command (or an explicitly recorded successor).
+ * Opportunistic red→green state for fix intents: no failing repro is required,
+ * but when a pre-mutation validation did fail, that same check must pass after
+ * the fix. `missing` therefore means "captured red has no matching green", not
+ * "no red was captured".
  */
-export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'mutationCount' | 'redEvidence' | 'redWaiver' | 'greenSuccessor' | 'validations'>): 'not-required' | 'missing' | 'satisfied' | 'waived' {
+export function redPairStatus(state: Pick<WorkState, 'normalizedIntent' | 'mutationCount' | 'mutationSeq' | 'redEvidence' | 'validations'>): 'not-required' | 'missing' | 'satisfied' {
   if (state.normalizedIntent !== 'fix' || state.mutationCount === 0) return 'not-required';
-  if (state.redWaiver) return 'waived';
   const red = state.redEvidence;
-  if (!red) return 'missing';
-  const successorKey = state.greenSuccessor ? validationCommandKey(state.greenSuccessor) : undefined;
+  if (!red) return 'not-required';
   const green = state.validations.some(validation => validation.status === 'passed'
-    && (validationCommandKey(validation.command) === red.commandKey || (successorKey !== undefined && validationCommandKey(validation.command) === successorKey)));
+    && validation.revision >= state.mutationSeq
+    && validationCommandKey(validation.command) === red.commandKey);
   return green ? 'satisfied' : 'missing';
 }
 
@@ -62,7 +62,7 @@ export interface WorkState {
   decisions: Array<{decision: string; reason?: string}>;
   files: Array<{path: string; action: WorkFileAction; note?: string}>;
   touchedFiles: string[];
-  validations: Array<{command: string; status: Exclude<WorkValidationStatus, 'pending'>; summary: string; kind?: ValidationKind}>;
+  validations: Array<{command: string; status: Exclude<WorkValidationStatus, 'pending'>; summary: string; revision: number; kind?: ValidationKind}>;
   validationCommands: Array<{command: string; status: WorkValidationStatus}>;
   /** Number of successful workspace mutations observed this turn. */
   mutationCount: number;
@@ -86,12 +86,8 @@ export interface WorkState {
    * command or output.
    */
   carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
-  /** Captured pre-mutation failing repro for fix goals (P4). */
+  /** Captured pre-mutation failing repro for fix goals. Optional, but same-check green is required when present. */
   redEvidence?: RedEvidence;
-  /** Structured waiver when the failing repro is genuinely unobservable here (P4). */
-  redWaiver?: {reason: string};
-  /** Explicitly recorded successor command binding green to red (P4). */
-  greenSuccessor?: string;
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
   blockers: string[];
   pending: string[];
@@ -119,7 +115,7 @@ export interface WorkTaskProgress {
   revision: number;
 }
 
-export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; redWaiver?: {reason: string}; greenSuccessor?: string}) {
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence}) {
   if (carried.taskProgress && carried.taskProgress.total > 0) {
     state.taskProgress = {...carried.taskProgress, revision: 1};
   }
@@ -135,8 +131,6 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
   // physical turns so a continuation cannot complete while a carried pair
   // stays unsatisfied.
   if (carried.redEvidence) state.redEvidence = {...carried.redEvidence};
-  if (carried.redWaiver) state.redWaiver = {...carried.redWaiver};
-  if (carried.greenSuccessor) state.greenSuccessor = carried.greenSuccessor;
 }
 
 export interface WorkToolEvent {
@@ -168,10 +162,10 @@ function outputSummary(output: unknown) {
   return '';
 }
 
-function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined) {
+function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined, revision: number) {
   const existing = state.validations.find(validation => validation.command === command);
-  if (existing) Object.assign(existing, {status, summary, ...(kind ? {kind} : {})});
-  else state.validations.push({command, status, summary, ...(kind ? {kind} : {})});
+  if (existing) Object.assign(existing, {status, summary, revision, ...(kind ? {kind} : {})});
+  else state.validations.push({command, status, summary, revision, ...(kind ? {kind} : {})});
 
   const existingCommand = state.validationCommands.find(item => item.command === command);
   if (existingCommand) existingCommand.status = status;
@@ -295,7 +289,7 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       const passed = summary ? summary.status === 'passed' : ok && exitCode === 0;
       const status: Exclude<WorkValidationStatus, 'pending'> = passed ? 'passed' : 'failed';
       const summaryText = summary?.summaryText ?? (passed ? `Executed changed artifact ${artifact} successfully.` : `Changed artifact ${artifact} exited unsuccessfully.`);
-      upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic');
+      upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
       state.validationSeq = seq;
       state.phase = 'validating';
       state.lastProgressAt = now;
@@ -312,8 +306,7 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
   }
 
   // Task-list coordination: a successful writeTasks result records bounded
-  // current-turn task counts as completion evidence, plus structured red
-  // waivers / green-successor declarations (P4). It is not a file mutation,
+  // current-turn task counts as completion evidence. It is not a file mutation,
   // and a failed call leaves prior evidence untouched.
   if (ok && event.toolName === 'writeTasks') {
     const progress = taskProgressFromOutput(event.output, seq);
@@ -321,10 +314,6 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       state.taskProgress = progress;
       state.lastProgressAt = now;
     }
-    const redWaiver = redWaiverFromOutput(event.output);
-    if (redWaiver && !state.redWaiver) state.redWaiver = {reason: redWaiver};
-    const greenSuccessor = greenSuccessorFromOutput(event.output);
-    if (greenSuccessor && !state.greenSuccessor) state.greenSuccessor = greenSuccessor;
   }
 
   state.revision = seq;
@@ -355,24 +344,6 @@ export function taskProgressFromOutput(output: unknown, revision: number): WorkT
   const completed = boundedTaskCount(counts.completed);
   if (pending === undefined || inProgress === undefined || completed === undefined) return undefined;
   return {total, pending, inProgress, completed, revision};
-}
-
-function boundedEchoString(output: unknown, field: 'redWaiver' | 'greenSuccessor'): string | undefined {
-  if (typeof output !== 'object' || output == null) return undefined;
-  const record = output as Record<string, unknown>;
-  if (record.ok !== true) return undefined;
-  const value = record[field];
-  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 400) : undefined;
-}
-
-/** Structured red-evidence waiver echoed by a successful writeTasks result (P4). */
-export function redWaiverFromOutput(output: unknown): string | undefined {
-  return boundedEchoString(output, 'redWaiver');
-}
-
-/** Explicit green-successor command echoed by a successful writeTasks result (P4). */
-export function greenSuccessorFromOutput(output: unknown): string | undefined {
-  return boundedEchoString(output, 'greenSuccessor');
 }
 
 /**

@@ -1374,7 +1374,7 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     expect(outcome).toMatchObject({status: 'complete'});
   });
 
-  it('continues when edits land after a failing repro, then completes on the red→green pair', async () => {
+  it('rejects an unrelated green after a captured red, then completes when the same check passes', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle,
       availableTools: tools,
@@ -1385,7 +1385,9 @@ describe('runAgentTurn: autonomous goal continuation', () => {
           {type: 'tool-result', toolCallId: 'r1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: false, code: 1, validationSummary: {kind: 'test', status: 'failed', summaryText: '1 failing', failedFiles: ['a.ts'], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}}},
           {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
           {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          {type: 'text-delta', text: 'I stopped here without validating.'},
+          {type: 'tool-call', toolCallId: 'b1', toolName: 'shell', input: {command: 'npm run build'}},
+          {type: 'tool-result', toolCallId: 'b1', toolName: 'shell', input: {command: 'npm run build'}, output: {ok: true, code: 0, validationSummary: {kind: 'build', status: 'passed', summaryText: 'build passed', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+          {type: 'text-delta', text: 'The build passes.'},
           {type: 'finish', finishReason: 'stop'},
         ],
         [
@@ -1399,35 +1401,31 @@ describe('runAgentTurn: autonomous goal continuation', () => {
     const cb = makeCallbacks();
     const outcome = await runAgentTurn('fix the failing build in a.ts', undefined, [], cb);
     expect(mocks.streamedMessages).toHaveLength(2);
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/edits landed after the latest validation/);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/captured pre-edit failing check/);
+    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/same validation command/);
     expect(outcome).toMatchObject({status: 'complete', evidence: {validationOutcome: 'passed', redPair: 'satisfied', recoveryUsed: {goal: 1}}});
   });
 
 
 
 
-  it('demands a red→green pair before accepting a fix final', async () => {
+  it('accepts a validated fix when no pre-edit failing check was captured', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle,
       availableTools: tools,
-      callStreams: [
-        [
-          {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
-          {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
-          ...passedValidation('v1'),
-          {type: 'text-delta', text: 'Fixed.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
-        [
-          {type: 'text-delta', text: 'Still no repro captured.'},
-          {type: 'finish', finishReason: 'stop'},
-        ],
+      streamParts: [
+        {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts', edits: []}},
+        {type: 'tool-result', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}, output: {ok: true}},
+        ...passedValidation('v1'),
+        {type: 'text-delta', text: 'Fixed and validated.'},
+        {type: 'finish', finishReason: 'stop'},
       ],
     });
     const cb = makeCallbacks();
     const outcome = await runAgentTurn('fix the login crash in the auth module', undefined, [], cb);
-    expect(JSON.stringify(mocks.streamedMessages[1])).toMatch(/red→green pair missing/);
-    expect(outcome).toMatchObject({status: 'failed', evidence: {redPair: 'missing'}});
+    expect(mocks.streamedMessages).toHaveLength(1);
+    expect(outcome).toMatchObject({status: 'complete', evidence: {validationOutcome: 'passed'}});
+    expect(outcome.evidence).not.toHaveProperty('redPair');
   });
 });
 

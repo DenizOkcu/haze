@@ -237,9 +237,9 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       }
     : undefined;
 
-  // Bounded, cross-output-mode collection of gate decisions (verification,
-  // sweep, waivers, pauses) so `--output json` consumers see *why* a goal
-  // continued or paused, not only that it did. The same events stream live in
+  // Bounded, cross-output-mode collection of gate decisions and pauses so
+  // `--output json` consumers see *why* a goal continued or paused, not only
+  // that it did. The same events stream live in
   // stream-json mode.
   const goalNotices: string[] = [];
   const recordEvent = (event: AgentEvent) => {
