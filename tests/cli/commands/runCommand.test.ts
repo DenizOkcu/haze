@@ -345,3 +345,82 @@ describe('parseTurnTimeoutMs', () => {
     expect(() => parseTurnTimeoutMs('48h')).toThrow(/at most 24 hours/);
   });
 });
+
+describe('runHeadless: --until-done relaunch supervisor (P6)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function loadUntilDone(script: Array<{status: 'complete' | 'failed'; stopReason?: string; evidence?: unknown; resume?: unknown}>) {
+    const runAgentGoal = vi.fn(async () => {
+      const step = script[Math.min(runAgentGoal.mock.calls.length - 1, script.length - 1)]!;
+      return {
+        status: step.status,
+        stopReason: step.status === 'complete' ? 'completed' : (step.stopReason ?? 'model-error'),
+        cycles: 2,
+        ...(step.evidence ? {evidence: step.evidence} : {}),
+        ...(step.resume ? {resume: step.resume} : {}),
+      };
+    });
+    vi.doMock('../../../src/cli/commands/streaming/goalSupervisor.js', () => ({runAgentGoal}));
+    vi.doMock('../../../src/cli/commands/streaming.js', () => ({runAgentTurn: vi.fn()}));
+    vi.doMock('../../../src/config/contextFiles.js', () => ({readContextFiles: async () => []}));
+    vi.doMock('../../../src/config/settings.js', () => ({readSettings: async () => PROVIDER_SETTINGS}));
+    vi.doMock('../../../src/core/log/llmLog.js', () => ({createLog: async () => ({file: '/tmp/stub-llm.jsonl'}), endLog: async () => undefined}));
+    vi.doMock('../../../src/core/session/sessionStore.js', () => ({
+      findSession: async () => undefined,
+      restoreSessionState: async () => ({messages: [], workState: undefined, parseErrors: []}),
+    }));
+    vi.resetModules();
+    const mod = await import('../../../src/cli/commands/runCommand.js');
+    return {...mod, runAgentGoal};
+  }
+
+  const evidence = (mutationCount: number) => ({mutationCount, validationOutcome: 'stale', taskProgress: {total: 3, pending: 1, inProgress: 0, completed: 2}, finishCause: 'error', recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false});
+
+  it('relaunches after transient model errors and completes without human intervention', async () => {
+    vi.useFakeTimers();
+    const stderr = captureStderr();
+    const {runHeadless, runAgentGoal} = await loadUntilDone([
+      {status: 'failed', stopReason: 'model-error', evidence: evidence(2)},
+      {status: 'failed', stopReason: 'model-stream-idle', evidence: evidence(4)},
+      {status: 'complete', evidence: {mutationCount: 5, validationOutcome: 'passed', finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}},
+    ]);
+    const run = runHeadless({prompt: 'implement the long feature', output: 'json', untilDone: true});
+    // Advancing virtual time drives the exponential backoff sleeps (2s + 4s).
+    await vi.advanceTimersByTimeAsync(120_000);
+    const exitCode = await run;
+    expect(runAgentGoal).toHaveBeenCalledTimes(3);
+    expect(stderr.join('')).toContain('relaunching');
+    expect(exitCode).toBe(0);
+  });
+
+  it('stops after three no-progress relaunches (poison guard) with a truthful non-zero exit', async () => {
+    vi.useFakeTimers();
+    const stderr = captureStderr();
+    const {runHeadless, runAgentGoal} = await loadUntilDone(
+      Array.from({length: 10}, () => ({status: 'failed', stopReason: 'model-error', evidence: evidence(2)})),
+    );
+    const run = runHeadless({prompt: 'doomed goal', output: 'json', untilDone: true});
+    await vi.advanceTimersByTimeAsync(300_000);
+    const exitCode = await run;
+    // First run + relaunches until the poison guard trips at the third no-progress relaunch.
+    expect(runAgentGoal.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(stderr.join('')).toContain('truly stuck');
+    expect(exitCode).toBe(1);
+  });
+
+  it('does not relaunch on non-transient stop reasons', async () => {
+    const {runHeadless, runAgentGoal} = await loadUntilDone([{status: 'failed', stopReason: 'blocked'}]);
+    const exitCode = await runHeadless({prompt: 'blocked goal', output: 'json', untilDone: true});
+    expect(runAgentGoal).toHaveBeenCalledTimes(1);
+    expect(exitCode).toBe(1);
+  });
+
+  it('never relaunches without the flag', async () => {
+    const {runHeadless, runAgentGoal} = await loadUntilDone([{status: 'failed', stopReason: 'model-error'}]);
+    await runHeadless({prompt: 'plain goal', output: 'json'});
+    expect(runAgentGoal).toHaveBeenCalledTimes(1);
+  });
+});

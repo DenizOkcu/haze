@@ -1,6 +1,6 @@
 import {type ModelMessage} from 'ai';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
-import {runAgentGoal, type GoalRunResult} from './streaming/goalSupervisor.js';
+import {runAgentGoal, type GoalRunOptions, type GoalRunResult} from './streaming/goalSupervisor.js';
 import {type Message, type StreamCallbacks, type TurnStatus} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
@@ -10,7 +10,7 @@ import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
-import type {AgentEvent} from '../../core/agent/events.js';
+import {agentEvent, type AgentEvent} from '../../core/agent/events.js';
 import {findSession, restoreSessionState} from '../../core/session/sessionStore.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
@@ -27,6 +27,8 @@ export interface HeadlessOptions {
   output: HeadlessOutput;
   debug?: boolean;
   timeout?: string;
+  /** `--until-done` (P6): relaunch the goal after transient model failures until structural completion, a deadline, or the poison guard. */
+  untilDone?: boolean;
 }
 
 /** Pinned, documented usage shape emitted in `--output json` (avoids leaking internal estimates). */
@@ -44,6 +46,7 @@ type HeadlessStreamEvent =
   | {type: 'goal_start'; goalId: string; request: string; at: string}
   | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; at: string}
   | {type: 'goal_end'; goalId: string; status: 'complete' | 'failed' | 'aborted'; cycles: number; stopReason?: string; evidence?: TurnCompletionEvidence; at: string}
+  | {type: 'goal_resume'; goalId: string; relaunch: number; stopReason: string; reason: string; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; responseModel?: string; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
@@ -102,6 +105,8 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'goal_continue', goalId: event.goalId, cycle: event.cycle, reason: event.reason, at: event.at};
     case 'goal_end':
       return {...(event.stopReason ? {stopReason: event.stopReason} : {}), ...(event.evidence ? {evidence: event.evidence} : {}), type: 'goal_end', goalId: event.goalId, status: event.status, cycles: event.cycles, at: event.at};
+    case 'goal_resume':
+      return {type: 'goal_resume', goalId: event.goalId, relaunch: event.relaunch, stopReason: event.stopReason, reason: event.reason, at: event.at};
     case 'step_start':
       return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
     case 'step_end':
@@ -276,7 +281,56 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     // The logical-goal supervisor owns the whole request: `--timeout` bounds
     // the entire goal, and per-turn budgets merely end physical turns that
     // continue automatically while recoverable work and progress remain.
-    const goalResult: GoalRunResult = await runAgentGoal({request: options.prompt, displayValue: options.prompt, contextFiles, callbacks, session, modelOverride: options.modelOverride, ...(turnDeadlineMs != null ? {goalDeadlineMs: turnDeadlineMs} : {})});
+    // `--until-done` (P6) adds a bounded in-process relaunch loop on top:
+    // transient model failures (model-error, idle-stall exhaustion) with a
+    // live frontier re-enter the supervisor with backoff, until structural
+    // completion, the goal deadline, or the poison guard (repeated relaunches
+    // with no frontier progress). Unattendedness never grants authority: the
+    // supervisor resumes work, not permissions.
+    const deadlineAt = turnDeadlineMs != null ? Date.now() + turnDeadlineMs : undefined;
+    const runOnce = async (relaunchOptions: {resumeFrom?: GoalRunOptions['resumeFrom']; conversationCarriesRequest?: boolean}) => runAgentGoal({
+      request: options.prompt,
+      displayValue: options.prompt,
+      contextFiles,
+      callbacks,
+      session,
+      modelOverride: options.modelOverride,
+      ...(turnDeadlineMs != null ? {goalDeadlineMs: Math.max(1, deadlineAt! - Date.now())} : {}),
+      ...(relaunchOptions.resumeFrom ? {resumeFrom: relaunchOptions.resumeFrom} : {}),
+      ...(relaunchOptions.conversationCarriesRequest ? {conversationCarriesRequest: true} : {}),
+    });
+    let goalResult: GoalRunResult = await runOnce({});
+    if (options.untilDone) {
+      const poisonLimit = 3;
+      let relaunches = 0;
+      let noProgressRelaunches = 0;
+      let lastSignature: string | undefined;
+      while (
+        goalResult.status === 'failed'
+        && (goalResult.stopReason === 'model-error' || goalResult.stopReason === 'model-stream-idle')
+      ) {
+        const signature = JSON.stringify(goalResult.evidence ? [goalResult.evidence.mutationCount > 0, goalResult.evidence.validationOutcome, goalResult.evidence.taskProgress ? [goalResult.evidence.taskProgress.total, goalResult.evidence.taskProgress.pending, goalResult.evidence.taskProgress.inProgress, goalResult.evidence.taskProgress.completed] : null] : null);
+        noProgressRelaunches = lastSignature != null && signature === lastSignature ? noProgressRelaunches + 1 : 0;
+        lastSignature = signature;
+        if (noProgressRelaunches >= poisonLimit) {
+          process.stderr.write(`haze --until-done: stopping after ${noProgressRelaunches} relaunch${noProgressRelaunches === 1 ? '' : 'es'} without measurable progress (truly stuck). The frontier is preserved; the truthful goal status follows.\n`);
+          break;
+        }
+        if (deadlineAt != null && Date.now() >= deadlineAt) break;
+        relaunches += 1;
+        const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(relaunches, 5));
+        callbacks.onEvent?.(agentEvent({type: 'goal_resume', goalId: `relaunch-${relaunches}`, relaunch: relaunches, stopReason: goalResult.stopReason, reason: `transient ${goalResult.stopReason}; relaunching with ${delayMs}ms backoff`}));
+        process.stderr.write(`haze --until-done: ${goalResult.stopReason} on cycle ${goalResult.cycles}; relaunching (attempt ${relaunches}, backoff ${delayMs}ms).\n`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        // A paused checkpoint (idle stall) resumes it; a hard model error has
+        // no checkpoint, but the conversation is preserved — re-enter against
+        // it without duplicating the user request.
+        goalResult = await runOnce({
+          ...(goalResult.resume?.kind === 'incomplete-goal' ? {resumeFrom: goalResult.resume} : {}),
+          ...(goalResult.resume ? {} : {conversationCarriesRequest: conversation.length > 0}),
+        });
+      }
+    }
     status = goalResult.status;
     evidence = goalResult.evidence;
     goal = {

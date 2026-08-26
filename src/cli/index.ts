@@ -25,7 +25,8 @@ program
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
   .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'))
-  .option('--timeout <duration>', 'print-mode absolute turn deadline (e.g. 30s, 10m, 2h); bounds total elapsed time so a busy tool cannot run indefinitely');
+  .option('--timeout <duration>', 'print-mode absolute turn deadline (e.g. 30s, 10m, 2h); bounds total elapsed time so a busy tool cannot run indefinitely')
+  .option('--until-done', 'print mode: relaunch the goal after transient model failures (with backoff) until it structurally completes, the --timeout deadline hits, or repeated relaunches make no progress');
 
 program.addHelpText('after', `
 Examples:
@@ -100,7 +101,7 @@ program.command('doctor')
   });
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string; version?: boolean; verbose?: boolean}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
   if (opts.version) {
     // Handled here (not via commander's built-in .version()) so --verbose can
     // enrich it and the bin launcher can answer without loading dist.
@@ -125,6 +126,7 @@ program.action(async () => {
       output: opts.output === 'json' || opts.output === 'stream-json' ? opts.output : 'text',
       debug: Boolean(opts.debug),
       timeout: opts.timeout,
+      untilDone: Boolean(opts.untilDone),
     });
     // Set the exit code and return instead of process.exit(code): the latter does not wait
     // for stdout to drain and can truncate piped/redirected output (e.g. `haze -p ... | jq`).
