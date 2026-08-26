@@ -81,6 +81,9 @@ function slimToolStartInput(input: unknown): Record<string, unknown> {
   return slimmed;
 }
 
+/** Goal-ledger request text bound; the exact bytes live in conversation snapshots, the ledger needs a resumable copy (P1). */
+const GOAL_LEDGER_REQUEST_CHARS = 1024;
+
 export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry | undefined {
   if (entry.type === 'event') {
     if (entry.name === 'message_update') return undefined;
@@ -115,6 +118,13 @@ export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry |
 
   if (entry.type === 'conversation_snapshot') {
     return {...entry, messages: slimConversationSnapshot(entry.messages)};
+  }
+
+  // Goal-ledger entries are small bounded metadata; only the request text is
+  // capped (a pathological 256 KiB piped prompt must not bloat every boundary
+  // append). Everything else passes through so the frontier is never dropped.
+  if (entry.type === 'goal' && entry.request.length > GOAL_LEDGER_REQUEST_CHARS) {
+    return {...entry, request: `${entry.request.slice(0, GOAL_LEDGER_REQUEST_CHARS)}…[ledger-truncated]`};
   }
 
   return entry;

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readGoalLedgerFrontier, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits.js';
 
 describe('sessionStore', () => {
@@ -483,5 +483,91 @@ describe('sessionStore', () => {
     const before = await fs.stat(session.file);
     await expect(vacuumSessionFileIfLarge(session)).resolves.toBe(false);
     expect((await fs.stat(session.file)).size).toBe(before.size);
+  });
+});
+
+describe('goal ledger (P1: durable frontier)', () => {
+  let tmp: string;
+  let sessionsDir: string;
+  let cwd: string;
+
+  beforeEach(async () => {
+    clearSessionSummaryCacheForTests();
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-session-goal-test-'));
+    sessionsDir = path.join(tmp, 'sessions');
+    cwd = path.join(tmp, 'workspace');
+    await fs.ensureDir(cwd);
+  });
+
+  afterEach(async () => {
+    clearSessionSummaryCacheForTests();
+    setSessionVacuumThresholdForTests(SESSION_VACUUM_THRESHOLD_BYTES);
+    await fs.remove(tmp);
+  });
+
+  function goalEntry(over: Partial<Extract<import('../../src/core/session/sessionStore.js').SessionEntry, {type: 'goal'}>> = {}) {
+    return {type: 'goal' as const, at: new Date().toISOString(), goalId: 'goal-1', phase: 'goal_start' as const, request: 'fix the login crash', requestHash: 'abc123', intent: 'fix', cycle: 0, mutationCount: 0, validationOutcome: 'absent', progressSignature: '', ...over};
+  }
+
+  it('parses goal entries and reports the last non-terminal entry as the frontier', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix the login crash'});
+    await appendSessionEntry(session, goalEntry());
+    await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 2, validationOutcome: 'stale', openAsks: ['Fix the login crash'], shape: 'debug'}));
+    const frontier = await readGoalLedgerFrontier(session);
+    expect(frontier).toMatchObject({goalId: 'goal-1', cycle: 1, mutationCount: 2, validationOutcome: 'stale', openAsks: ['Fix the login crash']});
+    // restoreSessionState surfaces the same frontier in one scan.
+    const restored = await restoreSessionState(session);
+    expect(restored.goalFrontier?.cycle).toBe(1);
+  });
+
+  it('clears the frontier on goal_end and lets newer goals supersede stale ones', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'hi'});
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a'}));
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a', phase: 'goal_end', stopReason: 'completed', status: 'complete'}));
+    expect(await readGoalLedgerFrontier(session)).toBeUndefined();
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-b', request: 'second goal'}));
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-b', phase: 'goal_end', stopReason: 'blocked', status: 'failed'}));
+    expect(await readGoalLedgerFrontier(session)).toBeUndefined();
+  });
+
+  it('treats a truncated tail line as absent (half-written boundary never resurrects)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'work'});
+    await appendSessionEntry(session, goalEntry());
+    await fs.appendFile(session.file, '{"type":"goal","phase":"goal_contin');
+    const frontier = await readGoalLedgerFrontier(session);
+    expect(frontier?.cycle).toBe(0);
+    const {parseErrors} = await readSessionEntries(session);
+    expect(parseErrors.length).toBe(1);
+  });
+
+  it('never makes a goal-only session resumable and bounds ledger request text', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, goalEntry({request: 'x'.repeat(5000)}));
+    expect(await fs.pathExists(session.file)).toBe(false); // deferred: no resumable message yet
+    const materialized = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(materialized, {type: 'ui_message', at: '1', role: 'user', text: 'go'});
+    await appendSessionEntry(materialized, goalEntry({request: 'x'.repeat(5000)}));
+    const {entries} = await readSessionEntries(materialized);
+    const goal = entries.find(entry => entry.type === 'goal');
+    // 1024-char cap plus the bounded truncation marker.
+    expect(goal && goal.type === 'goal' ? goal.request.length : 0).toBeLessThanOrEqual(1024 + 20);
+    expect(goal && goal.type === 'goal' ? goal.request.endsWith('[ledger-truncated]') : false).toBe(true);
+    // A goal-only entry does not count as a resumable message for listings.
+    const summaries = await listSessions(cwd, sessionsDir);
+    expect(summaries.every(summary => summary.messageCount > 0)).toBe(true);
+  });
+
+  it('survives the size vacuum: frontier entries are never dropped', async () => {
+    setSessionVacuumThresholdForTests(1);
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'long work'});
+    await appendSessionEntry(session, goalEntry());
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: 'long work'}] as ModelMessage[]});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '3', messages: [{role: 'user', content: 'long work more'}] as ModelMessage[]});
+    await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 4}));
+    expect(await readGoalLedgerFrontier(session)).toMatchObject({cycle: 1, mutationCount: 4});
   });
 });

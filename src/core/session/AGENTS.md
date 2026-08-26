@@ -22,6 +22,7 @@ Current entry types are:
 - `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state, slimmed before write so large tool results become previews/metadata.
 - `work_state_snapshot` — structured work state.
 - `event` — lightweight structured lifecycle/tool/message events.
+- `goal` — durable goal-ledger boundary (P1): one append per supervisor `goal_start`/`goal_continue`/`goal_end` carrying `goalId`, exact request + `requestHash`, intent, cycle, mutation/validation counts, progress signature, shape, bounded open-ask texts, and (terminal only) stop reason/status. The frontier is the last non-terminal entry of the newest goal id (`findGoalLedgerFrontier` / `readGoalLedgerFrontier` / `restoreSessionState().goalFrontier`); a truncated tail line parses as absent. `sessionSlimming.ts` caps only the request text (1024 chars + marker) and never drops frontier entries. A goal-only session is not resumable on its own.
 
 Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt files.
 

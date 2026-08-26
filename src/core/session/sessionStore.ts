@@ -15,7 +15,27 @@ export type SessionEntry =
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
-  | {type: 'event'; at: string; name: string; text?: string};
+  | {type: 'event'; at: string; name: string; text?: string}
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; shape?: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; openAsks?: string[]; stopReason?: string; status?: string};
+
+/** Durable goal-ledger entry (P1): one append per supervisor boundary. */
+export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
+
+/** An unterminated goal frontier detected in a session (P1 resume path). */
+export interface GoalLedgerFrontier {
+  goalId: string;
+  request: string;
+  requestHash: string;
+  intent: string;
+  shape?: string;
+  cycle: number;
+  mutationCount: number;
+  validationOutcome: string;
+  progressSignature: string;
+  taskCounts?: GoalLedgerEntry['taskCounts'];
+  openAsks?: string[];
+  at: string;
+}
 
 type SessionHeader = Extract<SessionEntry, {type: 'header'}>;
 type DeferredSessionWrite = {header: SessionHeader; entries: SessionEntry[]};
@@ -192,6 +212,17 @@ function optionalBuildProvenance(value: unknown): boolean {
   return optionalString(value.commit) && optionalString(value.builtAt);
 }
 
+function optionalTaskCounts(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return ['total', 'pending', 'inProgress', 'completed'].every(key => typeof value[key] === 'number');
+}
+
+function optionalBoundedStrings(value: unknown, limit: number): boolean {
+  if (value === undefined) return true;
+  return Array.isArray(value) && value.length <= limit && value.every(item => typeof item === 'string');
+}
+
 function parseSessionEntry(value: unknown): SessionEntry {
   const invalid = (detail: string): never => {
     throw new Error(`unexpected entry shape: ${detail}`);
@@ -221,6 +252,15 @@ function parseSessionEntry(value: unknown): SessionEntry {
       return value as SessionEntry;
     case 'event':
       if (typeof value.at !== 'string' || typeof value.name !== 'string' || !optionalString(value.text)) return invalid('invalid event');
+      return value as SessionEntry;
+    case 'goal':
+      if (typeof value.at !== 'string' || typeof value.goalId !== 'string'
+        || (value.phase !== 'goal_start' && value.phase !== 'goal_continue' && value.phase !== 'goal_end')
+        || typeof value.request !== 'string' || typeof value.requestHash !== 'string' || typeof value.intent !== 'string'
+        || typeof value.cycle !== 'number' || typeof value.mutationCount !== 'number'
+        || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
+        || !optionalString(value.shape) || !optionalTaskCounts(value.taskCounts)
+        || !optionalBoundedStrings(value.openAsks, 7) || !optionalString(value.stopReason) || !optionalString(value.status)) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);
@@ -266,6 +306,45 @@ export async function readSessionEntries(session: HazeSession): Promise<ReadSess
   return {entries, parseErrors};
 }
 
+/**
+ * Pure frontier detection over parsed session entries (P1): the append-only
+ * goal ledger's frontier is the last entry of the most recent goal id that has
+ * no `goal_end` entry. A truncated or malformed tail line parses as absent, so
+ * a crash mid-write can never resurrect a half-written boundary
+ * (autoprompt's "treat half-written artifacts as absent").
+ */
+export function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLedgerFrontier | undefined {
+  let frontier: GoalLedgerFrontier | undefined;
+  for (const entry of entries) {
+    if (entry.type !== 'goal') continue;
+    if (entry.phase === 'goal_end') {
+      if (frontier?.goalId === entry.goalId) frontier = undefined;
+      continue;
+    }
+    frontier = {
+      goalId: entry.goalId,
+      request: entry.request,
+      requestHash: entry.requestHash,
+      intent: entry.intent,
+      ...(entry.shape ? {shape: entry.shape} : {}),
+      cycle: entry.cycle,
+      mutationCount: entry.mutationCount,
+      validationOutcome: entry.validationOutcome,
+      progressSignature: entry.progressSignature,
+      ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
+      ...(entry.openAsks ? {openAsks: entry.openAsks} : {}),
+      at: entry.at,
+    };
+  }
+  return frontier;
+}
+
+/** Read the goal-ledger frontier of a stored session (one file scan). */
+export async function readGoalLedgerFrontier(session: HazeSession): Promise<GoalLedgerFrontier | undefined> {
+  const {entries} = await readSessionEntries(session);
+  return findGoalLedgerFrontier(entries);
+}
+
 export interface RestoreConversationResult {
   messages: ModelMessage[];
   parseErrors: string[];
@@ -275,21 +354,47 @@ export interface RestoreSessionStateResult {
   messages: ModelMessage[];
   workState: WorkState | undefined;
   parseErrors: string[];
+  /** Unterminated goal frontier from the durable ledger, if any (P1 resume path). */
+  goalFrontier: GoalLedgerFrontier | undefined;
 }
 
 /**
  * Restore conversation and work state in one file scan (CR-013). Session
  * files grow to megabytes in long workspaces; resuming should not parse the
- * JSONL twice.
+ * JSONL twice. The goal-ledger frontier rides the same scan (P1).
  */
 export async function restoreSessionState(session: HazeSession): Promise<RestoreSessionStateResult> {
   let messages: ModelMessage[] = [];
   let workState: WorkState | undefined;
+  let goalFrontier: GoalLedgerFrontier | undefined;
+  const terminatedGoals = new Set<string>();
   const parseErrors = await scanSessionEntries(session, entry => {
     if (entry.type === 'conversation_snapshot') messages = entry.messages;
     if (entry.type === 'work_state_snapshot') workState = entry.state;
+    if (entry.type === 'goal') {
+      if (entry.phase === 'goal_end') {
+        terminatedGoals.add(entry.goalId);
+        if (goalFrontier?.goalId === entry.goalId) goalFrontier = undefined;
+      } else {
+        goalFrontier = {
+          goalId: entry.goalId,
+          request: entry.request,
+          requestHash: entry.requestHash,
+          intent: entry.intent,
+          ...(entry.shape ? {shape: entry.shape} : {}),
+          cycle: entry.cycle,
+          mutationCount: entry.mutationCount,
+          validationOutcome: entry.validationOutcome,
+          progressSignature: entry.progressSignature,
+          ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
+          ...(entry.openAsks ? {openAsks: entry.openAsks} : {}),
+          at: entry.at,
+        };
+      }
+    }
   });
-  return {messages, workState, parseErrors};
+  if (goalFrontier && terminatedGoals.has(goalFrontier.goalId)) goalFrontier = undefined;
+  return {messages, workState, parseErrors, goalFrontier};
 }
 
 export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
