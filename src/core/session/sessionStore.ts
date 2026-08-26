@@ -16,7 +16,7 @@ export type SessionEntry =
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string}
-  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; shape?: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; openAsks?: string[]; stopReason?: string; status?: string};
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; shape?: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; openAsks?: string[]; asks?: Array<{id: string; text: string; status: 'open' | 'met' | 'waived'; evidence?: string; waiverReason?: string}>; redEvidence?: {command: string; commandKey: string; summary: string}; redWaiverReason?: string; greenSuccessor?: string; verified?: boolean; stopReason?: string; status?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
 export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
@@ -33,8 +33,44 @@ export interface GoalLedgerFrontier {
   validationOutcome: string;
   progressSignature: string;
   taskCounts?: GoalLedgerEntry['taskCounts'];
-  openAsks?: string[];
+  /** Full ask statuses so a crash-resumed goal never re-opens met/waived asks (P2 parity). */
+  asks?: GoalLedgerAsk[];
+  /** Carried red→green/verification state so a crash resume keeps its evidence (P3/P4 parity). */
+  redEvidence?: GoalLedgerEntry['redEvidence'];
+  redWaiverReason?: string;
+  greenSuccessor?: string;
+  verified?: boolean;
   at: string;
+}
+
+/** Ask record as persisted in goal-ledger entries (safe metadata only). */
+export interface GoalLedgerAsk {
+  id: string;
+  text: string;
+  status: 'open' | 'met' | 'waived';
+  evidence?: string;
+  waiverReason?: string;
+}
+
+const ASK_TEXT_LIMIT = 200;
+const ASK_STATUSES: ReadonlySet<string> = new Set(['open', 'met', 'waived']);
+
+/** Strict, bounded parse of a ledger ask record; malformed entries are rejected, not guessed. */
+function parseLedgerAsk(value: unknown): GoalLedgerAsk | undefined {
+  if (typeof value !== 'object' || value == null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== 'string' || typeof record.text !== 'string' || typeof record.status !== 'string' || !ASK_STATUSES.has(record.status)) return undefined;
+  const evidence = typeof record.evidence === 'string' && record.evidence.trim() ? record.evidence.slice(0, 300) : undefined;
+  const waiverReason = typeof record.waiverReason === 'string' && record.waiverReason.trim() ? record.waiverReason.slice(0, 300) : undefined;
+  return {id: record.id.slice(0, 64), text: record.text.slice(0, ASK_TEXT_LIMIT), status: record.status as 'open' | 'met' | 'waived', ...(evidence ? {evidence} : {}), ...(waiverReason ? {waiverReason} : {})};
+}
+
+function parseLedgerRedEvidence(value: unknown): GoalLedgerEntry['redEvidence'] | undefined {
+  if (typeof value !== 'object' || value == null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.command !== 'string' || typeof record.commandKey !== 'string') return undefined;
+  const summary = typeof record.summary === 'string' ? record.summary : '';
+  return {command: record.command.slice(0, 400), commandKey: record.commandKey.slice(0, 400), summary: summary.slice(0, 200)};
 }
 
 type SessionHeader = Extract<SessionEntry, {type: 'header'}>;
@@ -162,6 +198,11 @@ export function setSessionVacuumThresholdForTests(bytes: number): void {
   effectiveVacuumThresholdBytes = bytes;
 }
 
+/** Trailing goal-ledger entries preserved per goal id when the vacuum rewrites (frontier + end + one audit entry). */
+export const GOAL_LEDGER_KEEP_PER_GOAL = 3;
+/** Ledger trim must amortize its rewrite: rewrite for goal entries alone only past this many dropped bytes. */
+export const GOAL_LEDGER_TRIM_BYTES = 2_048;
+
 export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBytes: number = effectiveVacuumThresholdBytes): Promise<boolean> {
   const file = validatedSessionFile(session);
   if (session.deferredWrite) return false;
@@ -174,17 +215,35 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
     if (entry.type === 'conversation_snapshot') lastConversation = index;
     if (entry.type === 'work_state_snapshot') lastWorkState = index;
   });
+  // Goal-ledger bound (P1): long autonomous goals append one entry per physical
+  // turn; intermediate `goal_continue` entries of superseded cycles are audit
+  // trail only. Keep the trailing few per goal id — the frontier and the
+  // terminal entry are always among them — so a very long-lived session file
+  // stays bounded without ever losing a live frontier.
+  const keepGoal = new Set<number>();
+  const goalIndexesByGoal = new Map<string, number[]>();
+  entries.forEach((entry, index) => {
+    if (entry.type === 'goal') goalIndexesByGoal.set(entry.goalId, [...(goalIndexesByGoal.get(entry.goalId) ?? []), index]);
+  });
+  for (const indexes of goalIndexesByGoal.values()) {
+    for (const index of indexes.slice(-GOAL_LEDGER_KEEP_PER_GOAL)) keepGoal.add(index);
+  }
   // Malformed lines are dropped by the rewrite: they were already unusable
   // (and reported as parse errors on read) and keeping them would defeat the
   // size bound the vacuum exists to enforce.
-  const kept = entries.filter((entry, index) =>
+  const candidate = entries.filter((entry, index) =>
     (entry.type !== 'conversation_snapshot' && entry.type !== 'work_state_snapshot')
     || index === lastConversation
     || index === lastWorkState);
+  const kept = candidate.filter((entry, index) => entry.type !== 'goal' || keepGoal.has(index));
+  const droppedGoalBytes = candidate
+    .filter((entry, index) => entry.type === 'goal' && !keepGoal.has(index))
+    .reduce((sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry), 'utf8'), 0);
   const serialized = kept.map(entry => JSON.stringify(entry)).join('\n') + '\n';
-  // Only rewrite when it meaningfully shrinks the file; otherwise a single
-  // dominant snapshot would trigger a full rewrite on every append.
-  if (serialized.length > stat.size / 2) return false;
+  // Only rewrite when it meaningfully shrinks the file (otherwise a single
+  // dominant snapshot would trigger a full rewrite on every append), or when
+  // the goal-ledger trim alone has accumulated enough to amortize the rewrite.
+  if (serialized.length > stat.size / 2 && droppedGoalBytes < GOAL_LEDGER_TRIM_BYTES) return false;
   await writePrivateFileAtomic(file, serialized);
   return true;
 }
@@ -221,6 +280,36 @@ function optionalTaskCounts(value: unknown): boolean {
 function optionalBoundedStrings(value: unknown, limit: number): boolean {
   if (value === undefined) return true;
   return Array.isArray(value) && value.length <= limit && value.every(item => typeof item === 'string');
+}
+
+function optionalLedgerAsks(value: unknown): boolean {
+  if (value === undefined) return true;
+  return Array.isArray(value) && value.length <= 7 && value.every(item => parseLedgerAsk(item) !== undefined);
+}
+
+function optionalLedgerRedEvidence(value: unknown): boolean {
+  return value === undefined || parseLedgerRedEvidence(value) !== undefined;
+}
+
+function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
+  return {
+    goalId: entry.goalId,
+    request: entry.request,
+    requestHash: entry.requestHash,
+    intent: entry.intent,
+    ...(entry.shape ? {shape: entry.shape} : {}),
+    cycle: entry.cycle,
+    mutationCount: entry.mutationCount,
+    validationOutcome: entry.validationOutcome,
+    progressSignature: entry.progressSignature,
+    ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
+    ...(entry.asks ? {asks: entry.asks} : entry.openAsks ? {asks: entry.openAsks.map((text, index) => ({id: `ask-${index + 1}`, text, status: 'open' as const}))} : {}),
+    ...(entry.redEvidence ? {redEvidence: entry.redEvidence} : {}),
+    ...(entry.redWaiverReason ? {redWaiverReason: entry.redWaiverReason} : {}),
+    ...(entry.greenSuccessor ? {greenSuccessor: entry.greenSuccessor} : {}),
+    ...(entry.verified ? {verified: true} : {}),
+    at: entry.at,
+  };
 }
 
 function parseSessionEntry(value: unknown): SessionEntry {
@@ -260,7 +349,10 @@ function parseSessionEntry(value: unknown): SessionEntry {
         || typeof value.cycle !== 'number' || typeof value.mutationCount !== 'number'
         || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
         || !optionalString(value.shape) || !optionalTaskCounts(value.taskCounts)
-        || !optionalBoundedStrings(value.openAsks, 7) || !optionalString(value.stopReason) || !optionalString(value.status)) return invalid('invalid goal');
+        || !optionalBoundedStrings(value.openAsks, 7) || !optionalString(value.stopReason) || !optionalString(value.status)
+        || !optionalLedgerAsks(value.asks) || !optionalLedgerRedEvidence(value.redEvidence)
+        || !optionalString(value.redWaiverReason) || !optionalString(value.greenSuccessor)
+        || !(value.verified === undefined || typeof value.verified === 'boolean')) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);
@@ -321,20 +413,7 @@ export function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLe
       if (frontier?.goalId === entry.goalId) frontier = undefined;
       continue;
     }
-    frontier = {
-      goalId: entry.goalId,
-      request: entry.request,
-      requestHash: entry.requestHash,
-      intent: entry.intent,
-      ...(entry.shape ? {shape: entry.shape} : {}),
-      cycle: entry.cycle,
-      mutationCount: entry.mutationCount,
-      validationOutcome: entry.validationOutcome,
-      progressSignature: entry.progressSignature,
-      ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
-      ...(entry.openAsks ? {openAsks: entry.openAsks} : {}),
-      at: entry.at,
-    };
+    frontier = frontierFromGoalEntry(entry);
   }
   return frontier;
 }
@@ -376,20 +455,7 @@ export async function restoreSessionState(session: HazeSession): Promise<Restore
         terminatedGoals.add(entry.goalId);
         if (goalFrontier?.goalId === entry.goalId) goalFrontier = undefined;
       } else {
-        goalFrontier = {
-          goalId: entry.goalId,
-          request: entry.request,
-          requestHash: entry.requestHash,
-          intent: entry.intent,
-          ...(entry.shape ? {shape: entry.shape} : {}),
-          cycle: entry.cycle,
-          mutationCount: entry.mutationCount,
-          validationOutcome: entry.validationOutcome,
-          progressSignature: entry.progressSignature,
-          ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
-          ...(entry.openAsks ? {openAsks: entry.openAsks} : {}),
-          at: entry.at,
-        };
+        goalFrontier = frontierFromGoalEntry(entry);
       }
     }
   });

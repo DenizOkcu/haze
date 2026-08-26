@@ -4,7 +4,6 @@ import {DEFAULT_TURN_DEADLINE_MS} from '../../../core/agent/budgets.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
-import type {GoalShape} from '../../../core/agent/goalPolicy.js';
 import {classifyRequestIntent, classifyGoalShape, deriveRequestAsks, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
@@ -145,7 +144,6 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
   const appendLedger = (phase: GoalLedgerAppend['phase'], extra: Partial<GoalLedgerAppend> = {}) => {
     if (!options.goalLedger) return;
     const source = checkpoint;
-    const shape: GoalShape = source?.shape ?? classifyGoalShape(request, intent, source?.asks?.length ?? deriveRequestAsks(request).length);
     options.goalLedger.append({
       goalId,
       phase,
@@ -156,9 +154,15 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       mutationCount: source?.mutationCount ?? 0,
       validationOutcome: source?.validationOutcome ?? 'not_applicable',
       progressSignature: source?.progressSignature ?? '',
-      shape,
+      ...(source ? {shape: source.shape ?? classifyGoalShape(request, intent, source.asks?.length ?? deriveRequestAsks(request).length)} : {shape: classifyGoalShape(request, intent, deriveRequestAsks(request).length)}),
       ...(source?.taskCounts ? {taskCounts: source.taskCounts} : {}),
-      ...(checkpointOpenAsks(source) ? {openAsks: checkpointOpenAsks(source)} : {}),
+      // Full ask statuses and red/verification evidence keep crash resumes at
+      // parity with in-process continuation (P1 frontier).
+      ...(source?.asks ? {asks: source.asks.map(ask => ({...ask}))} : {}),
+      ...(source?.redEvidence ? {redEvidence: {...source.redEvidence}} : {}),
+      ...(source?.redWaiver ? {redWaiverReason: source.redWaiver.reason} : {}),
+      ...(source?.greenSuccessor ? {greenSuccessor: source.greenSuccessor} : {}),
+      ...(source?.verified ? {verified: true} : {}),
       ...extra,
     });
   };

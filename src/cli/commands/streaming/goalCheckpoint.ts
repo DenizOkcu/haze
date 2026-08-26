@@ -82,6 +82,12 @@ export interface GoalLedgerAppend {
   shape?: GoalShape;
   taskCounts?: {total: number; pending: number; inProgress: number; completed: number};
   openAsks?: string[];
+  /** Full ask statuses (supersedes `openAsks` for crash-resume parity). */
+  asks?: WorkAsk[];
+  redEvidence?: RedEvidence;
+  redWaiverReason?: string;
+  greenSuccessor?: string;
+  verified?: boolean;
   stopReason?: string;
   status?: 'complete' | 'failed' | 'aborted';
 }
@@ -139,8 +145,11 @@ const VALIDATION_OUTCOMES: ReadonlySet<string> = new Set(['passed', 'failed', 's
 /**
  * Rebuild a supervisor checkpoint from a durable ledger frontier (P1 resume
  * path): safe metadata only, tolerant of ledger fields written by older
- * versions. `readiness` stays unset — the frontier predates a specific
- * readiness, so continuation uses the generic unfinished reason.
+ * versions. Carries full ask statuses and red→green/verification evidence so
+ * a crash resume matches in-process continuation (met asks stay met, a
+ * captured red repro stays captured, a passed verification stays passed).
+ * `readiness` stays unset — the frontier predates a specific readiness, so
+ * continuation uses the generic unfinished reason.
  */
 export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCheckpoint {
   const validationOutcome = (VALIDATION_OUTCOMES.has(frontier.validationOutcome) ? frontier.validationOutcome : 'not_applicable') as ValidationOutcome;
@@ -155,6 +164,10 @@ export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCh
     requestHash: frontier.requestHash,
     ...(frontier.intent ? {intent: frontier.intent as RequestIntent} : {}),
     ...(frontier.taskCounts ? {taskCounts: frontier.taskCounts} : {}),
-    ...(frontier.openAsks ? {asks: frontier.openAsks.map((text, index) => ({id: `ask-${index + 1}`, text, status: 'open' as const}))} : {}),
+    ...(frontier.asks ? {asks: frontier.asks.map(ask => ({...ask}))} : {}),
+    ...(frontier.redEvidence ? {redEvidence: {...frontier.redEvidence}} : {}),
+    ...(frontier.redWaiverReason ? {redWaiver: {reason: frontier.redWaiverReason}} : {}),
+    ...(frontier.greenSuccessor ? {greenSuccessor: frontier.greenSuccessor} : {}),
+    ...(frontier.verified ? {verified: true} : {}),
   };
 }

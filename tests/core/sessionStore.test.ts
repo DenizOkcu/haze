@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type {ModelMessage} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
-import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, latestSession, listSessions, readGoalLedgerFrontier, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
+import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, GOAL_LEDGER_KEEP_PER_GOAL, GOAL_LEDGER_TRIM_BYTES, latestSession, listSessions, readGoalLedgerFrontier, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits.js';
 
 describe('sessionStore', () => {
@@ -515,7 +515,7 @@ describe('goal ledger (P1: durable frontier)', () => {
     await appendSessionEntry(session, goalEntry());
     await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 2, validationOutcome: 'stale', openAsks: ['Fix the login crash'], shape: 'debug'}));
     const frontier = await readGoalLedgerFrontier(session);
-    expect(frontier).toMatchObject({goalId: 'goal-1', cycle: 1, mutationCount: 2, validationOutcome: 'stale', openAsks: ['Fix the login crash']});
+    expect(frontier).toMatchObject({goalId: 'goal-1', cycle: 1, mutationCount: 2, validationOutcome: 'stale', asks: [{id: 'ask-1', text: 'Fix the login crash', status: 'open'}]});
     // restoreSessionState surfaces the same frontier in one scan.
     const restored = await restoreSessionState(session);
     expect(restored.goalFrontier?.cycle).toBe(1);
@@ -560,6 +560,47 @@ describe('goal ledger (P1: durable frontier)', () => {
     expect(summaries.every(summary => summary.messageCount > 0)).toBe(true);
   });
 
+  it('carries full ask statuses and red/verification evidence for crash-resume parity', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix the crash'});
+    await appendSessionEntry(session, goalEntry({
+      phase: 'goal_continue',
+      cycle: 2,
+      mutationCount: 3,
+      asks: [
+        {id: 'ask-1', text: 'Fix the crash', status: 'met', evidence: 'npm test'},
+        {id: 'ask-2', text: 'Add a regression test', status: 'open'},
+      ],
+      redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
+      redWaiverReason: 'unobservable in CI',
+      greenSuccessor: 'npm run test:ci',
+      verified: true,
+    }));
+    const frontier = await readGoalLedgerFrontier(session);
+    expect(frontier?.asks).toEqual([
+      {id: 'ask-1', text: 'Fix the crash', status: 'met', evidence: 'npm test'},
+      {id: 'ask-2', text: 'Add a regression test', status: 'open'},
+    ]);
+    expect(frontier?.redEvidence).toEqual({command: 'npm test', commandKey: 'npm test', summary: 'red'});
+    expect(frontier?.redWaiverReason).toBe('unobservable in CI');
+    expect(frontier?.greenSuccessor).toBe('npm run test:ci');
+    expect(frontier?.verified).toBe(true);
+    // Legacy entries carrying only openAsks still map to open asks.
+    const legacy = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(legacy, {type: 'ui_message', at: '1', role: 'user', text: 'work'});
+    await appendSessionEntry(legacy, goalEntry({openAsks: ['Do the thing']}));
+    expect((await readGoalLedgerFrontier(legacy))?.asks).toEqual([{id: 'ask-1', text: 'Do the thing', status: 'open'}]);
+  });
+
+  it('rejects structurally invalid ask/red fields as parse errors, not guesses', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'work'});
+    await appendSessionEntry(session, goalEntry());
+    await fs.appendFile(session.file, `${JSON.stringify({...goalEntry({phase: 'goal_continue'}), asks: [{id: 'x', text: 't', status: 'finished'}]})}\n`);
+    const {parseErrors} = await readSessionEntries(session);
+    expect(parseErrors.length).toBe(1);
+  });
+
   it('survives the size vacuum: frontier entries are never dropped', async () => {
     setSessionVacuumThresholdForTests(1);
     const session = await createSession({cwd, sessionsDir});
@@ -569,5 +610,24 @@ describe('goal ledger (P1: durable frontier)', () => {
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '3', messages: [{role: 'user', content: 'long work more'}] as ModelMessage[]});
     await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 1, mutationCount: 4}));
     expect(await readGoalLedgerFrontier(session)).toMatchObject({cycle: 1, mutationCount: 4});
+  });
+
+  it('bounds ledger growth: the vacuum keeps only the trailing entries per goal id', async () => {
+    setSessionVacuumThresholdForTests(1);
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'long autonomous work'});
+    // Entries large enough that the dropped audit trail crosses the trim
+    // amortization threshold on the final append, so the rewrite fires.
+    for (let cycle = 0; cycle <= 9; cycle++) await appendSessionEntry(session, goalEntry({phase: cycle === 0 ? 'goal_start' : 'goal_continue', cycle, mutationCount: cycle, request: `fix the login crash and the session handler ${'x'.repeat(300)}`}));
+    const {entries} = await readSessionEntries(session);
+    const goalEntries = entries.filter(entry => entry.type === 'goal');
+    // The trim is amortized: a rewrite fires once the dropped audit trail
+    // crosses GOAL_LEDGER_TRIM_BYTES, so at rest the ledger holds the trailing
+    // window plus at most one un-amortized increment — never all ten.
+    expect(goalEntries.length).toBeGreaterThan(0);
+    expect(goalEntries.length).toBeLessThan(10);
+    expect(goalEntries.length).toBeLessThanOrEqual(GOAL_LEDGER_KEEP_PER_GOAL + Math.ceil(GOAL_LEDGER_TRIM_BYTES / 500) + 1);
+    expect(goalEntries.at(-1)).toMatchObject({cycle: 9});
+    expect(await readGoalLedgerFrontier(session)).toMatchObject({cycle: 9, mutationCount: 9});
   });
 });

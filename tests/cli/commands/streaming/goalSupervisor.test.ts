@@ -1,5 +1,6 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {GoalCheckpoint} from '../../../../src/cli/commands/streaming/goalCheckpoint.js';
+import {checkpointFromGoalFrontier} from '../../../../src/cli/commands/streaming/goalCheckpoint.js';
 import type {IncompleteGoalResume} from '../../../../src/cli/commands/streaming/goalCheckpoint.js';
 import type {GoalRunOptions, GoalRunResult} from '../../../../src/cli/commands/streaming/goalSupervisor.js';
 import type {TurnResult, TurnExecutionOptions} from '../../../../src/cli/commands/streaming.js';
@@ -379,5 +380,64 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
     ]);
     const result = await runAgentGoal(baseOptions({conversationCarriesRequest: true}));
     expect(result).toMatchObject({status: 'complete'});
+  });
+});
+
+describe('stored-goal frontier parity (P1: crash resume matches in-process continuation)', () => {
+  it('carries ask statuses, red evidence, and verification from the ledger frontier', async () => {
+    const checkpoint = checkpointFromGoalFrontier({
+      goalId: 'goal-crashed',
+      request: 'fix the login crash',
+      requestHash: 'deadbeef',
+      intent: 'fix',
+      shape: 'debug',
+      cycle: 3,
+      mutationCount: 4,
+      validationOutcome: 'stale',
+      progressSignature: 'sig',
+      at: 't0',
+      taskCounts: {total: 4, pending: 1, inProgress: 0, completed: 3},
+      asks: [
+        {id: 'ask-1', text: 'Fix the login crash', status: 'met', evidence: 'npm test'},
+        {id: 'ask-2', text: 'Add a regression test', status: 'open'},
+        {id: 'ask-3', text: 'Document the fix', status: 'waived', waiverReason: 'no docs page exists'},
+      ],
+      redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'red'},
+      redWaiverReason: 'unobservable',
+      greenSuccessor: 'npm run test:ci',
+      verified: true,
+    });
+    expect(checkpoint).toMatchObject({
+      goalId: 'goal-crashed',
+      requestHash: 'deadbeef',
+      intent: 'fix',
+      cycle: 3,
+      asks: [
+        {id: 'ask-1', status: 'met'},
+        {id: 'ask-2', status: 'open'},
+        {id: 'ask-3', status: 'waived'},
+      ],
+      redEvidence: {command: 'npm test'},
+      redWaiver: {reason: 'unobservable'},
+      greenSuccessor: 'npm run test:ci',
+      verified: true,
+    });
+    // The stored-goal resume hydrates exactly this carried evidence.
+    const {runAgentGoal} = await loadSupervisor([
+      {
+        result: turnResult('complete'),
+        inspect: options => {
+          expect(options.goalContext?.carried).toMatchObject({
+            asks: [{id: 'ask-1', status: 'met'}, {id: 'ask-2', status: 'open'}, {id: 'ask-3', status: 'waived'}],
+            redEvidence: {command: 'npm test'},
+            redWaiver: {reason: 'unobservable'},
+            greenSuccessor: 'npm run test:ci',
+            verified: true,
+          });
+        },
+      },
+    ]);
+    const result = await runAgentGoal(baseOptions({resumeFrom: {kind: 'stored-goal', checkpoint}}));
+    expect(result).toMatchObject({status: 'complete', cycles: 4});
   });
 });
