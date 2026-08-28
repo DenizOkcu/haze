@@ -40,6 +40,8 @@ interface MocksConfig {
   callStepEnds?: Array<Array<{stepNumber: number; text: string; toolCalls: unknown[]; toolResults?: unknown[]; finishReason?: string; response?: {messages: unknown[]}}>>;
   /** 1-based agent call numbers whose stream yields its parts, then hangs with no further events until aborted (model-stream idle stall). */
   stallCalls?: number[];
+  /** Reproduce providers that end the aborted iterator but reject responseMessages with a generic error. */
+  stalledResponseError?: string;
   /** Stream never settles, even after abort (abort-ignoring model stream). */
   ignoreAbort?: boolean;
   /** With `ignoreAbort`: yield these parts once aborted, then hang forever (late zombie output). */
@@ -226,7 +228,7 @@ async function loadStreaming(config: MocksConfig) {
               }
               // Model stream hangs: no further parts until the idle timer aborts.
               await waitForAbort;
-              throw new Error('aborted');
+              if (!config.stalledResponseError) throw new Error('aborted');
             })(),
             response: waitForAbort.then(() => {
               cleanup();
@@ -234,6 +236,7 @@ async function loadStreaming(config: MocksConfig) {
             }),
             responseMessages: waitForAbort.then(() => {
               cleanup();
+              if (config.stalledResponseError) throw new Error(config.stalledResponseError);
               return [];
             }),
           };
@@ -896,6 +899,36 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     expect(retryMessages.some(message => message.role === 'tool')).toBe(true);
     expect(outcome).toMatchObject({status: 'complete'});
     expect(outcome.resume).toBeUndefined();
+  });
+
+  it('routes an aborted terminated response through idle-stall recovery instead of tool-only completion', async () => {
+    vi.useFakeTimers();
+    const salvagedStep = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', output: {ok: true, stdout: 'src'}}]},
+    ];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: stallModelHandle,
+      stallCalls: [1],
+      stalledResponseError: 'terminated',
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}], response: {messages: salvagedStep}}],
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'src'}},
+        ],
+        [{type: 'text-delta', text: 'The retried step completed normally.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('inspect the project', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(cb.events.find(event => event.type === 'retry')).toMatchObject({attempt: 1});
+    expect(cb.messages.some(m => m.text === 'Tool work ended without a substantive final answer.')).toBe(false);
+    expect(cb.messages.some(m => /Model stream stalled for 5 minutes; retrying attempt 1\/2/.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'complete'});
   });
 
   it('pauses with a resume affordance when idle retries are exhausted', async () => {

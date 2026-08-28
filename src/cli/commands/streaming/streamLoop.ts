@@ -173,7 +173,7 @@ function applyStreamPart(deps: AttemptStreamDeps, part: AttemptStreamPart) {
 
 /** Await the agent's response messages and commit the completed conversation; salvage to the last completed step on a post-stream failure. */
 async function commitStreamResult(deps: AttemptStreamDeps, result: {responseMessages: PromiseLike<ModelMessage[]>}) {
-  const {loopState, callbacks, salvage} = deps;
+  const {loopState, callbacks, salvage, abortController} = deps;
   if (loopState.streamError && !loopState.streamFinished) {
     void Promise.resolve(result.responseMessages).catch(() => undefined);
     throw loopState.streamError;
@@ -181,12 +181,20 @@ async function commitStreamResult(deps: AttemptStreamDeps, result: {responseMess
 
   try {
     const responseMessages = await result.responseMessages;
+    // Some providers settle responseMessages instead of rejecting when an
+    // abort ends the stream. Never commit that partial response as a normal
+    // completion: the attempt catch must classify the recorded abort cause.
+    if (abortController.signal.aborted) throw abortController.signal.reason ?? new Error('aborted');
     const completedConversation = [...stripSyntheticControls(salvage.requestMessages), ...responseMessages];
     callbacks.setConversation(compactToolHistory(completedConversation).messages);
   } catch (error) {
     if (salvage.accumulated.length > 0) {
       callbacks.setConversation(compactToolHistory([...stripSyntheticControls(salvage.requestMessages), ...salvage.accumulated]).messages);
     }
+    // An idle timeout commonly makes AI SDK responseMessages reject with the
+    // generic "terminated" error after one or more completed tool steps. That
+    // is not benign: propagate it so model-stream retry/pause recovery runs.
+    if (abortController.signal.aborted) throw loopState.streamError ?? error;
     const text = error instanceof Error ? error.message : String(error);
     const benignTerminatedAfterStream = text === 'terminated' && (loopState.streamFinished || loopState.assistantText.trim().length > 0 || loopState.latestToolCalls.size > 0);
     if (!benignTerminatedAfterStream) throw loopState.streamError ?? error;
