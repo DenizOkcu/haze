@@ -1,8 +1,9 @@
+import {createHash} from 'node:crypto';
 import {ToolLoopAgent, isStepCount, type ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {estimateValueTokens} from '../../../core/agent/contextBudget.js';
-import {compactToolHistory, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
+import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {type TurnExecutionState} from '../../../core/agent/completionController.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {toolsContextFor} from '../../../llm/tools/toolContext.js';
@@ -35,6 +36,7 @@ export interface AttemptLoopState {
   streamFinished: boolean;
   finishReason: string | undefined;
   lastToolOk: boolean | undefined;
+  sawToolCall: boolean;
   pendingMalformedToolName: string | undefined;
   unresolvedMalformedToolName: string | undefined;
   /** Per-attempt (not per-turn) recovery counter: a transient retry gets a fresh map. Bounded across the whole turn by MAIN_TOOL_CALL_LIMIT. */
@@ -49,6 +51,14 @@ export interface AttemptLoopState {
   rememberVisibleAssistantText: (text: string) => void;
   /** Context files active for this attempt; grows when tool outputs surface scoped instructions. */
   contextFiles: ContextFile[];
+  /** Lightweight cross-epoch history; never retains AI SDK StepResult objects. */
+  completedSteps: number;
+  generatedToolCalls: number;
+  consecutiveToolOnlySteps: number;
+  latestRepeatedToolNames: string[];
+  seenToolCallFingerprints: Set<string>;
+  /** The current epoch rewrote history because the real context budget fired. */
+  contextCompactedInEpoch: boolean;
 }
 
 export function createAttemptLoopState(previousAssistantText: string, contextFiles: ContextFile[], callbacks: Pick<StreamCallbacks, 'setLastAssistantText'>): AttemptLoopState {
@@ -63,6 +73,7 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     streamFinished: false,
     finishReason: undefined,
     lastToolOk: undefined,
+    sawToolCall: false,
     pendingMalformedToolName: undefined,
     unresolvedMalformedToolName: undefined,
     malformedRecoveryAttempts: new Map<string, number>(),
@@ -78,7 +89,39 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
       callbacks.setLastAssistantText(text);
     },
     contextFiles,
+    completedSteps: 0,
+    generatedToolCalls: 0,
+    consecutiveToolOnlySteps: 0,
+    latestRepeatedToolNames: [],
+    seenToolCallFingerprints: new Set<string>(),
+    contextCompactedInEpoch: false,
   };
+}
+
+function toolCallFingerprint(value: unknown): {fingerprint: string; toolName: string} | undefined {
+  if (typeof value !== 'object' || value == null) return undefined;
+  const call = value as {toolName?: unknown; input?: unknown};
+  if (typeof call.toolName !== 'string') return undefined;
+  const serialized = JSON.stringify(call.input) ?? 'undefined';
+  const digest = createHash('sha256').update(serialized).digest('base64url');
+  return {fingerprint: `${call.toolName}:${digest}`, toolName: call.toolName};
+}
+
+/** Retain only the policy metadata needed by prepareStep across SDK epochs. */
+function recordCompletedStep(loopState: AttemptLoopState, input: {text: string; toolCalls: readonly unknown[]}) {
+  const repeated = new Set<string>();
+  for (const toolCall of input.toolCalls) {
+    const keyed = toolCallFingerprint(toolCall);
+    if (!keyed) continue;
+    if (loopState.seenToolCallFingerprints.has(keyed.fingerprint)) repeated.add(keyed.toolName);
+    loopState.seenToolCallFingerprints.add(keyed.fingerprint);
+  }
+  loopState.latestRepeatedToolNames = [...repeated];
+  loopState.completedSteps += 1;
+  loopState.generatedToolCalls += input.toolCalls.length;
+  loopState.consecutiveToolOnlySteps = input.toolCalls.length > 0 && input.text.trim().length === 0
+    ? loopState.consecutiveToolOnlySteps + 1
+    : 0;
 }
 
 /** What the completed stream tells the attempt outcome (classification evidence). */
@@ -131,6 +174,7 @@ function applyStreamPart(deps: AttemptStreamDeps, part: AttemptStreamPart) {
     }
     case 'tool-input-start': {
       finalizePendingAssistantBeforeTool(deps);
+      loopState.sawToolCall = true;
       const toolCall = {toolCallId: part.id as string, toolName: part.toolName as string, input: {}};
       loopState.latestToolCalls.set(part.id as string, toolCall);
       loopState.inFlightTools.add(part.id as string);
@@ -140,6 +184,7 @@ function applyStreamPart(deps: AttemptStreamDeps, part: AttemptStreamPart) {
     }
     case 'tool-call': {
       finalizePendingAssistantBeforeTool(deps);
+      loopState.sawToolCall = true;
       const toolCall = {toolCallId: part.toolCallId as string, toolName: part.toolName as string, input: part.input};
       loopState.latestToolCalls.set(part.toolCallId as string, toolCall);
       // Tool execution begins only after its complete input has parsed and validated.
@@ -171,8 +216,8 @@ function applyStreamPart(deps: AttemptStreamDeps, part: AttemptStreamPart) {
   }
 }
 
-/** Await the agent's response messages and commit the completed conversation; salvage to the last completed step on a post-stream failure. */
-async function commitStreamResult(deps: AttemptStreamDeps, result: {responseMessages: PromiseLike<ModelMessage[]>}) {
+/** Await one bounded SDK epoch and commit its exact append-only provider history. */
+async function commitStreamResult(deps: AttemptStreamDeps, result: {responseMessages: PromiseLike<ModelMessage[]>}): Promise<ModelMessage[]> {
   const {loopState, callbacks, salvage, abortController} = deps;
   if (loopState.streamError && !loopState.streamFinished) {
     void Promise.resolve(result.responseMessages).catch(() => undefined);
@@ -185,38 +230,48 @@ async function commitStreamResult(deps: AttemptStreamDeps, result: {responseMess
     // abort ends the stream. Never commit that partial response as a normal
     // completion: the attempt catch must classify the recorded abort cause.
     if (abortController.signal.aborted) throw abortController.signal.reason ?? new Error('aborted');
-    const completedConversation = [...stripSyntheticControls(salvage.requestMessages), ...responseMessages];
-    callbacks.setConversation(compactToolHistory(completedConversation).messages);
+    const providerConversation = [...salvage.requestMessages, ...responseMessages];
+    // Synthetic controls are request-local and must not enter session state,
+    // but every non-control provider message remains byte-for-byte unchanged.
+    callbacks.setConversation(stripSyntheticControls(providerConversation));
+    return providerConversation;
   } catch (error) {
     if (salvage.accumulated.length > 0) {
-      callbacks.setConversation(compactToolHistory([...stripSyntheticControls(salvage.requestMessages), ...salvage.accumulated]).messages);
+      callbacks.setConversation([...stripSyntheticControls(salvage.requestMessages), ...salvage.accumulated]);
     }
     // An idle timeout commonly makes AI SDK responseMessages reject with the
     // generic "terminated" error after one or more completed tool steps. That
     // is not benign: propagate it so model-stream retry/pause recovery runs.
     if (abortController.signal.aborted) throw loopState.streamError ?? error;
     const text = error instanceof Error ? error.message : String(error);
-    const benignTerminatedAfterStream = text === 'terminated' && (loopState.streamFinished || loopState.assistantText.trim().length > 0 || loopState.latestToolCalls.size > 0);
+    const benignTerminatedAfterStream = text === 'terminated' && (loopState.streamFinished || loopState.assistantText.trim().length > 0 || loopState.sawToolCall);
     if (!benignTerminatedAfterStream) throw loopState.streamError ?? error;
     callbacks.debugLog(`ignored post-stream response error: ${text}`);
-  }
-
-  if (loopState.currentAssistantText.trim().length > 0 || loopState.assistantStarted) {
-    finalizeAssistantSegment(loopState, callbacks);
-  } else if (loopState.latestToolCalls.size > 0) {
-    callbacks.addMessage({role: 'system', text: 'Tool work ended without a substantive final answer.'});
+    return [...salvage.requestMessages, ...salvage.accumulated];
   }
 }
 
+interface AgentEpochResult {
+  providerMessages: ModelMessage[];
+  completedSteps: number;
+}
+
 /**
- * Drive one attempt's `ToolLoopAgent` stream: construct the agent (repair,
- * prepareStep, step observers), consume every stream part, and commit the
- * completed conversation. Throws the stream error so the attempt orchestrator
- * classifies failures (abort cause, retry pool, recovery) in one place.
+ * Run exactly one AI SDK step. Keeping this in a separate async frame makes the
+ * ToolLoopAgent, StreamTextResult, and SDK StepResult graph collectible before
+ * the next provider request while retaining Vercel's provider/tool machinery.
  */
-export async function runAttemptStream(deps: AttemptStreamDeps): Promise<AttemptStreamOutcome> {
+async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMessage[]): Promise<AgentEpochResult> {
   const {setup, callbacks, loopState, turnState, globalBudget, stallGuard, salvage, retryAttempt, abortController} = deps;
-  const {sliceTools, stepCap, systemPrompt, inputBreakdown, providerSettings, omitMaxOutputTokens, toolExecutionContext, requestMessages} = setup;
+  const {sliceTools, systemPrompt, inputBreakdown, providerSettings, omitMaxOutputTokens, toolExecutionContext} = setup;
+  const prepare = createPrepareStep(deps);
+  const completedBefore = loopState.completedSteps;
+  salvage.requestMessages = requestMessages;
+  salvage.accumulated = [];
+  loopState.streamError = undefined;
+  loopState.streamFinished = false;
+  loopState.finishReason = undefined;
+  loopState.contextCompactedInEpoch = false;
 
   const agent = new ToolLoopAgent({
     id: 'haze-main',
@@ -225,24 +280,48 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
     tools: sliceTools,
     ...(!omitMaxOutputTokens ? {maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS} : {}),
     ...providerSettings,
-    stopWhen: isStepCount(stepCap),
+    // One provider request + its tool batch per SDK object graph. A normal
+    // ToolLoopAgent would make the same next provider request internally.
+    stopWhen: isStepCount(1),
     runtimeContext: toolExecutionContext,
     toolsContext: toolsContextFor(sliceTools, toolExecutionContext) as never,
     experimental_repairToolCall: createRepairToolCall(deps),
-    prepareStep: createPrepareStep(deps),
-    onStepStart({stepNumber}) {
-      callbacks.onEvent?.(agentEvent({type: 'step_start', attempt: retryAttempt + 1, step: stepNumber + 1}));
+    prepareStep(args) {
+      const prepared = prepare(args);
+      // Preserve the exact provider-facing prefix across epochs, including a
+      // scoped control injected for this request. Session state strips those
+      // controls independently when the epoch commits.
+      const preparedMessages = (prepared?.messages as ModelMessage[] | undefined) ?? args.messages;
+      salvage.requestMessages = preparedMessages;
+      if (completedBefore > 0) {
+        const messagesPreserved = requestMessages.length <= preparedMessages.length
+          && requestMessages.every((message, index) => preparedMessages[index] === message);
+        const requestPolicyStable = prepared?.activeTools == null
+          && prepared?.toolChoice == null
+          && prepared?.model == null
+          && prepared?.providerOptions == null;
+        const prefixPreserved = messagesPreserved && requestPolicyStable;
+        callbacks.onEvent?.(agentEvent({
+          type: 'resource_rollover',
+          attempt: retryAttempt + 1,
+          completedSteps: completedBefore,
+          toolCalls: loopState.generatedToolCalls,
+          prefixPreserved,
+          reason: prefixPreserved ? 'sdk-step-boundary' : loopState.contextCompactedInEpoch ? 'context-compaction' : 'request-policy-change',
+        }));
+        callbacks.debugLog(`ToolLoopAgent epoch rollover after step ${completedBefore}; provider prefix ${prefixPreserved ? 'preserved' : 'reset'}`);
+      }
+      return prepared;
     },
-    onStepEnd({stepNumber, text, content = [], toolCalls, toolResults, finishReason, usage, response}) {
-      // Tool-loop control must advance from this internal callback, which the
-      // SDK awaits before prepareStep. Updating it from the public stream can
-      // lag behind fast providers and leave the next request read-only.
+    onStepStart({stepNumber}) {
+      callbacks.onEvent?.(agentEvent({type: 'step_start', attempt: retryAttempt + 1, step: loopState.completedSteps + stepNumber + 1}));
+    },
+    onStepEnd({text, content = [], toolCalls, toolResults, finishReason, usage, response}) {
+      // Tool-loop control must advance from this internally ordered callback.
       loopState.toolResultState = applyStepToolResultState(loopState.toolResultState, content);
-      // Turn-wide counters (shared across provider retries and recovery
-      // slices) so the global budget cannot reset between attempts. The
-      // execution-boundary budget (RH-003) is the authoritative count of
-      // underlying executions; sync the turn state to it so blocked calls are
-      // not double-counted and recovery math stays consistent.
+      recordCompletedStep(loopState, {text, toolCalls});
+      // Turn-wide counters remain shared across bounded SDK epochs, retries,
+      // and recovery slices. Executions are authoritative for tool-call usage.
       turnState.stepsUsed += 1;
       turnState.toolCallsUsed = globalBudget.started;
       if (toolCalls.length > 0 && text.trim().length === 0) turnState.toolOnlyStepsUsed += 1;
@@ -255,9 +334,9 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
         cacheWriteTokens: stepUsage.cacheWriteTokens,
         reasoningTokens: stepUsage.reasoningTokens,
       };
-      callbacks.onEvent?.(agentEvent({type: 'step_end', attempt: retryAttempt + 1, step: stepNumber + 1, finishReason, toolCallCount: toolCalls.length, usage: publicUsage, ...(response?.modelId ? {responseModel: response.modelId} : {})}));
-      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: stepNumber, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
-      callbacks.debugLog(`step ${stepNumber} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
+      callbacks.onEvent?.(agentEvent({type: 'step_end', attempt: retryAttempt + 1, step: loopState.completedSteps, finishReason, toolCallCount: toolCalls.length, usage: publicUsage, ...(response?.modelId ? {responseModel: response.modelId} : {})}));
+      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: loopState.completedSteps - 1, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
+      callbacks.debugLog(`step ${loopState.completedSteps - 1} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
     },
     onEnd(event) {
       const providerUsage = extractUsage({usage: event.usage});
@@ -275,28 +354,54 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
         logicalInputEstimate: inputBreakdown.logicalInputEstimate,
         effectiveNonCachedInput: providerUsage.effectiveNonCachedInput,
       });
-      const accumulated = [...stripSyntheticControls(requestMessages), ...event.responseMessages];
-      const compacted = compactToolHistory(accumulated);
-      callbacks.setConversation(compacted.messages);
-      callbacks.debugLog(`conversation updated to ${compacted.messages.length} messages by ToolLoopAgent`);
+      const accumulated = [...salvage.requestMessages, ...event.responseMessages];
+      callbacks.setConversation(stripSyntheticControls(accumulated));
+      callbacks.debugLog(`conversation updated to ${accumulated.length} exact messages by ToolLoopAgent epoch`);
     },
   });
 
   stallGuard.rearm();
   const result = await agent.stream({messages: requestMessages, abortSignal: abortController.signal});
-
   for await (const part of result.stream) {
     stallGuard.noteStreamEvent(part.type);
     applyStreamPart(deps, part);
   }
+  const providerMessages = await commitStreamResult(deps, result);
+  return {providerMessages, completedSteps: loopState.completedSteps - completedBefore};
+}
 
-  await commitStreamResult(deps, result);
+/**
+ * Drive one attempt through bounded ToolLoopAgent epochs. The provider prefix,
+ * tools, budgets, evidence, and deadline stay continuous; only the AI SDK's
+ * request-local retained graph is released at each completed step.
+ */
+export async function runAttemptStream(deps: AttemptStreamDeps): Promise<AttemptStreamOutcome> {
+  const {setup, callbacks, loopState, stallGuard, abortController} = deps;
+  let providerMessages = setup.requestMessages;
+  const attemptStartStep = loopState.completedSteps;
+
+  while (!abortController.signal.aborted) {
+    const epoch = await runAgentEpoch(deps, providerMessages);
+    providerMessages = epoch.providerMessages;
+    const attemptSteps = loopState.completedSteps - attemptStartStep;
+    const continueAfterTools = loopState.finishReason === 'tool-calls'
+      && epoch.completedSteps > 0
+      && attemptSteps < setup.stepCap;
+    if (!continueAfterTools) break;
+  }
+
+  if (loopState.currentAssistantText.trim().length > 0 || loopState.assistantStarted) {
+    finalizeAssistantSegment(loopState, callbacks);
+  } else if (loopState.sawToolCall && loopState.assistantText.trim().length === 0) {
+    callbacks.addMessage({role: 'system', text: 'Tool work ended without a substantive final answer.'});
+  }
+  stallGuard.clear();
 
   return {
     finishReason: loopState.finishReason,
     lastToolOk: loopState.lastToolOk,
     assistantText: loopState.assistantText,
-    sawToolCall: loopState.latestToolCalls.size > 0,
+    sawToolCall: loopState.sawToolCall,
     unresolvedMalformedToolName: loopState.unresolvedMalformedToolName,
     unresolvedToolInputError: loopState.unresolvedMalformedToolName != null,
   };

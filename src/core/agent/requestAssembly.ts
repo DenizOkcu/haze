@@ -27,11 +27,22 @@ function modelMessageTextForContext(message: ModelMessage) {
   return content.map(part => typeof part === 'object' && part != null && 'text' in part && typeof part.text === 'string' ? part.text : JSON.stringify(part)).join('\n');
 }
 
+function syntheticControlMessage(control: string): ModelMessage {
+  return {role: 'user', content: `${SYNTHETIC_CONTROL_OPEN}\n${control}\n</haze_control>`};
+}
+
 export function withSyntheticControl(messages: ModelMessage[], control: string): ModelMessage[] {
-  return [
-    ...stripSyntheticControls(messages),
-    {role: 'user', content: `${SYNTHETIC_CONTROL_OPEN}\n${control}\n</haze_control>`},
-  ];
+  return [...stripSyntheticControls(messages), syntheticControlMessage(control)];
+}
+
+/**
+ * Append a per-step control without rewriting an already-sent provider prefix.
+ * Active/session conversation state still removes every tagged control through
+ * `stripSyntheticControls`; this variant exists only for an in-flight logical
+ * turn whose next provider request should remain cache-prefix compatible.
+ */
+export function appendSyntheticControl(messages: ModelMessage[], control: string): ModelMessage[] {
+  return [...messages, syntheticControlMessage(control)];
 }
 
 /** Drop only a trailing text-only assistant final that completion policy rejected. */

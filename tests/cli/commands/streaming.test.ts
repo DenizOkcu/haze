@@ -29,6 +29,8 @@ interface MocksConfig {
   retryable?: boolean;
   streamParts?: FakeFullStreamPart[];
   responseMessages?: unknown[];
+  /** Per-call response messages, indexed by bounded SDK epoch (1-based). */
+  callResponseMessages?: unknown[][];
   availableTools?: Record<string, unknown>;
   failFirstNAgents?: number;
   idle?: boolean;
@@ -130,11 +132,15 @@ async function loadStreaming(config: MocksConfig) {
         this.onEnd = options.onEnd as never;
         this._fake = makeAgent(parts, responseMessages);
       }
-      stream({messages, abortSignal}: {messages: unknown[]; abortSignal: AbortSignal}) {
+      async stream({messages, abortSignal}: {messages: unknown[]; abortSignal: AbortSignal}) {
         agentCallCount += 1;
         const isFirstCall = agentCallCount === 1;
-        this._fake.streamArgs.push({messages, abortSignal});
-        mocks.streamedMessages.push(messages);
+        const prepared = await this.prepareStep?.({steps: [], messages});
+        const preparedMessages = typeof prepared === 'object' && prepared != null && 'messages' in prepared && Array.isArray(prepared.messages)
+          ? prepared.messages
+          : messages;
+        this._fake.streamArgs.push({messages: preparedMessages, abortSignal});
+        mocks.streamedMessages.push(preparedMessages);
         this._fake.options = this.options;
         this._fake.prepareStep = this.prepareStep;
         this._fake.onStepEnd = this.onStepEnd;
@@ -208,6 +214,9 @@ async function loadStreaming(config: MocksConfig) {
         const callIndex = agentCallCount - 1;
         const activeParts = config.callStreams ? config.callStreams[Math.min(callIndex, config.callStreams.length - 1)] : parts;
         const stepEnds = config.callStepEnds ? config.callStepEnds[Math.min(callIndex, config.callStepEnds.length - 1)] : (config.stepEnds ?? []);
+        const activeResponseMessages = config.callResponseMessages
+          ? config.callResponseMessages[Math.min(callIndex, config.callResponseMessages.length - 1)]
+          : responseMessages;
         if (config.stallCalls?.includes(agentCallCount)) {
           let onAbort: (() => void) | undefined;
           const waitForAbort = new Promise<void>(resolve => {
@@ -250,8 +259,8 @@ async function loadStreaming(config: MocksConfig) {
               yield part;
             }
           })(),
-          response: this._fake.response,
-          responseMessages: this._fake.responseMessages,
+          response: Promise.resolve({messages: activeResponseMessages}),
+          responseMessages: Promise.resolve(activeResponseMessages),
         };
       }
     }
@@ -472,6 +481,25 @@ describe('runAgentTurn: setup', () => {
     expect(textUser?.content).toBe('plain prompt');
   });
 
+  it('keeps older successful tool messages exact until real context compaction is required', async () => {
+    const oldOutput = `old-cache-prefix-${'x'.repeat(2_000)}`;
+    const history = Array.from({length: 4}, (_, index) => [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: `t${index}`, toolName: 'shell', input: {command: `printf ${index}`}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: `t${index}`, toolName: 'shell', input: {command: `printf ${index}`}, output: {type: 'json', value: {ok: true, stdout: index === 0 ? oldOutput : `output-${index}`}}}]},
+    ]).flat();
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}, contextWindowSource: 'settings', contextWindowTokens: 200_000}},
+      streamParts: [{type: 'text-delta', text: 'History retained.'}, {type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'History retained.'}],
+    });
+    const cb = makeCallbacks();
+    cb.setConversation(history);
+    await runAgentTurn('continue', undefined, [], cb);
+
+    expect(JSON.stringify(mocks.streamedMessages[0])).toContain(oldOutput);
+    expect(JSON.stringify(mocks.streamedMessages[0])).not.toContain('Older successful shell result omitted');
+  });
+
   it('applies ephemeral control to every request but never durable conversation/events', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
@@ -625,6 +653,43 @@ describe('runAgentTurn: stream handling', () => {
     await runAgentTurn('go', undefined, [], cb);
     const assistant = cb.messages.find((m) => m.role === 'assistant');
     expect(assistant?.text).toBe('Hello world');
+  });
+
+  it('rolls ToolLoopAgent at completed steps without rewriting the provider prefix', async () => {
+    const firstResponse = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'printf cache-prefix'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'printf cache-prefix'}, output: {type: 'json', value: {ok: true, stdout: 'cache-prefix'}}}]},
+    ];
+    const finalResponse = [{role: 'assistant', content: 'Work completed successfully.'}];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      callStepEnds: [
+        [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell', input: {command: 'printf cache-prefix'}}], toolResults: [{}], finishReason: 'tool-calls', response: {messages: firstResponse}}],
+        [{stepNumber: 0, text: 'Work completed successfully.', toolCalls: [], finishReason: 'stop', response: {messages: finalResponse}}],
+      ],
+      callStreams: [
+        [
+          {type: 'tool-input-start', id: 't1', toolName: 'shell'},
+          {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'printf cache-prefix'}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'printf cache-prefix'}, output: {ok: true, stdout: 'cache-prefix'}},
+          {type: 'finish', finishReason: 'tool-calls'},
+        ],
+        [{type: 'text-delta', text: 'Work completed successfully.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+      callResponseMessages: [firstResponse, finalResponse],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('run the command', undefined, [], cb);
+
+    expect(outcome).toMatchObject({status: 'complete'});
+    expect(mocks.agentOptions).toHaveLength(2);
+    expect(mocks.agentOptions.every(options => JSON.stringify(options.stopWhen) === JSON.stringify({steps: 1}))).toBe(true);
+    expect(mocks.streamedMessages).toHaveLength(2);
+    expect(mocks.streamedMessages[1]).toEqual([...mocks.streamedMessages[0], ...firstResponse]);
+    expect(cb.events.filter(event => event.type === 'resource_rollover')).toEqual([
+      expect.objectContaining({prefixPreserved: true, completedSteps: 1, toolCalls: 1}),
+    ]);
+    expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
   });
 
   it('records tool_start, tool_call, and tool_result events with status changes', async () => {

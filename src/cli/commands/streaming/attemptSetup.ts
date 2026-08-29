@@ -6,7 +6,7 @@ import {agentEvent} from '../../../core/agent/events.js';
 import {isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {calculateRequestTokenBudget, estimateMessagesTokens} from '../../../core/agent/contextBudget.js';
-import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
+import {stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {withToolDeadline} from '../../../core/deadline.js';
@@ -145,11 +145,14 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   callbacks.setGoalStatus?.(formatGoalStatus(goal));
   const likelyPlanOnlyRequest = isPlanOnlyRequest(value);
 
-  const durableRequestMessages = compactToolHistory(
-    retryingExistingRequest
-      ? stripSyntheticControls(callbacks.getConversation())
-      : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])],
-  ).messages;
+  // Keep the active provider history exact. Routine tool-history slimming used
+  // to rewrite older successful calls/results here, invalidating provider
+  // prompt-cache prefixes before the context budget required compaction.
+  // Durable session snapshots are slimmed independently at the persistence
+  // boundary; only the model-aware compaction below may rewrite active history.
+  const durableRequestMessages = retryingExistingRequest
+    ? stripSyntheticControls(callbacks.getConversation())
+    : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])];
   // Model-aware request budget (RH-005): message allowance is the context
   // window minus system prompt, tool schemas, output reserve, and a safety
   // margin — not a fixed 40K constant. Small contexts get a safe budget; the

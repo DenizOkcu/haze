@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
-import {compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutRejectedAssistantFinal} from '../../src/core/agent/requestAssembly.js';
+import {appendSyntheticControl, compactToolHistory, stripSyntheticControls, withSyntheticControl, withoutRejectedAssistantFinal} from '../../src/core/agent/requestAssembly.js';
 
 describe('requestAssembly', () => {
   it('replaces prior synthetic controls instead of persisting them', () => {
@@ -11,6 +11,18 @@ describe('requestAssembly', () => {
     expect(second[1].content).toContain('second nudge');
     expect(JSON.stringify(second)).not.toContain('first nudge');
     expect(stripSyntheticControls(second)).toEqual(base);
+  });
+
+  it('appends in-flight controls without rewriting the provider prefix', () => {
+    const base: ModelMessage[] = [{role: 'user', content: 'real request'}];
+    const first = appendSyntheticControl(base, 'first step constraint');
+    const response = {role: 'assistant', content: 'first response'} as ModelMessage;
+    const priorRequest = [...first, response];
+    const second = appendSyntheticControl(priorRequest, 'second step constraint');
+    expect(second.slice(0, priorRequest.length)).toEqual(priorRequest);
+    expect(JSON.stringify(second)).toContain('first step constraint');
+    expect(JSON.stringify(second)).toContain('second step constraint');
+    expect(stripSyntheticControls(second)).toEqual([...base, response]);
   });
 
   it('drops a rejected trailing text final without disturbing tool-bearing messages', () => {

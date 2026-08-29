@@ -50,6 +50,7 @@ type HeadlessStreamEvent =
   | {type: 'goal_resume'; goalId: string; relaunch: number; stopReason: string; reason: string; at: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: HeadlessUsage; responseModel?: string; at: string}
+  | {type: 'resource_rollover'; attempt: number; completedSteps: number; toolCalls: number; prefixPreserved: boolean; reason: 'sdk-step-boundary' | 'context-compaction' | 'request-policy-change'; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
   | {type: 'message_update'; id: string; delta: string; offset: number; at: string}
   | {type: 'message_end'; id: string; text: string; hidden?: boolean; at: string}
@@ -114,6 +115,8 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {type: 'step_start', attempt: event.attempt, step: event.step, at: event.at};
     case 'step_end':
       return {type: 'step_end', attempt: event.attempt, step: event.step, finishReason: event.finishReason, toolCallCount: event.toolCallCount, usage: event.usage, ...(event.responseModel ? {responseModel: event.responseModel} : {}), at: event.at};
+    case 'resource_rollover':
+      return {type: 'resource_rollover', attempt: event.attempt, completedSteps: event.completedSteps, toolCalls: event.toolCalls, prefixPreserved: event.prefixPreserved, reason: event.reason, at: event.at};
     case 'message_start':
       return {type: 'message_start', id: event.id, role: event.role, at: event.at};
     case 'message_update':

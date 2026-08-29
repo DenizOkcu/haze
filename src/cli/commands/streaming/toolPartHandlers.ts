@@ -30,10 +30,19 @@ type ToolPartHandlerDeps = {
   goal: SessionGoal;
 };
 
+function releaseCompletedToolCall(loopState: AttemptLoopState, toolCallId: string) {
+  // The exact protocol message remains in provider history; display state has
+  // already reduced the input to a summary, so do not retain a second copy in
+  // per-attempt bookkeeping after the result/error is consumed.
+  loopState.latestToolCalls.delete(toolCallId);
+  loopState.startedTools.delete(toolCallId);
+}
+
 export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStreamPart) {
   const {loopState, callbacks, toolDisplay, setup, goal} = deps;
   const toolCallId = part.toolCallId as string;
   const toolName = part.toolName as string;
+  loopState.sawToolCall = true;
   const toolCall = {toolCallId, toolName, input: part.input};
   loopState.latestToolCalls.set(toolCallId, toolCall);
   loopState.inFlightTools.delete(toolCallId);
@@ -48,6 +57,7 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
     item.finishedAt = startedAt + (item.durationMs ?? 0);
     callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_budget_blocked', durationMs: item.durationMs ?? 0}));
     toolDisplay.updateToolGroup(true);
+    releaseCompletedToolCall(loopState, toolCallId);
     return;
   }
   // A deadline-exceeded call was terminated at the wrapper boundary; the
@@ -62,6 +72,7 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
     callbacks.onEvent?.(agentEvent({type: 'tool_end', id: toolCall.toolCallId, name: toolCall.toolName, success: false, errorCode: 'tool_deadline', durationMs}));
     callbacks.onEvent?.(agentEvent({type: 'timeout', phase: 'tool', timeoutMs: toolName === 'subagent' ? SUBAGENT_TOOL_DEADLINE_MS : DEFAULT_TOOL_DEADLINE_MS}));
     toolDisplay.updateToolGroup(true);
+    releaseCompletedToolCall(loopState, toolCallId);
     return;
   }
   const ok = toolOutputOk(part.output, true);
@@ -85,12 +96,14 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
   const nestedTokens = subagentTokenEstimate(part.output);
   if (nestedTokens) callbacks.recordTokenUsage?.({inputTokens: nestedTokens.input, outputTokens: nestedTokens.output, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: nestedTokens.input, reasoningTokens: 0, logicalInputEstimate: nestedTokens.input, effectiveNonCachedInput: nestedTokens.input});
   toolDisplay.updateToolGroup(true);
+  releaseCompletedToolCall(loopState, toolCallId);
 }
 
 export function handleToolErrorPart(deps: ToolPartHandlerDeps, part: AttemptStreamPart) {
   const {loopState, callbacks, toolDisplay, setup, goal} = deps;
   const toolCallId = part.toolCallId as string;
   const toolName = part.toolName as string;
+  loopState.sawToolCall = true;
   loopState.inFlightTools.delete(toolCallId);
   const existing = loopState.latestToolCalls.get(toolCallId);
   const toolCall = {toolCallId, toolName, input: part.input ?? existing?.input};
@@ -113,4 +126,5 @@ export function handleToolErrorPart(deps: ToolPartHandlerDeps, part: AttemptStre
   callbacks.setWorkState?.(goal);
   callbacks.setGoalStatus?.(formatGoalStatus(goal));
   toolDisplay.updateToolGroup(true);
+  releaseCompletedToolCall(loopState, toolCallId);
 }

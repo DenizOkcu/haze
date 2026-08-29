@@ -320,6 +320,19 @@ describe('runHeadless: stream-json deltas (RH-006)', () => {
     vi.restoreAllMocks();
   });
 
+  it('emits bounded resource rollover metadata without prompt or tool content', async () => {
+    const writes = captureStdout();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => {
+        cb.onEvent?.({type: 'resource_rollover', attempt: 1, completedSteps: 3, toolCalls: 8, prefixPreserved: true, reason: 'sdk-step-boundary', at: 't'} as any);
+      },
+    });
+    await runHeadless({prompt: 'private prompt', output: 'stream-json'});
+    const rollover = writes.join('').split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>).find(line => line.type === 'resource_rollover');
+    expect(rollover).toEqual({type: 'resource_rollover', attempt: 1, completedSteps: 3, toolCalls: 8, prefixPreserved: true, reason: 'sdk-step-boundary', at: 't'});
+    expect(JSON.stringify(rollover)).not.toContain('private prompt');
+  });
+
   it('emits message_update as deltas that reconstruct message_end and stay linear', async () => {
     const writes = captureStdout();
     const {runHeadless} = await loadRunCommand({

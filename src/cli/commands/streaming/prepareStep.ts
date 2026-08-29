@@ -2,7 +2,7 @@ import type {ModelMessage} from 'ai';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {estimateMessagesTokens} from '../../../core/agent/contextBudget.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
-import {stripSyntheticControls, withSyntheticControl} from '../../../core/agent/requestAssembly.js';
+import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../../core/agent/turnPolicy.js';
 import {RESCUE_BOUNDARY} from '../../../core/agent/completionController.js';
 import {MAIN_TOOL_CALL_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../../core/agent/budgets.js';
@@ -26,12 +26,13 @@ import type {TurnExecutionState} from '../../../core/agent/completionController.
 type AgentOptions = NonNullable<ConstructorParameters<typeof import('ai').ToolLoopAgent>[0]>;
 type RepairToolCallFn = NonNullable<AgentOptions['experimental_repairToolCall']>;
 type PrepareStepFn = NonNullable<AgentOptions['prepareStep']>;
+type SyncPrepareStepResult = Exclude<ReturnType<PrepareStepFn>, PromiseLike<unknown>>;
 
 export function withScopedContextControl(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
   const files = context.pendingContextFiles ?? [];
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];
-  return withSyntheticControl(
+  return appendSyntheticControl(
     messages,
     `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`,
   );
@@ -55,10 +56,10 @@ export function createRepairToolCall(deps: {callbacks: StreamCallbacks; loopStat
   };
 }
 
-export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamCallbacks; loopState: AttemptLoopState; turnState: TurnExecutionState; turnBudget: {toolCallLimit: number}; goal: SessionGoal; recoverySlice: TurnExecutionOptions['recoverySlice']}): PrepareStepFn {
+export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamCallbacks; loopState: AttemptLoopState; turnState: TurnExecutionState; turnBudget: {toolCallLimit: number}; goal: SessionGoal; recoverySlice: TurnExecutionOptions['recoverySlice']}): (input: Parameters<PrepareStepFn>[0]) => SyncPrepareStepResult {
   const {setup, callbacks, loopState, turnState, turnBudget, goal, recoverySlice} = deps;
   const {sliceTools, requestBudget, toolExecutionContext, likelyPlanOnlyRequest, rescueWithoutTools} = setup;
-  return ({steps, messages}) => {
+  return ({steps, messages}: Parameters<PrepareStepFn>[0]): SyncPrepareStepResult => {
     // A rescue slice with no qualifying tools must synthesize, never reopen
     // discovery by falling back to the full tool set (F-08).
     if (rescueWithoutTools) {
@@ -66,7 +67,10 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       return {toolChoice: 'none' as const};
     }
     const toolCalls = steps.flatMap(step => step.toolCalls);
-    const repeatedToolNames = latestRepeatedToolNames(steps);
+    // ToolLoopAgent instances are intentionally one step wide. SDK `steps`
+    // therefore resets at each resource epoch; retain only bounded policy
+    // metadata in loopState instead of holding prior StepResult graphs.
+    const repeatedToolNames = steps.length > 0 ? latestRepeatedToolNames(steps) : loopState.latestRepeatedToolNames;
     let scopedMessages = withScopedContextControl(messages, toolExecutionContext);
     let messagesChanged = scopedMessages !== messages;
     // Re-evaluate the accumulated request size before each provider call and
@@ -75,15 +79,18 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
     if (estimateMessagesTokens(scopedMessages) > requestBudget.messageTokens) {
       const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal}).messages;
       scopedMessages = compacted;
+      loopState.contextCompactedInEpoch = true;
       messagesChanged = true;
     }
     // Turn-wide hard caps (shared across retries and recovery slices).
     const turnToolCallsExhausted = turnState.toolCallsUsed >= turnBudget.toolCallLimit;
     // Per-slice tool-call cap for a recovery slice (counts this slice's calls).
-    const sliceToolCallsExhausted = recoverySlice ? toolCalls.length >= recoverySlice.maxToolCalls : false;
+    const sliceToolCalls = steps.length > 0 ? toolCalls.length : loopState.generatedToolCalls;
+    const sliceToolCallsExhausted = recoverySlice ? sliceToolCalls >= recoverySlice.maxToolCalls : false;
     // Reserve the final tool-only slot for rescue: normal exploration stops at
     // the boundary; a rescue slice is exempt so it may use the reserved slot.
-    const toolOnlyBoundaryHit = !recoverySlice && toolOnlyStepCount(steps) >= RESCUE_BOUNDARY;
+    const consecutiveToolOnlySteps = steps.length > 0 ? toolOnlyStepCount(steps) : loopState.consecutiveToolOnlySteps;
+    const toolOnlyBoundaryHit = !recoverySlice && consecutiveToolOnlySteps >= RESCUE_BOUNDARY;
     if (likelyPlanOnlyRequest && loopState.toolResultState.mutatingToolSucceeded) return messagesChanged ? {toolChoice: 'none' as const, messages: scopedMessages} : {toolChoice: 'none' as const};
     if (loopState.pendingMalformedToolName && loopState.pendingMalformedToolName in sliceTools) {
       const toolName = loopState.pendingMalformedToolName as keyof typeof sliceTools;
@@ -91,7 +98,7 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       loopState.pendingMalformedToolName = undefined;
       if (attempt >= 2) {
         callbacks.debugLog(`malformed ${String(toolName)} recovery exhausted`);
-        return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, `The ${String(toolName)} input remained invalid after two smaller retries. Report this as blocked; do not promise another retry or claim completion.`)};
+        return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The ${String(toolName)} input remained invalid after two smaller retries. Report this as blocked; do not promise another retry or claim completion.`)};
       }
       loopState.malformedRecoveryAttempts.set(String(toolName), attempt + 1);
       callbacks.debugLog(`forcing smaller retry after malformed ${String(toolName)} input`);
@@ -100,22 +107,22 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       // required) and reject the object form with HTTP 400. Narrowing to a
       // single active tool plus 'required' preserves the forced-call
       // semantics on every server.
-      return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: withSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
+      return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: appendSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
     }
     if (loopState.toolResultState.editRecoveryPath && !loopState.toolResultState.editRecoveryReadSatisfied) {
       if ('readFile' in sliceTools) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof sliceTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof sliceTools>};
-      return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, `The failed mutation of ${loopState.toolResultState.editRecoveryPath} requires a fresh read, but readFile is unavailable in this bounded recovery slice. Report the unfinished edit as blocked; do not claim it succeeded.`)};
+      return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The failed mutation of ${loopState.toolResultState.editRecoveryPath} requires a fresh read, but readFile is unavailable in this bounded recovery slice. Report the unfinished edit as blocked; do not claim it succeeded.`)};
     }
     if (repeatedToolNames.length > 0) {
       const activeTools = (Object.keys(sliceTools) as Array<keyof typeof sliceTools>).filter(name => !repeatedToolNames.includes(name as string));
       callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
       return activeTools.length > 0
-        ? {activeTools, messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
-        : {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
+        ? {activeTools, messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
+        : {toolChoice: 'none', messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
     }
-    if (turnToolCallsExhausted || sliceToolCallsExhausted || toolOnlyBoundaryHit || toolCalls.length >= MAIN_TOOL_CALL_LIMIT) {
+    if (turnToolCallsExhausted || sliceToolCallsExhausted || toolOnlyBoundaryHit || sliceToolCalls >= MAIN_TOOL_CALL_LIMIT) {
       callbacks.debugLog('forcing text response to avoid tool loop');
-      return {toolChoice: 'none', messages: withSyntheticControl(scopedMessages, toolLoopBudgetPrompt())};
+      return {toolChoice: 'none', messages: appendSyntheticControl(scopedMessages, toolLoopBudgetPrompt())};
     }
     return messagesChanged ? {messages: scopedMessages} : undefined;
   };

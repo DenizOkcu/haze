@@ -1,7 +1,7 @@
 import type {LlmLog} from '../../../core/log/llmLog.js';
 import {agentEvent, type AgentEventSink} from '../../../core/agent/events.js';
 import {IDLE_TIMEOUT_MS, DEFAULT_MODEL_RETRIES} from '../../../core/agent/budgets.js';
-import {compactToolHistory, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
+import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import type {ModelMessage} from 'ai';
 import {abortForTurn, type TurnAbortCause} from './abortCause.js';
 import {logEntry} from './turnRuntime.js';
@@ -180,6 +180,6 @@ export interface AttemptSalvage {
  */
 export function salvageConversationToLastStep(callbacks: {setConversation: (messages: ModelMessage[]) => void}, salvage: AttemptSalvage) {
   if (salvage.accumulated.length > 0) {
-    callbacks.setConversation(compactToolHistory([...stripSyntheticControls(salvage.requestMessages), ...salvage.accumulated]).messages);
+    callbacks.setConversation([...stripSyntheticControls(salvage.requestMessages), ...salvage.accumulated]);
   }
 }

@@ -19,6 +19,7 @@ export type AgentEvent =
   | {type: 'goal_resume'; goalId: string; at: string; relaunch: number; stopReason: string; reason: string}
   | {type: 'step_start'; attempt: number; step: number; at: string}
   | {type: 'step_end'; attempt: number; step: number; finishReason: string; toolCallCount: number; usage: AgentStepUsage; responseModel?: string; at: string}
+  | {type: 'resource_rollover'; attempt: number; completedSteps: number; toolCalls: number; prefixPreserved: boolean; reason: 'sdk-step-boundary' | 'context-compaction' | 'request-policy-change'; at: string}
   | {type: 'message_start'; id: string; role: 'assistant'; at: string}
   | {type: 'message_update'; id: string; text: string; at: string}
   | {type: 'message_end'; id: string; text: string; at: string; hidden?: boolean}
