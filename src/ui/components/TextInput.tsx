@@ -16,14 +16,51 @@ import {useInputSuggestions} from './useInputSuggestions.js';
 
 const COMPACT_PASTE_MIN_LINES = 4;
 
-const CTRL_ENTER_ESCAPE_INPUTS = new Set(['\u001B[13;5u', '\u001B[13;5~']);
+// Enhanced-keyboard encodings of Enter with modifiers that some terminals emit
+// verbatim (kitty/CSI-u `u` form and xterm modifyOtherKeys `~` form). Ink 7's
+// keypress parser already resolves the CSI-u variants to `key.return` plus the
+// modifier flags before TextInput sees them; these entries cover pipelines that
+// deliver the raw sequence through `input`.
+const NEWLINE_ESCAPE_INPUTS = new Set([
+  '\u001B[13;2u', // shift+enter (kitty protocol / modifyOtherKeys=2)
+  '\u001B[13;2~', // shift+enter (xterm modifyOtherKeys=1)
+  '\u001B[13;5u', // ctrl+enter (kitty protocol / modifyOtherKeys=2)
+  '\u001B[13;5~', // ctrl+enter (xterm modifyOtherKeys=1)
+]);
 
-type TextInputKey = {return?: boolean; shift?: boolean; ctrl?: boolean};
+type TextInputKey = {return?: boolean; shift?: boolean; ctrl?: boolean; meta?: boolean};
 
 export function shouldInsertNewline(input: string, key: TextInputKey) {
-  return (key.return === true && (key.shift === true || key.ctrl === true))
+  return (key.return === true && (key.shift === true || key.ctrl === true || key.meta === true))
     || input === '\n'
-    || CTRL_ENTER_ESCAPE_INPUTS.has(input);
+    || NEWLINE_ESCAPE_INPUTS.has(input);
+}
+
+// Ink's kitty-keyboard auto-detection (enabled via the chat render option)
+// queries the terminal with CSI ? u. The terminal's CSI ? <flags> u response
+// can race Ink's detection listener and leak through the normal input pipeline
+// as literal text (Ink's keypress handling strips the leading ESC), which would
+// type e.g. `[?0u` into an otherwise empty prompt at startup. Drop probe
+// responses instead of inserting them.
+const KITTY_QUERY_RESPONSE_INPUT = /^\[\?\d+(?:;\d+)*u$/;
+
+export function isKittyQueryResponseInput(input: string) {
+  // Ink's keypress handling strips one leading ESC from unresolved sequences,
+  // so the probe response normally arrives as `[?0u`; tolerate the raw
+  // ESC-prefixed form as well.
+  const stripped = input.startsWith('\u001B') ? input.slice(1) : input;
+  return KITTY_QUERY_RESPONSE_INPUT.test(stripped);
+}
+
+/**
+ * Ctrl+C terminate check. Legacy terminals deliver the raw \x03 byte (Ink
+ * parses it to `c` + ctrl); with the kitty keyboard protocol enabled the
+ * terminal reports `CSI 99;5u`, which parses to the same `c` + ctrl shape.
+ * Ink 7.1.1's built-in exit-on-CtrlC only recognizes the raw \x03 event, so
+ * haze owns the interrupt explicitly (render runs with exitOnCtrlC: false).
+ */
+export function isInterruptInput(input: string, key: TextInputKey) {
+  return (input === 'c' && key.ctrl === true) || input === '\x03';
 }
 
 export type TextInputSuggestion = {
@@ -51,6 +88,7 @@ export function TextInput({
   onEscape,
   onToggleTasks,
   onResumeKey,
+  onInterrupt,
   onSubmit
 }: {
   placeholder?: string;
@@ -74,6 +112,13 @@ export function TextInput({
    * matching hint line, so ordinary typing is unaffected.
    */
   onResumeKey?: () => void;
+  /**
+   * Ctrl+C terminate: called for the parsed `c`+ctrl shape shared by the
+   * legacy \x03 byte and the kitty-protocol `CSI 99;5u` report. Runs even
+   * while the input is disabled (streaming), matching the terminal-wide
+   * terminate convention Ink's global handler used to provide.
+   */
+  onInterrupt?: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -157,6 +202,13 @@ export function TextInput({
   }
 
   useInput((input, key) => {
+    if (isKittyQueryResponseInput(input)) return;
+
+    if (isInterruptInput(input, key)) {
+      onInterrupt?.();
+      return;
+    }
+
     if (disabled) {
       if (key.escape) onCancel?.();
       return;
@@ -281,8 +333,6 @@ export function TextInput({
       setCursor(value.length);
       return;
     }
-
-    if (key.ctrl && input === 'c') return;
 
     if (key.ctrl && input === 'o') {
       onToggleTasks?.();

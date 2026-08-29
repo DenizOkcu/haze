@@ -718,6 +718,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
           }}
           onCancel={cancelThinking}
           onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
+          onInterrupt={() => exit()}
           onEscape={() => {
             if (busy) cancelThinking();
             else closeInputList();
@@ -766,7 +767,28 @@ export async function chatCommand(options: ChatOptions = {}) {
   // Incremental rendering rewrites only changed lines of the live frame, removing
   // the full-frame erase/rewrite flicker while streaming. The fps cap aligns with
   // the ~80ms spinner cadence; faster renders would only repaint unchanged lines.
-  const app = render(<ChatScreen debug={options.debug} version={options.version} build={options.build} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {incrementalRendering: true, maxFps: 15});
+  //
+  // Kitty keyboard protocol (auto-detected): without opting in, terminals send a
+  // bare \r for Shift+Enter — indistinguishable from Enter — so Shift+Enter would
+  // submit the prompt instead of inserting a newline. With the disambiguate flag,
+  // compliant terminals (kitty, WezTerm, Ghostty, iTerm2 >=3.5, foot, recent
+  // Windows Terminal, tmux passthrough) report modified Enter as CSI 13;<mod>u,
+  // which TextInput maps to a newline. Ink queries support first (CSI ? u) with a
+  // 200ms timeout, pushes/pops the terminal's flag stack across lifecycle, and
+  // leaves unsupporting terminals (e.g. macOS Terminal.app) untouched; Enter,
+  // Tab, and Backspace without modifiers keep their legacy bytes.
+  //
+  // The protocol also re-encodes Ctrl+C as CSI 99;5u, which Ink 7.1.1's
+  // exit-on-CtrlC (raw \x03 check) does not recognize — its useInput layer
+  // would swallow the parsed c+ctrl without exiting. haze therefore owns the
+  // interrupt: render with exitOnCtrlC disabled and let ChatScreen's TextInput
+  // onInterrupt (useApp exit) terminate for both encodings.
+  const app = render(<ChatScreen debug={options.debug} version={options.version} build={options.build} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {
+    incrementalRendering: true,
+    maxFps: 15,
+    kittyKeyboard: {mode: 'auto', flags: ['disambiguateEscapeCodes']},
+    exitOnCtrlC: false,
+  });
   try {
     await app.waitUntilExit();
     await teardownBackgroundProcesses().catch(() => undefined);
