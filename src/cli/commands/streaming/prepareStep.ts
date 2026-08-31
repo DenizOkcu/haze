@@ -1,6 +1,7 @@
 import type {ModelMessage} from 'ai';
+import {agentEvent} from '../../../core/agent/events.js';
 import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {estimateMessagesTokens} from '../../../core/agent/contextBudget.js';
+import {estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../../core/agent/turnPolicy.js';
@@ -56,8 +57,8 @@ export function createRepairToolCall(deps: {callbacks: StreamCallbacks; loopStat
   };
 }
 
-export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamCallbacks; loopState: AttemptLoopState; turnState: TurnExecutionState; turnBudget: {toolCallLimit: number}; goal: SessionGoal; recoverySlice: TurnExecutionOptions['recoverySlice']}): (input: Parameters<PrepareStepFn>[0]) => SyncPrepareStepResult {
-  const {setup, callbacks, loopState, turnState, turnBudget, goal, recoverySlice} = deps;
+export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamCallbacks; loopState: AttemptLoopState; turnState: TurnExecutionState; turnBudget: {toolCallLimit: number}; goal: SessionGoal; recoverySlice: TurnExecutionOptions['recoverySlice']; usageAnchor: {current: ContextUsageAnchor | undefined}}): (input: Parameters<PrepareStepFn>[0]) => SyncPrepareStepResult {
+  const {setup, callbacks, loopState, turnState, turnBudget, goal, recoverySlice, usageAnchor} = deps;
   const {sliceTools, requestBudget, toolExecutionContext, likelyPlanOnlyRequest, rescueWithoutTools} = setup;
   return ({steps, messages}: Parameters<PrepareStepFn>[0]): SyncPrepareStepResult => {
     // A rescue slice with no qualifying tools must synthesize, never reopen
@@ -75,12 +76,21 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
     let messagesChanged = scopedMessages !== messages;
     // Re-evaluate the accumulated request size before each provider call and
     // compact old tool history when it exceeds the model-aware budget, so a
-    // long multi-step turn compacts before overflowing (RH-005).
-    if (estimateMessagesTokens(scopedMessages) > requestBudget.messageTokens) {
-      const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal}).messages;
-      scopedMessages = compacted;
-      loopState.contextCompactedInEpoch = true;
-      messagesChanged = true;
+    // long multi-step turn compacts before overflowing (RH-005). The estimate
+    // prefers provider usage from the last completed step (Pillar 1.1); this
+    // sync path is the safety net under the epoch-boundary LLM compaction.
+    const contextEstimate = estimateConversationTokens(scopedMessages, usageAnchor.current, requestBudget.systemTokens + requestBudget.toolSchemaTokens);
+    if (contextEstimate.tokens > requestBudget.messageTokens) {
+      callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'threshold', method: 'heuristic'}));
+      const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal});
+      if (compacted.compacted) {
+        scopedMessages = compacted.messages;
+        loopState.contextCompactedInEpoch = true;
+        messagesChanged = true;
+        usageAnchor.current = undefined;
+        callbacks.recordCompaction?.({method: 'heuristic', olderCount: compacted.olderCount, keptCount: compacted.keptCount, summary: compacted.summary ?? ''});
+      }
+      callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: compacted.compacted ? 'heuristic' : 'none', compacted: compacted.compacted, olderCount: compacted.olderCount, keptCount: compacted.keptCount}));
     }
     // Turn-wide hard caps (shared across retries and recovery slices).
     const turnToolCallsExhausted = turnState.toolCallsUsed >= turnBudget.toolCallLimit;

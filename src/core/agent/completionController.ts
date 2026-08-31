@@ -152,7 +152,9 @@ export type CompletionReadiness =
   | 'red_check_not_green'
   | 'tool_failure'
   | 'unresolved_tool_input'
-  | 'aborted';
+  | 'aborted'
+  /** Produced only by the context-overflow exhaustion path (Pillar 1.4): the window stayed full after bounded compact-and-retry attempts. */
+  | 'context_exhausted';
 
 /** Inputs `assessCompletionReadiness` needs; matches the TurnExecutionState projection. */
 export interface CompletionReadinessInput {
@@ -201,6 +203,7 @@ export function describeCompletionReadiness(readiness: CompletionReadiness, task
     case 'tool_failure': return 'the last tool call failed';
     case 'unresolved_tool_input': return 'a tool call never executed because its input was invalid';
     case 'aborted': return 'the turn was aborted';
+    case 'context_exhausted': return 'the model context window was exhausted before the work could finish';
     case 'ready': return 'declared work is complete';
   }
 }

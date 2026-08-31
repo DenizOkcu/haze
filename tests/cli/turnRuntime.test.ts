@@ -11,6 +11,12 @@ describe('turnRuntime', () => {
     expect(retryDelayMs(10)).toBe(4000);
   });
 
+  it('scales the retry backoff from a configurable base (Pillar 1.3)', () => {
+    expect(retryDelayMs(0, 250)).toBe(250);
+    expect(retryDelayMs(1, 250)).toBe(500);
+    expect(retryDelayMs(5, 250)).toBe(1000); // capped at 4× the base
+  });
+
   it('normalizes provider usage details', () => {
     expect(extractUsage({usage: {inputTokens: 100, outputTokens: 20, inputTokenDetails: {cacheReadTokens: 25}, outputTokenDetails: {reasoningTokens: 3}}})).toMatchObject({
       inputTokens: 100,

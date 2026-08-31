@@ -11,7 +11,7 @@ import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type Turn
 import {goalCheckpointSignature, hashRequest, type GoalCheckpoint, type GoalLedgerAppend, type IncompleteGoalResume} from './goalCheckpoint.js';
 
 /** Why a logical goal stopped. `completed` is the only success. */
-export type GoalStopReason = 'completed' | 'no-progress' | 'goal-deadline' | 'blocked' | 'model-error' | 'model-stream-idle' | 'user-aborted';
+export type GoalStopReason = 'completed' | 'no-progress' | 'goal-deadline' | 'blocked' | 'model-error' | 'model-stream-idle' | 'user-aborted' | 'context-exhausted';
 
 export type {GoalLedgerAppend};
 
@@ -207,6 +207,15 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       noProgressCount = prevSignature != null && next.progressSignature === prevSignature ? noProgressCount + 1 : 0;
       prevSignature = next.progressSignature;
       checkpoint = {...next, noProgressCount};
+      // Context exhaustion is not a correctable-in-place condition: the window
+      // stayed full after the turn's bounded compact-and-retry attempts, so
+      // continuing immediately would relaunch the same oversized request.
+      // Pause with the resumable checkpoint instead (Pillar 1.4); the user
+      // compacts/clears context or switches models, then resumes.
+      if (checkpoint.readiness === 'context_exhausted') {
+        callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Goal paused: ${checkpointReason(checkpoint)}. Compact or clear context, or switch to a larger-context model, then resume.`}));
+        return finish('failed', 'context-exhausted', {kind: 'incomplete-goal', checkpoint});
+      }
       appendLedger('goal_continue');
       if (noProgressCount >= GOAL_NO_PROGRESS_LIMIT) {
         callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${checkpointReason(checkpoint)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});

@@ -4,6 +4,7 @@ import type {LspPool} from '../../../llm/lsp/pool.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
 import type {ToolExecutionBudgetState, TurnBudget} from '../../../core/agent/budgets.js';
+import type {ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import type {TurnExecutionState} from '../../../core/agent/completionController.js';
 import type {SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {modelThinkingLabel} from '../../../utils/modelName.js';
@@ -24,7 +25,12 @@ export interface AgentAttemptInput {
   callbacks: StreamCallbacks;
   retryAttempt: number;
   retryingExistingRequest: boolean;
-  contextOverflowRecovered: boolean;
+  /** Multiplier for the message-token budget after context-overflow retries (1 = none; Pillar 1.4). */
+  overflowShrinkFactor: number;
+  /** Context-overflow retries already consumed by this turn (Pillar 1.4). */
+  overflowRetries: number;
+  /** Whether this attempt runs after progress since the previous retry (Pillar 1.3 pool reset). */
+  progressSinceLastRetry: boolean;
   session: PromptSession | undefined;
   modelOverride: string | undefined;
   abortController: AbortController;
@@ -40,6 +46,8 @@ export interface AgentAttemptInput {
   /** Exactly-once teardown registry; shared with the turn's forced-settlement path. */
   cleanup: AttemptCleanupRegistry;
   remainingTurnDeadlineMs: () => number;
+  /** Turn-scoped usage anchor for provider-usage-backed context estimation (Pillar 1.1). */
+  usageAnchor: {current: ContextUsageAnchor | undefined};
 }
 
 /**
@@ -50,7 +58,11 @@ export interface AgentAttemptInput {
  * display are always torn down.
  */
 export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAttemptResult> {
-  const {value, contextFiles, callbacks, retryAttempt, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs} = input;
+  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs, usageAnchor} = input;
+  // Pillar 1.3: progress since the previous retry resets the shared retry pool
+  // (mirrors a per-burst budget), applied to both the stall guard's retry
+  // eligibility and the failure classification below.
+  const retryAttempt = input.progressSinceLastRetry && input.retryAttempt > 0 ? 0 : input.retryAttempt;
   callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
   let loadedMcp: LoadedMcpTools | undefined;
   let lspPool: LspPool | undefined;
@@ -78,7 +90,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
   let stallGuard: StreamStallGuard | undefined;
   let setup: Awaited<ReturnType<typeof prepareAttempt>> | undefined;
   try {
-    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path)});
+    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, overflowShrinkFactor: input.overflowShrinkFactor, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path), usageAnchor});
     if (!setup) return {status: 'failed'};
     const attemptSetupResult = setup;
     loadedMcp = setup.loadedMcp;
@@ -102,10 +114,10 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
       debugLog: callbacks.debugLog,
     });
 
-    const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage});
-    return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream});
+    const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage, usageAnchor});
+    return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream, retryAttempt, overflowRetries: input.overflowRetries});
   } catch (error) {
-    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries});
+    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, progressSinceLastRetry: input.progressSinceLastRetry, overflowRetries: input.overflowRetries, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries, retryBaseDelayMs: setup?.retryBaseDelayMs, goal, turnOptions});
   } finally {
     await cleanup.closeOnce(ATTEMPT_TEARDOWN_BOUND_MS);
     toolDisplay.finalizeToolGroup();

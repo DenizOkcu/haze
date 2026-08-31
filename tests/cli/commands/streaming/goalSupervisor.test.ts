@@ -167,6 +167,22 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     expect(cb.events.find(event => event.type === 'goal_end')).toMatchObject({cycles: 3});
   });
 
+  it('pauses instead of continuing when the context window is exhausted (Pillar 1.4)', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('failed', {resume: incompleteGoalResume({reason: 'context_exhausted'})})},
+    ]);
+    const cb = makeCallbacks();
+    const result = await runAgentGoal(baseOptions({callbacks: cb}));
+    // No relaunch of the same oversized request: the supervisor pauses with
+    // the resumable checkpoint after the single failing physical turn.
+    expect(result).toMatchObject({status: 'failed', stopReason: 'context-exhausted', cycles: 1});
+    expect(result.resume?.kind).toBe('incomplete-goal');
+    expect((result.resume as {checkpoint: GoalCheckpoint}).checkpoint).toMatchObject({readiness: 'context_exhausted'});
+    expect(calls.positional).toHaveLength(1);
+    expect(cb.events.some(event => event.type === 'goal_notice' && /context window was exhausted/.test(String(event.text)))).toBe(true);
+    expect(cb.events.filter(event => event.type === 'goal_end')).toHaveLength(1);
+  });
+
   it('pauses safely after one corrective no-progress cycle, with a resumable checkpoint', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {result: turnResult('failed', {resume: incompleteGoalResume()})},

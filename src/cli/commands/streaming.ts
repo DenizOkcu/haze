@@ -8,8 +8,9 @@ import type {TurnCompletionEvidence} from '../../core/agent/completionController
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
-import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
+import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
 import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
+import type {ContextUsageAnchor} from '../../core/agent/contextBudget.js';
 import type {SubagentOverrides, TurnExecutionScope} from '../../llm/requestContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
@@ -98,6 +99,8 @@ export interface StreamCallbacks {
   setGoalStatus?: (status: string | undefined) => void;
   onEvent?: AgentEventSink;
   compactConversation?: (instructions?: string) => boolean;
+  /** Durable compaction audit hook (Pillar 1.7): fired for every automatic compaction that rewrites the conversation, mirroring the session `compact` entry shape. */
+  recordCompaction?: (entry: {method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}) => void;
   recordTokenUsage?: (usage: TokenUsage) => void;
   setWorkState?: (state: WorkState) => void;
   onTasksChanged?: () => void;
@@ -139,6 +142,10 @@ export async function runAgentTurn(
     // logical goal shares the same lease.
     const turnScope: {executionScope?: TurnExecutionScope} = turnOptions.sharedTurnScope ?? {};
     const turnBudget = mainTurnBudget();
+    // Turn-scoped provider-usage anchor (Pillar 1.1): context estimation prefers
+    // real usage from the last completed step, with chars/4 estimates only for
+    // trailing messages. Shared across attempts and invalidated by compaction.
+    const usageAnchor: {current: ContextUsageAnchor | undefined} = {current: undefined};
     // Turn-wide execution budget (RH-003): one authoritative counter of
     // underlying tool executions, shared across retries and recovery slices so
     // the global limit cannot be reset or exceeded. The slice budget caps the
@@ -159,7 +166,9 @@ export async function runAgentTurn(
     turnState.intent = goal.intent;
     let activeOptions = turnOptions;
     let attempt = retryAttempt;
-    let overflowRecovered = contextOverflowRecovered;
+    let overflowRetries = contextOverflowRecovered ? 1 : 0;
+    let overflowShrinkFactor = contextOverflowRecovered ? OVERFLOW_SHRINK_FACTOR : 1;
+    let stepsUsedAtLastRetry = 0;
     let retrying = retryingExistingRequest;
     // The attempt machinery runs against quarantinable callbacks so an
     // abort-ignoring stream that outlives forced settlement cannot mutate the
@@ -181,7 +190,7 @@ export async function runAgentTurn(
         },
       });
       const cleanup = createAttemptCleanupRegistry();
-      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, contextOverflowRecovered: overflowRecovered, session, modelOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt))}), {
+      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, overflowShrinkFactor, overflowRetries, progressSinceLastRetry: turnState.stepsUsed > stepsUsedAtLastRetry, session, modelOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)), usageAnchor}), {
         abortController,
         cleanup,
         quarantine,
@@ -203,7 +212,11 @@ export async function runAgentTurn(
       resume = result.resume;
       if (result.retry) {
         attempt = result.retry.attempt;
-        overflowRecovered = result.retry.contextOverflowRecovered;
+        if (result.retry.overflowShrinkFactor != null) {
+          overflowRetries += 1;
+          overflowShrinkFactor = result.retry.overflowShrinkFactor;
+        }
+        stepsUsedAtLastRetry = turnState.stepsUsed;
         retrying = true;
         if (result.retry.freshController) {
           // The idle stall aborted the previous controller to kill the hung

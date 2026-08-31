@@ -1,14 +1,13 @@
 import type {ModelMessage, ToolSet} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
-import {DEFAULT_MODEL_RETRIES} from '../../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {calculateRequestTokenBudget, estimateMessagesTokens} from '../../../core/agent/contextBudget.js';
+import {calculateRequestTokenBudget, estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
@@ -66,6 +65,8 @@ export interface AttemptSetup {
   toolCategories: Map<string, ToolCategory>;
   /** Retry-pool size for this attempt's turn, from the `modelRetries` setting (default 2). */
   modelRetries: number;
+  /** Backoff base for the shared model-retry pool, from the `retryBaseDelayMs` setting (default 1000ms). */
+  retryBaseDelayMs: number;
 }
 
 export interface AttemptSetupDeps {
@@ -73,7 +74,8 @@ export interface AttemptSetupDeps {
   contextFiles: ContextFile[];
   callbacks: StreamCallbacks;
   retryingExistingRequest: boolean;
-  contextOverflowRecovered: boolean;
+  /** Multiplier for the message-token budget after context-overflow retries (1 = none, 0.6/0.36 after each; Pillar 1.4). */
+  overflowShrinkFactor: number;
   session: PromptSession | undefined;
   modelOverride: string | undefined;
   abortController: AbortController;
@@ -85,6 +87,8 @@ export interface AttemptSetupDeps {
   sliceBudget: ToolExecutionBudgetState;
   goal: SessionGoal;
   onContextFileRead: (path: string) => void;
+  /** Turn-scoped usage anchor for provider-usage-backed context estimation (Pillar 1.1). */
+  usageAnchor: {current: ContextUsageAnchor | undefined};
 }
 
 /**
@@ -95,9 +99,11 @@ export interface AttemptSetupDeps {
  * configured (the caller-reported failure path).
  */
 export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSetup | undefined> {
-  const {value, contextFiles, callbacks, retryingExistingRequest, contextOverflowRecovered, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead} = deps;
-  // Single choke point: one fresh settings read per turn, shared by model
-  // resolution and request assembly (CR-024).
+  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead, usageAnchor} = deps;
+  // Single choke point: one fresh settings read per attempt, shared by model
+  // resolution and request assembly (CR-024, relaxed in Pillar 1.9 so a
+  // provider/model switch mid-goal applies from the next attempt — the first
+  // attempt of each physical turn keeps the original read).
   const turnSettings = await readSettings();
   const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride}, turnSettings);
   if (!runtime?.model) {
@@ -160,11 +166,21 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   const requestedOutputTokens = runtime.config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: assembled.systemPrompt, tools: availableTools});
   // A context-overflow retry progressively shrinks the target so it cannot loop
-  // at an unchanged budget; further overflows get even smaller (RH-005).
-  const overflowTargetTokens = contextOverflowRecovered ? Math.floor(requestBudget.messageTokens * 0.6) : requestBudget.messageTokens;
+  // at an unchanged budget; further overflows get even smaller (RH-005, Pillar
+  // 1.4: 0.6 after the first, 0.36 after the second).
+  const overflowShrinkFactor = deps.overflowShrinkFactor;
+  const overflowTargetTokens = overflowShrinkFactor < 1 ? Math.floor(requestBudget.messageTokens * overflowShrinkFactor) : requestBudget.messageTokens;
+  const overheadTokens = requestBudget.systemTokens + requestBudget.toolSchemaTokens;
   let requestMessages = durableRequestMessages;
-  if (estimateMessagesTokens(requestMessages) > overflowTargetTokens) {
-    requestMessages = compactModelMessages(requestMessages, {tokenBudget: overflowTargetTokens, workState: goal}).messages;
+  if (estimateConversationTokens(requestMessages, usageAnchor.current, overheadTokens).tokens > overflowTargetTokens) {
+    callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'threshold', method: 'heuristic'}));
+    const compacted = compactModelMessages(requestMessages, {tokenBudget: overflowTargetTokens, workState: goal});
+    requestMessages = compacted.messages;
+    if (compacted.compacted) {
+      usageAnchor.current = undefined;
+      callbacks.recordCompaction?.({method: 'heuristic', olderCount: compacted.olderCount, keptCount: compacted.keptCount, summary: compacted.summary ?? ''});
+    }
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: compacted.compacted ? 'heuristic' : 'none', compacted: compacted.compacted, olderCount: compacted.olderCount, keptCount: compacted.keptCount}));
   }
   requestMessages = withoutSystemMessages(requestMessages);
   callbacks.setConversation(stripSyntheticControls(requestMessages));
@@ -227,5 +243,6 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     contextFiles: activeContextFiles,
     toolCategories,
     modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
+    retryBaseDelayMs: typeof turnSettings.retryBaseDelayMs === 'number' ? turnSettings.retryBaseDelayMs : DEFAULT_RETRY_BASE_DELAY_MS,
   };
 }

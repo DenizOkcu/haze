@@ -99,10 +99,18 @@ export interface HazeSettings {
    */
   modelRetries?: number;
   /**
+   * Base delay in milliseconds for the shared model-retry pool backoff
+   * (`base * 2^attempt`, capped at 4× the base). Unset means the built-in
+   * default of 1000ms. The pool resets whenever an attempt completes a
+   * successful step, so intermittent blips never exhaust it.
+   */
+  retryBaseDelayMs?: number;
+  /**
    * Manual `/compact` mode (F-09): `llm-summary` (default) asks the active
    * model to summarize the older history; `heuristic` keeps the bounded
-   * excerpt without a model call. Automatic mid-turn compaction is always
-   * heuristic.
+   * excerpt without a model call. Mid-turn compaction prefers an LLM summary
+   * when the older history is large and falls back to the heuristic excerpt
+   * for small trims and on any summarization failure.
    */
   manualCompaction?: 'llm-summary' | 'heuristic';
   /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
@@ -167,6 +175,9 @@ const contextWindowFallbackSchema = z.number().int().min(1_000).max(10_000_000);
 /** Retry-pool size must be a small non-negative count (0 disables retries). */
 const modelRetriesSchema = z.number().int().min(0).max(10);
 
+/** Retry backoff base must be a plausible delay (not fractions/junk). */
+const retryBaseDelaySchema = z.number().int().min(250).max(60_000);
+
 const settingsSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -179,6 +190,7 @@ const settingsSchema = z.object({
   contextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   localContextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   modelRetries: modelRetriesSchema.optional(),
+  retryBaseDelayMs: retryBaseDelaySchema.optional(),
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   theme: z.string().optional(),

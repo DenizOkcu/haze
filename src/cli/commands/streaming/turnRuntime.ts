@@ -3,6 +3,7 @@ import type {ContextFile} from '../../../config/contextFiles.js';
 import type {LlmLog} from '../../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../../core/log/llmLog.js';
 import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateValueTokens} from '../../../core/agent/contextBudget.js';
+import {DEFAULT_RETRY_BASE_DELAY_MS} from '../../../core/agent/budgets.js';
 
 export interface TokenUsage {
   inputTokens: number | undefined;
@@ -19,8 +20,8 @@ export interface TokenUsage {
   effectiveNonCachedInput: number | undefined;
 }
 
-export function retryDelayMs(attempt: number) {
-  return Math.min(4000, 1000 * 2 ** attempt);
+export function retryDelayMs(attempt: number, baseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS) {
+  return Math.min(baseDelayMs * 4, baseDelayMs * 2 ** attempt);
 }
 
 /** Append one entry to the per-turn LLM log when file logging is enabled; never blocks the turn. */

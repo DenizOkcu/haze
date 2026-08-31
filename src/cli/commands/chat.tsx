@@ -581,6 +581,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         sessionRecorder.recordWorkState(state);
       },
       compactConversation,
+      recordCompaction: entry => sessionRecorder.recordCompactEntry(entry),
       recordTokenUsage: usage => {
         setTokenUsage(current => accumulateTokenUsage(current, usage));
       },

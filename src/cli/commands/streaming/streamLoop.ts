@@ -1,11 +1,13 @@
 import {createHash} from 'node:crypto';
-import {ToolLoopAgent, isStepCount, type ModelMessage} from 'ai';
+import {ToolLoopAgent, generateText, isStepCount, type ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {estimateValueTokens} from '../../../core/agent/contextBudget.js';
+import {contextTokensFromUsage, estimateConversationTokens, estimateValueTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
+import {buildLlmCompactionPrompt, chooseBoundaryCompactionMethod, compactModelMessages, compactModelMessagesWithSummary, extractExistingCompactionSummary} from '../../../core/agent/compaction.js';
+import {isLengthStopOverflow, isSilentContextOverflow} from '../../../core/agent/overflow.js';
 import {type TurnExecutionState} from '../../../core/agent/completionController.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {COMPACTION_LLM_MAX_OUTPUT_TOKENS, COMPACTION_LLM_MIN_OLDER_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {toolsContextFor} from '../../../llm/tools/toolContext.js';
 import {busyToolLabel, toolCallSummary} from '../formatters.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
@@ -59,6 +61,8 @@ export interface AttemptLoopState {
   seenToolCallFingerprints: Set<string>;
   /** The current epoch rewrote history because the real context budget fired. */
   contextCompactedInEpoch: boolean;
+  /** Last valid per-step provider usage (input/output/cache), for usage-overflow detection (Pillar 1.2). */
+  lastUsage: {inputTokens: number | undefined; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number} | undefined;
 }
 
 export function createAttemptLoopState(previousAssistantText: string, contextFiles: ContextFile[], callbacks: Pick<StreamCallbacks, 'setLastAssistantText'>): AttemptLoopState {
@@ -95,6 +99,7 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     latestRepeatedToolNames: [],
     seenToolCallFingerprints: new Set<string>(),
     contextCompactedInEpoch: false,
+    lastUsage: undefined,
   };
 }
 
@@ -132,6 +137,13 @@ export interface AttemptStreamOutcome {
   sawToolCall: boolean;
   unresolvedMalformedToolName: string | undefined;
   unresolvedToolInputError: boolean;
+  /**
+   * Non-error context overflow detected from usage (Pillar 1.2): `silent`
+   * (usage exceeded the window on a successful finish) or `length-stop`
+   * (truncated input filled the window leaving no output room). Routed to
+   * compact-and-retry recovery in `finalizeAttemptOutcome`.
+   */
+  usageOverflow: 'silent' | 'length-stop' | undefined;
 }
 
 export interface AttemptStreamDeps {
@@ -148,6 +160,8 @@ export interface AttemptStreamDeps {
   loopState: AttemptLoopState;
   toolDisplay: ToolGroupRenderer;
   salvage: AttemptSalvage;
+  /** Turn-scoped usage anchor for provider-usage-backed context estimation (Pillar 1.1). */
+  usageAnchor: {current: ContextUsageAnchor | undefined};
 }
 
 function applyStreamPart(deps: AttemptStreamDeps, part: AttemptStreamPart) {
@@ -272,6 +286,9 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
   loopState.streamFinished = false;
   loopState.finishReason = undefined;
   loopState.contextCompactedInEpoch = false;
+  // Epoch-final provider usage for the usage anchor (Pillar 1.1); onEnd fires
+  // before the stream promise settles, so stash and commit after commitStreamResult.
+  let epochUsage: {inputTokens?: number; outputTokens?: number; cacheReadTokens: number; cacheWriteTokens: number} | undefined;
 
   const agent = new ToolLoopAgent({
     id: 'haze-main',
@@ -320,13 +337,19 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
       // Tool-loop control must advance from this internally ordered callback.
       loopState.toolResultState = applyStepToolResultState(loopState.toolResultState, content);
       recordCompletedStep(loopState, {text, toolCalls});
+      // Remember the last valid per-step usage for usage-overflow detection
+      // (Pillar 1.2); empty usage objects (some gateways/tests) keep the
+      // previous value or stay unset.
+      const stepUsage = stepCacheMetrics(usage);
+      if (stepUsage.inputTokens != null || usage?.outputTokens != null || stepUsage.cacheReadTokens > 0 || stepUsage.cacheWriteTokens > 0) {
+        loopState.lastUsage = {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens ?? 0, cacheReadTokens: stepUsage.cacheReadTokens, cacheWriteTokens: stepUsage.cacheWriteTokens};
+      }
       // Turn-wide counters remain shared across bounded SDK epochs, retries,
       // and recovery slices. Executions are authoritative for tool-call usage.
       turnState.stepsUsed += 1;
       turnState.toolCallsUsed = globalBudget.started;
       if (toolCalls.length > 0 && text.trim().length === 0) turnState.toolOnlyStepsUsed += 1;
       if (Array.isArray(response?.messages) && response.messages.length > 0) salvage.accumulated = response.messages as ModelMessage[];
-      const stepUsage = stepCacheMetrics(usage);
       const publicUsage = {
         inputTokens: stepUsage.inputTokens ?? 0,
         outputTokens: usage?.outputTokens ?? 0,
@@ -340,6 +363,7 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
     },
     onEnd(event) {
       const providerUsage = extractUsage({usage: event.usage});
+      epochUsage = {inputTokens: providerUsage.inputTokens, outputTokens: providerUsage.outputTokens, cacheReadTokens: providerUsage.cacheReadTokens, cacheWriteTokens: providerUsage.cacheWriteTokens};
       callbacks.recordTokenUsage?.({
         inputTokens: providerUsage.inputTokens,
         outputTokens: providerUsage.outputTokens,
@@ -367,7 +391,102 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
     applyStreamPart(deps, part);
   }
   const providerMessages = await commitStreamResult(deps, result);
+  // Re-anchor context estimation on the provider's own accounting for the
+  // committed history (Pillar 1.1). The anchor indexes the control-free
+  // message sequence so it stays aligned with durable conversation state.
+  const anchorTokens = contextTokensFromUsage(epochUsage ?? {});
+  if (anchorTokens != null) deps.usageAnchor.current = {messageCount: stripSyntheticControls(providerMessages).length, contextTokens: anchorTokens};
   return {providerMessages, completedSteps: loopState.completedSteps - completedBefore};
+}
+
+/**
+ * Mid-turn compaction at an epoch boundary (Pillar 1.5/1.6): before the next
+ * provider request, shrink the history when the (usage-anchored) estimate
+ * exceeds the message budget — the anchored total drives the decision, so
+ * token-dense history the chars/4 estimate undercounts still compacts. Large
+ * older halves get an LLM-written summary —
+ * chained from any previous compaction summary and split-turn aware — while
+ * small trims keep the deterministic heuristic excerpt. Any summarization
+ * failure falls back to the heuristic excerpt. Rewrites the provider prefix
+ * exactly once and invalidates the usage anchor (the next step re-anchors on
+ * fresh provider usage).
+ */
+async function compactAtEpochBoundary(deps: AttemptStreamDeps, providerMessages: ModelMessage[]): Promise<ModelMessage[]> {
+  const {setup, callbacks, loopState, goal, abortController, usageAnchor} = deps;
+  const overhead = setup.requestBudget.systemTokens + setup.requestBudget.toolSchemaTokens;
+  const estimate = estimateConversationTokens(providerMessages, usageAnchor.current, overhead);
+  const decision = chooseBoundaryCompactionMethod({messages: providerMessages, messageTokenBudget: setup.requestBudget.messageTokens, olderTokenThreshold: COMPACTION_LLM_MIN_OLDER_TOKENS, totalTokens: estimate.tokens});
+  if (decision.method === 'none' || !decision.split) return providerMessages;
+  const split = decision.split;
+  const tokenBudget = setup.requestBudget.messageTokens;
+  if (decision.method === 'heuristic') {
+    callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'threshold', method: 'heuristic'}));
+    const result = compactModelMessages(providerMessages, {tokenBudget, workState: goal});
+    if (!result.compacted) {
+      // Nothing older qualified; close the opened event truthfully.
+      callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: 'none', compacted: false}));
+      return providerMessages;
+    }
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: 'heuristic', compacted: true, olderCount: result.olderCount, keptCount: result.keptCount}));
+    callbacks.debugLog(`mid-turn compaction (heuristic): condensed ${result.olderCount} messages (${estimate.basis}-backed estimate ${estimate.tokens} > budget ${tokenBudget})`);
+    loopState.contextCompactedInEpoch = true;
+    usageAnchor.current = undefined;
+    callbacks.recordCompaction?.({method: 'heuristic', olderCount: result.olderCount, keptCount: result.keptCount, summary: result.summary ?? ''});
+    callbacks.setConversation(result.messages);
+    return result.messages;
+  }
+  callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'threshold', method: 'llm'}));
+  try {
+    const prompt = buildLlmCompactionPrompt({
+      older: split.older,
+      previousSummary: extractExistingCompactionSummary(providerMessages),
+      splitTurn: split.splitTurn,
+    });
+    const summarization = await generateText({
+      model: setup.runtime.model,
+      prompt,
+      maxOutputTokens: COMPACTION_LLM_MAX_OUTPUT_TOKENS,
+      abortSignal: abortController.signal,
+    });
+    const summaryText = summarization.text.trim();
+    if (!summaryText) throw new Error('model returned an empty summary');
+    const result = compactModelMessagesWithSummary(providerMessages, {summaryText, tokenBudget, workState: goal});
+    if (!result.compacted) throw new Error('nothing older to compact');
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: 'llm', compacted: true, olderCount: result.olderCount, keptCount: result.keptCount}));
+    callbacks.recordTokenUsage?.({
+      inputTokens: summarization.usage?.inputTokens,
+      outputTokens: summarization.usage?.outputTokens,
+      systemPrompt: 0,
+      messages: 0,
+      toolSchemas: 0,
+      outputEstimate: 0,
+      cacheReadTokens: summarization.usage?.inputTokenDetails?.cacheReadTokens ?? 0,
+      cacheWriteTokens: summarization.usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
+      noCacheTokens: 0,
+      reasoningTokens: summarization.usage?.outputTokenDetails?.reasoningTokens ?? 0,
+      logicalInputEstimate: 0,
+      effectiveNonCachedInput: undefined,
+    });
+    callbacks.debugLog(`mid-turn compaction (llm summary${split.splitTurn ? ', split turn' : ''}${extractExistingCompactionSummary(providerMessages) ? ', chained' : ''}): condensed ${result.olderCount} messages (${estimate.basis}-backed estimate ${estimate.tokens} > budget ${tokenBudget})`);
+    loopState.contextCompactedInEpoch = true;
+    usageAnchor.current = undefined;
+    callbacks.recordCompaction?.({method: 'llm', olderCount: result.olderCount, keptCount: result.keptCount, summary: result.summary ?? ''});
+    callbacks.setConversation(result.messages);
+    return result.messages;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    callbacks.debugLog(`mid-turn LLM compaction failed (${message}); falling back to the heuristic excerpt`);
+    const fallback = compactModelMessages(providerMessages, {tokenBudget, workState: goal});
+    // One truthful end event: the heuristic excerpt's actual outcome, with the
+    // LLM failure attached for diagnosis.
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: fallback.compacted ? 'heuristic' : 'none', compacted: fallback.compacted, olderCount: fallback.olderCount, keptCount: fallback.keptCount, error: `llm summary failed: ${message}`}));
+    if (!fallback.compacted) return providerMessages;
+    loopState.contextCompactedInEpoch = true;
+    usageAnchor.current = undefined;
+    callbacks.recordCompaction?.({method: 'heuristic', olderCount: fallback.olderCount, keptCount: fallback.keptCount, summary: fallback.summary ?? ''});
+    callbacks.setConversation(fallback.messages);
+    return fallback.messages;
+  }
 }
 
 /**
@@ -388,6 +507,9 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
       && epoch.completedSteps > 0
       && attemptSteps < setup.stepCap;
     if (!continueAfterTools) break;
+    // Budget-aware mid-turn compaction before the next provider request
+    // (Pillar 1.5); a no-op while the conversation fits.
+    providerMessages = await compactAtEpochBoundary(deps, providerMessages);
   }
 
   if (loopState.currentAssistantText.trim().length > 0 || loopState.assistantStarted) {
@@ -397,6 +519,20 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
   }
   stallGuard.clear();
 
+  // Non-error overflow detection from the last valid usage (Pillar 1.2):
+  // silent overflow (successful finish, usage over the window) and
+  // length-stop overflow (length finish, zero output, input filling the
+  // window). Both route to compact-and-retry in the attempt outcome.
+  const window = setup.runtime.config.contextWindowTokens;
+  const usage = loopState.lastUsage;
+  let usageOverflow: 'silent' | 'length-stop' | undefined;
+  if (usage && loopState.finishReason === 'stop' && isSilentContextOverflow({inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, contextWindowTokens: window})) {
+    usageOverflow = 'silent';
+  } else if (usage && isLengthStopOverflow({finishReason: loopState.finishReason, outputTokens: usage.outputTokens, inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, contextWindowTokens: window})) {
+    usageOverflow = 'length-stop';
+  }
+  if (usageOverflow) callbacks.debugLog(`detected ${usageOverflow} context overflow from provider usage (window ${window})`);
+
   return {
     finishReason: loopState.finishReason,
     lastToolOk: loopState.lastToolOk,
@@ -404,5 +540,6 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
     sawToolCall: loopState.sawToolCall,
     unresolvedMalformedToolName: loopState.unresolvedMalformedToolName,
     unresolvedToolInputError: loopState.unresolvedMalformedToolName != null,
+    usageOverflow,
   };
 }

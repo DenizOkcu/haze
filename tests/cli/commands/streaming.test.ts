@@ -20,7 +20,7 @@ interface FakeAgent {
 
 interface FakeModelHandle {
   model: unknown;
-  config: {providerName: string; baseURL: string; modelName: string; cacheKey: string; capabilities: Record<string, boolean>; contextWindowSource?: 'settings' | 'user-fallback' | 'default-fallback'; contextWindowTokens?: number};
+  config: {providerName: string; baseURL: string; modelName: string; cacheKey: string; capabilities: Record<string, boolean>; contextWindowSource?: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback'; contextWindowTokens?: number; maxOutputTokens?: number};
 }
 
 interface MocksConfig {
@@ -44,6 +44,10 @@ interface MocksConfig {
   stallCalls?: number[];
   /** Reproduce providers that end the aborted iterator but reject responseMessages with a generic error. */
   stalledResponseError?: string;
+  /** 1-based agent call numbers whose stream rejects with a context-overflow error. */
+  overflowCalls?: number[];
+  /** 1-based agent call numbers whose stream rejects with a transient retryable error. */
+  retryableCalls?: number[];
   /** Stream never settles, even after abort (abort-ignoring model stream). */
   ignoreAbort?: boolean;
   /** With `ignoreAbort`: yield these parts once aborted, then hang forever (late zombie output). */
@@ -56,6 +60,8 @@ const mocks = vi.hoisted(() => {
     streamedMessages: [] as unknown[][],
     agentOptions: [] as Array<Record<string, unknown>>,
     closeMcpCalls: [] as unknown[],
+    generateTextCalls: [] as unknown[],
+    generateTextFails: false,
     assembleContextResult: null as null | {
       systemPrompt: string;
       availableTools: Record<string, unknown>;
@@ -189,7 +195,7 @@ async function loadStreaming(config: MocksConfig) {
             responseMessages: never.then(() => []),
           };
         }
-        if (isFirstCall && config.contextOverflow) {
+        if ((isFirstCall && config.contextOverflow) || config.overflowCalls?.includes(agentCallCount)) {
           const error = new Error('Request exceeds maximum context length');
           (error as Error & {cause?: unknown}).cause = 'context';
           return {
@@ -200,7 +206,7 @@ async function loadStreaming(config: MocksConfig) {
             responseMessages: Promise.reject(error),
           };
         }
-        if (isFirstCall && config.retryable) {
+        if ((isFirstCall && config.retryable) || config.retryableCalls?.includes(agentCallCount)) {
           const error = new Error('Service overloaded (503)');
           return {
             stream: (async function* () {
@@ -267,6 +273,11 @@ async function loadStreaming(config: MocksConfig) {
     return {
       ...actual,
       ToolLoopAgent: FakeToolLoopAgent,
+      generateText: async (args: unknown) => {
+        mocks.generateTextCalls.push(args);
+        if (mocks.generateTextFails) throw new Error('summarizer unavailable');
+        return {text: 'MODEL SUMMARY: goal preserved, next action recorded.', usage: {}};
+      },
       isStepCount: (n: number) => ({steps: n}),
     };
   });
@@ -331,6 +342,8 @@ beforeEach(() => {
   mocks.streamedMessages.length = 0;
   mocks.agentOptions.length = 0;
   mocks.closeMcpCalls.length = 0;
+  mocks.generateTextCalls.length = 0;
+  mocks.generateTextFails = false;
   mocks.assembleContextResult = null;
 });
 
@@ -804,6 +817,31 @@ describe('runAgentTurn: error paths', () => {
     expect(mocks.assembledCalls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('shrinks the message budget progressively across overflow retries, then checkpoints (Pillar 1.4)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},
+      },
+      overflowCalls: [1, 2, 3],
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
+    });
+    const cb = makeCallbacks();
+    cb.compactConversation = () => true;
+    const outcome = await runAgentTurn('huge', undefined, [], cb);
+    // Two bounded compact-and-retry attempts at shrinking budgets (60%, 36%)...
+    expect(cb.messages.some(m => /60% of the message budget/.test(m.text))).toBe(true);
+    expect(cb.messages.some(m => /36% of the message budget/.test(m.text))).toBe(true);
+    // ...then the third overflow checkpoints the goal instead of hard-failing.
+    expect(cb.messages.some(m => /pausing the goal with a checkpoint/.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'failed', resume: {kind: 'incomplete-goal', reason: 'context_exhausted'}});
+    expect(mocks.assembledCalls).toHaveLength(3);
+    // Compaction observability rides the two retry attempts (the checkpoint
+    // attempt deliberately does not compact — it pauses instead).
+    expect(cb.events.filter(event => event.type === 'compaction_start' && event.reason === 'overflow')).toHaveLength(2);
+    expect(cb.events.filter(event => event.type === 'compaction_end' && event.reason === 'overflow' && event.compacted)).toHaveLength(2);
+  });
+
   it('reports honestly when the mode cannot compact instead of a misleading history message (F-10)', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {
@@ -894,6 +932,102 @@ describe('runAgentTurn: error paths', () => {
     expect(cb.messages.some((m) => /Model call failed/.test(m.text))).toBe(true);
     expect(outcome).toMatchObject({status: 'failed'});
     vi.useRealTimers();
+  });
+});
+
+describe('runAgentTurn: mid-turn compaction (Pillar 1.5)', () => {
+  it('compacts at the epoch boundary with an LLM summary when the older half is large', async () => {
+    // Pre-seeded durable history (~12K estimated tokens) fits the ~26.8K
+    // message budget at attempt setup, so no setup compaction fires; the
+    // first epoch's huge assistant response pushes the estimate over the
+    // budget, triggering boundary compaction with an older half ≥ the LLM
+    // threshold.
+    const seeded: Array<{role: string; content: string}> = [];
+    for (let index = 0; index < 10; index++) {
+      seeded.push({role: 'user', content: `earlier request ${index} ${'a'.repeat(4_000)}`});
+      seeded.push({role: 'assistant', content: `earlier answer ${index} ${'b'.repeat(4_000)}`});
+    }
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}, contextWindowTokens: 30_000, maxOutputTokens: 2_000},
+      },
+      callStepEnds: [[{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}], finishReason: 'tool-calls'}], []],
+      callStreams: [
+        [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}, {type: 'finish', finishReason: 'tool-calls'}],
+        [{type: 'text-delta', text: 'The work is complete and validated.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+      callResponseMessages: [
+        [
+          {role: 'assistant', content: [{type: 'text', text: 'W'.repeat(100_000)}, {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}]},
+          {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', output: {ok: true, stdout: 'src'}}]},
+        ],
+        [{role: 'assistant', content: 'done'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    cb.setConversation(seeded as never);
+    const compactionAudit: Array<{method: string; olderCount: number; keptCount: number; summary: string}> = [];
+    Object.assign(cb, {recordCompaction: (entry: {method: string; olderCount: number; keptCount: number; summary: string}) => compactionAudit.push(entry)});
+    const outcome = await runAgentTurn('continue the work', undefined, [], cb);
+    // The LLM summarization ran once and its summary leads the next request.
+    expect(mocks.generateTextCalls).toHaveLength(1);
+    const prompt = (mocks.generateTextCalls[0] as {prompt: string}).prompt;
+    expect(prompt).toContain('<older_conversation>');
+    expect(cb.events.find(event => event.type === 'compaction_start')).toMatchObject({reason: 'threshold', method: 'llm'});
+    expect(cb.events.find(event => event.type === 'compaction_end')).toMatchObject({reason: 'threshold', method: 'llm', compacted: true});
+    // The durable audit entry (Pillar 1.7) rides the same rewrite.
+    expect(compactionAudit).toHaveLength(1);
+    expect(compactionAudit[0]).toMatchObject({method: 'llm'});
+    expect(compactionAudit[0].summary).toContain('MODEL SUMMARY');
+    const secondEpoch = mocks.streamedMessages[1] as Array<{role: string; content: unknown}>;
+    expect(secondEpoch.length).toBeGreaterThan(0);
+    expect(secondEpoch.length).toBeLessThan(seeded.length + 3);
+    const first = secondEpoch[0] as {role: string; content: string};
+    expect(first.role).toBe('user');
+    expect(first.content).toContain('<haze_compaction>');
+    expect(first.content).toContain('MODEL SUMMARY');
+    // The compacted conversation was committed to session state (controls-free).
+    expect(cb.getConversation().length).toBeLessThan(seeded.length + 3);
+    expect(outcome).toMatchObject({status: 'complete'});
+  });
+
+  it('falls back to the heuristic excerpt when the LLM summary fails', async () => {
+    mocks.generateTextFails = true;
+    const seeded: Array<{role: string; content: string}> = [];
+    for (let index = 0; index < 10; index++) {
+      seeded.push({role: 'user', content: `earlier request ${index} ${'a'.repeat(4_000)}`});
+      seeded.push({role: 'assistant', content: `earlier answer ${index} ${'b'.repeat(4_000)}`});
+    }
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}, contextWindowTokens: 30_000, maxOutputTokens: 2_000},
+      },
+      callStepEnds: [[{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}], finishReason: 'tool-calls'}], []],
+      callStreams: [
+        [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}, {type: 'finish', finishReason: 'tool-calls'}],
+        [{type: 'text-delta', text: 'The work is complete and validated.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+      callResponseMessages: [
+        [
+          {role: 'assistant', content: [{type: 'text', text: 'W'.repeat(100_000)}, {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}]},
+          {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', output: {ok: true, stdout: 'src'}}]},
+        ],
+        [{role: 'assistant', content: 'done'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    cb.setConversation(seeded as never);
+    const outcome = await runAgentTurn('continue the work', undefined, [], cb);
+    const start = cb.events.find(event => event.type === 'compaction_start');
+    const end = cb.events.find(event => event.type === 'compaction_end') as {method?: string; compacted?: boolean; error?: string};
+    expect(start).toMatchObject({method: 'llm'});
+    // The failed LLM summary surfaces truthfully and the heuristic excerpt still compacts.
+    expect(end?.method).toBe('heuristic');
+    expect(end?.compacted).toBe(true);
+    expect(end?.error).toContain('llm summary failed');
+    expect(outcome).toMatchObject({status: 'complete'});
   });
 });
 

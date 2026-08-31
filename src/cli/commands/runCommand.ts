@@ -58,8 +58,10 @@ type HeadlessStreamEvent =
   | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; errorCode?: string; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
-  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'user-fallback' | 'default-fallback'; at: string}
+  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback'; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
+  | {type: 'compaction_start'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm'; at: string}
+  | {type: 'compaction_end'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm' | 'none'; compacted: boolean; olderCount?: number; keptCount?: number; willRetry?: boolean; error?: string; at: string}
   | {type: 'timeout'; phase: 'turn' | 'tool' | 'model-stream'; timeoutMs: number; at: string};
 
 function pinnedUsage(usage: TokenUsage): HeadlessUsage {
@@ -140,6 +142,10 @@ function toHeadlessStreamEvent(event: AgentEvent): HeadlessStreamEvent | undefin
       return {...(event.requested ? {requested: event.requested} : {}), type: 'reasoning_policy', effective: event.effective, reason: event.reason, at: event.at};
     case 'context_budget':
       return {type: 'context_budget', contextWindowTokens: event.contextWindowTokens, source: event.source, at: event.at};
+    case 'compaction_start':
+      return {type: 'compaction_start', reason: event.reason, method: event.method, at: event.at};
+    case 'compaction_end':
+      return {...(event.olderCount === undefined ? {} : {olderCount: event.olderCount}), ...(event.keptCount === undefined ? {} : {keptCount: event.keptCount}), ...(event.willRetry === undefined ? {} : {willRetry: event.willRetry}), ...(event.error === undefined ? {} : {error: event.error}), type: 'compaction_end', reason: event.reason, method: event.method, compacted: event.compacted, at: event.at};
   }
 }
 

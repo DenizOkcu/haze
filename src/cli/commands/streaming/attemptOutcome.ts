@@ -3,7 +3,7 @@ import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification} from '../../../core/agent/completionController.js';
-import {clampSlice, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, DEFAULT_MODEL_RETRIES, type TurnBudget} from '../../../core/agent/budgets.js';
+import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
 import {deriveValidationOutcome, redPairStatus} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
@@ -56,7 +56,7 @@ export type AttemptRecovery = {kind: 'length' | 'rescue' | 'goal'; control: stri
 
 /** Internal per-attempt result: the turn outcome plus retry/recovery directives for `runAgentTurn`. */
 export type AgentAttemptResult = TurnResult & {
-  retry?: {attempt: number; contextOverflowRecovered: boolean; delayMs: number; /** The retry aborts the previous controller (idle stall); hand the loop a fresh one. */ freshController?: boolean};
+  retry?: {attempt: number; delayMs: number; /** The retry aborts the previous controller (idle stall); hand the loop a fresh one. */ freshController?: boolean; /** Message-budget multiplier for the next attempt after an overflow retry (Pillar 1.4). */ overflowShrinkFactor?: number};
   /** When set, run one bounded recovery slice next (length-continuation, rescue, or goal continuation). */
   recovery?: AttemptRecovery;
 };
@@ -83,6 +83,10 @@ export interface AttemptOutcomeDeps {
   goal: SessionGoal;
   remainingTurnDeadlineMs: () => number;
   stream: AttemptStreamOutcome;
+  /** Current attempt number (for overflow retry bookkeeping). */
+  retryAttempt: number;
+  /** Context-overflow retries already consumed by this turn (Pillar 1.4). */
+  overflowRetries: number;
 }
 
 /**
@@ -105,6 +109,24 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
   if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
   goal.phase = 'done';
+
+  // Non-error overflow recovery (Pillar 1.2/1.4): a silent overflow completed
+  // its response, so compact only — the next physical turn (or the supervisor)
+  // continues from the smaller history; a length-stop overflow dropped the
+  // truncated final and retries the same request once per shrink step.
+  if (stream.usageOverflow && !abortController.signal.aborted) {
+    const compacted = callbacks.compactConversation?.('Automatic recovery after a context-window overflow detected from provider usage. Preserve the active user request and concrete next steps.') ?? false;
+    const willRetry = compacted && stream.usageOverflow === 'length-stop' && deps.overflowRetries < MAX_OVERFLOW_RETRIES;
+    callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: `silent usage overflow (window exceeded on a successful finish)`}));
+    callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'overflow', method: 'heuristic'}));
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'overflow', method: compacted ? 'heuristic' : 'none', compacted, willRetry}));
+    if (willRetry) {
+      callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
+      callbacks.addMessage({role: 'system', text: 'Context window filled by truncated input; compacted older context and retrying the same request at a smaller budget.'});
+      return {status: 'failed', retry: {attempt: deps.retryAttempt, delayMs: 0, overflowShrinkFactor: OVERFLOW_SHRINK_FACTOR ** (deps.overflowRetries + 1)}};
+    }
+    if (compacted) callbacks.addMessage({role: 'system', text: 'Context overflow detected from provider usage; compacted older context. Completed work is preserved.'});
+  }
   // Goal status reflects completion readiness, not the shallow text status:
   // unfinished-but-recoverable work is waiting on continuation (supervisor or
   // the user), while tool/input failures are concrete blockers. Prose alone
@@ -177,13 +199,20 @@ export interface AttemptFailureDeps {
   abortController: AbortController;
   turnState: TurnExecutionState;
   retryAttempt: number;
-  contextOverflowRecovered: boolean;
+  /** Whether the failed attempt completed at least one step since the previous retry (Pillar 1.3: progress refills the shared pool). */
+  progressSinceLastRetry?: boolean;
+  /** Context-overflow retries already consumed by this turn (Pillar 1.4). */
+  overflowRetries?: number;
   abortCause: TurnAbortCause;
   stallGuard: StreamStallGuard | undefined;
   salvage: AttemptSalvage;
   error: unknown;
   /** Retry-pool size for this turn (`modelRetries` setting); defaults to DEFAULT_MODEL_RETRIES. */
   maxRetries?: number;
+  /** Backoff base for the shared model-retry pool (`retryBaseDelayMs` setting); defaults to DEFAULT_RETRY_BASE_DELAY_MS. */
+  retryBaseDelayMs?: number;
+  goal: SessionGoal;
+  turnOptions: TurnExecutionOptions;
 }
 
 /**
@@ -191,10 +220,24 @@ export interface AttemptFailureDeps {
  * idle-stall retry/pause (shared bounded retry pool), absolute turn deadline,
  * user abort, context-overflow compaction retry, transient model retry, or a
  * hard model-call failure. Completed-step progress is always preserved.
+ *
+ * Pillar 1.3: the shared retry pool resets whenever the failed attempt made
+ * progress (completed at least one step) since the previous retry — a long
+ * turn with intermittent blips never exhausts the pool. Pillar 1.4: each
+ * context-overflow retry shrinks the message budget (0.6 → 0.36); once the
+ * bounded overflow retries are exhausted the goal checkpoints
+ * (`context_exhausted`) instead of hard-failing, so the supervisor or the
+ * R-resume can continue after the user compacts, clears context, or switches
+ * models — never a false hard block.
  */
 export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResult {
-  const {value, callbacks, abortController, turnState, retryAttempt, contextOverflowRecovered, abortCause, stallGuard, salvage, error} = deps;
+  const {value, callbacks, abortController, turnState, abortCause, stallGuard, salvage, error, goal, turnOptions} = deps;
   const maxRetries = deps.maxRetries ?? DEFAULT_MODEL_RETRIES;
+  const retryBaseDelayMs = deps.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const overflowRetries = deps.overflowRetries ?? 0;
+  // Progress refills the shared pool: consecutive failures chain backoff, but
+  // a failed attempt that completed steps since the last retry starts fresh.
+  const retryAttempt = deps.progressSinceLastRetry && deps.retryAttempt > 0 ? 0 : deps.retryAttempt;
   if (abortController.signal.aborted) {
     if (abortCause.kind === 'model-stream-idle') {
       // Transport stall, not a user cancel. Preserve completed work first: the
@@ -203,12 +246,12 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       // instead of re-running — possibly mutating — tool work.
       salvageConversationToLastStep(callbacks, salvage);
       if (stallGuard?.retryEligible) {
-        const delay = retryDelayMs(retryAttempt);
+        const delay = retryDelayMs(retryAttempt, retryBaseDelayMs);
         callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: `model stream idle for ${formatSeconds(IDLE_TIMEOUT_MS)}`}));
         callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}. Completed steps are preserved.`});
         // freshController: this stall aborted the controller to kill the hung
         // stream; the retry needs a live signal.
-        return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay, freshController: true}};
+        return {status: 'failed', retry: {attempt: retryAttempt + 1, delayMs: delay, freshController: true}};
       }
       // Bounded retries exhausted, or the stalled step emitted partial output.
       // Pause with the active goal preserved (work state is untouched by this
@@ -234,15 +277,26 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
   }
   const text = error instanceof Error ? error.message : String(error);
   callbacks.debugLog(`error: ${text}`);
-  if (!contextOverflowRecovered && isContextOverflowError(error)) {
+  // Bounded overflow retries with progressive shrink (Pillar 1.4): each retry
+  // compacts and multiplies the message budget by 0.6; once MAX_OVERFLOW_RETRIES
+  // are consumed the goal checkpoints instead of hard-failing.
+  if (overflowRetries >= MAX_OVERFLOW_RETRIES && isContextOverflowError(error)) {
+    callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: false, error: text}));
+    callbacks.addMessage({role: 'system', text: 'Context overflow persisted after bounded compaction retries; pausing the goal with a checkpoint. Completed work is preserved in the conversation. Press R to resume after compacting or clearing context, or switch to a larger-context model.'});
+    return {status: 'failed', resume: buildIncompleteGoalResume(value, turnOptions.goalContext?.goalId ?? goal.id, turnOptions.goalContext?.cycle ?? 1, turnState, 'context_exhausted', {})};
+  }
+  if (isContextOverflowError(error)) {
     const canCompact = typeof callbacks.compactConversation === 'function';
     const compacted = canCompact
       ? callbacks.compactConversation?.('Automatic recovery after provider context overflow. Preserve the active user request and concrete next steps.') ?? false
       : false;
     callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: compacted, error: text}));
+    callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'overflow', method: 'heuristic'}));
+    callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'overflow', method: compacted ? 'heuristic' : 'none', compacted, willRetry: compacted}));
     if (compacted) {
-      callbacks.addMessage({role: 'system', text: 'Context overflow detected; compacted older context and retrying the same request once.'});
-      return {status: 'failed', retry: {attempt: retryAttempt, contextOverflowRecovered: true, delayMs: 0}};
+      const shrink = OVERFLOW_SHRINK_FACTOR ** (overflowRetries + 1);
+      callbacks.addMessage({role: 'system', text: `Context overflow detected; compacted older context and retrying the same request at ${Math.round(shrink * 100)}% of the message budget.`});
+      return {status: 'failed', retry: {attempt: retryAttempt, delayMs: 0, overflowShrinkFactor: shrink}};
     }
     callbacks.addMessage({role: 'system', text: canCompact
       ? 'Context overflow detected, but there was not enough conversation history to compact automatically.'
@@ -251,10 +305,10 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
   // Transient model errors share the bounded retry pool with idle-stream
   // stalls, so a turn can never retry more than its configured total.
   if (retryAttempt < maxRetries && isRetryableModelError(error)) {
-    const delay = retryDelayMs(retryAttempt);
+    const delay = retryDelayMs(retryAttempt, retryBaseDelayMs);
     callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
     callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
-    return {status: 'failed', retry: {attempt: retryAttempt + 1, contextOverflowRecovered, delayMs: delay}};
+    return {status: 'failed', retry: {attempt: retryAttempt + 1, delayMs: delay}};
   }
   callbacks.addMessage({role: 'assistant', text: `Model call failed: ${text}`});
   return {status: 'failed'};

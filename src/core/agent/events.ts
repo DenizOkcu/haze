@@ -27,8 +27,10 @@ export type AgentEvent =
   | {type: 'tool_end'; id: string; name: string; success: boolean; output?: unknown; errorCode?: string; error?: unknown; durationMs: number; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
-  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'user-fallback' | 'default-fallback'; at: string}
+  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback'; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
+  | {type: 'compaction_start'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm'; at: string}
+  | {type: 'compaction_end'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm' | 'none'; compacted: boolean; olderCount?: number; keptCount?: number; willRetry?: boolean; error?: string; at: string}
   | {type: 'timeout'; phase: 'turn' | 'tool' | 'model-stream'; timeoutMs: number;
     /**
      * Model-stream stall diagnostics (phase 'model-stream' only). Safe metadata
