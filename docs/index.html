@@ -768,7 +768,7 @@
         <a href="skills.html">Skills</a>
         <a href="workflows.html">Workflows</a>
         <a class="resource-pill" href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
-        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v1.1.1</a>
+        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v1.2.0</a>
       </nav>
     </header>
 
@@ -920,7 +920,7 @@
           </li>
           <li>
             <h3>Automation without the TUI</h3>
-            <p>Run <code>haze -p</code> from scripts and CI with text, JSON, or streaming JSON output plus a reliable process exit status.</p>
+            <p>Run <code>haze -p</code> from scripts and CI with text, JSON, or streaming JSON output plus a reliable process exit status. Version 1.2.0 adds provider-usage context accounting, recoverable compact-and-retry overflow handling, and validation evidence hardened against masked shell failures.</p>
             <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" \
   --model ollama:qwen3.6:35b-a3b \
   --output json
@@ -943,7 +943,7 @@
         </article>
         <article>
           <h3>A small model-facing footprint</h3>
-          <p>haze's <a href="https://github.com/DenizOkcu/haze/blob/main/src/llm/systemPrompt.ts" target="_blank" rel="noopener">base system prompt</a> is about 1.1k tokens, compared with 20k+ for Claude Code. Request context and tool responses are aggressively bounded or compacted, while large raw outputs remain retrievable by handle. Local models get a tractable context, and cloud providers receive fewer input tokens.</p>
+          <p>haze's <a href="https://github.com/DenizOkcu/haze/blob/main/src/llm/systemPrompt.ts" target="_blank" rel="noopener">base system prompt</a> is about 1.1k tokens, compared with 20k+ for Claude Code. Request context and tool responses are aggressively bounded or compacted, while large raw outputs remain retrievable by handle. Provider-reported usage re-anchors context estimates, curated limits cover known model families, and overflow recovery compacts and retries before leaving a resumable checkpoint.</p>
           <pre class="mini-terminal" aria-label="Context footprint example"><span class="prompt">system prompt</span>  ~1.1k tokens
 <span class="prompt">tool output</span>    bounded · retrievable
 <span class="prompt">sessions</span>       compactable</pre>

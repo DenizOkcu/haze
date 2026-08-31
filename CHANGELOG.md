@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.2.0 - 2026-08-31
+
 Context truthfulness and never-stop-for-recoverable-reasons. A model-backed eval harness drove the changes: the completion gate's trust in real process results had four independent ways to be fed false positives, and the recovery paths still hard-failed on recoverable context conditions.
 
 ### Added

@@ -2,17 +2,19 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.1.1
+## What's new in 1.2.0
 
-haze 1.1.1 makes long-running goals resumable while keeping the autonomy core small and evidence-based.
+haze 1.2.0 makes long-running work more truthful under context pressure and provider instability.
 
-- Durable goal progress: logical-goal boundaries are appended to the session JSONL with an exact-request hash and bounded task/validation state, so interrupted work can resume from a crash-safe frontier instead of replaying completed work.
-- Headless persistence: `--until-done` relaunches a goal after transient provider failures with exponential backoff, `goal_resume` events, the existing absolute timeout, and a three-strike no-progress guard. JSON output includes bounded goal notices so scripts can see why work continued or paused.
-- Simpler completion: declared tasks and fresh post-edit validation remain authoritative. Fixes do not require a pre-edit reproduction, but when a recognized check does fail before the first edit, that same command must pass afterward. Experimental ask gates, verifier/sweep calls, lane hints, and goal shapes were evaluated and removed before release because they added cost without improving the measured task.
-- Smaller internals: theme data now lives in one typed registry, provider presets use compact model tuples, and the large chat, wizard, input-suggestion, and streaming paths are split into focused modules without changing their public behavior.
+- Provider-aware context accounting: completed steps re-anchor estimates on provider usage, a curated model catalog supplies known context/output limits, and live or user-configured model metadata still takes precedence.
+- Recoverable overflow handling: thrown, silent, and length-stop context overflows compact and retry with progressively smaller budgets. Exhausted recovery checkpoints the goal as `context_exhausted` instead of hard-failing or looping on the same request.
+- Better continuity: large mid-turn compactions use model-written, split-turn-aware summaries; every compaction emits stream events and a durable session entry for auditability.
+- Truthful validation: validation pipelines run with `pipefail`; masking command lists and quoted lookalikes cannot claim validation authority; and a generic custom pass cannot erase a real classified failure.
+- Resilient retries: `retryBaseDelayMs` configures exponential backoff, the retry pool resets after measurable step progress, and provider/model settings are re-read for each attempt.
 
 Previous releases:
 
+- `1.1.1`: durable goal ledgers and crash-resume frontiers; headless `--until-done` relaunches with bounded notices and a no-progress guard; proportional task/validation completion gates; and smaller orchestration internals.
 - `1.1.0`: terminal theming with 14 built-in palettes and live `/themes` switching; hard secret-file protection across every file tool, including symlink, read-blessing, ignore-override, and grep-traversal defenses.
 - `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).
 - `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
