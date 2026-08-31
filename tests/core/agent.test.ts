@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import type {ModelMessage} from 'ai';
-import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, modelMessageText, splitForCompaction} from '../../src/core/agent/compaction.js';
+import {buildLlmCompactionPrompt, chooseBoundaryCompactionMethod, compactModelMessages, compactModelMessagesWithSummary, extractExistingCompactionSummary, modelMessageText, splitForCompaction} from '../../src/core/agent/compaction.js';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {isContextOverflowError, isRetryableModelError} from '../../src/core/agent/errors.js';
 import {goalContinuationPrompt} from '../../src/core/agent/goalPolicy.js';
@@ -166,6 +166,65 @@ describe('LLM-summarized compaction pieces (F-09)', () => {
     expect(first.content).toContain('Model-written summary of the older conversation:');
     expect(first.content).toContain('THE SUMMARY');
     expect(result.messages.at(-1)).toEqual(msg('user', 'recent'));
+  });
+
+  it('flags a split turn when the recent window lands mid-turn (Pillar 1.6)', () => {
+    // A user message starts a turn; cutting at an assistant message keeps the
+    // turn's early prefix in the older half — a split turn.
+    const turn = [msg('user', 'do the big task'), msg('assistant', 'step one'), msg('assistant', 'step two'), msg('assistant', 'step three')];
+    const split = splitForCompaction(turn, {keepRecentMessages: 1});
+    expect(split?.splitTurn).toBe(true);
+    expect(split?.older).toHaveLength(3);
+    // Cutting at a user message boundary is not a split turn.
+    const clean = splitForCompaction([msg('user', 'old request'), msg('assistant', 'old answer'), msg('user', 'new request'), msg('assistant', 'new answer')], {keepRecentMessages: 2});
+    expect(clean?.splitTurn).toBe(false);
+  });
+
+  it('extracts an existing compaction summary for iterative chaining (Pillar 1.5)', () => {
+    const compacted = compactModelMessages([...many, msg('user', 'recent')], {keepRecentMessages: 3});
+    const extracted = extractExistingCompactionSummary(compacted.messages);
+    expect(extracted).toBe(compacted.summary);
+    expect(extractExistingCompactionSummary([msg('user', 'plain'), msg('assistant', 'answer')])).toBeUndefined();
+  });
+
+  it('buildLlmCompactionPrompt chains a previous summary and flags split turns', () => {
+    const chained = buildLlmCompactionPrompt({older: many, previousSummary: 'PREVIOUS SUMMARY', splitTurn: true});
+    expect(chained).toContain('<previous-summary>');
+    expect(chained).toContain('PREVIOUS SUMMARY');
+    expect(chained).toContain('MIDDLE of an unfinished task');
+    const plain = buildLlmCompactionPrompt({older: many});
+    expect(plain).not.toContain('<previous-summary>');
+    expect(plain).not.toContain('MIDDLE of an unfinished task');
+  });
+
+  it('chooses the boundary compaction method from budget and older-half size (Pillar 1.5)', () => {
+    const small = [msg('user', 'old request'), msg('assistant', 'old answer'), msg('user', 'recent'), msg('assistant', 'recent answer')];
+    // Fits the budget: no compaction.
+    expect(chooseBoundaryCompactionMethod({messages: small, messageTokenBudget: 10_000, olderTokenThreshold: 6_000}).method).toBe('none');
+    // Over budget with a small older half: deterministic heuristic excerpt.
+    const overBudget = chooseBoundaryCompactionMethod({messages: [...many, msg('user', 'recent')], messageTokenBudget: 50, olderTokenThreshold: 6_000});
+    expect(overBudget.method).toBe('heuristic');
+    expect(overBudget.split?.older.length).toBeGreaterThan(0);
+    // Over budget with a large older half: LLM-written summary.
+    const large = Array.from({length: 80}, (_, index) => msg(index % 2 === 0 ? 'user' : 'assistant', `older message ${index} ${'x'.repeat(500)}`));
+    const llm = chooseBoundaryCompactionMethod({messages: [...large, msg('user', 'recent')], messageTokenBudget: 400, olderTokenThreshold: 6_000});
+    expect(llm.method).toBe('llm');
+  });
+
+  it('lets a usage-anchored total override the chars/4 estimate for the over-budget check (Pillar 1.1 × 1.5)', () => {
+    // 14 short messages: the chars/4 estimate fits a 10K budget (no
+    // compaction by default), but a compaction split still exists past the
+    // 12-message recent window.
+    const short = Array.from({length: 14}, (_, index) => msg(index % 2 === 0 ? 'user' : 'assistant', `short ${index}`));
+    expect(chooseBoundaryCompactionMethod({messages: short, messageTokenBudget: 10_000, olderTokenThreshold: 6_000}).method).toBe('none');
+    // The provider-anchored total says over budget (token-dense history):
+    // compaction must still fire.
+    const anchored = chooseBoundaryCompactionMethod({messages: short, messageTokenBudget: 10_000, olderTokenThreshold: 6_000, totalTokens: 20_000});
+    expect(anchored.method).toBe('heuristic');
+    // …and an anchored total inside the budget suppresses it despite the
+    // heuristic estimate being over.
+    const fits = chooseBoundaryCompactionMethod({messages: [...many, msg('user', 'recent')], messageTokenBudget: 50, olderTokenThreshold: 6_000, totalTokens: 10});
+    expect(fits.method).toBe('none');
   });
 });
 

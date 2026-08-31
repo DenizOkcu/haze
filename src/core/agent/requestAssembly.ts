@@ -1,13 +1,11 @@
 import type {ModelMessage} from 'ai';
-import {estimateValueTokens} from './contextBudget.js';
+import {estimateValueTokens, SYNTHETIC_CONTROL_MARKER} from './contextBudget.js';
 import {isFailedToolOutput} from './toolResults.js';
-
-const SYNTHETIC_CONTROL_OPEN = '<haze_control>';
 
 function isSyntheticControlMessage(message: ModelMessage) {
   return message.role === 'user'
     && typeof message.content === 'string'
-    && message.content.startsWith(SYNTHETIC_CONTROL_OPEN);
+    && message.content.startsWith(SYNTHETIC_CONTROL_MARKER);
 }
 
 export function stripSyntheticControls(messages: ModelMessage[]) {
@@ -28,7 +26,7 @@ function modelMessageTextForContext(message: ModelMessage) {
 }
 
 function syntheticControlMessage(control: string): ModelMessage {
-  return {role: 'user', content: `${SYNTHETIC_CONTROL_OPEN}\n${control}\n</haze_control>`};
+  return {role: 'user', content: `${SYNTHETIC_CONTROL_MARKER}\n${control}\n</haze_control>`};
 }
 
 export function withSyntheticControl(messages: ModelMessage[], control: string): ModelMessage[] {

@@ -129,6 +129,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     }
     deps.conversationRef.current = result.messages;
     deps.sessionRecorder()?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages; kept ${result.keptCount}.`);
+    deps.sessionRecorder()?.recordCompactEntry({method: 'heuristic', olderCount: result.olderCount, keptCount: result.keptCount, ...(instructions ? {instructions} : {}), summary: result.summary ?? ''});
     deps.sessionRecorder()?.recordConversation(result.messages);
     deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: condensed ${result.olderCount} older model messages into a bounded excerpt and kept the last ${result.keptCount}.`}]);
     return true;
@@ -251,6 +252,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         if (!result.compacted) throw new Error('nothing older to compact');
         deps.conversationRef.current = result.messages;
         deps.sessionRecorder()?.recordNamedEvent('compact', `Compacted ${result.olderCount} messages with a model-written summary; kept ${result.keptCount}.`);
+        deps.sessionRecorder()?.recordCompactEntry({method: 'llm', olderCount: result.olderCount, keptCount: result.keptCount, ...(instructions ? {instructions} : {}), summary: result.summary ?? ''});
         deps.sessionRecorder()?.recordConversation(result.messages);
         deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: replaced ${result.olderCount} older model messages with a model-written summary and kept the last ${result.keptCount}.`}]);
         return true;

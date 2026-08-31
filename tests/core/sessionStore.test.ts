@@ -90,6 +90,18 @@ describe('sessionStore', () => {
     await expect(restoreConversation(session)).resolves.toEqual({messages: latest, parseErrors: []});
   });
 
+  it('persists first-class compact entries without disturbing snapshot restore (Pillar 1.7)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const compacted: ModelMessage[] = [{role: 'user', content: '<haze_compaction>\nsummary\n</haze_compaction>'}, {role: 'user', content: 'continue'}];
+    await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'start work'});
+    await appendSessionEntry(session, {type: 'compact', at: '1', method: 'llm', olderCount: 12, keptCount: 4, summary: 'the audit trail summary'});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: compacted});
+    const {entries} = await readSessionEntries(session);
+    expect(entries.find(entry => entry.type === 'compact')).toEqual({type: 'compact', at: '1', method: 'llm', olderCount: 12, keptCount: 4, summary: 'the audit trail summary'});
+    // Snapshots remain the restore source of truth; the compact entry is narrative.
+    await expect(restoreConversation(session)).resolves.toEqual({messages: compacted, parseErrors: []});
+  });
+
   it('restores the latest structured work-state snapshot', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: '0', role: 'user', text: 'start work'});

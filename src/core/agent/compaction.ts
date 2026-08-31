@@ -1,5 +1,5 @@
 import type {ModelMessage} from 'ai';
-import {estimateModelMessageTokens} from './contextBudget.js';
+import {estimateMessagesTokens, estimateModelMessageTokens} from './contextBudget.js';
 import {workStatePrompt, type WorkState} from './workState.js';
 import {COMPACTION_LLM_TRANSCRIPT_CHARS, COMPACTION_OLDER_CHARS} from '../limits.js';
 
@@ -14,6 +14,13 @@ export interface CompactionResult {
 export interface CompactionSplit {
   older: ModelMessage[];
   recent: ModelMessage[];
+  /**
+   * The recent window lands mid-turn: the first kept message is not a user
+   * message, so the older half contains the early prefix of the current
+   * (unfinished) turn (Pillar 1.6). The LLM summarization path uses this to
+   * preserve the in-flight task's request, progress, and next action.
+   */
+  splitTurn: boolean;
 }
 
 /**
@@ -44,7 +51,7 @@ export function splitForCompaction(
   let recentStart = messages.length - keepRecentMessages;
   while (recentStart > 0 && messages[recentStart]?.role === 'tool') recentStart -= 1;
   if (recentStart === 0) return undefined;
-  return {older: messages.slice(0, recentStart), recent: messages.slice(recentStart)};
+  return {older: messages.slice(0, recentStart), recent: messages.slice(recentStart), splitTurn: messages[recentStart]?.role !== 'user'};
 }
 
 export function modelMessageText(message: ModelMessage) {
@@ -98,12 +105,54 @@ export function compactModelMessages(
 }
 
 /**
- * Build the summarization request for the LLM-summarized compaction path
- * (F-09). The transcript is the older half, bounded to a character budget and
- * truncated from the front (the oldest context is the least valuable) so the
- * request itself can never overflow the model.
+ * Extract the summary text of an existing `<haze_compaction>` message so a
+ * later LLM summarization can update it in place instead of re-summarizing
+ * the whole history from scratch (Pillar 1.5, iterative summaries).
  */
-export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instructions?: string; maxChars?: number}): string {
+export function extractExistingCompactionSummary(messages: ModelMessage[]): string | undefined {
+  for (const message of messages) {
+    if (message.role !== 'user' || typeof message.content !== 'string' || !message.content.startsWith('<haze_compaction>')) continue;
+    const start = message.content.indexOf('\n');
+    const end = message.content.lastIndexOf('</haze_compaction>');
+    if (start === -1 || end === -1 || end <= start) return undefined;
+    const summary = message.content.slice(start + 1, end).trim();
+    return summary || undefined;
+  }
+  return undefined;
+}
+
+/** Which mid-turn compaction method an epoch boundary should use (Pillar 1.5). */
+export type BoundaryCompactionMethod = 'none' | 'heuristic' | 'llm';
+
+/**
+ * Choose the mid-turn compaction method: `none` while the conversation fits
+ * the budget; the deterministic heuristic excerpt for small older halves (fast,
+ * no extra model call); an LLM-written summary once the older history is large
+ * enough that an excerpt loses decisions and next steps. `totalTokens`
+ * overrides the chars/4 estimate for the over-budget check so a usage-anchored
+ * total (Pillar 1.1) can trigger compaction for token-dense history that the
+ * heuristic estimate undercounts.
+ */
+export function chooseBoundaryCompactionMethod(input: {messages: ModelMessage[]; messageTokenBudget: number; olderTokenThreshold: number; estimateTokens?: (messages: ModelMessage[]) => number; totalTokens?: number}): {method: BoundaryCompactionMethod; split?: CompactionSplit} {
+  if (input.messages.length === 0) return {method: 'none'};
+  const estimate = input.estimateTokens ?? estimateMessagesTokens;
+  const total = input.totalTokens ?? estimate(input.messages);
+  if (total <= input.messageTokenBudget) return {method: 'none'};
+  const split = splitForCompaction(input.messages, {tokenBudget: input.messageTokenBudget});
+  if (!split) return {method: 'none'};
+  return {method: estimate(split.older) >= input.olderTokenThreshold ? 'llm' : 'heuristic', split};
+}
+
+/**
+ * Build the summarization request for the LLM-summarized compaction path
+ * (F-09; also the mid-turn path, Pillar 1.5). The transcript is the older
+ * half, bounded to a character budget and truncated from the front (the oldest
+ * context is the least valuable) so the request itself can never overflow the
+ * model. When a previous compaction summary exists it is included so the model
+ * updates it in place (iterative summaries); a split turn adds instructions to
+ * preserve the unfinished task's request, progress, and next action.
+ */
+export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instructions?: string; maxChars?: number; previousSummary?: string; splitTurn?: boolean}): string {
   const maxChars = input.maxChars ?? COMPACTION_LLM_TRANSCRIPT_CHARS;
   const entries = input.older.map(message => {
     const text = modelMessageText(message).replace(/\s+/g, ' ').trim();
@@ -125,6 +174,12 @@ export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instruct
     'Summarize the following older conversation history for continuity. The summary replaces the history in a coding agent context.',
     'Preserve: current user goal and success condition; explicit user constraints, preferences, and decisions; files created/changed/read; validation commands and their pass/fail results; blockers or pending decisions; the exact next action if work was unfinished.',
     'Drop: restatements, exploration dead ends that led nowhere, raw tool output detail, and anything the recent messages supersede.',
+    input.splitTurn
+      ? 'The transcript below was cut in the MIDDLE of an unfinished task (split turn). Under Critical Context, additionally preserve: the original request of the current task, the concrete work already completed in the cut-off prefix, and the single exact next action to continue it.'
+      : undefined,
+    input.previousSummary
+      ? `A previous compaction summary exists. Update it with the new messages: PRESERVE everything still relevant, ADD new progress/decisions/context, DROP only what the recent tail supersedes.\n\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
+      : undefined,
     input.instructions ? `User compaction instructions: ${input.instructions}` : undefined,
     `Write a dense summary in at most 60 lines. ${omitted > 0 ? `(${omitted} oldest message(s) already omitted from this transcript.)` : ''}`.trim(),
     '',

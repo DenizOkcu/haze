@@ -94,6 +94,12 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
     recordNamedEvent(name: string, text: string) {
       appendEntry({type: 'event', at: new Date().toISOString(), name, text});
     },
+    // First-class compaction audit entry (Pillar 1.7): what was compacted,
+    // when, how, and the summary that replaced it. Snapshots stay the restore
+    // source of truth; this entry is the durable narrative.
+    recordCompactEntry(entry: {method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}) {
+      appendEntry({type: 'compact', at: new Date().toISOString(), method: entry.method, olderCount: entry.olderCount, keptCount: entry.keptCount, ...(entry.instructions ? {instructions: entry.instructions} : {}), summary: entry.summary});
+    },
     async flush() {
       // Fold coalesced snapshots into the writer queue, then wait for the queue
       // to drain. Loop because a write completing mid-flush may have queued a

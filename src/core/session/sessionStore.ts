@@ -16,6 +16,8 @@ export type SessionEntry =
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'event'; at: string; name: string; text?: string}
+  /** First-class compaction audit entry (Pillar 1.7): conversation snapshots remain the restore source of truth; this records what was compacted, when, and how. */
+  | {type: 'compact'; at: string; method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}
   | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; stopReason?: string; status?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
@@ -298,6 +300,11 @@ function parseSessionEntry(value: unknown): SessionEntry {
       return value as SessionEntry;
     case 'event':
       if (typeof value.at !== 'string' || typeof value.name !== 'string' || !optionalString(value.text)) return invalid('invalid event');
+      return value as SessionEntry;
+    case 'compact':
+      if (typeof value.at !== 'string' || (value.method !== 'heuristic' && value.method !== 'llm')
+        || typeof value.olderCount !== 'number' || typeof value.keptCount !== 'number'
+        || typeof value.summary !== 'string' || !optionalString(value.instructions)) return invalid('invalid compact');
       return value as SessionEntry;
     case 'goal':
       if (typeof value.at !== 'string' || typeof value.goalId !== 'string'
