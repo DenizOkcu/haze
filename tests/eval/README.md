@@ -56,4 +56,4 @@ transcript). `.eval/` is gitignored and disposable.
   `--no-file-parallelism` (the runner script already passes it).
 - The user's real settings, provider, skills, and MCP/LSP configuration apply —
   evals measure the agent as configured, which is the point.
-- Record notable results/decisions in `docs/plans/` per roadmap item 4.2.
+- Record notable results/decisions as local working notes (kept out of git).

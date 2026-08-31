@@ -252,7 +252,7 @@ echo "what does this project do?" | haze
 
 `-p` and `--prompt` run one agentic turn with the full tool set and print the final assistant text. `--model` accepts a bare model name or `provider:name` and overrides the active model for that run without changing `~/.haze/settings.json`. The model must already be registered under a provider's `models`; add it once with `/provider`. Unknown or ambiguous selectors print a specific error to stderr and exit nonzero.
 
-If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts are limited to 256 KiB; for larger input, pass a file path and ask haze to read it. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. On a provider context overflow they compact the loaded conversation once, like the interactive path, and retry the same request; if there is too little history to compact, the run fails with a specific message. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
+If you pipe stdin without `-p`, haze reads the prompt from stdin. Piped prompts are limited to 256 KiB; for larger input, pass a file path and ask haze to read it. One-shot runs do not create or update durable sessions, and they ignore `--continue`; `--resume <id>` can load an exact saved context for the turn without changing the original session. On a provider context overflow they compact the loaded conversation and retry at a progressively smaller message budget (up to twice), like the interactive path; if the window stays full the run ends failed with a resumable `context_exhausted` checkpoint, and when compaction is unavailable the error says so explicitly. Add `--debug` to write a detailed JSONL log under `~/.haze/logs/`.
 
 `--output` controls the result format: `text` is the default, `json` prints one final envelope, and `stream-json` writes live NDJSON events followed by the same envelope.
 
@@ -288,7 +288,7 @@ The `status` field is authoritative (driven by the agent's terminal state, not b
 {"type":"result","status":"complete","result":"Here are the findings…","usage":{"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0,"reasoningTokens":0}}
 ```
 
-Each line is valid JSON and can be piped through `jq -c .`. Event types include `turn_start`, `message_start` / `message_update` / `message_end`, `tool_start` / `tool_end`, `resource_rollover`, `retry`, `context_overflow`, and `turn_end`. `resource_rollover` reports bounded SDK-step transitions and whether the provider prefix was preserved, without exposing prompts or tool output. Every event has an ISO-8601 `at` timestamp. Tool events omit raw inputs and outputs because CI and harness logs often capture stdout; use `--debug` for detailed local JSONL logs.
+Each line is valid JSON and can be piped through `jq -c .`. Event types include `turn_start`, `message_start` / `message_update` / `message_end`, `tool_start` / `tool_end`, `resource_rollover`, `retry`, `context_overflow`, `compaction_start` / `compaction_end`, and `turn_end`. `resource_rollover` reports bounded SDK-step transitions and whether the provider prefix was preserved, without exposing prompts or tool output. Every event has an ISO-8601 `at` timestamp. Tool events omit raw inputs and outputs because CI and harness logs often capture stdout; use `--debug` for detailed local JSONL logs.
 
 This mode is intended for harnesses that run haze without a person at the terminal. A supervisor can watch stdout for progress, stalls, or loops. The final `result` envelope contains the authoritative status, text, and usage. The `text` and `json` formats are unchanged.
 
@@ -364,7 +364,7 @@ Keep trivial, conversation-coupled, sequential, user-interactive, or uncertain s
 
 ## Context files
 
-haze saves durable workspace sessions in `~/.haze/sessions`. It writes a session after the first resumable message, so empty sessions do not create files or appear under `/resume`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, and `/resume` to browse workspace sessions, resume one, or fork its latest snapshot into a new session. `/resume <id>` and `haze --resume <id>` select an exact session. Use `/compact` to condense older model context: by default the active model writes a continuity summary of the older history (set `manualCompaction: "heuristic"` in settings to keep the model-free bounded excerpt instead); automatic mid-turn compaction always uses the heuristic excerpt. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
+haze saves durable workspace sessions in `~/.haze/sessions`. It writes a session after the first resumable message, so empty sessions do not create files or appear under `/resume`. Settings, history, sessions, and debug logs use private POSIX directory/file permissions (`0700`/`0600`) and ordered, flushable writes. Use `/session` to see the current file, `/new` to start fresh, and `/resume` to browse workspace sessions, resume one, or fork its latest snapshot into a new session. `/resume <id>` and `haze --resume <id>` select an exact session. Use `/compact` to condense older model context: by default the active model writes a continuity summary of the older history (set `manualCompaction: "heuristic"` in settings to keep the model-free bounded excerpt instead); automatic mid-turn compaction also prefers a model-written summary once the older history is large, keeping the bounded excerpt for small trims and as the fallback when summarization fails. Sessions also persist compact structured work state: the active goal, touched files, validation evidence, blockers, and next action.
 
 Snapshots are written at turn boundaries, not per tool call. If haze crashes or is killed mid-turn, the session resumes from the last completed turn: work already on disk (file edits, command side effects) is not reflected in the session record, so after a crash verify the working tree (`git status`, `git diff`) before continuing. To keep long sessions from growing quadratically — every turn appends the full history again — session files are automatically compacted once superseded snapshots dominate the file: only the newest conversation and work-state snapshots are kept and the file is rewritten atomically.
 
@@ -387,7 +387,8 @@ Use `AGENTS.md` for project conventions, commands, architecture notes, and anyth
 Most haze behaviour needs no configuration; a few optional keys in `~/.haze/settings.json` tune reliability and context handling. All are validated loudly — malformed values fail with a clear settings error instead of being silently ignored.
 
 - `modelRetries` (integer 0–10, default 2): size of the shared bounded retry pool for transient model errors and idle-stream stalls. Raise it for providers that terminate long streams aggressively; `0` disables automatic retries (a stalled stream pauses with the goal preserved for a one-key resume). The effective value is reported in `timeout` and `retry` stream events as `maxRetries`.
-- `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
+- `retryBaseDelayMs` (integer 250–60000, default 1000): base delay for the shared retry pool's exponential backoff (`base × 2^attempt`, capped at 4× the base). The pool resets whenever a failed attempt completed steps since the previous retry, so intermittent blips on a long turn never exhaust it.
+- `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata or a curated catalog entry. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
 - `manualCompaction` (`"llm-summary"` default, or `"heuristic"`): whether manual `/compact` asks the active model for a continuity summary or keeps the model-free bounded excerpt.
 - `theme` (string, default `purple`): name of a built-in palette (`/themes` lists and sets them, with `light` and oh-my-zsh ports like `robbyrussell` included). Unknown names fail loudly at startup with the valid names listed.
 
@@ -452,7 +453,7 @@ Package check:
 npm pack --dry-run
 ```
 
-The npm package ships `bin`, `dist`, README, license, changelog, and examples.
+The npm package ships `bin`, `dist`, README, SECURITY.md, license, and changelog.
 
 ## Release
 

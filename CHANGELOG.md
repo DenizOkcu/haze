@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Context truthfulness and never-stop-for-recoverable-reasons. A model-backed eval harness drove the changes: the completion gate's trust in real process results had four independent ways to be fed false positives, and the recovery paths still hard-failed on recoverable context conditions.
+
+### Added
+
+- Model-backed eval harness: `npm run eval` runs the real turn stack (goal supervisor, tools, budgets, compaction) against the configured provider in throwaway workspaces and asserts on the structured goal envelope plus deterministic ground truth (fixture test commands, file hashes) — never on response text. Five canonical scenarios including an honesty invariant (an unsatisfiable, tamper-protected task can never be reported `complete`). Evals skip under plain `npm test`, serialize process-wide, and write transcripts under gitignored `.eval/`.
+- Curated model catalog: known model families carry real context-window and output-cap metadata keyed by model-name pattern (gateway-style `vendor/model` ids match on the final segment), slotted between per-model `modelLimits` and the user fallback. Values are input-safe (the smaller window wins when variants differ); local inference servers never consult the catalog because their effective window is server-configured.
+- Compaction observability: `compaction_start` / `compaction_end` stream events (reason, method, counts, `willRetry`) and durable `compact` session entries (method, older/kept counts, summary) make every compaction — manual, threshold, or overflow-recovery — observable and auditable.
+- `retryBaseDelayMs` setting (integer 250–60000, default 1000): base delay for the shared model-retry pool's exponential backoff, capped at 4× the base.
+
+### Changed
+
+- Context estimation prefers the provider's own accounting: each completed step re-anchors the estimate on reported usage (convention-robust across OpenAI-style and Anthropic-style cache reporting, so cache-heavy finishes are never double-counted), with chars/4 estimates only for trailing messages. Silent overflows (usage over the window on a successful finish) and length-stop overflows (truncated input filling the window) are detected from usage and route through the same compact-and-retry recovery as thrown overflow errors, alongside a 25-family provider error-pattern table with rate-limit exclusions.
+- Context-overflow recovery no longer hard-fails: retries shrink the message budget progressively (60%, then 36%); once the bounded retries are exhausted the goal checkpoints (`context_exhausted`) and the supervisor pauses with a one-key resume instead of relaunching the same oversized request.
+- Mid-turn compaction runs at epoch boundaries and prefers an LLM-written summary for large older halves — chained from any previous compaction summary and split-turn aware (a recent window landing mid-turn preserves the unfinished task's request, progress, and next action) — with the deterministic heuristic excerpt for small trims and as the fallback on any summarization failure.
+- The shared model-retry pool resets whenever a failed attempt completed steps since the previous retry, so a long turn with intermittent provider blips never exhausts it; consecutive failures still chain backoff.
+- Settings are re-read per attempt, so a provider or model switch made mid-goal applies from the next attempt.
+
+### Fixed
+
+- Validation exit codes are truthful evidence (found by adversarial model-backed evals): validation-classified commands run under `pipefail` so a pipeline like `npm test | tail` can no longer report the final stage's success while the suite failed; a passing validation whose unquoted command can mask a failing stage (`;`, `||`, or single `&` list operators — redirections like `2>&1` are not) is demoted to unconfirmed; validation-kind inference matches only the unquoted command shape, so a quoted payload mentioning "test" cannot claim tool authority; and a passing self-declared custom check can no longer clear a failed classifier-confirmed validation, including one carried from a goal checkpoint.
+
 ## 1.1.1 - 2026-08-26
 
 Durable goal resume and a smaller autonomy core. This patch keeps the concrete headless/recovery gains developed after 1.1.0 while removing unproven completion ceremony before publication.

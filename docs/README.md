@@ -15,7 +15,7 @@ corresponding docs page in the same PR.
 | `quickstart.html` | `README.md` install/usage sections; `src/cli/index.ts` CLI flags |
 | `commands.html` | `src/cli/commands/commands.ts` slash-command catalog |
 | `tools.html` | `src/llm/hazeTools.ts` tool catalog; `src/llm/tools/**` implementations |
-| `skills.html` | `src/skills/**`, `examples/skills/`, and `src/llm/systemPrompt.ts` skill guidance |
+| `skills.html` | `src/skills/**` and `src/llm/systemPrompt.ts` skill guidance |
 | `workflows.html` | `README.md` examples and `AGENTS.md` runtime contracts |
 
 ## Regeneration
