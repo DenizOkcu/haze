@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {tool, type ModelMessage} from 'ai';
 import {z} from 'zod';
-import {cacheHitRatio, calculateRequestTokenBudget, contextBreakdown, effectiveNonCachedInput, estimateMessagesTokens, estimateTextTokens, estimateValueTokens, FALLBACK_CONTEXT_WINDOW_TOKENS, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
+import {cacheHitRatio, calculateRequestTokenBudget, contextBreakdown, contextTokensFromUsage, effectiveNonCachedInput, estimateConversationTokens, estimateMessagesTokens, estimateTextTokens, estimateValueTokens, FALLBACK_CONTEXT_WINDOW_TOKENS, IMAGE_BYTES_PER_TOKEN_ESTIMATE} from '../../src/core/agent/contextBudget.js';
 
 describe('context budget', () => {
   it('accounts for system, messages, project context, and exact tool schemas', () => {
@@ -100,5 +100,58 @@ describe('memoized message estimation (F-07)', () => {
     const first = estimateMessagesTokens(messages);
     expect(estimateMessagesTokens([...messages, {role: 'user', content: 'more'}])).toBeGreaterThan(first);
     expect(estimateMessagesTokens(messages)).toBe(first);
+  });
+});
+
+describe('usage-backed context estimation (Pillar 1.1)', () => {
+  it('derives context tokens from provider usage without double-counting cached input', () => {
+    // Exclusive-style reporting (Anthropic-like: cache read outside inputTokens).
+    expect(contextTokensFromUsage({inputTokens: 1000, outputTokens: 200, cacheReadTokens: 3000, cacheWriteTokens: 0})).toBe(4200);
+    // Subset-style reporting (OpenAI-like: cached tokens already inside
+    // inputTokens) must not count the cached prefix twice — a cache-heavy
+    // successful finish is not an overflow.
+    expect(contextTokensFromUsage({inputTokens: 120_000, outputTokens: 500, cacheReadTokens: 110_000, cacheWriteTokens: 0})).toBe(120_500);
+    // All-zero or absent usage never anchors.
+    expect(contextTokensFromUsage({})).toBeUndefined();
+    expect(contextTokensFromUsage({inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0})).toBeUndefined();
+  });
+
+  it('uses the anchor for the covered prefix and estimates only trailing messages', () => {
+    const covered: ModelMessage[] = [
+      {role: 'user', content: 'x'.repeat(400)},
+      {role: 'assistant', content: 'y'.repeat(400)},
+      {role: 'user', content: 'z'.repeat(400)},
+    ];
+    const trailing: ModelMessage[] = [{role: 'user', content: 'a'.repeat(400)}];
+    const anchor = {messageCount: covered.length, contextTokens: 10_000};
+    const estimate = estimateConversationTokens([...covered, ...trailing], anchor, 2_000);
+    expect(estimate.basis).toBe('usage');
+    // 10k reported minus 2k non-message overhead, plus the trailing message's own estimate.
+    expect(estimate.tokens).toBe(10_000 - 2_000 + estimateMessagesTokens(trailing));
+  });
+
+  it('falls back to pure estimates without an anchor or after a history rewrite', () => {
+    const messages: ModelMessage[] = [
+      {role: 'user', content: 'x'.repeat(400)},
+      {role: 'assistant', content: 'y'.repeat(400)},
+    ];
+    expect(estimateConversationTokens(messages, undefined).basis).toBe('estimate');
+    expect(estimateConversationTokens(messages, undefined).tokens).toBe(estimateMessagesTokens(messages));
+    // A stale anchor (history shrank below its boundary, e.g. after compaction) is ignored.
+    const stale = {messageCount: 5, contextTokens: 10_000};
+    expect(estimateConversationTokens(messages, stale).basis).toBe('estimate');
+  });
+
+  it('excludes synthetic control messages from both sides so anchor indices stay aligned', () => {
+    const history: ModelMessage[] = [
+      {role: 'user', content: 'x'.repeat(400)},
+      {role: 'user', content: '<haze_control>\nmid-turn nudge\n</haze_control>'},
+      {role: 'assistant', content: 'y'.repeat(400)},
+    ];
+    // Anchor covered the two durable messages (controls excluded).
+    const anchor = {messageCount: 2, contextTokens: 5_000};
+    const estimate = estimateConversationTokens([...history, {role: 'user', content: '<haze_control>\nlate control\n</haze_control>'}], anchor, 1_000);
+    expect(estimate.basis).toBe('usage');
+    expect(estimate.tokens).toBe(4_000);
   });
 });

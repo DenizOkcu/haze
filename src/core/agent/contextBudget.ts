@@ -178,6 +178,83 @@ export function cacheHitRatio(inputTokens: number | undefined, cacheReadTokens: 
   return cacheReadTokens / inputTokens;
 }
 
+// ── Usage-backed context estimation (Pillar 1.1) ─────────────────────────────
+
+/** Marker prefix of a request-local synthetic control message (see requestAssembly.ts). */
+export const SYNTHETIC_CONTROL_MARKER = '<haze_control>';
+
+function isSyntheticControlMessage(message: ModelMessage): boolean {
+  return message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SYNTHETIC_CONTROL_MARKER);
+}
+
+/**
+ * Anchor for usage-backed context estimation (Pillar 1.1): the provider's own
+ * token accounting for a completed step, plus the message count it covered.
+ * Trailing messages appended after that boundary are estimated with the usual
+ * chars/4 heuristic and added on top — mirroring how the estimate should behave
+ * once real usage exists.
+ */
+export interface ContextUsageAnchor {
+  /** Message count (synthetic controls excluded) the usage covered. */
+  messageCount: number;
+  /** Provider-reported context tokens at that boundary (input+output+cache). */
+  contextTokens: number;
+}
+
+/**
+ * The input-like term of a provider usage record, robust to the two cache
+ * reporting conventions. OpenAI-style usage includes cached tokens inside
+ * `inputTokens` (the convention `effectiveNonCachedInput` assumes), so
+ * summing both would double the cached prefix — tripping silent-overflow
+ * detection and over-compaction on every cache-heavy turn. When cache-read
+ * exceeds input, the reporting must be exclusive-style (Anthropic-like), and
+ * the sum is exact. The remaining ambiguous case (exclusive-style with
+ * cache-read ≤ input) can only under-count — the safe direction: later
+ * compaction and late overflow detection, never false positives.
+ */
+export function inputLikeTokens(usage: {inputTokens?: number; cacheReadTokens?: number}): number {
+  const input = usage.inputTokens ?? 0;
+  const cacheRead = usage.cacheReadTokens ?? 0;
+  return cacheRead > input ? input + cacheRead : Math.max(input, cacheRead);
+}
+
+/**
+ * Total provider-reported context tokens from a usage record: the
+ * convention-robust input-like term (see `inputLikeTokens`) plus cache-write
+ * (never part of `inputTokens` on either convention) and output tokens.
+ */
+export function contextTokensFromUsage(usage: {inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number}): number | undefined {
+  const total = inputLikeTokens(usage) + (usage.cacheWriteTokens ?? 0) + (usage.outputTokens ?? 0);
+  return total > 0 ? total : undefined;
+}
+
+export interface ContextTokenEstimate {
+  tokens: number;
+  /** Whether the number is provider-usage-backed or a pure chars/4 estimate. */
+  basis: 'usage' | 'estimate';
+}
+
+/**
+ * Estimate the message-history token count, preferring provider usage. When an
+ * anchor exists and still covers a prefix of the messages (nothing rewrote the
+ * history — e.g. compaction), the anchor's reported total minus the given
+ * non-message overhead (system prompt + tool schemas, which provider input
+ * tokens include) is used and only trailing messages are estimated. Synthetic
+ * controls are excluded on both sides so anchor indices stay aligned with the
+ * durable (control-free) conversation.
+ */
+export function estimateConversationTokens(messages: readonly ModelMessage[], anchor: ContextUsageAnchor | undefined, overheadTokens = 0): ContextTokenEstimate {
+  if (!anchor) return {tokens: estimateMessagesTokens(messages), basis: 'estimate'};
+  const withoutControls = messages.filter(message => !isSyntheticControlMessage(message));
+  if (withoutControls.length < anchor.messageCount) {
+    // History was rewritten (compaction, salvage) — the anchor is stale.
+    return {tokens: estimateMessagesTokens(withoutControls), basis: 'estimate'};
+  }
+  let trailing = 0;
+  for (let index = anchor.messageCount; index < withoutControls.length; index++) trailing += estimateModelMessageTokens(withoutControls[index]!);
+  return {tokens: Math.max(0, anchor.contextTokens - overheadTokens) + trailing, basis: 'usage'};
+}
+
 export interface RequestTokenBudget {
   contextWindowTokens: number;
   systemTokens: number;
