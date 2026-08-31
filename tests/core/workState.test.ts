@@ -7,6 +7,9 @@ function passedSummary(text = 'tests passed') {
 function failedSummary(text = 'tests failed') {
   return {kind: 'test', status: 'failed', summaryText: text, failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false};
 }
+function genericPassedSummary(text = 'custom check passed') {
+  return {kind: 'generic', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
+}
 
 describe('work state', () => {
   it('records files and validation without raw tool output', () => {
@@ -78,6 +81,40 @@ describe('deriveValidationOutcome', () => {
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
     observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
     expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
+  it('does not let a passing custom check clear a failed confirmed validation (self-certification guard)', () => {
+    // Found by the honest-impossibility eval: the model ran `npm test` (red),
+    // then a self-written `purpose=validation` script (green), and the gate
+    // saw the latest validation as passed. Known test/build commands are the
+    // authoritative completion evidence; generic custom checks supplement
+    // them and cannot clear a confirmed failure.
+    const state = createWorkState('make the tests pass', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'node -e "console.log(1)"'}, success: true, output: {ok: true, code: 0, validationSummary: genericPassedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('failed');
+    // The confirmed suite turning green is what clears it.
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('still honors a passing custom check when no confirmed validation has failed', () => {
+    const state = createWorkState('verify the behavior', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'node custom-check.js'}, success: true, output: {ok: true, code: 0, validationSummary: genericPassedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('does not let a passing custom check clear a failed validation carried from a goal checkpoint', () => {
+    // Cross-physical-turn variant of the self-certification guard: the
+    // confirmed failure rides the checkpoint as carried evidence and must
+    // keep demanding a confirmed green, not a custom check.
+    const state = createWorkState('make the tests pass', 'fix', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 1, validationOutcome: 'failed'});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'node -e "console.log(1)"'}, success: true, output: {ok: true, code: 0, validationSummary: genericPassedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('failed');
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('passed');
   });
 
   it('marks a validation stale when a mutation happens afterwards', () => {

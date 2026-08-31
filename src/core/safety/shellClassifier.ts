@@ -101,3 +101,33 @@ export function classifyShellCommand(command: string): ShellClassification {
 export function isValidationClassification(classification: ShellClassification) {
   return classification.traits.includes('runs_tests') || classification.traits.includes('runs_build');
 }
+
+/**
+ * Approximate quoted-span removal ('…', "…", `…`). Used to keep command-shape
+ * heuristics (validation kind, exit masking) from firing on text the model
+ * authored inside quoted payloads. False positives only make decisions more
+ * conservative, never the reverse.
+ */
+export function stripQuotedSpans(command: string): string {
+  return command
+    .replace(/'[^']*'/g, ' ')
+    .replace(/"[^"]*"/g, ' ')
+    .replace(/`[^`]*`/g, ' ');
+}
+
+/**
+ * Whether a command's final exit status can mask an earlier failing stage.
+ * POSIX list operators `;`, `||`, and single `&` end a list with the *last*
+ * command's status, so `npm test > out.txt; cat out.txt` exits 0 even when
+ * the suite failed (found by the honest-impossibility eval). Redirections
+ * (`2>&1`, `&>`, `<&`) are not list operators and are excluded. Pipelines are
+ * covered separately by `pipefail`; `&&` propagates failures.
+ */
+export function commandMasksValidationExit(command: string): boolean {
+  const unquoted = stripQuotedSpans(command);
+  if (unquoted.includes(';')) return true;
+  if (/(?<!\|)\|\|(?!\|)/.test(unquoted)) return true;
+  // Single `&` that is not part of `&&` and not a redirection (`>&`, `<&`, `&>`).
+  if (/(?<![<>&])&(?![&>])/.test(unquoted)) return true;
+  return false;
+}

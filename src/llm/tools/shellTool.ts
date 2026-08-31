@@ -1,6 +1,6 @@
 import {tool} from 'ai';
 import {z} from 'zod';
-import {classifyShellCommand, isValidationClassification} from '../../core/safety/shellClassifier.js';
+import {classifyShellCommand, commandMasksValidationExit, isValidationClassification} from '../../core/safety/shellClassifier.js';
 import {detectMissingExecutable, missingExecutableFields} from '../../core/safety/missingExecutable.js';
 import {parseValidationOutput} from '../../core/validation/outputParser.js';
 import {filterShellOutput} from '../../core/shellOutput/registry.js';
@@ -11,7 +11,7 @@ import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
 import {SHELL_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
-import {resolveUserShell, shellInvocation, shellSyntaxGuidance} from '../../core/process/userShell.js';
+import {resolveUserShell, shellDialect, shellInvocation, shellSyntaxGuidance} from '../../core/process/userShell.js';
 
 /** Byte-stat metadata only — the raw stream text must never reach the model context (see code-review CR-001). */
 function streamByteStats(stream: BoundedStream) {
@@ -25,7 +25,7 @@ export const shellTool = tool({
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}. ${shellSyntaxGuidance(userShell)}`.trim()),
-    purpose: z.enum(['auto', 'validation']).default('auto').describe('Use validation for an intentional test/check command, including custom assertion scripts; pass/fail still comes from the real process result.'),
+    purpose: z.enum(['auto', 'validation']).default('auto').describe('Use validation for an intentional test/check command; known test/build commands are the authoritative completion evidence, custom checks supplement them. Pass/fail comes from the real process result.'),
     timeoutSeconds: z.number().int().positive().max(600).optional().describe('Timeout in seconds; defaults to 60'),
     background: z.boolean().default(false).describe('Start a registered long-running process and return immediately. Use process to list, inspect output, or kill it.'),
   }),
@@ -51,15 +51,34 @@ export const shellTool = tool({
     }
     const timeoutMs = (timeoutSeconds ?? 60) * 1000;
     const startedAt = Date.now();
-    const processResult = await runBoundedProcess({...shellInvocation(command), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES});
+    // Validation exit codes must be truthful evidence: a pipeline like
+    // `npm test | tail` otherwise reports the final stage's success while the
+    // suite failed (found by the honest-impossibility eval). `pipefail` makes
+    // any failing stage fail the pipeline; shells without it degrade to their
+    // default pipeline semantics through the guarded `set` (POSIX shells only).
+    const isValidationCommand = purpose === 'validation' || isValidationClassification(classification);
+    const executionCommand = isValidationCommand && shellDialect(userShell) === 'posix' ? `set -o pipefail 2>/dev/null || true; ${command}` : command;
+    const processResult = await runBoundedProcess({...shellInvocation(executionCommand), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES});
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;
-    const validationSummary = purpose === 'validation' || isValidationClassification(classification)
+    const validationSummary = isValidationCommand
       ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: processResult.stdout.omittedBytes > 0, stderrTruncated: processResult.stderr.omittedBytes > 0, classification})
       : undefined;
-    const validationPassed = validationSummary?.status === 'passed';
-    const output = filterShellOutput({command, code, stdout, stderr, timedOut, classification, validationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
+    // Evidence truthfulness: a passing validation whose command shape can
+    // mask an earlier failing stage (`npm test > out; cat out` ends with the
+    // last stage's status) is demoted to unconfirmed — generic kind — so the
+    // completion gate cannot treat it as authoritative (found by the
+    // honest-impossibility eval). Failing validations keep their kind: a
+    // masked compound that still failed is honestly failed.
+    const authoritative = validationSummary == null || validationSummary.status !== 'passed' || !commandMasksValidationExit(command);
+    const confirmedValidationSummary = validationSummary && authoritative
+      ? validationSummary
+      : validationSummary
+        ? {...validationSummary, kind: 'generic' as const, summaryText: `${validationSummary.summaryText ?? ''} (compound command: exit-code provenance unconfirmed)`.trim()}
+        : undefined;
+    const validationPassed = confirmedValidationSummary?.status === 'passed';
+    const output = filterShellOutput({command, code, stdout, stderr, timedOut, classification, validationSummary: confirmedValidationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
     // Generic, dependency-agnostic diagnostic for a missing executable. Only the
     // executable name and a generic next step are exposed (never raw stderr).
     const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;
@@ -67,7 +86,7 @@ export const shellTool = tool({
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
       code, command, purpose, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
       aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
-      stdout: output.stdout, stderr: output.stderr, validationSummary,
+      stdout: output.stdout, stderr: output.stderr, validationSummary: confirmedValidationSummary,
       stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),
       ...(missing ? {...missingExecutableFields(missing), missingExecutableStep: missing.suggestedNextStep} : {}),
       ...(processResult.error ? {error: processResult.error} : {}),

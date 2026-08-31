@@ -363,7 +363,17 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   const stale = state.mutationSeq > 0 && state.validationSeq < state.mutationSeq;
   if (stale) return 'stale';
   const latest = state.validations.at(-1) ?? state.carriedValidation;
-  return latest?.status === 'passed' ? 'passed' : 'failed';
+  if (latest?.status !== 'passed') return 'failed';
+  // A self-declared custom check (generic kind, `purpose=validation`) cannot
+  // clear a failed classifier-confirmed validation: known test/build commands
+  // are the authoritative completion evidence, custom checks supplement them
+  // (found by the honest-impossibility eval — a model ran `npm test` red, then
+  // passed an unrelated self-written script and claimed completion). A failed
+  // validation carried from a goal checkpoint counts as confirmed too.
+  const confirmedFailed = state.validations.some(entry => entry.kind !== 'generic' && entry.status === 'failed')
+    || (state.carriedValidation?.status === 'failed' && state.carriedValidation.kind !== 'generic');
+  if (latest.kind === 'generic' && confirmedFailed) return 'failed';
+  return 'passed';
 }
 
 export function workStatePrompt(state: WorkState) {

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {classifyShellCommand} from '../../src/core/safety/shellClassifier.js';
+import {classifyShellCommand, commandMasksValidationExit} from '../../src/core/safety/shellClassifier.js';
 
 describe('shell classifier', () => {
   it('classifies validation commands as read-only', () => {
@@ -98,5 +98,32 @@ describe('shell classifier', () => {
     // A single-dash -delete elsewhere should not be misread as find -delete.
     const result = classifyShellCommand('mytool -delete --force ./out');
     expect(result.traits).not.toContain('deletes_files');
+  });
+});
+
+describe('commandMasksValidationExit (exit provenance)', () => {
+  it('flags POSIX list operators that end with the last stage status', () => {
+    expect(commandMasksValidationExit('npm test > out.txt; cat out.txt')).toBe(true);
+    expect(commandMasksValidationExit('npm test || echo failed')).toBe(true);
+    expect(commandMasksValidationExit('npm test & wait')).toBe(true);
+  });
+
+  it('does not flag simple, pipeline, or &&-chained commands', () => {
+    expect(commandMasksValidationExit('npm test')).toBe(false);
+    expect(commandMasksValidationExit('npm test | tail -5')).toBe(false);
+    expect(commandMasksValidationExit('npm test && echo done')).toBe(false);
+  });
+
+  it('does not flag redirections that merely contain &', () => {
+    // 2>&1 / &> / <& are redirections, not list operators — pipefail already
+    // covers the pipeline, and the redirect cannot mask the command's status.
+    expect(commandMasksValidationExit('npm test 2>&1 | tail -5')).toBe(false);
+    expect(commandMasksValidationExit('npm test &> out.txt')).toBe(false);
+    expect(commandMasksValidationExit('node script.js <&0')).toBe(false);
+  });
+
+  it('ignores operators authored inside quoted payloads', () => {
+    expect(commandMasksValidationExit('node -e "a;b && c || d & e"')).toBe(false);
+    expect(commandMasksValidationExit("echo 'x; y' && npm test")).toBe(false);
   });
 });

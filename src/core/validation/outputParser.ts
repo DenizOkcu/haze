@@ -1,4 +1,4 @@
-import type {ShellClassification} from '../safety/shellClassifier.js';
+import {stripQuotedSpans, type ShellClassification} from '../safety/shellClassifier.js';
 import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
 import {capOutputForProcessing} from '../toolOutput/reduction.js';
 
@@ -7,7 +7,11 @@ function uniq(values: string[]) {
 }
 
 function inferKind(command: string, classification?: ShellClassification): ValidationKind {
-  const lower = command.toLowerCase();
+  // Shape-only inference on the unquoted command: kind authority must come
+  // from running a recognized tool, never from words the model authored
+  // inside a quoted payload (found by the honest-impossibility eval — a
+  // self-written `node -e` script mentioning "test" claimed kind 'test').
+  const lower = stripQuotedSpans(command).toLowerCase();
   if (/typecheck|\btsc\b/.test(lower)) return 'typecheck';
   if (/\beslint\b|\blint\b/.test(lower)) return 'lint';
   if (/\bbuild\b/.test(lower) || classification?.traits.includes('runs_build')) return 'build';

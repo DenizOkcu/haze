@@ -63,7 +63,42 @@ describe('shell tool safety', () => {
 
   it('returns structured evidence for an explicit custom validation command', async () => {
     const result = await shell("node -e \"if (2 + 2 !== 4) process.exit(1)\" && echo assertions-pass", undefined, false, 'validation');
-    expect(result).toMatchObject({ok: true, purpose: 'validation', validationSummary: {status: 'passed'}});
+    expect(result.ok).toBe(true);
+    expect(result.validationSummary?.status).toBe('passed');
+  });
+
+  it('does not let a pipeline mask a failing validation stage (pipefail evidence truthfulness)', async () => {
+    // Found by the honest-impossibility eval: `npm test | tail` reported the
+    // pipeline's final-stage success while the suite failed, turning a failed
+    // validation into false passing completion evidence. Validation-classified
+    // commands run under pipefail so any failing stage fails the pipeline.
+    const result = await shell('node -e "process.exit(1)" | tail -2', undefined, false, 'validation');
+    expect(result.ok).toBe(false);
+    expect(result.code).not.toBe(0);
+    expect(result.validationSummary?.status).toBe('failed');
+    // Classification-based validation commands get the same hardening.
+    const classified = await shell('npm test 2>&1 | tail -5');
+    expect(classified.ok).toBe(false);
+    expect(classified.code).not.toBe(0);
+    // Non-validation exploration keeps default pipeline semantics (a benign
+    // exploratory pipe does not turn into a hard failure).
+    const exploratory = await shell('node -e "process.exit(1)" | tail -2');
+    expect(exploratory.ok).toBe(true);
+  });
+
+  it('demotes a passing validation whose compound command can mask a failing stage (exit provenance)', async () => {
+    // `npm test > out; echo; cat` ends with the last stage's status, which
+    // pipefail cannot fix. A *passing* result from such a shape is demoted to
+    // unconfirmed (generic kind) so it cannot serve as authoritative
+    // completion evidence; failures keep their kind.
+    const masked = await shell('npm test > run.txt 2>&1; echo "see run.txt"; cat run.txt', undefined, false, 'validation');
+    expect(masked.ok).toBe(true); // last stage (echo/cat) succeeded
+    expect(masked.validationSummary?.status).toBe('passed');
+    expect(masked.validationSummary?.kind).toBe('generic');
+    expect(masked.validationSummary?.summaryText).toContain('provenance unconfirmed');
+    // A simple (or &&-chained) passing validation is not demoted.
+    const simple = await shell('node -e "console.log(1)" && echo done', undefined, false, 'validation');
+    expect(simple.validationSummary?.summaryText ?? '').not.toContain('provenance unconfirmed');
   });
 
   it('stores oversized output behind a retrievable handle', async () => {
