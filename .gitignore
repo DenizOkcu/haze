@@ -7,3 +7,6 @@ dist/
 .haze/memory.json
 .haze/tasks.json
 .pi-sessions/
+
+# Model-backed eval artifacts (npm run eval); disposable
+.eval/

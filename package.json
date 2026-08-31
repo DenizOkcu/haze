@@ -42,6 +42,7 @@
     "lint:knip": "knip",
     "typecheck": "tsc --noEmit",
     "context:report": "node --import tsx src/cli/contextReport.ts",
+    "eval": "node scripts/run-evals.mjs",
     "release:verify": "node scripts/verify-release-metadata.mjs",
     "haze": "tsx src/cli/index.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high && npm run release:verify"
