@@ -1,6 +1,7 @@
 import {createOpenAI} from '@ai-sdk/openai';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
+import {catalogLimitsFor} from '../config/modelCatalog.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
@@ -30,8 +31,8 @@ export interface ModelRuntimeConfig {
    * (128K hosted / 32K local) so `contextWindowSource` can flag the guess.
    */
   contextWindowTokens: number;
-  /** Where contextWindowTokens came from: per-model settings, a user-set fallback, or the built-in default. */
-  contextWindowSource: 'settings' | 'user-fallback' | 'default-fallback';
+  /** Where contextWindowTokens came from: per-model settings, the curated model catalog, a user-set fallback, or the built-in default. */
+  contextWindowSource: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback';
   /** Optional output-token limit metadata for request budgeting (RH-005). */
   maxOutputTokens?: number;
 }
@@ -97,15 +98,22 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const limits = modelLimitsFor(selection.provider, name);
   // Class-aware fallback so unknown local models (server-configured window,
   // silent truncation) stay conservative while unknown hosted models get the
-  // modern 128K floor. A user-set fallback setting overrides the built-in
-  // default; the source tag distinguishes an intentional guess (no warning)
-  // from the default guess (warned once per session) (RH-005).
+  // modern 128K floor. The curated catalog (Pillar 1.8) fills known families
+  // before any fallback; local servers never consult it because their
+  // effective window is server-configured. A user-set fallback setting
+  // overrides the built-in default; the source tag distinguishes an
+  // intentional guess (no warning) from the default guess (warned once per
+  // session) (RH-005).
   const isLocal = isLocalProviderUrl(baseURL);
+  const catalog = isLocal ? undefined : catalogLimitsFor(name);
   const userFallback = isLocal ? settings.localContextWindowFallbackTokens : settings.contextWindowFallbackTokens;
   const fallbackTokens = userFallback ?? (isLocal ? FALLBACK_LOCAL_CONTEXT_TOKENS : FALLBACK_CONTEXT_WINDOW_TOKENS);
   const contextWindowSource = limits.contextWindowTokens !== undefined
-    ? 'settings'
-    : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
+    ? 'settings' as const
+    : catalog
+      ? 'catalog' as const
+      : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
+  const maxOutputTokens = limits.maxOutputTokens ?? catalog?.maxOutputTokens;
   return {
     model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector: modelSelector(selection.provider, name),
@@ -117,9 +125,9 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       cacheKey,
       capabilities: caps,
       reasoningPolicy,
-      contextWindowTokens: limits.contextWindowTokens ?? fallbackTokens,
+      contextWindowTokens: limits.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
       contextWindowSource,
-      ...(limits.maxOutputTokens !== undefined ? {maxOutputTokens: limits.maxOutputTokens} : {}),
+      ...(maxOutputTokens !== undefined ? {maxOutputTokens} : {}),
     },
   };
 }
