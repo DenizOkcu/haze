@@ -72,17 +72,18 @@
                 <tr><td>readFile</td><td>Read numbered UTF-8 lines in bounded pages (exact or outline mode). A small signature-checked sparse index makes later pages cheap. User-typed paths may open files outside the workspace, read-only, for that turn.</td></tr>
                 <tr><td>grep</td><td>Regex search over the workspace using a bundled ripgrep binary. Results carry a global cap; ignored paths require an explicit override.</td></tr>
                 <tr><td>readToolOutput</td><td>Re-page raw output that was too large for the original tool result, by offset or substring query. Retained data has fixed per-entry and total memory limits.</td></tr>
-                <tr><td>lsp*</td><td>Optional symbol, definition, and reference lookup through a language server you configure with <code>/lsp</code>. Read-only; see below.</td></tr>
+                <tr><td>lsp*</td><td>Optional symbol-path retrieval, enriched references, diagnostics, rename, and safe-delete operations through a language server configured with <code>/lsp</code>. See below.</td></tr>
               </tbody>
             </table>
             <p>All file tools refuse protected secret files before any filesystem access: SSH keys, shell history files, <code>.env</code>/<code>.envrc</code> files, <code>*.pem</code>/<code>*.key</code>, and common home credential stores. The refusal is terminal (<code>secret_file_protected</code>, <code>recoverable: false</code>), cannot be bypassed by user-typed path mentions, ignore overrides, or symlinks, and grep traversal skips those names entirely. Documentation variants (<code>.env.example</code>, <code>.env.sample</code>, <code>.env.template</code>, <code>id_*.pub</code>) stay readable.</p>
           </section>
 
           <section id="write">
-            <h2><span class="em">Write</span> · 3 tools</h2>
+            <h2><span class="em">Write</span> · 4 tools</h2>
             <table>
               <tbody>
                 <tr><td>editFile</td><td>Batched unique text replacements with line-prefix tolerance and recovery hints on failure. Small edits render as inline diffs; large ones as summaries.</td></tr>
+                <tr><td>replaceInFiles</td><td>Guarded literal or regex replacement across files, with dry-run previews, stable occurrence IDs, include/exclude globs, and an expected-count guard.</td></tr>
                 <tr><td>replaceLines</td><td>1-based inclusive line-range replacement with EOF clamping for slightly-oversized ranges. The fallback when exact text matching is ambiguous.</td></tr>
                 <tr><td>writeFile</td><td>Create files and parent directories. Overwriting an existing file requires an explicit flag.</td></tr>
               </tbody>
@@ -122,7 +123,7 @@
           <section id="lsp">
             <h2>LSP &amp; <span class="em">MCP</span></h2>
             <h3>Language servers — <code class="cmd">/lsp</code></h3>
-            <p>Configure read-only language-server navigation interactively. Presets exist for <strong>TypeScript</strong>, <strong>Rust</strong>, <strong>Python</strong>, <strong>Go</strong>, and <strong>PHP</strong>, or add any custom command. haze does not install servers: LSP tools appear only when an enabled server binary is on <code>PATH</code>. Otherwise the model navigates with grep, listFiles, and readFile. On shutdown failure or malformed protocol data, haze terminates the server's process tree.</p>
+            <p>Configure language-server navigation and refactoring interactively. Presets exist for <strong>TypeScript</strong>, <strong>Rust</strong>, <strong>Python</strong>, <strong>Go</strong>, and <strong>PHP</strong>, or add any custom command. Tools can retrieve hierarchical symbols and bodies, enrich references with enclosing symbols and snippets, inspect symbol-scoped diagnostics, perform semantic renames, and delete only unreferenced symbols. Warm servers receive external file-change notifications, wait for bounded indexing progress, and restart once after termination. All returned locations and workspace edits remain workspace-confined. haze does not install servers: LSP tools appear only when an enabled server binary is on <code>PATH</code>.</p>
             <h3>MCP servers — <code class="cmd">/mcp</code></h3>
             <p>Connect <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener">Model Context Protocol</a> servers to extend the toolset: presets (Context7 for live library docs), or custom <code>http</code> / <code>sse</code> / <code>stdio</code> servers. HTTP API keys are entered masked and sent as bearer tokens; discovery has bounded deadlines, failures are isolated, and MCP tools never shadow built-ins. Servers persist in <code>~/.haze/settings.json</code> under <code>mcpServers</code>.</p>
           </section>

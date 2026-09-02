@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Symbol-aware LSP workflow: hierarchical symbol/body/signature retrieval, reference results enriched with enclosing symbols and snippets, symbol-scoped diagnostics, semantic rename, and reference-guarded safe delete. Warm language servers now receive external file-change notifications, wait for bounded indexing progress, and restart once after termination.
+- Guarded `replaceInFiles` bulk edits with dry-run previews, stable occurrence IDs, include/exclude globs, expected-count checks, stale-selection refusal, bounded diffs, and retrievable overflow output.
+
 ## 1.2.0 - 2026-08-31
 
 Context truthfulness and never-stop-for-recoverable-reasons. A model-backed eval harness drove the changes: the completion gate's trust in real process results had four independent ways to be fed false positives, and the recovery paths still hard-failed on recoverable context conditions.

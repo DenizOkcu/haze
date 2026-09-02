@@ -35,8 +35,9 @@ export function toolCallSummary(toolName: string, input: unknown) {
     const edits = Array.isArray(data.edits) ? ` (${data.edits.length} edit${data.edits.length === 1 ? '' : 's'})` : '';
     return `${toolName} ${data.path}${edits}`;
   }
+  if (toolName === 'replaceInFiles' && typeof data?.needle === 'string') return `replaceInFiles "${compact(data.needle, 60)}"${typeof data.path === 'string' && data.path !== '.' ? ` in ${data.path}` : ''}${data.dryRun === false ? '' : ' (dry run)'}`;
   if (toolName === 'replaceLines' && typeof data?.path === 'string') return `replaceLines ${data.path}:${data.startLine}-${data.endLine}`;
-  if ((toolName === 'editFile' || toolName === 'replaceLines') && (data == null || (typeof data === 'object' && Object.keys(data as object).length === 0))) return toolName;
+  if ((toolName === 'editFile' || toolName === 'replaceInFiles' || toolName === 'replaceLines') && (data == null || (typeof data === 'object' && Object.keys(data as object).length === 0))) return toolName;
   if (toolName === 'subagent') {
     const task = typeof data?.objective === 'string' ? data.objective : typeof data?.task === 'string' ? data.task : undefined;
     if (task) {
@@ -50,6 +51,7 @@ export function toolCallSummary(toolName: string, input: unknown) {
   }
   if (toolName === 'lspWorkspaceSymbols' && typeof data?.query === 'string') return `lspWorkspaceSymbols "${data.query}"`;
   if (toolName === 'lspSymbols' && typeof data?.path === 'string') return `lspSymbols ${data.path}`;
+  if ((toolName === 'lspFindSymbol' || toolName === 'lspRenameSymbol' || toolName === 'lspSafeDeleteSymbol' || toolName === 'lspDiagnosticsForSymbol') && typeof data?.namePath === 'string') return `${toolName} ${typeof data.path === 'string' ? `${data.path}:` : ''}${data.namePath}`;
   if (toolName === 'lspDiagnostics' && typeof data?.path === 'string') return `lspDiagnostics ${data.path}`;
   if ((toolName === 'lspDefinition' || toolName === 'lspTypeDefinition' || toolName === 'lspImplementation' || toolName === 'lspReferences') && typeof data?.path === 'string') return `${toolName} ${data.path}:${data.line}:${data.column}`;
   return `${toolName} ${compact(input)}`;

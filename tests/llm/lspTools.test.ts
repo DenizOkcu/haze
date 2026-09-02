@@ -5,9 +5,13 @@ const captured = vi.hoisted(() => ({
   lspFns: {
     lspDefinition: vi.fn(async () => [{path: 'src/a.ts', range: {start: {line: 1, character: 2}, end: {line: 3, character: 4}}}]),
     lspDiagnostics: vi.fn(async () => ({ok: true, diagnostics: [{severity: 'error', message: 'bad', range: {start: {line: 1, character: 1}, end: {line: 1, character: 4}}}], truncated: false})),
-    lspDocumentSymbols: vi.fn(async () => [{name: 'foo', kind: 12, path: 'src/a.ts'}]),
+    lspDiagnosticsForSymbol: vi.fn(async () => [{path: 'src/a.ts', namePath: 'foo', diagnostics: []}]),
+    lspDocumentSymbols: vi.fn(async () => [{name: 'foo', namePath: 'foo', kind: 12, path: 'src/a.ts'}]),
+    lspFindSymbols: vi.fn(async () => ({symbols: [{name: 'foo', namePath: 'foo', path: 'src/a.ts', range: {start: {line: 1, character: 1}, end: {line: 2, character: 1}}, selectionRange: {start: {line: 1, character: 1}, end: {line: 1, character: 4}}}], indexingComplete: true})),
     lspImplementation: vi.fn(async () => [{path: 'src/impl.ts', range: {start: {line: 5, character: 1}, end: {line: 5, character: 9}}}]),
-    lspReferences: vi.fn(async () => [{path: 'src/a.ts', range: {start: {line: 1, character: 2}, end: {line: 1, character: 5}}}]),
+    lspReferenceLocations: vi.fn(async () => []),
+    lspReferences: vi.fn(async () => [{path: 'src/a.ts', range: {start: {line: 1, character: 2}, end: {line: 1, character: 5}}, owner: {namePath: 'main'}, snippet: '1 | foo'}]),
+    lspRename: vi.fn(async () => ({changes: {}})),
     lspTypeDefinition: vi.fn(async () => [{path: 'src/types.ts', range: {start: {line: 2, character: 1}, end: {line: 4, character: 2}}}]),
     lspWorkspaceSymbols: vi.fn(async () => [{name: 'foo', kind: 12, path: 'src/a.ts'}]),
   },
@@ -32,16 +36,19 @@ async function loadLspTools() {
   vi.doMock('../../src/llm/lsp/requests.js', () => ({
     ...captured.lspFns,
   }));
+  vi.doMock('../../src/llm/lsp/workspaceEdit.js', () => ({
+    applyWorkspaceEdit: vi.fn(async () => ({ok: true, changedFiles: 1})),
+  }));
+  vi.doMock('../../src/llm/tools/workspaceFile.js', () => ({
+    prepareWorkspaceRead: vi.fn(async (filePath: string) => `/workspace/${filePath}`),
+  }));
   vi.resetModules();
   return import('../../src/llm/lspTools.js');
 }
 
 beforeEach(() => {
   captured.readSettingsResult = {lspServers: [{name: 'typescript', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts', '.tsx']}]};
-  for (const fn of Object.values(captured.lspFns)) {
-    fn.mockClear();
-    fn.mockReset();
-  }
+  for (const fn of Object.values(captured.lspFns)) fn.mockClear();
 });
 
 afterEach(() => {
@@ -125,6 +132,7 @@ describe('lspTools.lspReferences', () => {
     const result = await lspTools.lspReferences.execute({path: 'src/a.ts', line: 1, column: 1, maxResults: 50}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
     expect(result).toMatchObject({ok: true, server: 'typescript'});
     expect((result as {locations: unknown[]}).locations).toHaveLength(1);
+    expect((result as {references: Array<{owner: {namePath: string}; snippet: string}>}).references[0]).toMatchObject({owner: {namePath: 'main'}, snippet: '1 | foo'});
   });
 
   it('returns noServer shape for unsupported extension', async () => {
@@ -170,6 +178,33 @@ describe('lspTools.lspWorkspaceSymbols', () => {
     const {lspTools} = await loadLspTools();
     const result = await lspTools.lspWorkspaceSymbols.execute({query: 'foo', maxSymbols: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
     expect((result as {error: string}).error).toContain('grep/listFiles');
+  });
+});
+
+describe('symbol-aware LSP tools', () => {
+  it('finds a symbol by hierarchical name path with body options', async () => {
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspFindSymbol.execute({namePath: 'Service/run', path: 'src/a.ts', depth: 1, includeBody: true, includeInfo: false, includeKinds: [], excludeKinds: [], substringMatching: false, maxResults: 20}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, server: 'typescript', indexingComplete: true});
+    expect(captured.lspFns.lspFindSymbols).toHaveBeenCalledWith(expect.anything(), 'Service/run', expect.objectContaining({includeBody: true}), undefined);
+  });
+
+  it('renames and safe-deletes resolved unreferenced symbols', async () => {
+    const {lspTools} = await loadLspTools();
+    const execution = {toolCallId: 't', messages: [], abortSignal: new AbortController().signal, context: {}} as never;
+    expect(await lspTools.lspRenameSymbol.execute({path: 'src/a.ts', namePath: 'foo', newName: 'bar'}, execution)).toMatchObject({ok: true, changedFiles: 1});
+    expect(captured.lspFns.lspRename).toHaveBeenCalledWith(expect.anything(), 'src/a.ts', 1, 1, 'bar', undefined);
+    expect(await lspTools.lspSafeDeleteSymbol.execute({path: 'src/a.ts', namePath: 'foo'}, execution)).toMatchObject({ok: true, changedFiles: 1});
+  });
+
+  it('refuses safe delete when references remain and returns symbol diagnostics groups', async () => {
+    captured.lspFns.lspReferenceLocations.mockResolvedValueOnce([{path: 'src/use.ts'}]);
+    const {lspTools} = await loadLspTools();
+    const execution = {toolCallId: 't', messages: [], abortSignal: new AbortController().signal, context: {}} as never;
+    const deletion = await lspTools.lspSafeDeleteSymbol.execute({path: 'src/a.ts', namePath: 'foo'}, execution);
+    expect(deletion).toMatchObject({ok: false, recoverable: true});
+    const diagnostics = await lspTools.lspDiagnosticsForSymbol.execute({path: 'src/a.ts', namePath: 'foo', checkReferences: true, maxResults: 50}, execution);
+    expect(diagnostics).toMatchObject({ok: true, groups: [{namePath: 'foo'}]});
   });
 });
 
@@ -261,5 +296,9 @@ describe('lspTools descriptions', () => {
     expect(lspTools.lspImplementation.description).toContain('implementations');
     expect(lspTools.lspReferences.description).toContain('references');
     expect(lspTools.lspDiagnostics.description).toContain('diagnostics');
+    expect(lspTools.lspFindSymbol.description).toContain('hierarchical');
+    expect(lspTools.lspRenameSymbol.description).toContain('Rename');
+    expect(lspTools.lspSafeDeleteSymbol.description).toContain('Delete');
+    expect(lspTools.lspDiagnosticsForSymbol.description).toContain('symbol');
   });
 });

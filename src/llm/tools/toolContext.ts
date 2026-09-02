@@ -102,7 +102,7 @@ export function hazeContext(context: ToolExecutionContext): HazeToolContext | un
 }
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
-  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch']);
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol']);
   return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 
@@ -162,7 +162,7 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
 function isMutatingTool(toolName: string) {
   // Shell execution is conservatively workspace-mutation-capable. Classification remains
   // informational and is not a sandbox boundary.
-  return ['editFile', 'replaceLines', 'writeFile', 'shell'].includes(toolName);
+  return ['editFile', 'replaceInFiles', 'replaceLines', 'writeFile', 'shell', 'lspRenameSymbol', 'lspSafeDeleteSymbol'].includes(toolName);
 }
 
 function isReadOnlyFileTool(toolName: string) {

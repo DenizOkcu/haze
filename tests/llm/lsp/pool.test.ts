@@ -42,6 +42,9 @@ interface FakeClient {
   initialize: ReturnType<typeof vi.fn>;
   openDocument: ReturnType<typeof vi.fn>;
   request: ReturnType<typeof vi.fn>;
+  notify: ReturnType<typeof vi.fn>;
+  closeDocument: ReturnType<typeof vi.fn>;
+  waitForIndexing: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
   isTerminated: boolean;
   terminated: boolean;
@@ -52,6 +55,9 @@ function fakeClient(): FakeClient {
     initialize: vi.fn(async () => undefined),
     openDocument: vi.fn(async () => undefined),
     request: vi.fn(async () => []),
+    notify: vi.fn(),
+    closeDocument: vi.fn(),
+    waitForIndexing: vi.fn(async () => true),
     close: vi.fn(async () => undefined),
     isTerminated: false,
     get terminated() {

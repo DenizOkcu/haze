@@ -12,7 +12,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
 - `hazeTools.ts` defines the public built-in tool catalog and schemas.
 - `tools/**` contains implementation helpers split out of `hazeTools.ts`, including managed background-process registration/control.
-- `lsp/` (client/pool/protocol/requests) with `lspTools.ts` provides optional read-only stdio LSP navigation: `client.ts` owns JSON-RPC framing and process lifecycle, `pool.ts` owns server selection and turn-scoped client reuse (RH-009), `protocol.ts` owns pure URI/range/symbol/diagnostic shaping, and `requests.ts` owns the workspace-safe request facades the tools layer and its tests program against.
+- `lsp/` (client/pool/protocol/requests/symbols/workspaceEdit) with `lspTools.ts` provides optional workspace-safe stdio LSP navigation and refactoring: `client.ts` owns JSON-RPC framing and process lifecycle, `pool.ts` owns server selection and turn-scoped client reuse (RH-009), `protocol.ts` owns pure URI/range/symbol/diagnostic shaping, and `requests.ts` owns the workspace-safe request facades the tools layer and its tests program against.
 - `mcp.ts` loads tools from configured MCP servers and skips collisions rather than shadowing built-ins.
 - `toolResultTypes.ts` contains structured result types and guards shared by tools, formatters, and tests.
 - `webFetch.ts` implements public URL fetching and content extraction behind the `fetch` tool.
@@ -22,7 +22,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - Tools are intentionally small, structured, and workspace-safe.
 - File tools are confined to `process.cwd()` via workspace path helpers and respect `.gitignore` unless explicit `allowIgnored`/`includeIgnored` options are used.
 - `listFiles`, `readFile`, `grep`, and `fetch` are deduplicated within a turn when no mutation occurred. `shell` is never deduplicated because commands may observe changed external state between identical calls.
-- `editFile`, `replaceLines`, and `writeFile` are mutating; they must check scoped nested instructions before writing and pause if new applicable instructions are discovered.
+- `editFile`, `replaceInFiles`, `replaceLines`, `writeFile`, `lspRenameSymbol`, and `lspSafeDeleteSymbol` are mutating; they must check scoped nested instructions before writing and pause if new applicable instructions are discovered.
 - Failed mutations force a fresh `readFile` only when the structured failure explicitly carries `recoveryTool: 'readFile'` (for example stale or ambiguous edit content). Argument-only failures such as invalid write modes can be retried directly with corrected input. Recovery compares normalized lexical workspace paths.
 - Tool outputs should be JSON-serializable, bounded, and include recovery hints on failure.
 - Large output should use `storeToolOutput`/handles and reduction metadata rather than returning unbounded text.
@@ -54,4 +54,4 @@ Current reliability contracts:
 
 - Do not invent default providers/models; honor `config/providers.ts` resolution.
 - MCP tools are optional per turn. Failures should be isolated and surfaced as system/UI messages, not crash unrelated turns.
-- LSP tools are read-only and should only appear when enabled and the configured server command is available.
+- LSP tools should only appear when enabled and the configured server command is available. Mutating LSP workspace edits must pass the same confinement, secret, ignore, scoped-instruction, coordination, and bounded-diff contracts as built-in file mutations.

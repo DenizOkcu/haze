@@ -30,6 +30,8 @@ export class StdioLspClient {
   private terminating = false;
   private initializeResult: unknown;
   private readonly published = new Map<string, {diagnostics: unknown[]; version?: number}>();
+  private readonly activeProgress = new Set<string>();
+  private lastProgressAt = 0;
 
   constructor(private server: HazeLspServer, private child: ChildProcessWithoutNullStreams) {
     child.stdout.on('data', chunk => {
@@ -97,8 +99,14 @@ export class StdioLspClient {
       this.buffer = this.buffer.slice(bodyStart + length);
       const message = JSON.parse(raw) as {id?: number; method?: string; params?: unknown; result?: unknown; error?: {message?: string}};
       if (typeof message.id !== 'number') {
-        // Server-initiated notification; only diagnostics are consumed, others are dropped.
+        // Server-initiated notifications are consumed selectively; unknown ones are dropped.
         if (typeof message.method === 'string') this.handleNotification(message.method, message.params);
+        continue;
+      }
+      if (typeof message.method === 'string') {
+        // A few common server requests must be acknowledged or indexing can stall.
+        const result: Json = message.method === 'workspace/configuration' ? [] : null;
+        this.send({id: message.id, result});
         continue;
       }
       const pending = this.pending.get(message.id);
@@ -111,6 +119,14 @@ export class StdioLspClient {
   }
 
   private handleNotification(method: string, params: unknown) {
+    if (method === '$/progress' && isObject(params) && (typeof params.token === 'string' || typeof params.token === 'number') && isObject(params.value)) {
+      const token = String(params.token);
+      const kind = params.value.kind;
+      if (kind === 'begin' || kind === 'report') this.activeProgress.add(token);
+      if (kind === 'end') this.activeProgress.delete(token);
+      this.lastProgressAt = Date.now();
+      return;
+    }
     if (method !== 'textDocument/publishDiagnostics') return;
     if (!isObject(params) || typeof params.uri !== 'string') return;
     const diagnostics = Array.isArray(params.diagnostics) ? params.diagnostics : [];
@@ -150,8 +166,10 @@ export class StdioLspClient {
           implementation: {linkSupport: true},
           references: {},
           diagnostic: {},
+          rename: {prepareSupport: true},
         },
-        workspace: {symbol: {}},
+        window: {workDoneProgress: true},
+        workspace: {symbol: {}, didChangeWatchedFiles: {dynamicRegistration: false}, workspaceEdit: {documentChanges: true}},
       },
     });
     this.notify('initialized', {});
@@ -167,6 +185,16 @@ export class StdioLspClient {
     const result = this.initializeResult;
     if (!isObject(result) || !isObject(result.capabilities)) return false;
     return isObject(result.capabilities.textDocumentDiagnostic);
+  }
+
+  /** Wait until server-reported indexing settles, bounded to avoid blocking unsupported servers. */
+  async waitForIndexing(timeoutMs = 3000, quietMs = 100): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.activeProgress.size > 0 || (this.lastProgressAt > 0 && Date.now() - this.lastProgressAt < quietMs)) {
+      if (Date.now() >= deadline) return false;
+      await new Promise(resolve => setTimeout(resolve, Math.min(50, deadline - Date.now())));
+    }
+    return true;
   }
 
   /** Latest push-published diagnostics for a document URI, if any arrived. */

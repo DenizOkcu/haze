@@ -86,8 +86,11 @@ describe('toolCallSummary', () => {
     expect(toolCallSummary('editFile', {path: 'a.ts', edits: [{}, {}]})).toBe('editFile a.ts (2 edits)');
   });
 
-  it('formats replaceLines with line range', () => {
+  it('formats replacement and symbol-aware LSP tools', () => {
     expect(toolCallSummary('replaceLines', {path: 'x.ts', startLine: 3, endLine: 5})).toBe('replaceLines x.ts:3-5');
+    expect(toolCallSummary('replaceInFiles', {path: 'src', needle: 'old', dryRun: true})).toBe('replaceInFiles "old" in src (dry run)');
+    expect(toolCallSummary('lspFindSymbol', {path: 'src/a.ts', namePath: 'Service/run'})).toBe('lspFindSymbol src/a.ts:Service/run');
+    expect(toolCallSummary('lspRenameSymbol', {path: 'src/a.ts', namePath: 'Service/run'})).toBe('lspRenameSymbol src/a.ts:Service/run');
   });
 
   it('falls back to generic format', () => {

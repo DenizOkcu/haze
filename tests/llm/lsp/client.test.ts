@@ -230,6 +230,21 @@ describe('StdioLspClient', () => {
     await client.close();
   });
 
+  it('acknowledges server work-progress requests and waits for indexing to settle', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    child.stdout.emit('data', frame({id: 44, method: 'window/workDoneProgress/create', params: {token: 'index'}}));
+    child.stdout.emit('data', frame({method: '$/progress', params: {token: 'index', value: {kind: 'begin'}}}));
+    const waiting = client.waitForIndexing(1000, 10);
+    child.stdout.emit('data', frame({method: '$/progress', params: {token: 'index', value: {kind: 'end'}}}));
+    await vi.advanceTimersByTimeAsync(60);
+    await expect(waiting).resolves.toBe(true);
+    const sent = (child.stdin.write as ReturnType<typeof vi.fn>).mock.calls.map(call => call[0] as string).join('\n');
+    expect(sent).toContain('"id":44');
+    expect(sent).toContain('"result":null');
+  });
+
   it('still resolves requests interleaved with notification frames', async () => {
     const child = fakeChild();
     const client = new StdioLspClient(ts, child);

@@ -33,7 +33,12 @@ export function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
 }
 
-export function asRange(value: unknown) {
+export interface LspRange {
+  start: {line: number; character: number};
+  end: {line: number; character: number};
+}
+
+export function asRange(value: unknown): LspRange | undefined {
   if (!isObject(value) || !isObject(value.start) || !isObject(value.end)) return undefined;
   const start = value.start as Record<string, unknown>;
   const end = value.end as Record<string, unknown>;
@@ -92,7 +97,7 @@ export function flattenSymbols(symbols: unknown[], filePath: string, limit: numb
 /** Structured, workspace-safe summary of one LSP diagnostic. */
 export interface LspDiagnostic {
   severity: 'error' | 'warning' | 'information' | 'hint';
-  range: ReturnType<typeof asRange>;
+  range: LspRange;
   message: string;
   code?: string;
   source?: string;

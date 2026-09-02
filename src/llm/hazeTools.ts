@@ -28,6 +28,7 @@ import {EXACT_MUTATION_BYTES} from '../core/limits.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../core/agent/budgets.js';
 import {readUtf8LinesPage, readUtf8Prefix} from '../core/io/boundedRead.js';
 import {assertReadableTextFile, readFailureRecovery} from './tools/readRecovery.js';
+import {replaceInFiles} from './tools/replaceInFiles.js';
 
 function mutationDiffFields(filePath: string, fullDiff: ToolDiffLine[]) {
   const preview = boundedDiff(fullDiff, INLINE_DIFF_LINE_LIMIT);
@@ -250,6 +251,29 @@ export const hazeTools = {
         }, scopedContext);
       } catch (error) {
         return structuredToolFailure('grep', error, 'Check that the search path exists and the pattern is valid regex. Try a narrower path or simpler pattern.', searchPath);
+      }
+    }),
+  }),
+
+  replaceInFiles: tool({
+    description: 'Preview or apply guarded literal/regex replacements across files. Use dryRun and occurrence IDs when unintended matches are possible.',
+    contextSchema: hazeToolContextSchema,
+    inputSchema: z.object({
+      path: z.string().default('.').describe('Workspace-relative file or directory scope'),
+      needle: z.string().min(1).describe('Literal text or JavaScript regular expression'),
+      replacement: z.string().describe('Replacement text; regex mode supports $1-style capture substitutions'),
+      mode: z.enum(['literal', 'regex']).default('literal'),
+      includeGlob: z.string().optional().describe('Optional workspace-relative include glob'),
+      excludeGlob: z.string().optional().describe('Optional workspace-relative exclude glob'),
+      dryRun: z.boolean().default(true).describe('Preview changes without writing'),
+      occurrenceIds: z.array(z.string()).optional().describe('Apply only stable IDs returned by a dry run; stale IDs abort all changes'),
+      expectedCount: z.number().int().nonnegative().optional().describe('Abort all changes unless this many occurrences are currently found'),
+    }),
+    execute: async (input, context) => runDedupedTool('replaceInFiles', input, context, async () => {
+      try {
+        return await replaceInFiles(input, context);
+      } catch (error) {
+        return structuredToolFailure('replaceInFiles', error, 'Run a dry run with a narrower path/glob or corrected pattern, then apply current occurrence IDs.', input.path);
       }
     }),
   }),
