@@ -1,6 +1,6 @@
 import type {ToolSet} from 'ai';
 import {hazeTools} from './hazeTools.js';
-import {buildLspTools} from './lspTools.js';
+import {buildLspTools, createPostMutationDiagnostics} from './lspTools.js';
 import {LspPool} from './lsp/pool.js';
 import {buildSystemPrompt, type PromptSession} from './systemPrompt.js';
 import {readSettings} from '../config/settings.js';
@@ -18,6 +18,7 @@ import {isSkillEnabled} from '../config/skillSettings.js';
 import {createSubagentTool} from '../core/subagent/subagentRunner.js';
 import type {ContextFile} from '../config/contextFiles.js';
 import {addCapabilityTools} from './capabilities.js';
+import type {PostMutationDiagnostics} from './tools/toolContext.js';
 
 export type ToolCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
 
@@ -63,6 +64,8 @@ export interface AssembledRequestContext {
   loadedMcp?: LoadedMcpTools;
   /** Turn-scoped LSP client pool; callers close it once the turn/context is done. */
   lspPool?: LspPool;
+  /** Bounded automatic diagnostics attached to successful file-mutation results. */
+  postMutationDiagnostics?: PostMutationDiagnostics;
   executionScope: TurnExecutionScope;
 }
 
@@ -99,7 +102,8 @@ export async function assembleRequestContext(input: {
   } else {
     for (const [name, skill] of enabledSkills) if (!isSkillEnabled(settings, name, skill.source)) enabledSkills.delete(name);
   }
-  const hasInstalledLsp = (await installedLspServers(settings)).length > 0;
+  const installedLsp = await installedLspServers(settings);
+  const hasInstalledLsp = installedLsp.length > 0;
   const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile;
   const profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
   const executionScope = input.executionScope ?? {
@@ -151,5 +155,8 @@ export async function assembleRequestContext(input: {
   const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
   const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
-  return {systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope};
+  return {
+    systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope,
+    ...(lspPool ? {postMutationDiagnostics: createPostMutationDiagnostics(installedLsp, lspPool)} : {}),
+  };
 }

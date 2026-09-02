@@ -26,6 +26,12 @@ async function loadLspTools() {
       const servers = (settings.lspServers ?? []) as Array<Record<string, unknown>>;
       return servers.map(server => ({...server, args: server.args ?? [], extensions: server.extensions ?? [], enabled: server.enabled !== false}));
     },
+    // Mirrors the real installedLspServers gate; tests mark missing binaries with installed: false.
+    installedLspServers: async (settings: Record<string, unknown>) => {
+      const servers = (settings.lspServers ?? []) as Array<Record<string, unknown>>;
+      return servers.filter(server => server.enabled !== false && server.installed !== false)
+        .map(server => ({...server, args: server.args ?? [], extensions: server.extensions ?? [], enabled: true}));
+    },
   }));
   vi.doMock('../../src/llm/lsp/pool.js', () => ({
     pickLspServer: (servers: Array<{extensions?: string[]; enabled?: boolean}>, filePath: string) => {
@@ -208,6 +214,48 @@ describe('symbol-aware LSP tools', () => {
   });
 });
 
+describe('lspTools installed-server gating', () => {
+  it('refuses a file whose matching server is enabled but not installed', async () => {
+    captured.readSettingsResult = {lspServers: [
+      {name: 'typescript', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts', '.tsx']},
+      {name: 'rust', command: 'rust-analyzer', extensions: ['.rs'], installed: false},
+    ]};
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspDefinition.execute({path: 'src/lib.rs', line: 1, column: 1, maxResults: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toContain('rust is enabled');
+    expect((result as {error: string}).error).toContain('"rust-analyzer" is not installed');
+    expect(captured.lspFns.lspDefinition).not.toHaveBeenCalled();
+  });
+
+  it('reports a named enabled server that is not installed', async () => {
+    captured.readSettingsResult = {lspServers: [{name: 'rust', command: 'rust-analyzer', extensions: ['.rs'], installed: false}]};
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspWorkspaceSymbols.execute({query: 'foo', server: 'rust', maxSymbols: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toContain('not installed');
+    expect(captured.lspFns.lspWorkspaceSymbols).not.toHaveBeenCalled();
+  });
+
+  it('uses the first installed server when an earlier enabled one is missing', async () => {
+    captured.readSettingsResult = {lspServers: [
+      {name: 'rust', command: 'rust-analyzer', extensions: ['.rs'], installed: false},
+      {name: 'typescript', command: 'typescript-language-server', args: ['--stdio'], extensions: ['.ts', '.tsx']},
+    ]};
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspWorkspaceSymbols.execute({query: 'foo', maxSymbols: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: true, server: 'typescript'});
+  });
+
+  it('explains that no enabled server is installed when none resolve', async () => {
+    captured.readSettingsResult = {lspServers: [{name: 'rust', command: 'rust-analyzer', extensions: ['.rs'], installed: false}]};
+    const {lspTools} = await loadLspTools();
+    const result = await lspTools.lspWorkspaceSymbols.execute({query: 'foo', maxSymbols: 10}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);
+    expect(result).toMatchObject({ok: false});
+    expect((result as {error: string}).error).toContain('No enabled LSP server is installed');
+  });
+});
+
 describe('lspTools.lspTypeDefinition', () => {
   it('returns locations for a 1-based line/column', async () => {
     const {lspTools} = await loadLspTools();
@@ -248,6 +296,29 @@ describe('lspTools.lspImplementation', () => {
 });
 
 describe('lspTools.lspDiagnostics', () => {
+  it('builds automatic diagnostics for supported changed files only', async () => {
+    const {createPostMutationDiagnostics} = await loadLspTools();
+    const diagnose = createPostMutationDiagnostics([
+      {name: 'typescript', command: 'typescript-language-server', extensions: ['.ts']},
+    ], {} as never);
+
+    const result = await diagnose(['src/a.ts', 'README.md', 'src/a.ts']);
+
+    expect(captured.lspFns.lspDiagnostics).toHaveBeenCalledOnce();
+    expect(captured.lspFns.lspDiagnostics).toHaveBeenCalledWith(expect.anything(), 'src/a.ts', 20, expect.anything());
+    expect(result).toMatchObject({ok: true, files: [{path: 'src/a.ts', server: 'typescript', diagnostics: [{message: 'bad'}]}], truncated: false});
+  });
+
+  it('omits automatic diagnostics when no server supports the changed files', async () => {
+    const {createPostMutationDiagnostics} = await loadLspTools();
+    const diagnose = createPostMutationDiagnostics([
+      {name: 'typescript', command: 'typescript-language-server', extensions: ['.ts']},
+    ], {} as never);
+
+    expect(await diagnose(['README.md'])).toBeUndefined();
+    expect(captured.lspFns.lspDiagnostics).not.toHaveBeenCalled();
+  });
+
   it('returns diagnostics for an enabled server', async () => {
     const {lspTools} = await loadLspTools();
     const result = await lspTools.lspDiagnostics.execute({path: 'src/a.ts', maxResults: 50}, {toolCallId: 't', messages: [], abortSignal: new AbortController().signal} as never);

@@ -24,6 +24,7 @@ describe('toolContext', () => {
       mutationEpoch: 0,
       isSubagent: true,
       blessedPaths: [],
+      postMutationDiagnostics: async () => undefined,
     }).success).toBe(true);
     expect(hazeToolContextSchema.safeParse({futureField: 'allowed'}).success).toBe(true);
     expect(hazeToolContextSchema.safeParse([]).success).toBe(false);
@@ -64,6 +65,41 @@ describe('toolContext', () => {
     const context: HazeToolContext = {};
     await runDedupedTool('writeFile', {path: 'new.ts', append: true}, {context}, async () => ({ok: false, reasonCode: 'append_target_missing' as const}));
     await expect(runDedupedTool('writeFile', {path: './new.ts', append: false}, {context}, async () => ({ok: true}))).resolves.toEqual({ok: true});
+  });
+
+  it('attaches automatic diagnostics only after successful file changes', async () => {
+    const calls: string[][] = [];
+    const context: HazeToolContext = {
+      postMutationDiagnostics: async paths => {
+        calls.push([...paths]);
+        return {ok: true, files: paths.map(filePath => ({path: filePath, diagnostics: []}))};
+      },
+    };
+
+    const changed = await runDedupedTool('replaceInFiles', {path: 'src'}, {context}, async () => ({ok: true, files: [{path: 'src/a.ts'}, {path: 'src/b.ts'}]}));
+    const failed = await runDedupedTool('editFile', {path: 'src/failed.ts'}, {context}, async () => ({ok: false, reasonCode: 'old_text_missing'}));
+    const unchanged = await runDedupedTool('editFile', {path: 'src/c.ts'}, {context}, async () => ({ok: true, noChange: true}));
+    const preview = await runDedupedTool('replaceInFiles', {path: 'src'}, {context}, async () => ({ok: true, dryRun: true}));
+    await runDedupedTool('shell', {command: 'echo ok'}, {context}, async () => ({ok: true}));
+
+    expect(changed).toMatchObject({lspDiagnostics: {ok: true, files: [{path: 'src/a.ts'}, {path: 'src/b.ts'}]}});
+    expect(failed).not.toHaveProperty('lspDiagnostics');
+    expect(unchanged).not.toHaveProperty('lspDiagnostics');
+    expect(preview).not.toHaveProperty('lspDiagnostics');
+    expect(calls).toEqual([['src/a.ts', 'src/b.ts']]);
+  });
+
+  it('keeps a successful mutation result when automatic diagnostics fail', async () => {
+    const context: HazeToolContext = {
+      postMutationDiagnostics: async () => { throw new Error('server unavailable\nwith internal detail'); },
+    };
+
+    const result = await runDedupedTool('writeFile', {path: 'src/new.ts'}, {context}, async () => ({ok: true}));
+
+    expect(result).toEqual({
+      ok: true,
+      lspDiagnostics: {ok: false, error: 'Automatic LSP diagnostics failed: server unavailable'},
+    });
   });
 
   it('serializes concurrent main-turn file mutation and shell under the workspace policy', async () => {

@@ -192,7 +192,15 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
 
   const contextFileSignatures = callbacks.contextFileSignatures ?? new Map(activeContextFiles.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
   const mutationPolicy = assembled.executionScope?.mutationPolicy ?? new WorkspaceMutationPolicy();
-  const toolExecutionContext: HazeToolContext = {inFlightToolCalls: new Map<string, Promise<unknown>>(), loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)), loadedContextFileSignatures: contextFileSignatures, onContextFileRead, mutationPolicy, blessedPaths: turnOptions.blessedPaths};
+  const toolExecutionContext: HazeToolContext = {
+    inFlightToolCalls: new Map<string, Promise<unknown>>(),
+    loadedContextFilePaths: new Set(activeContextFiles.map(file => file.path)),
+    loadedContextFileSignatures: contextFileSignatures,
+    onContextFileRead,
+    mutationPolicy,
+    blessedPaths: turnOptions.blessedPaths,
+    postMutationDiagnostics: assembled.postMutationDiagnostics,
+  };
 
   const recoverySlice = turnOptions.recoverySlice;
   const stepCap = recoverySlice?.maxSteps ?? MAIN_STEP_LIMIT;

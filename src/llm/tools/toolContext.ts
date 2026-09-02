@@ -24,6 +24,8 @@ export type ToolExecutionContext = {
   experimental_context?: unknown;
 };
 
+export type PostMutationDiagnostics = (paths: readonly string[]) => Promise<unknown | undefined>;
+
 export type HazeToolContext = {
   inFlightToolCalls?: Map<string, Promise<unknown>>;
   completedToolCalls?: Map<string, number>;
@@ -43,6 +45,8 @@ export type HazeToolContext = {
   isSubagent?: boolean;
   /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
   blessedPaths?: readonly BlessedPath[];
+  /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
+  postMutationDiagnostics?: PostMutationDiagnostics;
 };
 
 function stableJsonStringify(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
@@ -89,7 +93,8 @@ function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('mutationPolicy', isMutationPolicy)
     && validOptional('mutationOwner', field => typeof field === 'symbol')
     && validOptional('isSubagent', field => typeof field === 'boolean')
-    && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'));
+    && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
+    && validOptional('postMutationDiagnostics', field => typeof field === 'function');
 }
 
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');
@@ -159,10 +164,35 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
   };
 }
 
+const FILE_MUTATION_TOOLS = new Set(['editFile', 'replaceInFiles', 'replaceLines', 'writeFile', 'lspRenameSymbol', 'lspSafeDeleteSymbol']);
+
 function isMutatingTool(toolName: string) {
   // Shell execution is conservatively workspace-mutation-capable. Classification remains
   // informational and is not a sandbox boundary.
-  return ['editFile', 'replaceInFiles', 'replaceLines', 'writeFile', 'shell', 'lspRenameSymbol', 'lspSafeDeleteSymbol'].includes(toolName);
+  return FILE_MUTATION_TOOLS.has(toolName) || toolName === 'shell';
+}
+
+/** Paths actually changed by a successful dedicated file-mutation result. */
+export function changedPathsForDiagnostics(toolName: string, input: unknown, result: unknown): string[] {
+  if (!FILE_MUTATION_TOOLS.has(toolName) || !isRecord(result) || result.ok === false || result.noChange === true || result.dryRun === true) return [];
+  const files = Array.isArray(result.files)
+    ? result.files.flatMap(file => isRecord(file) && typeof file.path === 'string' ? [file.path] : [])
+    : [];
+  const inputPath = toolInputField(input, 'path');
+  return [...new Set(files.length > 0 ? files : inputPath ? [inputPath] : [])];
+}
+
+async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown, result: T, diagnostics: PostMutationDiagnostics | undefined): Promise<T> {
+  if (!diagnostics) return result;
+  const paths = changedPathsForDiagnostics(toolName, input, result);
+  if (paths.length === 0 || !isRecord(result)) return result;
+  try {
+    const lspDiagnostics = await diagnostics(paths);
+    return lspDiagnostics === undefined ? result : {...result, lspDiagnostics} as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {...result, lspDiagnostics: {ok: false, error: `Automatic LSP diagnostics failed: ${message.split('\n')[0]}`}} as T;
+  }
 }
 
 function isReadOnlyFileTool(toolName: string) {
@@ -264,7 +294,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
       }
     }
     ctx.completedToolCalls.set(key, ctx.mutationEpoch);
-    return result;
+    return await attachPostMutationDiagnostics(toolName, input, result, ctx.postMutationDiagnostics);
   } catch (error) {
     if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(error)) {
       ctx.failedMutationPaths.add(mutationPathKey);
