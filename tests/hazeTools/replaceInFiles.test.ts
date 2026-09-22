@@ -1,4 +1,7 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import nativeFs from 'node:fs/promises';
+import * as walker from '../../src/utils/fs.js';
+import * as boundedRead from '../../src/core/io/boundedRead.js';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,8 +23,41 @@ describe('replaceInFiles tool', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     process.chdir(cwd);
     await fs.remove(tmp);
+  });
+
+  it.each([true, false])('never opens protected scan descendants (dryRun=%s)', async dryRun => {
+    // Only synthetic directory metadata: no protected file is created or read.
+    vi.spyOn(walker, 'walkDir').mockResolvedValue([{path: '.env', absolutePath: path.join(tmp, '.env'), name: '.env', isFile: true, isDirectory: false}]);
+    const read = vi.spyOn(boundedRead, 'readUtf8Prefix');
+    const result = await hazeTools.replaceInFiles.execute({path: '.', needle: 'marker', replacement: 'new', mode: 'literal', dryRun, expectedCount: 1}, context);
+    expect(read).not.toHaveBeenCalled();
+    expect(result).toMatchObject({skippedFiles: 1, occurrences: []});
+  });
+
+  it.each([
+    ['(?<=prefix )foo', 'bar'], ['foo(?= suffix)', 'bar'],
+    ['(?<word>foo)', '$<word>-$&-$$'], ['(foo)', "$`-$1-$'"], ['^prefix', 'start'],
+  ])('matches native regex replacement semantics for %s', async (needle, replacement) => {
+    const content = 'prefix foo suffix\nprefix foo suffix';
+    await fs.writeFile('src/a.ts', content);
+    const result = await hazeTools.replaceInFiles.execute({path: 'src/a.ts', needle, replacement, mode: 'regex', dryRun: false}, context);
+    expect(result).toMatchObject({ok: true});
+    expect(await fs.readFile('src/a.ts', 'utf8')).toBe(content.replace(new RegExp(needle, 'gm'), replacement));
+  });
+
+  it('reports completed and uncertain paths when a later write fails', async () => {
+    const write = nativeFs.writeFile.bind(nativeFs);
+    vi.spyOn(nativeFs, 'writeFile').mockImplementation(async (file, data, options) => {
+      if (String(file).endsWith('b.ts')) throw new Error('disk full');
+      return write(file, data, options);
+    });
+    const result = await hazeTools.replaceInFiles.execute({path: 'src', needle: 'oldName', replacement: 'newName', mode: 'literal', dryRun: false}, context);
+    expect(result).toMatchObject({ok: false, changedPaths: ['src/a.ts'], uncertainPaths: ['src/b.ts'], recoverable: true});
+    expect(await fs.readFile('src/a.ts', 'utf8')).toContain('newName');
+    expect(await fs.readFile('src/b.ts', 'utf8')).toContain('oldName');
   });
 
   it('previews stable occurrence IDs without mutating files', async () => {

@@ -43,7 +43,14 @@ function occurrencesIn(filePath: string, content: string, input: ReplaceInFilesI
     if (start == null) continue;
     const matched = match[0];
     if (matched.length === 0) throw new Error('needle must not match an empty string');
-    const replacement = input.mode === 'regex' ? matched.replace(new RegExp(input.needle, 'm'), input.replacement) : input.replacement;
+    let replacement = input.replacement;
+    if (input.mode === 'regex') {
+      // A sticky match retains lookaround, captures, and native $`/$' input context.
+      const single = new RegExp(input.needle, 'my');
+      single.lastIndex = start;
+      const replaced = content.replace(single, input.replacement);
+      replacement = replaced.slice(start, replaced.length - (content.length - start - matched.length));
+    }
     const digest = crypto.createHash('sha256').update(`${filePath}\0${start}\0${matched}`).digest('hex').slice(0, 12);
     result.push({id: `${filePath}:${result.length}@${digest}`, path: filePath, start, end: start + matched.length, line: content.slice(0, start).split('\n').length, matched, replacement});
   }
@@ -69,16 +76,18 @@ export async function replaceInFiles(input: ReplaceInFilesInput, context: ToolEx
   const include = input.includeGlob ? globRegex(input.includeGlob) : undefined;
   const exclude = input.excludeGlob ? globRegex(input.excludeGlob) : undefined;
   const files: Array<{path: string; absolutePath: string; content: string; occurrences: Occurrence[]}> = [];
+  let skippedFiles = 0;
   for (const entry of entries) {
     if (!entry.isFile) continue;
     const relative = path.relative(workspaceRoot(), entry.absolutePath).replace(/\\/g, '/');
     if ((include && !include.test(relative)) || exclude?.test(relative)) continue;
     let content: string;
     try {
-      const read = await readUtf8Prefix(entry.absolutePath, EXACT_MUTATION_BYTES);
+      const safePath = await prepareWorkspaceRead(entry.absolutePath, false, context);
+      const read = await readUtf8Prefix(safePath, EXACT_MUTATION_BYTES);
       if (read.truncated) continue;
       content = read.content;
-    } catch { continue; }
+    } catch { skippedFiles++; continue; }
     if (content.includes('\0')) continue;
     const occurrences = occurrencesIn(relative, content, input);
     if (occurrences.length > 0) files.push({path: relative, absolutePath: entry.absolutePath, content, occurrences});
@@ -89,7 +98,7 @@ export async function replaceInFiles(input: ReplaceInFilesInput, context: ToolEx
   const occurrenceHandle = fullPreview.length > preview.length || fullPreview.some(occurrence => occurrence.before.length > 200 || occurrence.after.length > 200)
     ? storeToolOutput(JSON.stringify(fullPreview, null, 2))
     : undefined;
-  const previewFields = {occurrences: preview, occurrencesTruncated: occurrenceHandle != null, ...(occurrenceHandle ? {occurrenceHandle} : {})};
+  const previewFields = {skippedFiles, occurrences: preview, occurrencesTruncated: occurrenceHandle != null, ...(occurrenceHandle ? {occurrenceHandle} : {})};
   if (input.dryRun) return {ok: true, dryRun: true, occurrenceCount: all.length, fileCount: files.length, ...previewFields};
   if (input.expectedCount != null && input.expectedCount !== all.length) return {ok: false, error: `expectedCount=${input.expectedCount}, but found ${all.length}; no changes applied.`, ...previewFields, recoverable: true};
   const requested = input.occurrenceIds ? new Set(input.occurrenceIds) : undefined;
@@ -104,11 +113,19 @@ export async function replaceInFiles(input: ReplaceInFilesInput, context: ToolEx
     const prepared = await prepareWorkspaceMutation('replaceInFiles', file.path, false, context);
     if (prepared.scopedStop) return prepared.scopedStop;
   }
-  const changed = selectedFiles.map(file => ({...file, updated: applyOccurrences(file.content, file.selected)}));
-  for (const file of changed) await fs.writeFile(file.absolutePath, file.updated, 'utf8');
+  const changed = selectedFiles.map(file => ({...file, updated: applyOccurrences(file.content, file.selected)})).filter(file => file.updated !== file.content);
+  const changedPaths: string[] = [];
+  for (const file of changed) {
+    try {
+      await fs.writeFile(file.absolutePath, file.updated, 'utf8');
+      changedPaths.push(file.path);
+    } catch {
+      return {ok: false, changedPaths, uncertainPaths: [file.path], error: `Write failed for ${file.path}; earlier writes were not rolled back.`, recoverable: true, suggestedNextStep: 'Read the changed and uncertain paths before retrying; validate all completed changes.'};
+    }
+  }
   const fullFiles = changed.map(file => ({path: file.path, ...fileDiff(file.content, file.updated)}));
   const changedFiles = fullFiles.map(file => ({...file, diff: boundedDiff(file.diff, 12).diff}));
   const diffLineCount = fullFiles.reduce((sum, file) => sum + file.diff.length, 0);
   const diffHandle = diffLineCount > changedFiles.reduce((sum, file) => sum + file.diff.length, 0) ? storeToolOutput(JSON.stringify(fullFiles, null, 2)) : undefined;
-  return {ok: true, dryRun: false, occurrenceCount: changed.reduce((sum, file) => sum + file.selected.length, 0), fileCount: changed.length, diffLineCount, files: changedFiles, ...(diffHandle ? {diffHandle} : {})};
+  return {ok: true, dryRun: false, changedPaths, noChange: changed.length === 0, occurrenceCount: changed.reduce((sum, file) => sum + file.selected.length, 0), fileCount: changed.length, diffLineCount, files: changedFiles, ...(diffHandle ? {diffHandle} : {})};
 }

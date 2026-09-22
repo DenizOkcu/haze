@@ -112,11 +112,14 @@ export function isProtectedSecretPath(candidatePath: string, homeDir: string = o
  * remain readable through targeted `readFile` calls.
  */
 export function secretSearchExcludeGlobs(): string[] {
-  return [
-    '!.env', '!.env.*', '!.envrc', '!.envrc.*',
-    '!id_rsa*', '!id_dsa*', '!id_ecdsa*', '!id_ed25519*',
-    '!*.pem', '!*.key',
-    ...[...SHELL_HISTORY_BASENAMES].map(name => `!${name}`),
-    '!secrets.json', '!secrets.yaml', '!secrets.yml', '!secrets.toml',
-  ];
+  // Search conservatively excludes home-store names wherever encountered.
+  // Negated-only globs cannot express an exception without widening traversal.
+  return [...new Set([
+    ...ENV_STEMS.flatMap(stem => [`!${stem}`, `!${stem}.*`]),
+    ...SSH_KEY_STEMS.map(stem => `!${stem}*`),
+    ...PROTECTED_EXTENSIONS.map(extension => `!*${extension}`),
+    ...[...PROTECTED_BASENAMES].map(name => `!${name}`),
+    ...PROTECTED_HOME_DIRS.flatMap(directory => [`!**/${directory}`, `!**/${directory}/**`]),
+    ...PROTECTED_HOME_FILES.map(file => `!**/${file}`),
+  ])];
 }

@@ -211,11 +211,13 @@ export const hazeTools = {
           '--context', String(contextLines),
         ];
         if (caseInsensitive) args.push('--ignore-case');
+        if (includeIgnored) args.push('--no-ignore', '--hidden');
         if (glob) args.push('--glob', glob);
         // Secret-file exclusions come after any model-supplied glob: later
         // ripgrep globs take precedence, and an explicit glob (which also
         // re-enables hidden-file search) must never re-include secrets.
-        for (const secretGlob of secretSearchExcludeGlobs()) args.push('--glob', secretGlob);
+        for (const secretGlob of secretSearchExcludeGlobs()) args.push('--iglob', secretGlob);
+        args.push('--glob', '!**/.git/**', '--glob', '!**/node_modules/**');
         args.push('--', pattern, absolutePath);
 
         const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});

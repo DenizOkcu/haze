@@ -1,4 +1,6 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import * as grepRunner from '../../src/llm/tools/grepRunner.js';
+import {secretSearchExcludeGlobs} from '../../src/core/safety/secretPaths.js';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,8 +18,33 @@ describe('grep tool', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     process.chdir(originalCwd);
     await fs.remove(tmp);
+  });
+
+  it('appends case-insensitive secret policy exclusions after positive user globs', async () => {
+    const run = vi.spyOn(grepRunner, 'runRipgrepBounded').mockRejectedValue(new Error('argument inspection only'));
+    await hazeTools.grep.execute({pattern: 'marker', path: '.', glob: '*', contextLines: 0, maxMatches: 10, caseInsensitive: false, includeIgnored: true}, {});
+    const args = run.mock.calls[0]![0].args;
+    for (const glob of secretSearchExcludeGlobs()) {
+      const index = args.indexOf(glob);
+      expect(index).toBeGreaterThan(args.indexOf('*'));
+      expect(args[index - 1]).toBe('--iglob');
+    }
+    expect(args).toEqual(expect.arrayContaining(['!**/.ssh/**', '!**/.aws/**', '!**/.docker/config.json', '!**/.netrc', '!secrets.json', '!*.key']));
+  });
+
+  it('searches ignored and hidden descendants only with override, excluding dependency metadata', async () => {
+    await fs.writeFile(path.join(tmp, '.gitignore'), 'private/\n');
+    for (const directory of ['private', '.hidden', 'node_modules', '.git']) {
+      await fs.ensureDir(path.join(tmp, directory));
+      await fs.writeFile(path.join(tmp, directory, 'value.txt'), 'needle\n');
+    }
+    const input = {pattern: 'needle', path: '.', contextLines: 0, maxMatches: 10, caseInsensitive: false};
+    expect(await hazeTools.grep.execute(input, {})).toMatchObject({totalMatches: 0});
+    const result = await hazeTools.grep.execute({...input, includeIgnored: true, glob: '*.txt'}, {});
+    expect(result.matches.map(match => match.file).sort()).toEqual(['.hidden/value.txt', 'private/value.txt']);
   });
 
   it('returns structured matches and enforces a global result cap', async () => {
