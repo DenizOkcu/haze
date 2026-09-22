@@ -2,6 +2,8 @@ import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
+import {isSingleForegroundCommand} from '../safety/shellClassifier.js';
+import {changedPathsFromTool} from './toolCapabilities.js';
 
 export type WorkFileAction = 'read' | 'created' | 'modified';
 export type WorkValidationStatus = 'pending' | 'passed' | 'failed';
@@ -163,13 +165,11 @@ function outputSummary(output: unknown) {
 }
 
 function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined, revision: number) {
-  const existing = state.validations.find(validation => validation.command === command);
-  if (existing) Object.assign(existing, {status, summary, revision, ...(kind ? {kind} : {})});
-  else state.validations.push({command, status, summary, revision, ...(kind ? {kind} : {})});
-
-  const existingCommand = state.validationCommands.find(item => item.command === command);
-  if (existingCommand) existingCommand.status = status;
-  else state.validationCommands.push({command, status});
+  // Keep both evidence and status display in execution order when a check reruns.
+  state.validations = state.validations.filter(validation => validation.command !== command);
+  state.validations.push({command, status, summary, revision, ...(kind ? {kind} : {})});
+  state.validationCommands = state.validationCommands.filter(item => item.command !== command);
+  state.validationCommands.push({command, status});
 }
 
 const ARTIFACT_LAUNCHERS = new Set(['node', 'python', 'python3', 'ruby', 'php', 'perl', 'sh', 'bash', 'zsh', 'fish', 'csh', 'tcsh', 'tsx', 'ts-node', 'rscript', 'lua']);
@@ -182,7 +182,7 @@ function shellWords(command: string) {
 /** Strictly recognize direct execution of one file changed during this goal. */
 export function executedMutatedArtifact(command: string, state: WorkState): string | undefined {
   // Chaining and pipelines can mask the artifact's exit status, so they are not evidence.
-  if (/&&|\|\||[;|]/.test(command)) return undefined;
+  if (!isSingleForegroundCommand(command)) return undefined;
   const words = shellWords(command.trim());
   if (words.length === 0) return undefined;
   const executable = words[0]!.replace(/^.*[\\/]/, '').toLowerCase();
@@ -263,18 +263,20 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
     state.lastProgressAt = now;
   }
 
-  if (path && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolName)) {
-    if (ok) {
-      upsertFile(state, path, event.toolName === 'writeFile' ? 'created' : 'modified');
-      state.phase = 'editing';
-      state.lastProgressAt = now;
-      state.blockers = state.blockers.filter(blocker => !blocker.includes(path));
-      state.mutationCount += 1;
-      state.mutationSeq = seq;
-    } else {
-      state.blockers = [...new Set([...state.blockers, `Edit failed for ${path}: ${outputSummary(event.output) || 'fresh read required'}`])];
-      state.nextAction = `Read ${path}, then retry the edit with current content.`;
-    }
+  const changedPaths = changedPathsFromTool(event.toolName, event.input, event.output, event.success);
+  for (const changedPath of changedPaths) {
+    upsertFile(state, changedPath, event.toolName === 'writeFile' ? 'created' : 'modified');
+    state.blockers = state.blockers.filter(blocker => !blocker.includes(changedPath));
+  }
+  if (changedPaths.length > 0) {
+    state.phase = 'editing';
+    state.lastProgressAt = now;
+    state.mutationCount += changedPaths.length;
+    state.mutationSeq = seq;
+  }
+  if (!ok && path && ['editFile', 'replaceLines', 'writeFile'].includes(event.toolName)) {
+    state.blockers = [...new Set([...state.blockers, `Edit failed for ${path}: ${outputSummary(event.output) || 'fresh read required'}`])];
+    state.nextAction = `Read ${path}, then retry the edit with current content.`;
   }
 
   // Classifier-confirmed test/build commands are validation. A direct execution

@@ -24,25 +24,22 @@ export function withToolDeadline(execute: () => Promise<unknown>, timeoutMs: num
       if (settled) return;
       settled = true;
       if (handle.timer) clearTimeout(handle.timer);
+      signal?.removeEventListener('abort', onAbort);
       action();
     };
-    const quarantineLate = () => {
-      // Swallow the eventual resolution/rejection of an abort-ignoring tool so
-      // it cannot surface as an unhandled rejection after the wrapper returned.
-      work.catch(() => undefined);
-    };
     const fire = (message: string) => settle(() => {
-      quarantineLate();
       resolve({ok: false, [TOOL_DEADLINE_EXCEEDED]: true, error: message});
     });
-
-    const work = execute();
+    const onAbort = () => fire('Tool execution was aborted.');
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener('abort', onAbort, {once: true});
     handle.timer = setTimeout(() => fire(`Tool execution exceeded the ${timeoutMs}ms deadline.`), timeoutMs);
-    if (signal) {
-      if (signal.aborted) return fire('Tool execution was aborted.');
-      signal.addEventListener('abort', () => fire('Tool execution was aborted.'), {once: true});
+    // Attach both handlers even when cancellation wins; late rejection is handled.
+    try {
+      execute().then(value => settle(() => resolve(value)), error => settle(() => reject(error)));
+    } catch (error) {
+      settle(() => reject(error));
     }
-    work.then(value => settle(() => resolve(value)), error => settle(() => reject(error)));
   });
 }
 
@@ -56,12 +53,17 @@ export interface AbsoluteDeadline {
 }
 export function createAbsoluteDeadline(input: {timeoutMs: number; signal?: AbortSignal; onTimeout: () => void;}): AbsoluteDeadline {
   const {timeoutMs, signal, onTimeout} = input;
-  let fired = false;
+  let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const fire = () => {
-    if (fired) return;
-    fired = true;
+  const clear = () => {
+    disposed = true;
     if (timer) clearTimeout(timer);
+    timer = undefined;
+    signal?.removeEventListener('abort', fire);
+  };
+  const fire = () => {
+    if (disposed) return;
+    clear();
     onTimeout();
   };
   timer = setTimeout(fire, timeoutMs);
@@ -69,10 +71,5 @@ export function createAbsoluteDeadline(input: {timeoutMs: number; signal?: Abort
     if (signal.aborted) fire();
     else signal.addEventListener('abort', fire, {once: true});
   }
-  return {
-    clear: () => {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-    },
-  };
+  return {clear};
 }

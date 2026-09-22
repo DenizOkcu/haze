@@ -12,6 +12,43 @@ function genericPassedSummary(text = 'custom check passed') {
 }
 
 describe('work state', () => {
+  it.each([
+    ['editFile', {ok: true, path: 'a.ts'}, 1],
+    ['replaceLines', {ok: true, path: 'a.ts'}, 1],
+    ['writeFile', {ok: true, path: 'a.ts'}, 1],
+    ['replaceInFiles', {ok: true, files: [{path: 'a.ts'}, {path: 'b.ts'}]}, 2],
+    ['lspRenameSymbol', {ok: true, files: [{path: 'a.ts'}]}, 1],
+    ['lspSafeDeleteSymbol', {ok: true, files: [{path: 'a.ts'}]}, 1],
+    ['replaceInFiles', {ok: false, changedPaths: ['a.ts']}, 1],
+    ['subagent', {capsule: {termination: 'provider_error', changedPaths: ['a.ts']}}, 1],
+    ['subagent', {changedPaths: ['a.ts', 'a.ts']}, 1],
+    ['replaceInFiles', {ok: true, dryRun: true, files: [{path: 'a.ts'}]}, 0],
+    ['replaceInFiles', {ok: true, files: []}, 0],
+    ['editFile', {ok: true, noChange: true, path: 'a.ts'}, 0],
+    ['lspRenameSymbol', {ok: false}, 0],
+  ] as const)('accounts for actual %s effects: %j', (toolName, output, count) => {
+    const state = createWorkState('implement', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    observeWorkToolEvent(state, {toolName, input: {path: '.'}, success: true, output});
+    expect(state.mutationCount).toBe(count);
+    expect(deriveValidationOutcome(state)).toBe(count ? 'stale' : 'passed');
+    observeWorkToolEvent(state, {toolName, input: {path: '.'}, success: true, output, duplicateSkipped: true});
+    expect(state.mutationCount).toBe(count);
+  });
+
+  it.each([
+    ['node app.js', true], ['node app.js "a;b&c"', true],
+    ['node app.js\ntrue', false], ['node app.js & true', false],
+    ['node app.js && true', false], ['node app.js # comment', false],
+    ['node app.js $(true)', false], ['node app.js `true`', false],
+    ['sh -c "node app.js; true"', false],
+  ])('credits only trustworthy direct artifact execution: %s', (command, credited) => {
+    const state = createWorkState('implement', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'app.js'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command}, success: true, output: {ok: true, code: 0}});
+    expect(deriveValidationOutcome(state)).toBe(credited ? 'passed' : 'absent');
+  });
+
   it('records files and validation without raw tool output', () => {
     const state = createWorkState('add feature', 'implement', ['change code', 'test']);
     observeWorkToolEvent(state, {toolName: 'readFile', input: {path: 'src/a.ts'}, success: true});
@@ -69,6 +106,24 @@ describe('work state', () => {
 });
 
 describe('deriveValidationOutcome', () => {
+  it.each(['passed', 'failed'] as const)('uses execution order when an earlier check reruns %s', status => {
+    const state = createWorkState('implement', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    const check = (command: string, passed: boolean) => observeWorkToolEvent(state, {
+      toolName: 'shell', input: {command}, success: passed,
+      output: {ok: passed, validationSummary: passed ? passedSummary() : failedSummary()},
+    });
+    check('npm test', status !== 'passed');
+    check('npm run lint', status !== 'passed');
+    check('npm test', status === 'passed');
+    observeWorkToolEvent(state, {toolName: 'readFile', input: {path: 'a.ts'}, success: true});
+    expect(deriveValidationOutcome(state)).toBe(status);
+    expect(state.validations.map(item => item.command)).toEqual(['npm run lint', 'npm test']);
+    expect(state.validationCommands.at(-1)).toEqual({command: 'npm test', status});
+    expect(state.validations.at(-1)?.revision).toBe(state.validationSeq);
+    expect(state.validationSeq).toBeGreaterThan(state.mutationSeq);
+  });
+
   it('marks a fresh passing validation as passed', () => {
     const state = createWorkState('add feature', 'implement', []);
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});

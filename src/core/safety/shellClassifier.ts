@@ -123,9 +123,17 @@ export function stripQuotedSpans(command: string): string {
  * (`2>&1`, `&>`, `<&`) are not list operators and are excluded. Pipelines are
  * covered separately by `pipefail`; `&&` propagates failures.
  */
+/** Conservative output/exit ownership check, not a shell parser or execution gate. */
+export function isSingleForegroundCommand(command: string): boolean {
+  // Expansions and escapes can change token boundaries; decline ambiguous shapes.
+  if (/[\\`$]/.test(command)) return false;
+  const shape = stripQuotedSpans(command);
+  return !commandMasksValidationExit(command) && !/[&|<>\r\n#(){}"']/.test(shape);
+}
+
 export function commandMasksValidationExit(command: string): boolean {
   const unquoted = stripQuotedSpans(command);
-  if (unquoted.includes(';')) return true;
+  if (/[;\r\n]/.test(unquoted)) return true;
   if (/(?<!\|)\|\|(?!\|)/.test(unquoted)) return true;
   // Single `&` that is not part of `&&` and not a redirection (`>&`, `<&`, `&>`).
   if (/(?<![<>&])&(?![&>])/.test(unquoted)) return true;

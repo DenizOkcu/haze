@@ -75,27 +75,31 @@ export function createQuarantinableCallbacks(callbacks: StreamCallbacks): Quaran
   // a quarantined call must answer "not compacted" instead of undefined.
   const whileLiveBoolean = <Args extends unknown[]>(fn: (...args: Args) => boolean) => (...args: Args) => (state.quarantined ? false : fn(...args));
   const guarded: StreamCallbacks = {
-    ...callbacks,
+    // Enumerate every callback so new fields require an explicit quarantine decision.
+    debugLog: callbacks.debugLog,
+    getConversation: callbacks.getConversation,
+    getLastAssistantText: callbacks.getLastAssistantText,
     addMessage: whileLive(callbacks.addMessage),
     updateMessage: whileLive(callbacks.updateMessage),
     setConversation: whileLive(callbacks.setConversation),
     setBusy: whileLive(callbacks.setBusy),
     setLastAssistantText: whileLive(callbacks.setLastAssistantText),
-    ...(callbacks.setBusyLabel ? {setBusyLabel: whileLive(callbacks.setBusyLabel)} : {}),
-    ...(callbacks.setAbortController ? {setAbortController: whileLive(callbacks.setAbortController)} : {}),
-    ...(callbacks.setGoalStatus ? {setGoalStatus: whileLive(callbacks.setGoalStatus)} : {}),
-    ...(callbacks.onEvent ? {onEvent: whileLive(callbacks.onEvent)} : {}),
-    ...(callbacks.compactConversation ? {compactConversation: whileLiveBoolean(callbacks.compactConversation)} : {}),
-    ...(callbacks.recordTokenUsage ? {recordTokenUsage: whileLive(callbacks.recordTokenUsage)} : {}),
-    ...(callbacks.setWorkState ? {setWorkState: whileLive(callbacks.setWorkState)} : {}),
-    ...(callbacks.onTasksChanged ? {onTasksChanged: whileLive(callbacks.onTasksChanged)} : {}),
+    setBusyLabel: callbacks.setBusyLabel && whileLive(callbacks.setBusyLabel),
+    setAbortController: callbacks.setAbortController && whileLive(callbacks.setAbortController),
+    setGoalStatus: callbacks.setGoalStatus && whileLive(callbacks.setGoalStatus),
+    onEvent: callbacks.onEvent && whileLive(callbacks.onEvent),
+    compactConversation: callbacks.compactConversation && whileLiveBoolean(callbacks.compactConversation),
+    recordCompaction: callbacks.recordCompaction && whileLive(callbacks.recordCompaction),
+    recordTokenUsage: callbacks.recordTokenUsage && whileLive(callbacks.recordTokenUsage),
+    setWorkState: callbacks.setWorkState && whileLive(callbacks.setWorkState),
+    onTasksChanged: callbacks.onTasksChanged && whileLive(callbacks.onTasksChanged),
     get log() {
       return state.quarantined ? undefined : callbacks.log;
     },
     get contextFileSignatures() {
       return callbacks.contextFileSignatures;
     },
-  };
+  } satisfies Record<keyof StreamCallbacks, unknown>;
   return {callbacks: guarded, quarantine: () => {
     state.quarantined = true;
   }};
