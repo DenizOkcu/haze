@@ -343,12 +343,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
         callbacks.onEvent?.(agentEvent({type: 'goal_resume', goalId: `relaunch-${relaunches}`, relaunch: relaunches, stopReason: goalResult.stopReason, reason: `transient ${goalResult.stopReason}; relaunching with ${delayMs}ms backoff`}));
         process.stderr.write(`haze --until-done: ${goalResult.stopReason} on cycle ${goalResult.cycles}; relaunching (attempt ${relaunches}, backoff ${delayMs}ms).\n`);
         await new Promise(resolve => setTimeout(resolve, delayMs));
-        // A paused checkpoint (idle stall) resumes it; a hard model error has
-        // no checkpoint, but the conversation is preserved — re-enter against
-        // it without duplicating the user request.
+        // Relaunch with the same obligations and history. A new bounded retry
+        // pool is intentional after headless backoff, not a new user request.
         goalResult = await runOnce({
-          ...(goalResult.resume?.kind === 'incomplete-goal' ? {resumeFrom: goalResult.resume} : {}),
-          ...(goalResult.resume ? {} : {conversationCarriesRequest: conversation.length > 0}),
+          ...(goalResult.resume ? {resumeFrom: goalResult.resume.kind === 'model-stream-idle' ? {...goalResult.resume, retryAttempt: 0} : goalResult.resume} : {}),
+          conversationCarriesRequest: conversation.length > 0,
         });
       }
     }

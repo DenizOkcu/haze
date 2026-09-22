@@ -15,7 +15,7 @@ import type {SubagentOverrides, TurnExecutionScope} from '../../llm/requestConte
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
-import type {IncompleteGoalResume} from './streaming/goalCheckpoint.js';
+import {goalCheckpointSignature, taskCountsOf, type GoalCheckpoint, type IncompleteGoalResume} from './streaming/goalCheckpoint.js';
 import {abortableDelay, type TokenUsage} from './streaming/turnRuntime.js';
 import type {ToolDisplayDiff} from './streaming/toolGroupRenderer.js';
 import {abortForTurn, createUserAbortCause} from './streaming/abortCause.js';
@@ -36,6 +36,8 @@ export interface TurnResult {
   abortReason?: 'user' | 'turn-deadline';
   /** Bounded, safe completion evidence (no raw commands/output). Additive. */
   evidence?: TurnCompletionEvidence;
+  /** Goal-scoped obligations survive every failed exit, including transport failures. */
+  checkpoint?: GoalCheckpoint;
   /**
    * The turn paused with recoverable work unfinished; this carries what a
    * one-key/automatic resume needs instead of forcing the user to restate the
@@ -241,7 +243,16 @@ export async function runAgentTurn(
     }
     projectGoalEvidence(turnState, goal);
     const evidence = toCompletionEvidence(turnState);
-    return {status, evidence, ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
+    const checkpoint: GoalCheckpoint = {
+      goalId: turnOptions.goalContext?.goalId ?? goal.id, request: value,
+      cycle: turnOptions.goalContext?.cycle ?? 1, mutationCount: goal.mutationCount,
+      validationOutcome: turnState.validationOutcome, taskCounts: taskCountsOf(goal.taskProgress),
+      progressSignature: goalCheckpointSignature({mutationCount: goal.mutationCount, validationOutcome: turnState.validationOutcome, taskCounts: taskCountsOf(goal.taskProgress)}),
+      noProgressCount: turnOptions.goalContext?.noProgressCount ?? 0,
+      requestHash: turnOptions.goalContext?.requestHash, intent: goal.normalizedIntent,
+      ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
+    };
+    return {status, evidence, ...(status !== 'complete' ? {checkpoint} : {}), ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
   } finally {
     turnDeadline?.clear();
     // RT-05: persist an explicit cause for unexplained outcomes in the ledger

@@ -98,6 +98,20 @@ afterEach(() => {
 
 describe('runAgentGoal: automatic continuation across physical turns', () => {
   let cycle0GoalId: string | undefined;
+  it.each(['model-error', 'model-stream-idle'] as const)('carries exact obligations across %s relaunches', async stopReason => {
+    const checkpoint: GoalCheckpoint = {goalId: 'same-goal', request: 'fix', cycle: 1, mutationCount: 2, validationOutcome: 'failed', taskCounts: {total: 1, pending: 1, inProgress: 0, completed: 0}, redEvidence: {command: 'npm test', commandKey: 'npm test', summary: 'failed'}, progressSignature: 'before', noProgressCount: 0};
+    const {runAgentGoal} = await loadSupervisor([{result: turnResult('failed', {checkpoint, ...(stopReason === 'model-stream-idle' ? {resume: {kind: 'model-stream-idle' as const, request: 'fix', retryAttempt: 2}} : {evidence: {finishCause: 'error', mutationCount: 2, validationOutcome: 'failed', validationAfterMutation: true, recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}})})}]);
+    const first = await runAgentGoal(baseOptions());
+    expect(first.stopReason).toBe(stopReason);
+    expect(first.resume?.checkpoint).toEqual(checkpoint);
+    calls.turns = [{result: turnResult('complete'), inspect: (options, args) => {
+      expect(args.retryingExistingRequest).toBe(true);
+      expect(options.goalContext?.goalId).toBe('same-goal');
+      expect(options.goalContext?.carried).toMatchObject({mutationCount: 2, validationOutcome: 'failed', taskProgress: {pending: 1}, redEvidence: checkpoint.redEvidence});
+    }}];
+    calls.positional = [];
+    await runAgentGoal(baseOptions({resumeFrom: first.resume}));
+  });
   it('emits goal_continue with a descriptive text and a goal_notice on pause', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {result: turnResult('failed', {resume: incompleteGoalResume()})},

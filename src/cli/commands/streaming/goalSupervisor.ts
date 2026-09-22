@@ -28,7 +28,7 @@ export interface GoalRunResult {
    * stall): what an explicit resume needs. Automatic continuation has already
    * been attempted; this never rides a `completed` result.
    */
-  resume?: {kind: 'model-stream-idle'; request: string; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint};
+  resume?: {kind: 'model-stream-idle'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint};
 }
 
 export interface GoalRunOptions {
@@ -43,7 +43,7 @@ export interface GoalRunOptions {
   /** Base per-turn options (attachments, blessed paths); attachments apply to the first physical turn only. */
   turnOptions?: TurnExecutionOptions;
   /** Explicit resume of a paused goal: an idle-stalled turn pool, a stored goal checkpoint, or a durable ledger frontier. */
-  resumeFrom?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint} | {kind: 'stored-goal'; checkpoint: GoalCheckpoint};
+  resumeFrom?: {kind: 'model-stream-idle'; retryAttempt: number; checkpoint?: GoalCheckpoint} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint} | {kind: 'stored-goal'; checkpoint: GoalCheckpoint};
   /** The preserved conversation already carries the user request (headless until-done relaunch): do not re-add it. */
   conversationCarriesRequest?: boolean;
   /** Durable goal-ledger sink (P1): the interactive UI wires the session recorder; headless runs stay in-process. */
@@ -114,7 +114,7 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
 export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResult> {
   const {request, contextFiles, callbacks} = options;
   const startedAt = Date.now();
-  const resumedCheckpoint = options.resumeFrom?.kind === 'incomplete-goal' || options.resumeFrom?.kind === 'stored-goal' ? options.resumeFrom.checkpoint : undefined;
+  const resumedCheckpoint = options.resumeFrom?.checkpoint;
   const goalId = resumedCheckpoint?.goalId ?? `goal-${startedAt}-${Math.random().toString(36).slice(2)}`;
   const requestHash = resumedCheckpoint?.requestHash ?? hashRequest(request);
   const intent = resumedCheckpoint?.intent ?? classifyRequestIntent(request);
@@ -194,6 +194,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     initialRetryAttempt = 0;
     cycle += 1;
     lastEvidence = result.evidence;
+    if (result.checkpoint) checkpoint = result.checkpoint;
 
     if (result.status === 'complete') return finish('complete', 'completed');
     if (result.status === 'aborted') {
@@ -236,11 +237,11 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     if (result.resume?.kind === 'model-stream-idle') {
       // Bounded in-turn retries are exhausted; a transport stall is a concrete
       // external blocker — pause with the existing one-key resume path.
-      return finish('failed', 'model-stream-idle', {kind: 'model-stream-idle', request: result.resume.request, retryAttempt: result.resume.retryAttempt});
+      return finish('failed', 'model-stream-idle', {kind: 'model-stream-idle', request: result.resume.request, retryAttempt: result.resume.retryAttempt, ...(checkpoint ? {checkpoint} : {})});
     }
 
     // Failed without a checkpoint: hard blocker (failed tool, invalid input,
     // provider error) or an unresolved synthesis failure.
-    return finish('failed', result.evidence?.finishCause === 'error' ? 'model-error' : 'blocked');
+    return finish('failed', result.evidence?.finishCause === 'error' ? 'model-error' : 'blocked', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
   }
 }
