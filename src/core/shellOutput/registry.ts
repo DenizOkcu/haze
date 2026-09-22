@@ -1,4 +1,5 @@
 import type {ShellOutputFilterInput, ShellOutputFilterResult, StreamReduction} from './types.js';
+import {isSingleForegroundCommand} from '../safety/shellClassifier.js';
 import type {LineFilterDefinition} from './lineFilter.js';
 import {applyLineFilter, findLineFilter} from './lineFilter.js';
 import {renderValidationReduction} from './reducers/validation.js';
@@ -77,7 +78,7 @@ export function filterShellOutput(input: ShellOutputFilterInput): ShellOutputFil
       const rawHandle = input.storeRawOutput?.(raw);
       stdout = makeReduction(input.stdout, renderValidationReduction(input.validationSummary, rawHandle, raw), true, filterName, input, undefined, 'validation');
       stderr = makeReduction(input.stderr, '', input.stderr.length > 0, filterName, input, undefined, 'validation');
-    } else {
+    } else if (isSingleForegroundCommand(input.command)) {
       const stdoutIn = capOutputForProcessing(input.stdout);
       const stderrIn = capOutputForProcessing(input.stderr);
       const git = reduceGitOutput(input.command, stdoutIn, stderrIn);

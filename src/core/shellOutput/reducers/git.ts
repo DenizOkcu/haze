@@ -1,10 +1,11 @@
 import {commandCandidates} from '../command.js';
+import {isSingleForegroundCommand} from '../../safety/shellClassifier.js';
 
 function gitSubcommand(command: string) {
   for (const candidate of commandCandidates(command)) {
     const words = candidate.toLowerCase().split(/\s+/).filter(Boolean);
     const gitIndex = words.indexOf('git');
-    if (gitIndex === -1) continue;
+    if (gitIndex !== 0) continue;
     for (let index = gitIndex + 1; index < words.length; index++) {
       const word = words[index] ?? '';
       if (word === '-c' || word === '--git-dir' || word === '--work-tree') {
@@ -19,7 +20,8 @@ function gitSubcommand(command: string) {
 }
 
 export function reduceGitOutput(command: string, stdout: string, stderr: string) {
-  const text = stdout || stderr;
+  if (!isSingleForegroundCommand(command) || stderr.trim()) return undefined;
+  const text = stdout;
   const subcommand = gitSubcommand(command);
   if (subcommand === 'status') return reduceGitStatus(text);
   if (subcommand === 'log') return reduceGitLog(text);
@@ -57,6 +59,7 @@ function reduceGitStatus(text: string) {
       if (item && !/^\(use /.test(item)) items.push(inUntracked && !/^\w+:/.test(item) ? `?? ${item}` : item);
     }
   }
+  if (!branch && items.length === 0) return undefined;
   const untracked = items.filter(line => line.startsWith('?? ')).length;
   const changed = items.length - untracked;
   const shown = items.slice(0, 30);
