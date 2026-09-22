@@ -7,6 +7,14 @@
 - Symbol-aware LSP workflow: hierarchical symbol/body/signature retrieval, reference results enriched with enclosing symbols and snippets, symbol-scoped diagnostics, semantic rename, and reference-guarded safe delete. Warm language servers now receive external file-change notifications, wait for bounded indexing progress, and restart once after termination.
 - Guarded `replaceInFiles` bulk edits with dry-run previews, stable occurrence IDs, include/exclude globs, expected-count checks, stale-selection refusal, bounded diffs, and retrievable overflow output.
 
+## 1.2.1 - 2026-09-07
+
+Edit-recovery UX fix: when a file mutation fails and haze requests `readFile` recovery, the model is now explicitly told which path to read and why — and the tool set is no longer narrowed, because the execution-time gate already enforces the fresh read with a recoverable structured error.
+
+### Fixed
+
+- Read-only edit recovery instructs instead of restricting: when a failed mutation requests `readFile` recovery, the next step appends a control message naming the exact path and explaining that edit tools will reject retries until the read completes — while keeping the full tool set. The turn-scoped gate in the tool context (`failedMutationPaths` / `pathsReadAfterFailedMutation`) remains the structural enforcer: a premature retry gets a structured `Read <path> first` failure in the same step, not a request-time hard error. Previously haze silently narrowed the active tools to `readFile`, so small models that retried the failed mutation anyway hit `AI_NoSuchToolError` step failures and supervisor relaunch loops (22× observed).
+
 ## 1.2.0 - 2026-08-31
 
 Context truthfulness and never-stop-for-recoverable-reasons. A model-backed eval harness drove the changes: the completion gate's trust in real process results had four independent ways to be fed false positives, and the recovery paths still hard-failed on recoverable context conditions.

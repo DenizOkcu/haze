@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A minimal LLM harness for your terminal.",
   "type": "module",
   "license": "MIT",
