@@ -38,23 +38,33 @@ export function useInputSuggestions({value, cursor, suggestions, suggestionMode,
   const detectedMention = !mask && suggestionMode === 'slash' && !value.startsWith('/') && getMentionSuggestions
     ? detectMentionAtCursor(value, cursor)
     : undefined;
+  // Token identity binds results to the mention that produced them (SU-06): a
+  // previous token's list is only visible while the current token matches, so a
+  // fast Tab during a refetch can never complete with another token's entry.
+  const mentionTokenKey = detectedMention ? `${detectedMention.start}:${detectedMention.end}:${detectedMention.token}` : undefined;
+  const [mentionResultsFor, setMentionResultsFor] = useState<string | undefined>();
   useEffect(() => {
     setMentionContext(detectedMention);
+    if (!detectedMention) {
+      setMentionSuggestions([]);
+      setMentionResultsFor(undefined);
+    }
   }, [detectedMention?.token, detectedMention?.start, detectedMention?.end]);
   useEffect(() => {
     if (!mentionContext || !getMentionSuggestions) {
-      if (mentionSuggestions.length > 0) setMentionSuggestions([]);
+      setMentionSuggestions(current => (current.length > 0 ? [] : current));
       return;
     }
+    const key = `${mentionContext.start}:${mentionContext.end}:${mentionContext.token}`;
     let cancelled = false;
     Promise.resolve(getMentionSuggestions(mentionContext.token))
-      .then(results => { if (!cancelled) { setMentionSuggestions(results); setMentionSelectedIndex(0); } })
-      .catch(() => { if (!cancelled) setMentionSuggestions([]); });
+      .then(results => { if (!cancelled) { setMentionSuggestions(results); setMentionSelectedIndex(0); setMentionResultsFor(key); } })
+      .catch(() => { if (!cancelled) { setMentionSuggestions([]); setMentionResultsFor(undefined); } });
     return () => { cancelled = true; };
-  }, [mentionContext?.token, mentionContext?.start, mentionContext?.end]);
+  }, [mentionContext?.token, mentionContext?.start, mentionContext?.end, getMentionSuggestions]);
 
   const inMentionMode = !!detectedMention;
-  const mentionList = inMentionMode ? mentionSuggestions : [];
+  const mentionList = inMentionMode && mentionResultsFor === mentionTokenKey ? mentionSuggestions : [];
   const activeMentionIndex = Math.min(mentionSelectedIndex, Math.max(0, mentionList.length - 1));
   const activeSuggestionIndex = Math.min(selectedSuggestionIndex, Math.max(0, filteredSuggestions.length - 1));
   const activeSuggestion = inMentionMode ? mentionList[activeMentionIndex] : filteredSuggestions[activeSuggestionIndex];

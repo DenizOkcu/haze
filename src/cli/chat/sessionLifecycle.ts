@@ -4,6 +4,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, splitForCompaction} from '../../core/agent/compaction.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
+import {COMPACTION_LLM_MAX_OUTPUT_TOKENS} from '../../core/agent/budgets.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {modelWithConfig} from '../../llm/client.js';
 import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession} from '../../core/session/sessionStore.js';
@@ -13,6 +14,9 @@ import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 import type {SessionRecorder} from './sessionRecorder.js';
 import {displayMessagesFromConversation, estimateConversationTokens} from './chatMetrics.js';
 import {EMPTY_TOKEN_USAGE} from './turnState.js';
+
+/** Bounded wall-clock budget for one manual LLM compaction summary (SU-03). */
+const COMPACT_SUMMARY_TIMEOUT_MS = 120_000;
 import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 
 /**
@@ -222,6 +226,10 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       deps.workStateRef.current = undefined;
       deps.setLiveMessagesState(() => []);
       deps.setMessages(() => [{role: 'system', text: 'Cleared. The void is productive.'}]);
+      // SU-02: record the empty snapshot so the clear is durable immediately;
+      // restore replays the clear marker and yields an empty conversation even
+      // if the process exits before the next conversation snapshot arrives.
+      deps.sessionRecorder()?.recordConversation([]);
       deps.sessionRecorder()?.recordNamedEvent('clear', 'Conversation cleared');
       await deps.sessionRecorder()?.flush().catch(deps.showPersistenceWarning);
       await startNewLog().catch(deps.showPersistenceWarning);
@@ -239,13 +247,27 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         deps.setMessages(m => [...m, {role: 'system', text: `Compaction skipped: only ${messages.length} model messages in context.`}]);
         return false;
       }
+      // SU-03: commit against the exact session and conversation we captured.
+      // A submission/session change while the summary was pending must not be
+      // overwritten — the stale compaction is reported and discarded instead.
+      const sessionAtStart = deps.sessionRef.current;
       try {
         const runtime = await modelWithConfig();
         if (!runtime?.model) throw new Error('no model provider configured');
         const summarization = await generateText({
           model: runtime.model,
           prompt: buildLlmCompactionPrompt({older: split.older, instructions}),
+          maxOutputTokens: COMPACTION_LLM_MAX_OUTPUT_TOKENS,
+          abortSignal: AbortSignal.timeout(COMPACT_SUMMARY_TIMEOUT_MS),
         });
+        if (deps.sessionRef.current !== sessionAtStart) {
+          deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the session changed while the summary was being written.'}]);
+          return false;
+        }
+        if (deps.conversationRef.current !== messages) {
+          deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the conversation changed while the summary was being written. Run /compact again.'}]);
+          return false;
+        }
         const summaryText = summarization.text.trim();
         if (!summaryText) throw new Error('model returned an empty summary');
         const result = compactModelMessagesWithSummary(messages, {summaryText, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, instructions, workState: deps.workStateRef.current});

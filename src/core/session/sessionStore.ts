@@ -367,17 +367,32 @@ export async function readSessionEntries(session: HazeSession): Promise<ReadSess
  * a crash mid-write can never resurrect a half-written boundary
  * (autoprompt's "treat half-written artifacts as absent").
  */
-export function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLedgerFrontier | undefined {
-  let frontier: GoalLedgerFrontier | undefined;
-  for (const entry of entries) {
-    if (entry.type !== 'goal') continue;
+/**
+ * Ordered frontier state shared by list-based lookup and streaming restore
+ * (SU-01): a later start/continue of the same goal id REOPENS it, because an
+ * explicit resume reuses the goalId after an orderly pause (`goal_end`). Only
+ * the newest goal id can hold the frontier; a terminal end closes exactly that
+ * goal. Both consumers must return identical results for any entry sequence.
+ */
+export class GoalLedgerFrontierTracker {
+  private frontier: GoalLedgerFrontier | undefined;
+  observe(entry: SessionEntry): void {
+    if (entry.type !== 'goal') return;
     if (entry.phase === 'goal_end') {
-      if (frontier?.goalId === entry.goalId) frontier = undefined;
-      continue;
+      if (this.frontier?.goalId === entry.goalId) this.frontier = undefined;
+      return;
     }
-    frontier = frontierFromGoalEntry(entry);
+    this.frontier = frontierFromGoalEntry(entry);
   }
-  return frontier;
+  result(): GoalLedgerFrontier | undefined {
+    return this.frontier;
+  }
+}
+
+export function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLedgerFrontier | undefined {
+  const tracker = new GoalLedgerFrontierTracker();
+  for (const entry of entries) tracker.observe(entry);
+  return tracker.result();
 }
 
 /** Read the goal-ledger frontier of a stored session (one file scan). */
@@ -407,25 +422,22 @@ export interface RestoreSessionStateResult {
 export async function restoreSessionState(session: HazeSession): Promise<RestoreSessionStateResult> {
   let messages: ModelMessage[] = [];
   let workState: WorkState | undefined;
-  let goalFrontier: GoalLedgerFrontier | undefined;
-  const terminatedGoals = new Set<string>();
+  const tracker = new GoalLedgerFrontierTracker();
   const parseErrors = await scanSessionEntries(session, entry => {
     // Legacy slim markers (pre-envelope-fix) are re-wrapped so the restored
     // conversation is a protocol-safe ModelMessage[] for the next provider
     // request (F-09).
     if (entry.type === 'conversation_snapshot') messages = repairRestoredConversation(entry.messages);
-    if (entry.type === 'work_state_snapshot') workState = entry.state;
-    if (entry.type === 'goal') {
-      if (entry.phase === 'goal_end') {
-        terminatedGoals.add(entry.goalId);
-        if (goalFrontier?.goalId === entry.goalId) goalFrontier = undefined;
-      } else {
-        goalFrontier = frontierFromGoalEntry(entry);
-      }
+    // SU-02: a durable clear marker means "no conversation after this line";
+    // later snapshots (if any) re-materialize it, otherwise restore yields [].
+    if (entry.type === 'event' && entry.name === 'clear') {
+      messages = [];
+      workState = undefined;
     }
+    if (entry.type === 'work_state_snapshot') workState = entry.state;
+    tracker.observe(entry);
   });
-  if (goalFrontier && terminatedGoals.has(goalFrontier.goalId)) goalFrontier = undefined;
-  return {messages, workState, parseErrors, goalFrontier};
+  return {messages, workState, parseErrors, goalFrontier: tracker.result()};
 }
 
 export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {

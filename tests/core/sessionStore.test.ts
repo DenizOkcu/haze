@@ -556,6 +556,40 @@ describe('goal ledger (P1: durable frontier)', () => {
     return {type: 'goal' as const, at: new Date().toISOString(), goalId: 'goal-1', phase: 'goal_start' as const, request: 'fix the login crash', requestHash: 'abc123', intent: 'fix', cycle: 0, mutationCount: 0, validationOutcome: 'absent', progressSignature: '', ...over};
   }
 
+  it('reopens a goal id that resumed after its own terminal end (SU-01)', async () => {
+    // start → failed end → explicit same-id resume start → crash must restore
+    // the new frontier; both lookup APIs must agree on every sequence.
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix'});
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a'}));
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a', phase: 'goal_end', stopReason: 'no-progress', status: 'failed'}));
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a', phase: 'goal_start', cycle: 2, mutationCount: 1}));
+    for (const read of [() => readGoalLedgerFrontier(session), () => restoreSessionState(session).then(r => r.goalFrontier)]) {
+      await expect(read()).resolves.toMatchObject({goalId: 'goal-a', cycle: 2, mutationCount: 1});
+    }
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-a', phase: 'goal_end', stopReason: 'completed', status: 'complete'}));
+    expect(await readGoalLedgerFrontier(session)).toBeUndefined();
+    expect((await restoreSessionState(session)).goalFrontier).toBeUndefined();
+    // Interleaved ids: only the newest goal can hold the frontier.
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-b', request: 'second'}));
+    await appendSessionEntry(session, goalEntry({goalId: 'goal-c', request: 'third'}));
+    expect(await readGoalLedgerFrontier(session)).toMatchObject({goalId: 'goal-c'});
+  });
+
+  it('restores an empty conversation after a durable clear event (SU-02)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'hello'});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: 'hello'}]});
+    await appendSessionEntry(session, {type: 'work_state_snapshot', at: '3', state: createWorkState('goal', 'implement', [])});
+    await appendSessionEntry(session, {type: 'event', at: '4', name: 'clear', text: 'Conversation cleared'});
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual([]);
+    expect(restored.workState).toBeUndefined();
+    // A later snapshot re-materializes the conversation, as does any new turn.
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '5', messages: [{role: 'user', content: 'after clear'}]});
+    expect((await restoreSessionState(session)).messages).toEqual([{role: 'user', content: 'after clear'}]);
+  });
+
   it('parses goal entries and reports the last non-terminal entry as the frontier', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'fix the login crash'});

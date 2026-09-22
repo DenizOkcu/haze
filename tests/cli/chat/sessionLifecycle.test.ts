@@ -129,6 +129,43 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
     expect(recordedMessages.some(m => m.role === 'system' && /Compaction skipped/.test(m.text))).toBe(true);
   });
 
+  it('discards the summary when the conversation or session changed while it was pending (SU-03)', async () => {
+    const conversation = history();
+    const sessionRef = {current: {id: 's1'} as never};
+    const deps = recordingDeps({conversationRef: {current: conversation}, sessionRef, noSession: false});
+    const lifecycle = await loadLifecycle(deps);
+    const pending = lifecycle.compactConversationWithModel();
+    // A new submission replaces the conversation array while the summary is pending.
+    deps.conversationRef.current = [...conversation, {role: 'user', content: 'interrupting ask'}];
+    await expect(pending).resolves.toBe(false);
+    expect(deps.conversationRef.current.at(-1)).toEqual({role: 'user', content: 'interrupting ask'});
+    expect(recordedMessages.some(m => m.role === 'system' && /conversation changed while the summary/.test(m.text))).toBe(true);
+    // A session switch (/new) must also discard rather than write across sessions.
+    const conversation2 = history();
+    const deps2 = recordingDeps({conversationRef: {current: conversation2}, sessionRef: {current: {id: 's1'} as never}});
+    const lifecycle2 = await loadLifecycle(deps2);
+    const pending2 = lifecycle2.compactConversationWithModel();
+    (deps2.sessionRef as {current: unknown}).current = {id: 's2'};
+    await expect(pending2).resolves.toBe(false);
+    expect(deps2.conversationRef.current).toBe(conversation2);
+  });
+
+  it('records a durable empty snapshot on clear so restore yields nothing (SU-02)', async () => {
+    const conversations: unknown[][] = [];
+    const namedEvents: string[] = [];
+    const recorder = {
+      recordConversation: (messages: unknown[]) => conversations.push(messages),
+      recordNamedEvent: (name: string) => namedEvents.push(name),
+      flush: async () => undefined,
+    } as never;
+    const deps = makeDeps({sessionRecorder: () => recorder, conversationRef: {current: [{role: 'user', content: 'hello'}]}});
+    const lifecycle = await loadLifecycle(deps);
+    await lifecycle.clearConversation();
+    expect(deps.conversationRef.current).toEqual([]);
+    expect(conversations.at(-1)).toEqual([]);
+    expect(namedEvents).toContain('clear');
+  });
+
   it('keeps the sync heuristic path untouched for overflow recovery', async () => {
     const conversation = history();
     const deps = recordingDeps({conversationRef: {current: conversation}});

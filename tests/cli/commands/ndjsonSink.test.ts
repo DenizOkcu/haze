@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 import {NdjsonSink, type WritableSink} from '../../../src/cli/commands/ndjsonSink.js';
 
 /** A fake stream that backpressures the first write (returns false) then drains on demand. */
@@ -28,6 +28,69 @@ function backpressureStream(): WritableSink & {lines: string[]; drain(): void} {
     },
   };
 }
+
+/** A fake stream that never drains and captures permanent error listeners (SU-05). */
+function errorCapturingStream(): WritableSink & {lines: string[]; errorListeners: Array<() => void>} {
+  const lines: string[] = [];
+  const errorListeners: Array<() => void> = [];
+  return {
+    lines,
+    errorListeners,
+    write(chunk: string) {
+      lines.push(chunk);
+      return true;
+    },
+    once(event, listener) {
+      if (event === 'error') errorListeners.push(listener);
+      return this;
+    },
+    off: () => undefined,
+  };
+}
+
+describe('NdjsonSink delivery (SU-05)', () => {
+  it('captures asynchronous stream errors after a true return and fails flush', async () => {
+    const stream = errorCapturingStream();
+    const sink = new NdjsonSink(stream);
+    await sink.write({ok: true});
+    // Stream breaks between writes (no drain pending): flush must reject so the
+    // headless command can exit non-zero instead of reporting a lost result.
+    stream.errorListeners[0]?.();
+    await expect(sink.write({late: true})).rejects.toThrow(/output stream failed/);
+    await expect(sink.flush()).rejects.toThrow(/output stream failed/);
+  });
+
+  it('bounds the pending queue under a permanently stalled consumer', async () => {
+    // Only the first write backpressures; later writes flow once it drains, so
+    // exactly the two writes beyond the bound are rejected without a hang.
+    let first = true;
+    const drainListeners = new Set<() => void>();
+    const stream: WritableSink = {
+      write: () => {
+        if (first) { first = false; return false; }
+        return true;
+      },
+      once: (event, listener) => {
+        if (event === 'drain') drainListeners.add(listener);
+        return stream;
+      },
+      off: (_event, listener) => {
+        drainListeners.delete(listener);
+        return stream;
+      },
+    };
+    const sink = new NdjsonSink(stream);
+    const outcomes = Array.from({length: 1002}, (_, i) => sink.write({i}).then(() => 'written', error => error instanceof Error ? error.message : String(error)));
+    // The first writeLine registers its drain listener in a microtask; fire it
+    // once registered so the remaining bounded chain can drain and settle.
+    await vi.waitFor(() => expect(drainListeners.size).toBeGreaterThan(0));
+    for (const listener of [...drainListeners]) listener();
+    const settled = await Promise.all(outcomes);
+    // Writes beyond the bound fail fast instead of queueing without limit.
+    expect(settled.filter(result => /stalled/.test(String(result)))).toHaveLength(2);
+    await expect(sink.flush()).rejects.toThrow(/stalled/);
+  });
+});
 
 describe('NdjsonSink', () => {
   it('serializes writes in arrival order, including across backpressure', async () => {

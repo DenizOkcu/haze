@@ -378,12 +378,25 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   if (options.output === 'json' || options.output === 'stream-json') {
     // For stream-json the authoritative agent events have already streamed; flush
     // them before the terminal result so ordering is preserved under backpressure.
-    if (streamSink) await streamSink.flush().catch(() => undefined);
+    // A broken output stream is a delivery failure: report it and exit non-zero
+    // instead of claiming success with an unusable stream (SU-05).
+    let outputError: string | undefined;
+    if (streamSink) await streamSink.flush().catch(error => {
+      outputError = error instanceof Error ? error.message : String(error);
+    });
     // This terminal line is byte-identical to the --output json envelope, so harnesses can parse the last line the same way.
     const resultLine = {type: 'result', status, result, usage: pinnedUsage(usage), ...(evidence ? {evidence} : {}), ...(goal ? {goal} : {}), ...(goalNotices.length > 0 ? {notices: goalNotices.slice(-5)} : {})};
-    if (streamSink) await streamSink.write(resultLine).catch(() => undefined);
+    if (streamSink) await streamSink.write(resultLine).catch(error => {
+      outputError ??= error instanceof Error ? error.message : String(error);
+    });
     else writeNdjson(resultLine);
-    if (streamSink) await streamSink.flush().catch(() => undefined);
+    if (streamSink) await streamSink.flush().catch(error => {
+      outputError ??= error instanceof Error ? error.message : String(error);
+    });
+    if (outputError) {
+      process.stderr.write(`haze output error: failed to deliver stream-json output (${outputError}).\n`);
+      return 1;
+    }
   } else if (status === 'complete') {
     process.stdout.write(result + (result.endsWith('\n') ? '' : '\n'));
   } else {

@@ -148,7 +148,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // model stream) — automatic continuation has already been attempted by the
   // goal supervisor. Carries what a one-key resume needs; any new submission
   // clears it.
-  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint} | undefined>(undefined);
+  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint; pauseReason?: 'no-progress' | 'goal-deadline' | 'context-exhausted'} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
 
@@ -366,8 +366,12 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       if (mode === 'chat') followUps.queue(value);
       return;
     }
-    // Any new submission supersedes a paused-task resume affordance.
-    if (pausedResume) setPausedResume(undefined);
+    // A new goal or session reset supersedes the paused-goal resume affordance;
+    // recovery/configuration commands (compact, model, provider, settings,
+    // resume…) intentionally keep it — the pause notice tells the user to run
+    // exactly those and then press R (SU-04).
+    const isRecoveryCommand = mode !== 'chat' || /^(?:\/compact|\/model|\/provider|\/settings|\/themes|\/resume|\/sessions)\b/.test(value.trim());
+    if (pausedResume && !isRecoveryCommand) setPausedResume(undefined);
 
     if (await wizard.dispatch(mode, value)) return;
 
@@ -603,7 +607,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     // continuation) exposes the one-key resume affordance; it stays until the
     // user submits something else.
     if (goalResult.resume?.kind === 'model-stream-idle') setPausedResume({kind: 'model-stream-idle', request: goalResult.resume.request, retryAttempt: goalResult.resume.retryAttempt});
-    else if (goalResult.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: goalResult.resume.checkpoint.request, retryAttempt: 0, checkpoint: goalResult.resume.checkpoint});
+    else if (goalResult.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: goalResult.resume.checkpoint.request, retryAttempt: 0, checkpoint: goalResult.resume.checkpoint, pauseReason: goalResult.stopReason === 'context-exhausted' || goalResult.stopReason === 'goal-deadline' || goalResult.stopReason === 'no-progress' ? goalResult.stopReason : undefined});
     else setPausedResume(undefined);
     return goalResult;
   }
@@ -684,7 +688,13 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
     </Box>}
     {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal' ? 'Unfinished goal paused (no measurable progress)' : 'Unfinished goal paused (model stream stalled)'} · </Text>
+      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal'
+        ? pausedResume.pauseReason === 'context-exhausted'
+          ? 'Unfinished goal paused (context window exhausted — compact or switch models, then resume)'
+          : pausedResume.pauseReason === 'goal-deadline'
+            ? 'Unfinished goal paused (goal deadline reached)'
+            : 'Unfinished goal paused (no measurable progress)'
+        : 'Unfinished goal paused (model stream stalled)'} · </Text>
       <Text color={theme.command} bold>Press R to {pausedResume.kind === 'incomplete-goal' ? 'resume' : 'retry'}</Text>
       <Text color={theme.muted}> or type a follow-up</Text>
     </Box>}
