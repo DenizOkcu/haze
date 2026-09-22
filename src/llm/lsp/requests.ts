@@ -169,10 +169,15 @@ export async function lspReferences(server: HazeLspServer, filePath: string, lin
   }));
 }
 
-async function pullDiagnostics(client: StdioLspClient, absolutePath: string, limit: number) {
-  const result = await client.request('textDocument/documentDiagnostic', {textDocument: {uri: toUri(absolutePath)}}, 15000);
-  const items = isObject(result) && Array.isArray(result.items) ? result.items : [];
-  return diagnosticsFrom(items, limit);
+const PULL_DIAGNOSTIC_METHOD = 'textDocument/diagnostic';
+
+/** Distinguish "server reports an empty list" from "no report arrived" (CI-02). */
+type PullResult = {kind: 'report'; diagnostics: LspDiagnostic[]} | {kind: 'unavailable'};
+
+async function pullDiagnostics(client: StdioLspClient, absolutePath: string, limit: number): Promise<PullResult> {
+  const result = await client.request(PULL_DIAGNOSTIC_METHOD, {textDocument: {uri: toUri(absolutePath)}}, 15000);
+  if (!isObject(result) || !Array.isArray(result.items)) return {kind: 'unavailable'};
+  return {kind: 'report', diagnostics: diagnosticsFrom(result.items, limit)};
 }
 
 async function awaitPushDiagnostics(client: StdioLspClient, absolutePath: string, limit: number, waitMs: number) {
@@ -190,8 +195,10 @@ export async function lspDiagnostics(server: HazeLspServer, filePath: string, li
   return await withLspClient(server, filePath, pool, async (client, absolutePath) => {
     if (client.diagnosticPullSupported()) {
       try {
-        return {ok: true as const, diagnostics: await pullDiagnostics(client, absolutePath, limit)};
+        const pulled = await pullDiagnostics(client, absolutePath, limit);
+        if (pulled.kind === 'report') return {ok: true as const, diagnostics: pulled.diagnostics};
       } catch (error) {
+        // A timeout is a transport symptom, not a clean report; fall back to push.
         if (!(error instanceof LspError) || !/timed out/.test(error.message)) throw error;
       }
     }

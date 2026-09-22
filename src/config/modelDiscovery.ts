@@ -1,4 +1,5 @@
 import type {HazeProviderSettings} from './settings.js';
+import {assertCredentialedEndpointSecure} from './endpointSecurity.js';
 
 /** Per-model limits harvested from a provider's /models listing. */
 export type HarvestedModelLimits = Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>;
@@ -16,6 +17,8 @@ export type ModelDiscoveryResult =
 const DEFAULT_TIMEOUT_MS = 5000;
 /** Discovery feeds a type-filtered picker; cap the stored list, not the UX. */
 const MAX_DISCOVERED_MODELS = 500;
+/** Redirect hops followed; each hop re-validates the credential transport policy. */
+const MAX_DISCOVERY_REDIRECTS = 2;
 
 export function modelsEndpointUrl(baseUrl: string): string {
   return `${baseUrl.trim().replace(/\/+$/, '')}/models`;
@@ -203,12 +206,29 @@ export async function discoverProviderModels(
 ): Promise<ModelDiscoveryResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let url = modelsEndpointUrl(provider.url);
+  // CI-01: validate before the first network call — a draft key must never be
+  // transmitted to a remote plaintext endpoint just because the user is still
+  // in a wizard. Re-checked on every redirect hop (downgrades are refused).
+  try {
+    assertCredentialedEndpointSecure(url, provider.key);
+  } catch (error) {
+    return {status: 'failed', error: error instanceof Error ? error.message : String(error)};
+  }
   let response: Response;
   try {
-    response = await fetchImpl(modelsEndpointUrl(provider.url), {
-      headers: {accept: 'application/json', ...(provider.key ? {authorization: `Bearer ${provider.key}`} : {})},
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    for (let hop = 0; ; hop += 1) {
+      response = await fetchImpl(url, {
+        headers: {accept: 'application/json', ...(provider.key ? {authorization: `Bearer ${provider.key}`} : {})},
+        redirect: 'manual',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const location = response.status >= 300 && response.status < 400 ? response.headers?.get('location') : null;
+      if (!location) break;
+      if (hop >= MAX_DISCOVERY_REDIRECTS) return {status: 'failed', error: `endpoint redirected more than ${MAX_DISCOVERY_REDIRECTS} times`};
+      url = new URL(location, url).toString();
+      assertCredentialedEndpointSecure(url, provider.key);
+    }
   } catch (error) {
     return {status: 'failed', error: describeFetchError(error)};
   }

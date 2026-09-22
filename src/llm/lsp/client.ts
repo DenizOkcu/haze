@@ -180,11 +180,11 @@ export class StdioLspClient {
     return this.initializeResult;
   }
 
-  /** Whether the server advertised pull diagnostics (`textDocument/documentDiagnostic`). */
+  /** Whether the server advertised pull diagnostics (`textDocument/diagnostic`). */
   diagnosticPullSupported() {
     const result = this.initializeResult;
     if (!isObject(result) || !isObject(result.capabilities)) return false;
-    return isObject(result.capabilities.textDocumentDiagnostic);
+    return isObject(result.capabilities.diagnosticProvider);
   }
 
   /** Wait until server-reported indexing settles, bounded to avoid blocking unsupported servers. */

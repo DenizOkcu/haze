@@ -45,16 +45,46 @@ describe('discoverProviderModels', () => {
     }));
   });
 
+  it('rejects a credentialed remote plaintext endpoint before any network call (CI-01)', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({data: [{id: 'a'}]}));
+    const result = await discoverProviderModels({url: 'http://remote.example.test/v1', key: 'draft-secret'}, {fetchImpl});
+    expect(result).toMatchObject({status: 'failed'});
+    expect((result as {error: string}).error).toMatch(/plaintext HTTP/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('allows loopback HTTP with credentials and HTTPS remotely', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({data: [{id: 'a'}]}));
+    expect(await discoverProviderModels({url: 'http://127.0.0.1:1234/v1', key: 'k'}, {fetchImpl})).toMatchObject({status: 'ok'});
+    expect(await discoverProviderModels({url: 'https://api.example.test/v1', key: 'k'}, {fetchImpl})).toMatchObject({status: 'ok'});
+  });
+
+  it('refuses a redirect that downgrades a credentialed request to remote plaintext', async () => {
+    const headers = new Headers({location: 'http://plain.example.test/v1/models'});
+    const redirectResponse = {ok: false, status: 302, headers} as unknown as Response;
+    const fetchImpl = vi.fn(async () => redirectResponse);
+    const result = await discoverProviderModels({url: 'https://api.example.test/v1', key: 'k'}, {fetchImpl});
+    expect(result).toMatchObject({status: 'failed'});
+    expect((result as {error: string}).error).toMatch(/plaintext HTTP/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed on HTTP errors, non-JSON bodies, and empty model lists', async () => {
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: async () => jsonResponse({}, false, 401)})).toEqual({status: 'failed', error: 'endpoint returned HTTP 401'});
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: async () => ({ok: true, status: 200, json: () => Promise.reject(new Error('bad json'))} as unknown as Response)})).toEqual({status: 'failed', error: 'endpoint returned no JSON'});
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: async () => jsonResponse({data: []})})).toEqual({status: 'failed', error: 'endpoint returned no models'});
+    expect(await discoverProviderModels({url: 'http://localhost:1/v1'}, {fetchImpl: async () => jsonResponse({}, false, 401)})).toEqual({status: 'failed', error: 'endpoint returned HTTP 401'});
+    expect(await discoverProviderModels({url: 'http://localhost:1/v1'}, {fetchImpl: async () => ({ok: true, status: 200, json: () => Promise.reject(new Error('bad json'))} as unknown as Response)})).toEqual({status: 'failed', error: 'endpoint returned no JSON'});
+    expect(await discoverProviderModels({url: 'http://localhost:1/v1'}, {fetchImpl: async () => jsonResponse({data: []})})).toEqual({status: 'failed', error: 'endpoint returned no models'});
   });
 
   it('reports timeouts and network errors as failures without throwing', async () => {
     const timeout = Object.assign(new Error('The operation was aborted due to timeout'), {name: 'TimeoutError'});
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: async () => { throw timeout; }})).toEqual({status: 'failed', error: 'timed out'});
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: async () => { throw new Error('fetch failed'); }})).toEqual({status: 'failed', error: 'fetch failed'});
+    expect(await discoverProviderModels({url: 'http://localhost:1/v1'}, {fetchImpl: async () => { throw timeout; }})).toEqual({status: 'failed', error: 'timed out'});
+    expect(await discoverProviderModels({url: 'http://localhost:1/v1'}, {fetchImpl: async () => { throw new Error('fetch failed'); }})).toEqual({status: 'failed', error: 'fetch failed'});
+  });
+
+  it('rejects an invalid endpoint URL before fetching', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({data: [{id: 'a'}]}));
+    expect(await discoverProviderModels({url: 'not a url'}, {fetchImpl})).toMatchObject({status: 'failed', error: expect.stringContaining('Invalid endpoint URL')});
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
 
@@ -151,10 +181,10 @@ describe('harvestModelLimits', () => {
 
   it('is surfaced by discoverProviderModels and omitted when nothing was harvested', async () => {
     const withLimits = vi.fn(async () => jsonResponse({data: [{id: 'm', context_length: 200_000}]}));
-    const result = await discoverProviderModels({url: 'u'}, {fetchImpl: withLimits});
+    const result = await discoverProviderModels({url: 'https://api.example.test/v1'}, {fetchImpl: withLimits});
     expect(result).toEqual({status: 'ok', models: ['m'], modelLimits: {m: {contextWindowTokens: 200_000}}});
 
     const without = vi.fn(async () => jsonResponse({data: [{id: 'm'}]}));
-    expect(await discoverProviderModels({url: 'u'}, {fetchImpl: without})).toEqual({status: 'ok', models: ['m']});
+    expect(await discoverProviderModels({url: 'https://api.example.test/v1'}, {fetchImpl: without})).toEqual({status: 'ok', models: ['m']});
   });
 });

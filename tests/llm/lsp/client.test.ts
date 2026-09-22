@@ -261,7 +261,9 @@ describe('StdioLspClient', () => {
     const client = new StdioLspClient(ts, child);
     expect(client.diagnosticPullSupported()).toBe(false);
     const initializing = client.initialize();
-    child.stdout.emit('data', frame({id: sentId(child), result: {capabilities: {textDocumentDiagnostic: {interFileDependencies: true}}}}));
+    // The protocol capability is `diagnosticProvider`; a standards-shaped server
+    // advertising pull diagnostics must be recognized (CI-02).
+    child.stdout.emit('data', frame({id: sentId(child), result: {capabilities: {diagnosticProvider: {interFileDependencies: true}}}}));
     await initializing;
     expect(client.diagnosticPullSupported()).toBe(true);
     await client.close();
