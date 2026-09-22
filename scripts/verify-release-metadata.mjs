@@ -7,8 +7,12 @@
 // Usage: node scripts/verify-release-metadata.mjs
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-const repoRoot = path.resolve(new URL('..', import.meta.url).pathname);
+// fileURLToPath (not URL.pathname): URL-decodes percent escapes and handles
+// Windows drive letters, so checkouts under paths with spaces/#/non-ASCII
+// resolve to the real filesystem root (MR-04).
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const problems = [];
 
 function read(file) {

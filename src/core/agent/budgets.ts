@@ -53,8 +53,6 @@ export const SUBAGENT_MAX_RETRIES = 5;
 
 /** Default size of the shared bounded model-retry pool for transient model errors and idle-stream stalls, per turn. Configurable via the `modelRetries` setting (0 disables automatic retries). */
 export const DEFAULT_MODEL_RETRIES = 2;
-/** Upper bound accepted for the `modelRetries` setting (mirrors the settings schema). */
-export const MAX_MODEL_RETRIES_SETTING = 10;
 /** Default base delay for the shared model-retry pool backoff (`base * 2^attempt`, capped at 4× the base). Configurable via the `retryBaseDelayMs` setting. */
 export const DEFAULT_RETRY_BASE_DELAY_MS = 1_000;
 /** Each context-overflow retry multiplies the message-token budget by this factor (Pillar 1.4: 0.6 → 0.36 → checkpoint). */

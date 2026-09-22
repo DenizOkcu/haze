@@ -29,7 +29,7 @@ type RepairToolCallFn = NonNullable<AgentOptions['experimental_repairToolCall']>
 type PrepareStepFn = NonNullable<AgentOptions['prepareStep']>;
 type SyncPrepareStepResult = Exclude<ReturnType<PrepareStepFn>, PromiseLike<unknown>>;
 
-export function withScopedContextControl(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
+function withScopedContextControl(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
   const files = context.pendingContextFiles ?? [];
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];

@@ -374,7 +374,7 @@ export async function readSessionEntries(session: HazeSession): Promise<ReadSess
  * the newest goal id can hold the frontier; a terminal end closes exactly that
  * goal. Both consumers must return identical results for any entry sequence.
  */
-export class GoalLedgerFrontierTracker {
+class GoalLedgerFrontierTracker {
   private frontier: GoalLedgerFrontier | undefined;
   observe(entry: SessionEntry): void {
     if (entry.type !== 'goal') return;
@@ -389,7 +389,7 @@ export class GoalLedgerFrontierTracker {
   }
 }
 
-export function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLedgerFrontier | undefined {
+function findGoalLedgerFrontier(entries: readonly SessionEntry[]): GoalLedgerFrontier | undefined {
   const tracker = new GoalLedgerFrontierTracker();
   for (const entry of entries) tracker.observe(entry);
   return tracker.result();

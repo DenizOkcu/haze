@@ -28,6 +28,8 @@ interface TempPackageOptions {
   buildCommit?: string;
   gitHead?: string;
   omit?: string[];
+  /** Linked-worktree layout: `.git` file with relative gitdir + commondir + packed ref. */
+  gitWorktree?: {gitDirName: string; commonDirName: string; head: string; packedRef: string};
 }
 
 async function makeTempPackage(options: TempPackageOptions = {}) {
@@ -51,6 +53,15 @@ async function makeTempPackage(options: TempPackageOptions = {}) {
   }
   if (options.gitHead) {
     await fs.outputFile(path.join(root, '.git', 'HEAD'), `${options.gitHead}\n`);
+  }
+  if (options.gitWorktree) {
+    const {gitDirName, commonDirName, head, packedRef} = options.gitWorktree;
+    const gitDir = path.join(root, gitDirName);
+    await fs.outputFile(path.join(root, '.git'), `gitdir: ${gitDirName}\n`);
+    // commondir is relative to the git dir, matching real worktree layouts.
+    await fs.outputFile(path.join(gitDir, 'commondir'), `${path.relative(gitDir, path.join(root, commonDirName))}\n`);
+    await fs.outputFile(path.join(gitDir, 'HEAD'), head);
+    await fs.outputFile(path.join(root, commonDirName, 'packed-refs'), packedRef);
   }
   return root;
 }
@@ -124,14 +135,52 @@ describe('bin/haze.js verifying launcher', () => {
     expect(result.stdout).toContain('stub-cli-loaded');
   });
 
+  it('detects a stale build through a linked worktree with relative gitdir and commondir (MR-05)', async () => {
+    const head = 'f'.repeat(40);
+    const root = await tempPackage({
+      buildCommit: '1'.repeat(40),
+      gitWorktree: {
+        gitDirName: path.join('outside store', 'wt-git'),
+        commonDirName: path.join('outside store', 'common'),
+        head: 'ref: refs/heads/feature\n',
+        packedRef: `# pack-refs with: peeled fully-peeled\n${head} refs/heads/feature\n`,
+      },
+    });
+    const stale = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    expect(stale.code).toBe(1);
+    expect(stale.stderr).toContain('stale');
+
+    const current = await tempPackage({
+      buildCommit: head,
+      gitWorktree: {
+        gitDirName: path.join('outside store', 'wt-git'),
+        commonDirName: path.join('outside store', 'common'),
+        head: 'ref: refs/heads/feature\n',
+        packedRef: `# pack-refs with: peeled fully-peeled\n${head} refs/heads/feature\n`,
+      },
+    });
+    const okResult = await runLauncher(path.join(current, 'bin', 'haze.js'), ['--help']);
+    expect(okResult.code).toBe(0);
+    expect(okResult.stdout).toContain('stub-cli-loaded');
+  });
+
   // The real checkout variant: proves the repo's own bin+dist report the exact
   // build the packaged tarball ships. Skipped when dist has not been built yet
   // (unit CI) so it never masks launcher regressions behind a build dependency.
   describe.skipIf(!((): boolean => {
     try {
-      const build = JSON.parse(fs.readFileSync(path.join(repoRoot, 'dist', 'buildInfo.json'), 'utf8')) as {version?: string};
+      const build = JSON.parse(fs.readFileSync(path.join(repoRoot, 'dist', 'buildInfo.json'), 'utf8')) as {version?: string; commit?: string};
       const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {version?: string};
-      return fs.existsSync(path.join(repoRoot, 'dist', 'cli', 'index.js')) && build.version === pkg.version;
+      // Stable with missing/stale/current dist (MR-02): only run when the built
+      // version AND commit match the checkout; a stale local build skips instead
+      // of failing, and CI runs this suite right after `npm run build`.
+      if (!fs.existsSync(path.join(repoRoot, 'dist', 'cli', 'index.js')) || build.version !== pkg.version) return false;
+      // Import lazily from dist (it exists whenever the version check passed) so
+      // this stays synchronous; a missing module simply skips the block.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS lazy load of a compiled helper inside a sync guard
+      const {gitHeadCommit} = require(path.join(repoRoot, 'dist', 'utils', 'buildInfo.js')) as {gitHeadCommit: (root: string) => string | undefined};
+      const head = gitHeadCommit(repoRoot);
+      return head === undefined || build.commit === head;
     } catch {
       return false;
     }

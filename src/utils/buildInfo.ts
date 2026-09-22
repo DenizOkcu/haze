@@ -137,21 +137,40 @@ export function resolvePackageRoot(start: string = MODULE_DIR): string | undefin
  */
 export function gitHeadCommit(root: string): string | undefined {
   const sha = (value: string | undefined) => (/^[0-9a-f]{7,40}$/i.test((value ?? '').trim()) ? value!.trim() : undefined);
+  const readFile = (file: string): string | undefined => {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
   try {
     const dotGitPath = join(root, '.git');
     const stat = statSync(dotGitPath);
+    // `gitdir: <path>` may be relative (resolve against the checkout root) and
+    // may contain spaces, so capture to end-of-line rather than \S+ (MR-05).
     const gitDir = stat.isDirectory()
       ? dotGitPath
-      : /gitdir:\s*(\S+)/.exec(readFileSync(dotGitPath, 'utf8'))?.[1];
+      : resolve(root, (/gitdir:\s*(.+?)\s*$/.exec(readFile(dotGitPath) ?? '') ?? [])[1] ?? '');
     if (!gitDir) return undefined;
-    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
+    // Linked worktrees keep refs in the common Git directory; per-worktree dirs
+    // carry only HEAD and private refs. Resolve via `commondir` when present.
+    const commonDirRaw = /\s*(.+?)\s*$/.exec(readFile(join(gitDir, 'commondir')) ?? '')?.[1];
+    const refDirs = commonDirRaw ? [resolve(gitDir, commonDirRaw)] : [];
+    const head = (readFile(join(gitDir, 'HEAD')) ?? '').trim();
     if (!head.startsWith('ref:')) return sha(head);
     const ref = head.slice(4).trim();
-    const refPath = join(gitDir, ref);
-    if (existsSync(refPath)) return sha(readFileSync(refPath, 'utf8'));
-    const packed = readFileSync(join(gitDir, 'packed-refs'), 'utf8');
-    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return sha(new RegExp(`^([0-9a-f]{40}) ${escaped}$`, 'm').exec(packed)?.[1]);
+    for (const dir of [gitDir, ...refDirs]) {
+      const loose = sha(readFile(join(dir, ref)));
+      if (loose) return loose;
+      const packed = readFile(join(dir, 'packed-refs'));
+      if (packed) {
+        const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const packedSha = sha(new RegExp(`^([0-9a-f]{40}) ${escaped}$`, 'm').exec(packed)?.[1]);
+        if (packedSha) return packedSha;
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   }

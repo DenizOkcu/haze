@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.0 release.
+Last updated: 2026-08-31 for the 1.2.1 release.
 
 Runtime configuration, paths, context files, and provider/server settings.
 

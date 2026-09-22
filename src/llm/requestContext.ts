@@ -40,7 +40,7 @@ export interface TurnExecutionScope {
 const ALWAYS_AVAILABLE_TOOLS = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'shell', 'writeTasks', 'readToolOutput', 'skill']);
 
 /** Keep the common coding path lean while preserving explicitly relevant capabilities. */
-export function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
+function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
   if (request === undefined) return tools;
   const lower = request.toLowerCase();
   const includeFetch = /https?:\/\/|\b(web|online|fetch|current docs?|api docs?|library docs?|research)\b/.test(lower);

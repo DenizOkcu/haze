@@ -125,6 +125,24 @@ describe('buildInfo', () => {
       await fs.outputFile(path.join(root, '.git', 'HEAD'), 'not a ref or sha\n');
       expect(gitHeadCommit(root)).toBeUndefined();
     });
+
+    it('resolves a linked worktree through a relative gitdir, spaces, commondir, and packed refs (MR-05)', async () => {
+      // Common dir: absolute layout (e.g. a sibling main checkout) holding refs.
+      const mainRepo = path.join(tmp, 'main repo');
+      const commonDir = path.join(mainRepo, '.git');
+      await fs.outputFile(path.join(commonDir, 'packed-refs'), `# pack-refs with: peeled fully-peeled\n${'d'.repeat(40)} refs/heads/feature\n`);
+      // Linked worktree: .git file with a RELATIVE gitdir path (spaces included).
+      const worktree = path.join(tmp, 'wt');
+      const worktreeGit = path.join(tmp, '.git-wt');
+      await fs.outputFile(path.join(worktree, '.git'), `gitdir: ../.git-wt\n`);
+      await fs.outputFile(path.join(worktreeGit, 'commondir'), '../main repo/.git\n');
+      await fs.outputFile(path.join(worktreeGit, 'HEAD'), 'ref: refs/heads/feature\n');
+      expect(gitHeadCommit(worktree)).toBe('d'.repeat(40));
+
+      // Loose ref in the common dir wins when present.
+      await fs.outputFile(path.join(commonDir, 'refs', 'heads', 'feature'), `${'e'.repeat(40)}\n`);
+      expect(gitHeadCommit(worktree)).toBe('e'.repeat(40));
+    });
   });
 
   describe('runtimeCapabilities', () => {

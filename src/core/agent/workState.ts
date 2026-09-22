@@ -180,7 +180,7 @@ function shellWords(command: string) {
 }
 
 /** Strictly recognize direct execution of one file changed during this goal. */
-export function executedMutatedArtifact(command: string, state: WorkState): string | undefined {
+function executedMutatedArtifact(command: string, state: WorkState): string | undefined {
   // Chaining and pipelines can mask the artifact's exit status, so they are not evidence.
   if (!isSingleForegroundCommand(command)) return undefined;
   const words = shellWords(command.trim());

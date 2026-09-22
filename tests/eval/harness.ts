@@ -31,7 +31,7 @@ import type {PromptSession} from '../../src/llm/systemPrompt.js';
  * loudly with a remediation hint.
  */
 
-export const evalEnabled = process.env.HAZE_EVAL === '1';
+const evalEnabled = process.env.HAZE_EVAL === '1';
 
 /** `it` when evals are enabled, `it.skip` otherwise (same vitest signature, including per-test options). */
 export const evalIt = evalEnabled ? it : it.skip;
@@ -47,7 +47,7 @@ function evalGoalDeadlineMs(): number {
 }
 
 /** Fail-fast provider preflight; returns an error message when evals cannot run. */
-export async function evalPreflight(): Promise<string | undefined> {
+async function evalPreflight(): Promise<string | undefined> {
   const settings = await readSettings();
   const override = evalModelOverride();
   if (override) {

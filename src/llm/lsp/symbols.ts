@@ -57,7 +57,7 @@ export function matchesNamePath(symbol: SemanticSymbol, pattern: string, substri
   return substring ? symbol.name.includes(normalized) : lastSegment(symbol.namePath) === normalized;
 }
 
-export function rangeContains(outer: LspRange, line: number, character = 1) {
+function rangeContains(outer: LspRange, line: number, character = 1) {
   const startsBefore = line > outer.start.line || (line === outer.start.line && character >= outer.start.character);
   const endsAfter = line < outer.end.line || (line === outer.end.line && character <= outer.end.character);
   return startsBefore && endsAfter;

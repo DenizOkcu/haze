@@ -29,19 +29,39 @@ function readJson(file) {
 
 function readGitHead() {
   const sha = (value) => (/^[0-9a-f]{7,40}$/i.test((value ?? '').trim()) ? value.trim() : undefined);
+  const readOptional = (file) => {
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
   try {
     const dotGit = path.join(root, '.git');
     const stat = statSync(dotGit);
-    const gitDir = stat.isDirectory() ? dotGit : /gitdir:\s*(\S+)/.exec(readFileSync(dotGit, 'utf8'))?.[1];
+    // `gitdir: <path>` may be relative (resolve against root) and contain
+    // spaces; linked worktrees keep refs in the common dir via `commondir`
+    // (MR-05). Mirrors src/utils/buildInfo.ts gitHeadCommit by design.
+    const gitDir = stat.isDirectory()
+      ? dotGit
+      : path.resolve(root, (/gitdir:\s*(.+?)\s*$/m.exec(readOptional(dotGit) ?? '') ?? [])[1]);
     if (!gitDir) return undefined;
-    const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    const commonDirRaw = /\s*(.+?)\s*$/.exec(readOptional(path.join(gitDir, 'commondir')) ?? '')?.[1];
+    const refDirs = commonDirRaw ? [path.resolve(gitDir, commonDirRaw)] : [];
+    const head = (readOptional(path.join(gitDir, 'HEAD')) ?? '').trim();
     if (!head.startsWith('ref:')) return sha(head);
     const ref = head.slice(4).trim();
-    const refPath = path.join(gitDir, ref);
-    if (existsSync(refPath)) return sha(readFileSync(refPath, 'utf8'));
-    const packed = readFileSync(path.join(gitDir, 'packed-refs'), 'utf8');
-    const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return sha(new RegExp(`^([0-9a-f]{40}) ${escaped}$`, 'm').exec(packed)?.[1]);
+    for (const dir of [gitDir, ...refDirs]) {
+      const loose = sha(readOptional(path.join(dir, ref)));
+      if (loose) return loose;
+      const packed = readOptional(path.join(dir, 'packed-refs'));
+      if (packed) {
+        const escaped = ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const packedSha = sha(new RegExp(`^([0-9a-f]{40}) ${escaped}$`, 'm').exec(packed)?.[1]);
+        if (packedSha) return packedSha;
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   }

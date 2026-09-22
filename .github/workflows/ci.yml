@@ -42,14 +42,21 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
+      - run: npm run release:verify
       - run: npm run build
+      # Post-build artifact suite (MR-02): the real-checkout launcher test only
+      # runs against a current dist; executing it after the build guarantees the
+      # packaged launcher/dist pair is always exercised in CI.
+      - run: npm test -- tests/cli/binLauncher.test.ts
       - run: ./scripts/check-agents-stamps.sh
       - run: npm audit --audit-level=high
-      - run: npm pack --dry-run
+      # Real tarball (MR-03): `npm pack` after build prints the same file list as
+      # the dry run and actually creates the archive the upload step publishes.
+      - run: npm pack
       - name: Upload packed tarball
         uses: actions/upload-artifact@v4
         with:
           name: haze-tarball-${{ matrix.os }}-node-${{ matrix.node-version }}
           path: '*.tgz'
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14

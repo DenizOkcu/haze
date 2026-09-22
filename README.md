@@ -2,9 +2,9 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.2.0
+## What's new in 1.2.1
 
-haze 1.2.0 makes long-running work more truthful under context pressure and provider instability.
+haze 1.2.1 makes long-running work more truthful under context pressure and provider instability.
 
 - Provider-aware context accounting: completed steps re-anchor estimates on provider usage, a curated model catalog supplies known context/output limits, and live or user-configured model metadata still takes precedence.
 - Recoverable overflow handling: thrown, silent, and length-stop context overflows compact and retry with progressively smaller budgets. Exhausted recovery checkpoints the goal as `context_exhausted` instead of hard-failing or looping on the same request.

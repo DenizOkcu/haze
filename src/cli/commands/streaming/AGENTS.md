@@ -1,6 +1,6 @@
 # src/cli/commands/streaming/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.0 release.
+Last updated: 2026-08-31 for the 1.2.1 release.
 
 Helpers for `src/cli/commands/streaming.ts`.
 

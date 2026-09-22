@@ -12,7 +12,7 @@ import type {AttemptLoopState} from './streamLoop.js';
  * suppression, and reset for the next segment.
  */
 
-export function resetAssistantSegment(loopState: AttemptLoopState) {
+function resetAssistantSegment(loopState: AttemptLoopState) {
   loopState.currentAssistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   loopState.assistantStarted = false;
   loopState.assistantStartedAt = Date.now();
