@@ -241,8 +241,34 @@ export function hasRemainingRecoveryBudget(state: Pick<TurnExecutionState, 'step
  * failure (length-continuation lands in Increment 2 and only flips on when a
  * recovery credit is both available and warranted).
  */
+/**
+ * Explicit, persisted cause for a failed turn (RT-05): the live session's
+ * second goal failed in 20s with zero assistant output and no timeout/retry
+ * events, and with `--debug` off the ledger held nothing diagnosable. Pure and
+ * bounded; safe metadata only. Undefined when the finish explains itself
+ * (normal failed readiness with a substantive answer).
+ */
+export function describeTurnFailure(state: Pick<TurnExecutionState, 'finishCause' | 'aborted' | 'budgetBoundary'>, lastAssistantText: string): string | undefined {
+  if (!state.aborted && state.finishCause === 'stop' && lastAssistantText.trim().length === 0) return 'model-returned-no-output';
+  if (state.finishCause === 'length') return 'output-length-truncation';
+  if (state.finishCause === 'error') return 'model-error';
+  if (state.finishCause === 'content-filter') return 'content-filter';
+  if (state.finishCause === 'tool-calls' && state.budgetBoundary) return 'tool-budget-boundary';
+  if (state.finishCause === 'unknown') return 'unknown-finish';
+  return undefined;
+}
+
 export function decideTerminalStatus(state: TurnExecutionState, evidence: CompletionEvidence, budgetExhausted: boolean): TurnStatus {
   if (state.aborted) return 'aborted';
+  // A voluntary `stop` final whose structured completion evidence is ready is
+  // complete even at a budget boundary: a turn that finished its declared work
+  // and answered substantively must not be reported failed merely because it
+  // also used its whole budget (RT-02 — the review session's goal 1 ended
+  // failed/blocked with finishCause 'stop', 5/5 tasks, and a delivered report).
+  // `classifyTerminalOutcome` already treats this exact shape as goal-complete;
+  // keep the two authorities aligned. Non-stop finishes (length/error) and
+  // non-ready evidence still fail as before.
+  if (state.finishCause === 'stop' && evidence.assistantText.trim().length > 0 && assessCompletionReadiness(state, evidence) === 'ready') return 'complete';
   if (budgetExhausted || state.finishCause === 'length' || state.finishCause === 'error') return 'failed';
   if (assessCompletionReadiness(state, evidence) !== 'ready') return 'failed';
   if (evidence.sawToolCall && evidence.assistantText.trim().length === 0) return 'failed';

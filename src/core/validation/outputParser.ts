@@ -94,6 +94,26 @@ export function parseValidationOutput(input: {
   else if (diagCount > 0) summaryText = `${kind} failed: ${diagCount} diagnostic${diagCount === 1 ? '' : 's'}${uniqueFiles.length ? ` in ${uniqueFiles.join(', ')}` : ''}`;
   else summaryText = `${kind} ${status}`;
 
+  // First distinct failure lines are the diagnostic, not noise (RT-04): the
+  // live review session saw "release:verify" summarized as "10 failed tests"
+  // while the handle held 32 distinct mismatches, forcing a readToolOutput
+  // round-trip (a full model step) before the real failures were visible.
+  // Preserve up to three distinct first failure lines inline, bounded.
+  if (status !== 'passed' && status !== 'timed_out') {
+    const failureLines: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const isFailureLine = /^(?:✗|FAIL|FAILED|AssertionError|Error:|error|✖|×|●)/i.test(trimmed)
+        || /^\S+\.(?:ts|tsx|js|jsx|mts|cts):\d+/i.test(trimmed)
+        || /\b(failed|mismatch|does not|missing|unexpected)\b/i.test(trimmed);
+      if (!isFailureLine) continue;
+      if (!failureLines.some(existing => existing === trimmed)) failureLines.push(trimmed.length > 200 ? `${trimmed.slice(0, 199)}…` : trimmed);
+      if (failureLines.length >= 3) break;
+    }
+    if (failureLines.length > 0) summaryText = `${summaryText} — ${failureLines.join(' | ')}`;
+  }
+
   const suggestedNextStep = status === 'failed'
     ? uniqueFiles.length > 0
       ? `Inspect ${uniqueFiles.slice(0, 3).join(', ')} and fix the first relevant failure.`

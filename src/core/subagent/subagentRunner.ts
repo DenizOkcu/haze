@@ -205,9 +205,19 @@ export async function runSubagent(
     telemetry.estimates.mainContextTokensAvoided = Math.max(0, telemetry.estimates.privateContextTokens - telemetry.estimates.taskCapsuleTokens - telemetry.estimates.resultCapsuleTokens);
     return withLegacyProjection(capsule, telemetry);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    // Bounded, actionable provider-failure capsule (RT-03): a worker that dies
+    // before producing output must tell the parent model what happened and what
+    // to do next — an empty deliverable (observed live: provider errors with no
+    // message surfaced as `deliverable: ""`) leaves the parent guessing and
+    // re-dispatching blind. Never echo provider bodies; bound the text.
+    const rawMessage = error instanceof Error && error.message.trim().length > 0 ? error.message.trim() : 'the provider call failed before any output';
+    const boundedMessage = rawMessage.length > 300 ? `${rawMessage.slice(0, 299)}…` : rawMessage;
+    const capsuleMessage = `${boundedMessage}. No usable worker output was produced; retry this subagent once with the same task, or do the work directly in the main conversation.`;
     const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded' : options.abortSignal?.aborted ? 'cancelled' : 'provider_error';
-    const result = terminalResult(task, runtime, profile, termination, message, options.queueMs);
+    const result = terminalResult(task, runtime, profile, termination, capsuleMessage, options.queueMs);
+    // Keep the raw provider message on the legacy `error` field so machine
+    // consumers see exactly what the provider said (unchanged contract).
+    result.error = rawMessage;
     result.telemetry.durationMs = performance.now() - startedAt;
     result.durationMs = result.telemetry.durationMs;
     result.telemetry.toolCalls = toolCallLog;

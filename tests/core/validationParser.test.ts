@@ -23,6 +23,30 @@ describe('validation output parser', () => {
     expect(summary.summaryText).toBe('test passed');
   });
 
+  it('includes first distinct failure lines in failed summaries (RT-04)', () => {
+    // The live review session saw release:verify summarized as "10 failed
+    // tests" while the handle held 32 distinct mismatches; the distinct
+    // failure lines must ride the summary itself.
+    const stdout = [
+      '✗ package-lock.json: root version "1.2.0" does not match package.json "1.2.1".',
+      '✗ README.md: does not reference version "1.2.1".',
+      '✗ docs/index.html: does not reference version "1.2.1".',
+      '✗ AGENTS.md: stamp does not target release 1.2.1.',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'npm run release:verify', code: 1, stdout, stderr: ''});
+    expect(summary.status).toBe('failed');
+    expect(summary.summaryText).toContain('package-lock.json');
+    expect(summary.summaryText).toContain('README.md');
+    expect(summary.summaryText).toContain('docs/index.html');
+    // Bounded: at most three distinct lines inline.
+    expect(summary.summaryText).not.toContain('AGENTS.md');
+  });
+
+  it('does not append failure lines to passing summaries (RT-04)', () => {
+    const summary = parseValidationOutput({command: 'npm test', code: 0, stdout: 'Tests: 3 passed, 0 failed\n', stderr: ''});
+    expect(summary.summaryText).toBe('test passed');
+  });
+
   it('marks failed tests as failed even when a pipe swallows the exit code', () => {
     // Reproduces the regression seen in the 2026-06-13 session log: the
     // agent ran `npm test 2>&1 | tail -50`, jest exited non-zero, but the shell

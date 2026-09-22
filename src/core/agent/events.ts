@@ -11,7 +11,7 @@ interface AgentStepUsage {
 
 export type AgentEvent =
   | {type: 'turn_start'; request: string; at: string}
-  | {type: 'turn_end'; request: string; at: string; status: 'complete' | 'aborted' | 'failed'; evidence?: TurnCompletionEvidence}
+  | {type: 'turn_end'; request: string; at: string; status: 'complete' | 'aborted' | 'failed'; evidence?: TurnCompletionEvidence; /** Explicit cause when the outcome is otherwise unexplained (RT-05): persisted without --debug so silent failures are diagnosable from the ledger. */ reason?: string}
   | {type: 'goal_start'; goalId: string; request: string; at: string}
   | {type: 'goal_continue'; goalId: string; cycle: number; reason: string; text?: string; at: string}
   | {type: 'goal_notice'; text: string; at: string}

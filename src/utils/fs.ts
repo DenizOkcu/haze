@@ -33,11 +33,15 @@ export interface WalkOptions {
 }
 
 export async function walkDir(root: string, options: WalkOptions = {}): Promise<WalkEntry[]> {
-  const {recursive = false, maxEntries = Infinity, cursor, filter, ignoreBatch} = options;
+  const {recursive = false, maxEntries = Infinity, filter, ignoreBatch} = options;
   const result: WalkEntry[] = [];
   // Cursor semantics: the cursor is the last entry a previous page returned.
   // This walk resumes strictly *after* that entry in depth-first traversal
   // order, without re-checking or even descending into earlier subtrees.
+  // An empty/whitespace cursor normalizes to absent: callers whose optional
+  // pagination field materializes as "" (JSON round-trips, default-filled
+  // schemas) must not silently receive an empty first page (RT-01).
+  const cursor = typeof options.cursor === 'string' && options.cursor.trim() !== '' ? options.cursor : undefined;
   const cursorSegments = cursor ? cursor.split(/[\\/]/).filter(Boolean) : [];
   let collecting = cursor == null;
 

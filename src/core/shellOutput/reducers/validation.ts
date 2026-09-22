@@ -9,7 +9,18 @@ function groupDiagnostics(summary: ValidationSummary) {
   return grouped;
 }
 
-export function renderValidationReduction(summary: ValidationSummary, rawHandle?: string) {
+/** Inline cap for small raw output kept alongside the summary (RT-04). */
+const INLINE_RAW_CHARS = 800;
+const INLINE_RAW_LINES = 12;
+
+/** Small failing-command output is the diagnostic itself (RT-04): keep it inline so a readToolOutput round-trip (a full model step) is saved. */
+function inlineRawLines(raw: string): string[] {
+  if (raw.length === 0 || raw.length > INLINE_RAW_CHARS) return [];
+  const lines = raw.split(/\r?\n/).map(line => line.trimEnd()).filter(Boolean);
+  return lines.length === 0 || lines.length > INLINE_RAW_LINES ? [] : lines;
+}
+
+export function renderValidationReduction(summary: ValidationSummary, rawHandle?: string, raw = '') {
   const lines: string[] = [summary.summaryText];
   if (summary.failedTests.length) {
     lines.push('', 'failed tests:');
@@ -34,6 +45,8 @@ export function renderValidationReduction(summary: ValidationSummary, rawHandle?
     lines.push('', `failed files: ${summary.failedFiles.join(', ')}`);
   }
   if (summary.suggestedNextStep) lines.push('', `next: ${summary.suggestedNextStep}`);
+  const inline = inlineRawLines(raw);
+  if (inline.length) lines.push('', ...inline);
   if (rawHandle) lines.push('', `raw output: use readToolOutput with handle ${rawHandle}`);
   return lines.join('\n');
 }

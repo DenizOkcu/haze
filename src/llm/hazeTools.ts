@@ -56,7 +56,20 @@ export const hazeTools = {
     }),
     execute: async ({path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context) => runDedupedTool('listFiles', {path: dirPath, recursive, maxEntries, cursor, includeIgnored, includeSizes}, context, async () => {
       try {
-        const absolutePath = await prepareWorkspaceRead(dirPath, includeIgnored, context);
+        let absolutePath: string;
+        try {
+          absolutePath = await prepareWorkspaceRead(dirPath, includeIgnored, context);
+        } catch (error) {
+          // RT-06: an out-of-workspace path must refuse honestly instead of
+          // returning a success-shaped empty listing, which the model reads as
+          // "directory is empty" and can report as a false fact. Reuse the
+          // shared structured failure shape (readFile/grep already do).
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes('outside the workspace')) {
+            return {ok: false, toolName: 'listFiles', path: dirPath, error: message, reasonCode: 'outside_workspace' as const, recoverable: true, suggestedNextStep: 'Use a workspace-relative path, or ask the user to mention the outside path explicitly so it can be read directly.'};
+          }
+          throw error;
+        }
         const entries: string[] = [];
         let ignoredSkipped = 0;
 

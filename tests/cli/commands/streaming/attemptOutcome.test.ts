@@ -22,6 +22,7 @@ describe('terminalTurnStatus', () => {
     expect(terminalTurnStatus({aborted: false, assistantText: '', sawToolCall: true, lastToolOk: true})).toBe('failed');
     expect(terminalTurnStatus({aborted: false, assistantText: 'Done.', sawToolCall: true, lastToolOk: false})).toBe('failed');
     expect(terminalTurnStatus({aborted: false, assistantText: 'partial', sawToolCall: true, budgetReached: true})).toBe('failed');
+    expect(terminalTurnStatus({aborted: false, assistantText: 'partial', sawToolCall: true, lastToolOk: true, finishReason: 'stop', intent: 'implement', mutationCount: 1, validationOutcome: 'passed', budgetReached: true})).toBe('complete');
     expect(terminalTurnStatus({aborted: false, assistantText: "I'll retry with smaller writes.", sawToolCall: true, unresolvedToolInputError: true})).toBe('failed');
     expect(terminalTurnStatus({aborted: true, assistantText: '', sawToolCall: false})).toBe('aborted');
     expect(terminalTurnStatus({aborted: false, assistantText: '', sawToolCall: false, finishReason: 'stop'})).toBe('failed');

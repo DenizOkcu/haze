@@ -3,7 +3,7 @@ import type {ModelMessage} from 'ai';
 import {agentEvent, type AgentEventSink} from '../../core/agent/events.js';
 import type {ImageAttachment} from '../../core/attachments/imageAttachments.js';
 import {type BlessedPath} from '../../core/attachments/readBlessings.js';
-import {createTurnExecutionState, toCompletionEvidence} from '../../core/agent/completionController.js';
+import {createTurnExecutionState, describeTurnFailure, toCompletionEvidence} from '../../core/agent/completionController.js';
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
@@ -244,7 +244,16 @@ export async function runAgentTurn(
     return {status, evidence, ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
   } finally {
     turnDeadline?.clear();
-    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState)}));
+    // RT-05: persist an explicit cause for unexplained outcomes in the ledger
+    // (no --debug required) and tell the user when a turn dies silently — the
+    // live session saw a 20s goal fail with zero assistant output and no
+    // timeout/retry events, forcing the user to re-send the prompt.
+    const turnEndReason = status === 'failed' ? describeTurnFailure(turnState, callbacks.getLastAssistantText()) : undefined;
+    if (turnEndReason === 'model-returned-no-output') {
+      callbacks.addMessage({role: 'system', text: 'The model returned no output for this turn. Send the request again, or retry after a moment; completed work is preserved in the conversation.'});
+    }
+    callbacks.onEvent?.(agentEvent({type: 'turn_end', request: value, status, evidence: toCompletionEvidence(turnState), ...(turnEndReason ? {reason: turnEndReason} : {})}));
+
     callbacks.setAbortController?.(null);
     callbacks.setBusyLabel?.(modelThinkingLabel(undefined));
     callbacks.setBusy(false);

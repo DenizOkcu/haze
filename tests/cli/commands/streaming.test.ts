@@ -769,11 +769,27 @@ describe('runAgentTurn: stream handling', () => {
     expect(outcome).toMatchObject({status: 'failed'});
   });
 
-  it('cannot report complete after the hard step budget is reached', async () => {
+  it('reports complete for a ready voluntary final at the hard step budget boundary (RT-02)', async () => {
+    // Budget exhaustion is a safety ceiling against runaway turns, not a marker
+    // of incompleteness: a voluntary `stop` with a substantive answer and ready
+    // completion evidence is complete even when the step budget is exhausted.
+    // This aligns decideTerminalStatus with classifyTerminalOutcome, which
+    // already classified this shape goal-complete while the status adapter
+    // reported failed (live regression: the review session's goal 1 ended
+    // failed/blocked with finishCause 'stop', 5/5 tasks, and a delivered report).
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
       stepEnds: Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: []})),
-      streamParts: [{type: 'text-delta', text: 'A final answer arrived only after exhausting the budget.'}, {type: 'finish', finishReason: 'stop'}],
+      streamParts: [{type: 'text-delta', text: 'A final answer arrived after the budget boundary, with all declared work done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toMatchObject({status: 'complete'});
+  });
+
+  it('still fails at the hard step budget boundary without a substantive final (RT-02)', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      stepEnds: Array.from({length: 64}, (_, stepNumber) => ({stepNumber, text: '', toolCalls: []})),
+      streamParts: [{type: 'finish', finishReason: 'stop'}],
     });
     await expect(runAgentTurn('work', undefined, [], makeCallbacks())).resolves.toMatchObject({status: 'failed'});
   });

@@ -8,6 +8,7 @@ import {
   decideRescue,
   decideTerminalStatus,
   describeCompletionReadiness,
+  describeTurnFailure,
   goalContinuationRecoverable,
   goalProgressSignature,
   hasSatisfactoryTerminalOutcome,
@@ -76,6 +77,9 @@ describe('decideTerminalStatus', () => {
     {name: 'first length finish (recovery disabled) -> failed', state: {finishCause: 'length'}, evidence: evidence({assistantText: 'partial'}), budgetExhausted: false, expected: 'failed'},
     {name: 'repeated length finish -> failed', state: {finishCause: 'length', lengthCreditUsed: true}, evidence: evidence({assistantText: 'partial'}), budgetExhausted: false, expected: 'failed'},
     {name: 'no remaining budget -> failed', state: {stepsUsed: budget.stepLimit}, evidence: evidence({assistantText: 'done'}), budgetExhausted: true, expected: 'failed'},
+    {name: 'ready voluntary stop with substantive answer at a budget boundary -> complete (RT-02)', state: {finishCause: 'stop', stepsUsed: budget.stepLimit}, evidence: evidence({sawToolCall: true, assistantText: 'Done: report delivered.', lastToolOk: true}), budgetExhausted: true, expected: 'complete'},
+    {name: 'budget boundary with failed readiness still fails (RT-02)', state: {finishCause: 'stop', stepsUsed: budget.stepLimit}, evidence: evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budgetExhausted: true, expected: 'failed'},
+    {name: 'budget boundary without a substantive answer still fails (RT-02)', state: {finishCause: 'stop', stepsUsed: budget.stepLimit}, evidence: evidence({sawToolCall: true, assistantText: '', lastToolOk: true}), budgetExhausted: true, expected: 'failed'},
     {name: 'abort always wins', state: {aborted: true}, evidence: evidence({assistantText: 'done'}), budgetExhausted: false, expected: 'aborted'},
     {name: 'abort wins even when budget exhausted', state: {aborted: true, stepsUsed: budget.stepLimit}, evidence: evidence({assistantText: ''}), budgetExhausted: true, expected: 'aborted'},
     {name: 'failed last tool -> failed', state: {finishCause: 'stop'}, evidence: evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budgetExhausted: false, expected: 'failed'},
@@ -89,6 +93,26 @@ describe('decideTerminalStatus', () => {
       expect(decideTerminalStatus(state(row.state), evidence(row.evidence), row.budgetExhausted)).toBe(row.expected);
     });
   }
+});
+
+describe('describeTurnFailure (RT-05)', () => {
+  it('names the silent no-output stop failure explicitly', () => {
+    expect(describeTurnFailure({finishCause: 'stop', aborted: false, budgetBoundary: false}, '')).toBe('model-returned-no-output');
+    expect(describeTurnFailure({finishCause: 'stop', aborted: false, budgetBoundary: false}, '   ')).toBe('model-returned-no-output');
+  });
+
+  it('names length/error/content-filter/budget failures', () => {
+    expect(describeTurnFailure({finishCause: 'length', aborted: false, budgetBoundary: false}, 'partial')).toBe('output-length-truncation');
+    expect(describeTurnFailure({finishCause: 'error', aborted: false, budgetBoundary: false}, '')).toBe('model-error');
+    expect(describeTurnFailure({finishCause: 'content-filter', aborted: false, budgetBoundary: false}, '')).toBe('content-filter');
+    expect(describeTurnFailure({finishCause: 'tool-calls', aborted: false, budgetBoundary: true}, '')).toBe('tool-budget-boundary');
+    expect(describeTurnFailure({finishCause: 'unknown', aborted: false, budgetBoundary: false}, '')).toBe('unknown-finish');
+  });
+
+  it('returns undefined for explained failures and non-failing outcomes', () => {
+    expect(describeTurnFailure({finishCause: 'stop', aborted: false, budgetBoundary: false}, 'done substantive')).toBeUndefined();
+    expect(describeTurnFailure({finishCause: 'stop', aborted: true, budgetBoundary: false}, '')).toBeUndefined();
+  });
 });
 
 describe('hasRemainingRecoveryBudget', () => {

@@ -54,6 +54,35 @@ describe('listFiles tool', () => {
     expect(second.nextCursor).toBeUndefined();
   });
 
+  it('treats an empty cursor as no cursor (RT-01)', async () => {
+    // A caller whose optional cursor field materializes as "" must get the
+    // full first page, not a success-shaped empty listing (found live in the
+    // review session: the first listFiles of the goal returned an empty
+    // repository for a populated checkout).
+    for (const name of ['a', 'b']) await fs.writeFile(path.join(tmp, `${name}.txt`), name);
+    const baseline = await listFiles({});
+    const emptyCursor = await listFiles({cursor: ''});
+    expect(emptyCursor.entries).toEqual(baseline.entries);
+    expect(emptyCursor.truncated).toBe(false);
+    expect(emptyCursor.entries.length).toBeGreaterThan(0);
+  });
+
+  it('refuses out-of-workspace paths honestly instead of listing empty (RT-06)', async () => {
+    // Without a bless set, an absolute path outside the workspace must return
+    // a structured refusal — never a success-shaped empty listing the model
+    // could read as "directory is empty" (observed live on ~/.haze).
+    const outside = path.join(os.tmpdir(), 'haze-listfiles-outside-rt6');
+    await fs.ensureDir(outside);
+    try {
+      const result = await listFiles({path: outside});
+      expect(result.ok).toBe(false);
+      expect(result.reasonCode).toBe('outside_workspace');
+      expect(result.suggestedNextStep).toContain('workspace-relative');
+    } finally {
+      await fs.remove(outside);
+    }
+  });
+
   it('skips ignored entries by default, counts them, and includes them on request', async () => {
     await fs.writeFile(path.join(tmp, '.gitignore'), 'secret.txt\n');
     await fs.writeFile(path.join(tmp, 'secret.txt'), 'hidden');

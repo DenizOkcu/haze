@@ -54,6 +54,28 @@ describe('walkDir', () => {
     expect(entries.length).toBeLessThanOrEqual(3);
   });
 
+  it('treats an empty or whitespace cursor as absent (RT-01)', async () => {
+    // Optional pagination fields materialized as "" (JSON round-trips,
+    // default-filled schemas) must return the full first page, not an empty
+    // listing. Found live: the review session's first listFiles returned an
+    // empty repository for a populated checkout.
+    const baseline = await walkDir(tmp, {recursive: true});
+    const emptyCursor = await walkDir(tmp, {recursive: true, cursor: ''});
+    const whitespaceCursor = await walkDir(tmp, {recursive: true, cursor: '  '});
+    expect(emptyCursor.map(e => e.path)).toEqual(baseline.map(e => e.path));
+    expect(whitespaceCursor.map(e => e.path)).toEqual(baseline.map(e => e.path));
+  });
+
+  it('resumes after a concrete cursor entry', async () => {
+    const firstPage = await walkDir(tmp, {recursive: true, maxEntries: 2});
+    const cursor = firstPage.at(-1)?.path;
+    expect(cursor).toBeTruthy();
+    const rest = await walkDir(tmp, {recursive: true, cursor});
+    const firstPaths = firstPage.map(e => e.path);
+    for (const entry of rest) expect(firstPaths).not.toContain(entry.path);
+    expect(rest.length).toBeGreaterThan(0);
+  });
+
   it('applies filter', async () => {
     const entries = await walkDir(tmp, {
       recursive: true,

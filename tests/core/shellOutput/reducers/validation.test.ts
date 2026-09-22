@@ -20,6 +20,23 @@ describe('renderValidationReduction', () => {
     expect(renderValidationReduction(summary({summaryText: 'all tests passed'}))).toContain('all tests passed');
   });
 
+  it('keeps small raw failing output inline to avoid a handle round-trip (RT-04)', () => {
+    const out = renderValidationReduction(summary({summaryText: 'generic failed'}), 'output-1', 'haze: refusing to start an incomplete or stale build.\n  - dist was built from commit old, but the checkout is at new.');
+    expect(out).toContain('haze: refusing to start an incomplete or stale build.');
+    expect(out).toContain('dist was built from commit old');
+    expect(out).toContain('raw output: use readToolOutput with handle output-1');
+  });
+
+  it('omits inline raw output when it is large or empty (RT-04)', () => {
+    const large = `${'x'.repeat(900)}`;
+    expect(renderValidationReduction(summary(), 'output-2', large)).not.toContain(large.slice(0, 100));
+    const emptyRaw = renderValidationReduction(summary(), 'output-3', '');
+    expect(emptyRaw.split('\n')).toEqual(['test failed', '', 'raw output: use readToolOutput with handle output-3']);
+    // The handle hint itself is absent when no raw was stored at all.
+    const noHandle = renderValidationReduction(summary());
+    expect(noHandle).not.toContain('readToolOutput');
+  });
+
   it('caps the failed-tests list at 10 entries', () => {
     const failedTests = Array.from({length: 25}, (_, index) => `TestFailure${index}`);
     const out = renderValidationReduction(summary({failedTests}));

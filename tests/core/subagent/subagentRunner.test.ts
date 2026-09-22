@@ -222,6 +222,47 @@ describe('runSubagent status mapping', () => {
     expect(result.error).toBe('boom');
   });
 
+  it('provider errors surface a bounded actionable capsule instead of an empty deliverable (RT-03)', async () => {
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        generateText: async () => {
+          throw new Error('x'.repeat(500));
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const result = await runSubagent('fails loudly', {model: noopModel, contextFiles: []});
+    expect(result.capsule.termination).toBe('provider_error');
+    expect(result.capsule.usable).toBe(false);
+    // Bounded provider message + explicit fallback guidance, never empty.
+    expect(result.capsule.deliverable.length).toBeGreaterThan(50);
+    expect(result.capsule.deliverable).toContain('retry this subagent once');
+    expect(result.capsule.deliverable).toContain('x'.repeat(299));
+    expect(result.capsule.deliverable.length).toBeLessThan(500);
+    expect(result.capsule.coverageGaps[0]).toBe(result.capsule.deliverable);
+  });
+
+  it('provider errors without a message still explain themselves (RT-03)', async () => {
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {
+        ...actual,
+        generateText: async () => {
+          throw 'not even an error';
+        },
+      };
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const result = await runSubagent('opaque failure', {model: noopModel, contextFiles: []});
+    expect(result.capsule.termination).toBe('provider_error');
+    expect(result.capsule.deliverable).toContain('the provider call failed before any output');
+    expect(result.capsule.deliverable).toContain('retry this subagent once');
+  });
+
   it('policy-blocks an out-of-range maxSteps instead of silently clamping it', async () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');

@@ -75,7 +75,7 @@ export function filterShellOutput(input: ShellOutputFilterInput): ShellOutputFil
       filterName = `validation-${input.validationSummary.kind}`;
       const raw = `${input.stdout}${input.stderr ? `\n${input.stderr}` : ''}`;
       const rawHandle = input.storeRawOutput?.(raw);
-      stdout = makeReduction(input.stdout, renderValidationReduction(input.validationSummary, rawHandle), true, filterName, input, undefined, 'validation');
+      stdout = makeReduction(input.stdout, renderValidationReduction(input.validationSummary, rawHandle, raw), true, filterName, input, undefined, 'validation');
       stderr = makeReduction(input.stderr, '', input.stderr.length > 0, filterName, input, undefined, 'validation');
     } else {
       const stdoutIn = capOutputForProcessing(input.stdout);
