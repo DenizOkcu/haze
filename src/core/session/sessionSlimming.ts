@@ -42,6 +42,22 @@ function slimImageFilePart(part: Record<string, unknown>) {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value != null && !Array.isArray(value);
+}
+
+/**
+ * Slim a tool-result output while preserving the AI SDK output envelope.
+ * Restored snapshots are re-sent to providers, and `modelMessageSchema` requires
+ * a tool-result output to be `{type: 'json'|'text'|... , value}`; a bare slim
+ * marker as the output made every resumed session fail with
+ * AI_InvalidPromptError (F-09 regression).
+ */
+function slimToolResultOutput(output: unknown) {
+  if (!isRecord(output) || typeof output.type !== 'string' || !('value' in output)) return slimLargeValue(output);
+  return {...output, value: slimLargeValue(output.value)};
+}
+
 function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === 'string') {
     if (value.length <= LARGE_STRING_CHARS) return value;
@@ -57,7 +73,7 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   if (record.type === 'tool-result') {
     return {
       ...record,
-      output: slimLargeValue(record.output),
+      output: slimToolResultOutput(record.output),
       result: slimLargeValue(record.result),
     };
   }
@@ -65,6 +81,39 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   const next: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(record)) next[key] = slimUnknown(child, seen);
   return next;
+}
+
+/**
+ * Restore-side repair (F-09): sessions written before the envelope fix store
+ * bare `{omitted, reason, originalBytes, preview}` slim markers as tool-result
+ * outputs. Re-sending those to a provider fails `modelMessageSchema`, so wrap
+ * each legacy marker back into the required `{type, value}` envelope. Already
+ * valid outputs pass through untouched.
+ */
+function repairLegacySlimmedMessages(messages: ModelMessage[]): ModelMessage[] {
+  let changed = false;
+  const repaired = messages.map(message => {
+    if (message.role !== 'tool' || !Array.isArray(message.content)) return message;
+    let messageChanged = false;
+    const content = (message.content as unknown[]).map(part => {
+      if (!isRecord(part) || part.type !== 'tool-result') return part;
+      if (!isLegacySlimMarker(part.output)) return part;
+      messageChanged = true;
+      return {...part, output: {type: 'json' as const, value: part.output}};
+    });
+    if (!messageChanged) return message;
+    changed = true;
+    return {...message, content: content as typeof message.content};
+  });
+  return changed ? repaired : messages;
+}
+
+function isLegacySlimMarker(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value.omitted === true && value.reason === 'session_size_limit' && !('type' in value);
+}
+
+export function repairRestoredConversation(messages: ModelMessage[]): ModelMessage[] {
+  return repairLegacySlimmedMessages(messages);
 }
 
 function slimConversationSnapshot(messages: ModelMessage[]): ModelMessage[] {

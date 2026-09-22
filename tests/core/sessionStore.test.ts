@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
-import type {ModelMessage} from 'ai';
+import {modelMessageSchema, type ModelMessage, type ToolResultPart} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
 import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, GOAL_LEDGER_KEEP_PER_GOAL, GOAL_LEDGER_TRIM_BYTES, latestSession, listSessions, readGoalLedgerFrontier, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits.js';
@@ -378,9 +378,44 @@ describe('sessionStore', () => {
 
     const restored = await restoreConversation(session);
     const content = restored.messages[0]?.content;
-    const toolResult = Array.isArray(content) ? content[0] as {output?: {omitted?: boolean; originalBytes?: number}} : undefined;
-    expect(toolResult?.output?.omitted).toBe(true);
-    expect(toolResult?.output?.originalBytes).toBeGreaterThan(32_000);
+    const toolResult = Array.isArray(content) ? content[0] as {output?: {type?: string; value?: {omitted?: boolean; originalBytes?: number}}} : undefined;
+    // The slim marker must stay inside the AI SDK output envelope so the
+    // restored conversation remains a protocol-safe ModelMessage[] (F-09).
+    expect(toolResult?.output?.type).toBe('json');
+    expect(toolResult?.output?.value?.omitted).toBe(true);
+    expect(toolResult?.output?.value?.originalBytes).toBeGreaterThan(32_000);
+    for (const message of restored.messages) expect(() => modelMessageSchema.parse(message)).not.toThrow();
+  });
+
+  it('repairs legacy bare slim markers on restore so resumed sessions stay provider-safe (F-09)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    // Shape written before the envelope fix: output replaced by a bare marker.
+    const legacy: ModelMessage[] = [{
+      role: 'user',
+      content: 'resume this session',
+    }, {
+      role: 'assistant',
+      content: [{type: 'tool-call', toolCallId: 'call', toolName: 'readFile', input: {path: 'a.md'}}],
+    }, {
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: 'call',
+        toolName: 'readFile',
+        output: {omitted: true, reason: 'session_size_limit', originalBytes: 40_040, preview: 'preview…'} as unknown as ToolResultPart['output'],
+      }],
+    }];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'materialize'}]});
+    // Write the legacy shape directly: appending through the slimming path
+    // would re-slim it. Simulate a file written by the previous version.
+    await fs.appendFile(session.file, `${JSON.stringify({type: 'conversation_snapshot', at: '2', messages: legacy})}\n`);
+
+    const restored = await restoreConversation(session);
+    for (const message of restored.messages) expect(() => modelMessageSchema.parse(message)).not.toThrow();
+    const toolMessage = restored.messages.find(m => m.role === 'tool');
+    const parts = Array.isArray(toolMessage?.content) ? toolMessage.content : [];
+    const output = (parts[0] as {output?: {type?: string}}).output;
+    expect(output?.type).toBe('json');
   });
 
   it('slims image file parts to placeholders so sessions never store image bytes (F03, AC4)', async () => {

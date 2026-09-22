@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
-import {prepareSessionEntryForWrite} from './sessionSlimming.js';
+import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';
 import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
 import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
@@ -410,7 +410,10 @@ export async function restoreSessionState(session: HazeSession): Promise<Restore
   let goalFrontier: GoalLedgerFrontier | undefined;
   const terminatedGoals = new Set<string>();
   const parseErrors = await scanSessionEntries(session, entry => {
-    if (entry.type === 'conversation_snapshot') messages = entry.messages;
+    // Legacy slim markers (pre-envelope-fix) are re-wrapped so the restored
+    // conversation is a protocol-safe ModelMessage[] for the next provider
+    // request (F-09).
+    if (entry.type === 'conversation_snapshot') messages = repairRestoredConversation(entry.messages);
     if (entry.type === 'work_state_snapshot') workState = entry.state;
     if (entry.type === 'goal') {
       if (entry.phase === 'goal_end') {
