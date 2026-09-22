@@ -105,6 +105,16 @@ export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
 }
 
 /**
+ * Ephemeral control for read-only edit recovery: a failed file mutation
+ * requested a fresh read before any further mutation. Names the exact path
+ * so the model re-reads it instead of retrying the stale edit. The tool set
+ * stays intact; the execution-time gate in toolContext is the enforcer.
+ */
+export function editRecoveryReadPrompt(path: string) {
+  return `A file mutation on ${path} failed and its content may be stale. Read ${path} with readFile now to get fresh content and current line numbers; the edit tools will reject any retry on ${path} until that read completes. Then retry the mutation once with corrected, fresh content. Do not retry the failed edit first and do not announce tool calls.`;
+}
+
+/**
  * Ephemeral control for a goal-continuation slice or a fresh continuation
  * turn. The model's stop was rejected (or its physical turn hit a budget
  * boundary) while structured evidence — declared task counts, post-edit

@@ -1,6 +1,6 @@
 import type {ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
-import {malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
+import {editRecoveryReadPrompt, malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
@@ -120,7 +120,12 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: appendSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
     }
     if (loopState.toolResultState.editRecoveryPath && !loopState.toolResultState.editRecoveryReadSatisfied) {
-      if ('readFile' in sliceTools) return messagesChanged ? {activeTools: ['readFile'] as Array<keyof typeof sliceTools>, messages: scopedMessages} : {activeTools: ['readFile'] as Array<keyof typeof sliceTools>};
+      // Instruct, do not restrict: the execution-time gate in toolContext
+      // (failed-mutation path requires a fresh read) is the structural
+      // enforcer and returns a recoverable structured error. Narrowing the
+      // request tool set here would downgrade that to a step-fatal
+      // AI_NoSuchToolError when a model retries the edit anyway.
+      if ('readFile' in sliceTools) return {messages: appendSyntheticControl(scopedMessages, editRecoveryReadPrompt(loopState.toolResultState.editRecoveryPath))};
       return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The failed mutation of ${loopState.toolResultState.editRecoveryPath} requires a fresh read, but readFile is unavailable in this bounded recovery slice. Report the unfinished edit as blocked; do not claim it succeeded.`)};
     }
     if (repeatedToolNames.length > 0) {

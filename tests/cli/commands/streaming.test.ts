@@ -438,11 +438,14 @@ describe('runAgentTurn: setup', () => {
     await runAgentTurn('fix a.ts', undefined, [], makeCallbacks());
     const options = mocks.agentOptions.at(-1)!;
     const onStepEnd = options.onStepEnd as (input: Record<string, unknown>) => void;
-    const prepare = options.prepareStep as (input: {steps: unknown[]; messages: unknown[]}) => {activeTools?: string[]} | undefined;
+    const prepare = options.prepareStep as (input: {steps: unknown[]; messages: unknown[]}) => {activeTools?: string[]; messages?: unknown} | undefined;
     const base = {stepNumber: 0, text: '', toolCalls: [], toolResults: [], finishReason: 'tool-calls', usage: {}, response: {messages: []}};
 
     onStepEnd({...base, content: [{type: 'tool-result', toolName: 'editFile', input: {path: './a.ts'}, output: {ok: false, recoveryTool: 'readFile'}}]});
-    expect(prepare({steps: [], messages: []})?.activeTools).toEqual(['readFile']);
+    const guided = prepare({steps: [], messages: []});
+    expect(guided?.activeTools).toBeUndefined();
+    expect(JSON.stringify(guided?.messages)).toContain('./a.ts');
+    expect(JSON.stringify(guided?.messages)).toMatch(/readFile/);
 
     onStepEnd({...base, stepNumber: 1, content: [{type: 'tool-result', toolName: 'readFile', input: {path: 'a.ts'}, output: {ok: true, content: 'x'}}]});
     expect(prepare({steps: [], messages: []})?.activeTools).toBeUndefined();
