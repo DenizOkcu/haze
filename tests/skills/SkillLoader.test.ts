@@ -51,6 +51,44 @@ describe('loadSkill', () => {
     expect(skill?.references[0]?.content).toBe('example content');
   });
 
+  it('rejects protected secret references before reading them (CI-03)', async () => {
+    // Synthetic protected names only — no real credentials are ever created.
+    await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', 'References:\n- [env](.env)\n- [key](server.key)'));
+    await expect(loadSkill(tmp)).rejects.toThrow(/protected secret/);
+    expect(await fs.pathExists(path.join(tmp, '.env'))).toBe(false);
+  });
+
+  it.runIf(process.platform !== 'win32')('rejects a symlink renamed onto a protected name', async () => {
+    const outside = path.join(path.dirname(tmp), `${path.basename(tmp)}-target.md`);
+    await fs.writeFile(outside, 'innocuous');
+    try {
+      await fs.symlink(outside, path.join(tmp, 'id_rsa'));
+      await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', 'References:\n- [key](id_rsa)'));
+      await expect(loadSkill(tmp)).rejects.toThrow(/protected secret/);
+    } finally {
+      await fs.remove(outside);
+    }
+  });
+
+  it('rejects too many references and oversized aggregate reference bodies (CI-04)', async () => {
+    await fs.ensureDir(path.join(tmp, 'refs'));
+    const many = Array.from({length: 21}, (_, i) => `refs/${i}.md`).join('\n- ');
+    await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', `References:\n- ${many}`));
+    await expect(loadSkill(tmp)).rejects.toThrow(/maximum is 20/);
+
+    const big = 'x'.repeat(45_000);
+    for (const name of ['a.md', 'b.md', 'c.md', 'd.md', 'e.md']) await fs.writeFile(path.join(tmp, 'refs', name), big);
+    await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', 'References:\n- [a](refs/a.md)\n- [b](refs/b.md)\n- [c](refs/c.md)\n- [d](refs/d.md)\n- [e](refs/e.md)'));
+    await expect(loadSkill(tmp)).rejects.toThrow(/aggregate/);
+  });
+
+  it('loads documentation-template references that share the env stem', async () => {
+    await fs.writeFile(path.join(tmp, '.env.example'), '# placeholder variables only');
+    await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', 'References:\n- [sample](.env.example)'));
+    const skill = await loadSkill(tmp);
+    expect(skill?.references[0]?.content).toContain('placeholder');
+  });
+
   it('rejects references outside the skill directory', async () => {
     await fs.writeFile(path.join(tmp, 'SKILL.md'), skillMarkdown('name: test\ndescription: test', 'References:\n[bad](../outside.md)'));
     await expect(loadSkill(tmp)).rejects.toThrow(/escapes/);

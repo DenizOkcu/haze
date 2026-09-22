@@ -19,6 +19,42 @@ const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_DISCOVERED_MODELS = 500;
 /** Redirect hops followed; each hop re-validates the credential transport policy. */
 const MAX_DISCOVERY_REDIRECTS = 2;
+/** CI-04: bound the JSON body before parsing so an oversized response fails loudly. */
+const MAX_DISCOVERY_BODY_BYTES = 1_000_000;
+
+/** Read a discovery response body as bounded UTF-8; an oversized body fails. */
+async function readBodyBounded(response: Response): Promise<unknown> {
+  if (response.body == null) return await response.json();
+  const read = await readUtf8PrefixFromStream(response.body, MAX_DISCOVERY_BODY_BYTES);
+  if (read.truncated) throw new Error(`endpoint response exceeds ${MAX_DISCOVERY_BODY_BYTES} bytes`);
+  return JSON.parse(read.content);
+}
+
+function readUtf8PrefixFromStream(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<{content: string; truncated: boolean}> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = []
+  let received = 0;
+  return new Promise((resolve, reject) => {
+    const pump = (): void => {
+      reader.read().then(({done, value}) => {
+        if (done) {
+          resolve({content: Buffer.concat(chunks).toString('utf8'), truncated: false});
+          return;
+        }
+        received += value.byteLength;
+        if (received > maxBytes) {
+          // Cancel and resolve truncated; the caller decides what that means.
+          void reader.cancel().catch(() => undefined);
+          resolve({content: '', truncated: true});
+          return;
+        }
+        chunks.push(value);
+        pump();
+      }, reject);
+    };
+    pump();
+  });
+}
 
 export function modelsEndpointUrl(baseUrl: string): string {
   return `${baseUrl.trim().replace(/\/+$/, '')}/models`;
@@ -235,7 +271,7 @@ export async function discoverProviderModels(
   if (!response.ok) return {status: 'failed', error: `endpoint returned HTTP ${response.status}`};
   let body: unknown;
   try {
-    body = await response.json();
+    body = await readBodyBounded(response);
   } catch {
     return {status: 'failed', error: 'endpoint returned no JSON'};
   }

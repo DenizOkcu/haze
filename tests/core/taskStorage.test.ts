@@ -91,6 +91,30 @@ describe('taskStorage', () => {
   });
 
   describe('saveTasks', () => {
+    it('refuses to write through a symlinked tasks file or directory (CI-05)', async () => {
+      const victimRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-tasks-victim-'));
+      try {
+        // Harmless temp target; the escape must be refused without modifying it.
+        const escapedFile = path.join(victimRoot, 'stolen.json');
+        await fs.writeFile(escapedFile, 'external state', 'utf-8');
+        await fs.ensureDir(path.join(tmp, '.haze'));
+        await fs.symlink(escapedFile, path.join(tmp, '.haze', 'tasks.json'));
+        await expect(saveTasks([{id: 'a', title: 'Escape', status: 'pending', createdAt: '', updatedAt: ''}])).rejects.toThrow(/outside the workspace/i);
+        expect(await fs.readFile(escapedFile, 'utf-8')).toBe('external state');
+        await fs.remove(path.join(tmp, '.haze', 'tasks.json'));
+
+        const escapedDir = path.join(victimRoot, 'store');
+        await fs.ensureDir(escapedDir);
+        await fs.remove(path.join(tmp, '.haze'));
+        await fs.symlink(escapedDir, path.join(tmp, '.haze'));
+        await expect(saveTasks([{id: 'a', title: 'Escape', status: 'pending', createdAt: '', updatedAt: ''}])).rejects.toThrow(/outside the workspace/i);
+        expect(await fs.pathExists(path.join(escapedDir, 'tasks.json'))).toBe(false);
+        expect(await loadTasks()).toEqual([]);
+      } finally {
+        await fs.remove(victimRoot);
+      }
+    });
+
     it('creates directory and file', async () => {
       const tasks: Task[] = [
         {id: 'new-task', title: 'New Task', status: 'pending', createdAt: '2024-01-01T00:00:00.000Z', updatedAt: '2024-01-01T00:00:00.000Z'},

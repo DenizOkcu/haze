@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {z} from 'zod';
 import {resolveWorkspacePath} from '../../utils/path.js';
+import {assertRealPathInsideWorkspace, assertWritablePathInsideWorkspace} from '../../utils/path.js';
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed';
 
@@ -39,7 +40,11 @@ export function generateTaskId(): string {
 
 export async function loadTasks(): Promise<Task[]> {
   try {
-    const content = await fs.readFile(getTasksFilePath(), 'utf-8');
+    const filePath = getTasksFilePath();
+    // CI-05: real-path confinement — a symlinked `.haze`/`tasks.json` must not
+    // redirect task state outside the workspace. Refusal is nonfatal (CR-012).
+    await assertRealPathInsideWorkspace(filePath, filePath);
+    const content = await fs.readFile(filePath, 'utf-8');
     return tasksSchema.parse(JSON.parse(content));
   } catch {
     return [];
@@ -48,6 +53,8 @@ export async function loadTasks(): Promise<Task[]> {
 
 export async function saveTasks(tasks: Task[]): Promise<void> {
   const filePath = getTasksFilePath();
+  // Mutation guards fail closed: an escaped real path throws instead of writing.
+  await assertWritablePathInsideWorkspace(filePath, filePath);
   await fs.mkdir(path.dirname(filePath), {recursive: true});
   await fs.writeFile(filePath, JSON.stringify(tasks, null, 2), 'utf-8');
 }
