@@ -222,6 +222,23 @@ describe('runSubagent status mapping', () => {
     expect(result.error).toBe('boom');
   });
 
+  it.each(['provider_error', 'cancelled', 'deadline_exceeded'] as const)('retains completed effects after %s', async termination => {
+    const controller = new AbortController();
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, generateText: vi.fn(async (config: {onToolExecutionEnd: (event: unknown) => void}) => {
+        config.onToolExecutionEnd({toolCall: {toolName: 'writeFile', input: {path: 'a.ts'}}, toolOutput: {type: 'tool-result', output: {ok: true, path: 'a.ts'}}, toolExecutionMs: 1});
+        config.onToolExecutionEnd({toolCall: {toolName: 'shell'}, toolOutput: {type: 'tool-result', output: {ok: true, command: 'npm test', validationSummary: {status: 'passed'}}}, toolExecutionMs: 1});
+        if (termination === 'cancelled') controller.abort();
+        throw new Error('provider disconnected');
+      })};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const result = await runSubagent('edit then fail', {model: noopModel, contextFiles: [], abortSignal: controller.signal, deadlineExpired: () => termination === 'deadline_exceeded'});
+    expect(result.capsule).toMatchObject({termination, usable: false, changedPaths: ['a.ts'], validation: [{command: 'npm test', ok: true}]});
+  });
+
   it('provider errors surface a bounded actionable capsule instead of an empty deliverable (RT-03)', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');

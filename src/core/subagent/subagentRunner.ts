@@ -11,6 +11,7 @@ import {
   withToolExecutionBudget,
 } from '../agent/budgets.js';
 import {storeToolOutput} from '../agent/toolOutputStore.js';
+import {changedPathsFromTool} from '../agent/toolCapabilities.js';
 import {withSyntheticControl} from '../agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../agent/turnPolicy.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
@@ -61,13 +62,6 @@ function pendingScopedControl(messages: ModelMessage[], context: HazeToolContext
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];
   return withSyntheticControl(messages, `Additional scoped project instructions now apply. Follow them before subsequent work.${projectContextSection(files)}`);
-}
-
-function changedPathFromOutput(name: string, output: unknown) {
-  if (!['editFile', 'replaceLines', 'writeFile'].includes(name) || typeof output !== 'object' || output == null) return undefined;
-  const value = output as {ok?: unknown; path?: unknown};
-  if (value.ok !== true || typeof value.path !== 'string') return undefined;
-  try { return workspaceRelativePath(resolveWorkspacePath(value.path)); } catch { return undefined; }
 }
 
 function validationFromOutput(name: string, output: unknown) {
@@ -170,10 +164,11 @@ export async function runSubagent(
         if (!isToolBudgetBlocked(output)) {
           const toolError = 'error' in event.toolOutput ? event.toolOutput.error : 'tool execution failed';
           if (toolCallLog.length < profile.maxToolCalls) toolCallLog.push({name: event.toolCall.toolName, summary: output === undefined ? `failed: ${String(toolError).slice(0, 120)}` : toolSummary(output), durationMs: event.toolExecutionMs});
-          const changedPath = changedPathFromOutput(event.toolCall.toolName, output);
-          if (changedPath) changedPaths.add(changedPath);
+          for (const changedPath of changedPathsFromTool(event.toolCall.toolName, event.toolCall.input, output)) {
+            try { changedPaths.add(workspaceRelativePath(resolveWorkspacePath(changedPath))); } catch { /* Ignore invalid paths in external results. */ }
+          }
           const validationRecord = validationFromOutput(event.toolCall.toolName, output);
-          if (validationRecord) validation.push(validationRecord);
+          if (validationRecord && validation.length < profile.maxToolCalls) validation.push(validationRecord);
         }
       },
     });
@@ -218,6 +213,9 @@ export async function runSubagent(
     // Keep the raw provider message on the legacy `error` field so machine
     // consumers see exactly what the provider said (unchanged contract).
     result.error = rawMessage;
+    result.capsule.changedPaths = [...changedPaths].sort();
+    result.capsule.validation = [...validation];
+    result.telemetry.estimates.resultCapsuleTokens = estimateValueTokens(result.capsule);
     result.telemetry.durationMs = performance.now() - startedAt;
     result.durationMs = result.telemetry.durationMs;
     result.telemetry.toolCalls = toolCallLog;

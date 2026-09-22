@@ -25,6 +25,9 @@ const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   writeFile: ['mutate'],
   editFile: ['mutate'],
   replaceLines: ['mutate'],
+  replaceInFiles: ['mutate'],
+  lspRenameSymbol: ['mutate'],
+  lspSafeDeleteSymbol: ['mutate'],
   // Process execution. A shell call becomes validation only when its command is
   // a classifier-confirmed validation command (see work state); that runtime
   // fact is tracked separately as a validation event, not as a static trait.
@@ -52,6 +55,25 @@ export function hasCapability(name: string, capability: ToolCapability): boolean
 /** Tools whose successful call introduces a workspace mutation. */
 export function isMutatingCapability(name: string): boolean {
   return hasCapability(name, 'mutate');
+}
+
+/** Confirmed effects, including completed writes from failed multi-file/worker calls. */
+export function changedPathsFromTool(toolName: string, input: unknown, output: unknown, success = true): string[] {
+  if (typeof output !== 'object' || output === null) return [];
+  const result = output as Record<string, unknown>;
+  if (result.duplicateSkipped === true || result.dryRun === true || result.noChange === true) return [];
+  const strings = (value: unknown) => Array.isArray(value) ? value.filter((path): path is string => typeof path === 'string' && path.length > 0).slice(0, 20_000) : [];
+  if (toolName === 'subagent') {
+    const capsule = typeof result.capsule === 'object' && result.capsule !== null ? result.capsule as Record<string, unknown> : result;
+    return [...new Set(strings(capsule.changedPaths))];
+  }
+  if (!isMutatingCapability(toolName)) return [];
+  if (Array.isArray(result.changedPaths)) return [...new Set(strings(result.changedPaths))];
+  if (result.ok === false || !success) return [];
+  if (Array.isArray(result.files)) return [...new Set(result.files.flatMap(file => typeof file === 'object' && file !== null && 'path' in file && typeof file.path === 'string' && !('noChange' in file && file.noChange === true) ? [file.path] : []))];
+  if (!['writeFile', 'editFile', 'replaceLines'].includes(toolName)) return [];
+  const path = typeof result.path === 'string' ? result.path : typeof input === 'object' && input !== null && 'path' in input ? input.path : undefined;
+  return typeof path === 'string' && path.length > 0 ? [path] : [];
 }
 
 /** Tools that can act as a validation step (runtime-classifier dependent). */

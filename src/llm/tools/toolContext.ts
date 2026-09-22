@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {changedPathsFromTool, isMutatingCapability} from '../../core/agent/toolCapabilities.js';
 import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import {readScopedContextFilesForPath, type ContextFile} from '../../config/contextFiles.js';
 import {workspacePathKey, workspaceRoot} from '../../utils/path.js';
@@ -164,22 +165,17 @@ export function scopedContextMutationStop(toolName: string, filePath: string, fi
   };
 }
 
-const FILE_MUTATION_TOOLS = new Set(['editFile', 'replaceInFiles', 'replaceLines', 'writeFile', 'lspRenameSymbol', 'lspSafeDeleteSymbol']);
+// Shared effects policy keeps diagnostics and completion evidence in agreement.
 
 function isMutatingTool(toolName: string) {
   // Shell execution is conservatively workspace-mutation-capable. Classification remains
   // informational and is not a sandbox boundary.
-  return FILE_MUTATION_TOOLS.has(toolName) || toolName === 'shell';
+  return isMutatingCapability(toolName) || toolName === 'shell';
 }
 
 /** Paths actually changed by a successful dedicated file-mutation result. */
-export function changedPathsForDiagnostics(toolName: string, input: unknown, result: unknown): string[] {
-  if (!FILE_MUTATION_TOOLS.has(toolName) || !isRecord(result) || result.ok === false || result.noChange === true || result.dryRun === true) return [];
-  const files = Array.isArray(result.files)
-    ? result.files.flatMap(file => isRecord(file) && typeof file.path === 'string' ? [file.path] : [])
-    : [];
-  const inputPath = toolInputField(input, 'path');
-  return [...new Set(files.length > 0 ? files : inputPath ? [inputPath] : [])];
+function changedPathsForDiagnostics(toolName: string, input: unknown, result: unknown): string[] {
+  return changedPathsFromTool(toolName, input, result);
 }
 
 async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown, result: T, diagnostics: PostMutationDiagnostics | undefined): Promise<T> {
