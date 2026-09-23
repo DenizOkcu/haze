@@ -1,4 +1,7 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {LspPool, pickLspServer} from '../../../src/llm/lsp/pool.js';
 import {StdioLspClient} from '../../../src/llm/lsp/client.js';
 import type {HazeLspServer} from '../../../src/config/lspSettings.js';
@@ -99,6 +102,28 @@ describe('LspPool', () => {
     await pool.ensureOpen(ts, client as unknown as StdioLspClient, '/ws/src/a.ts');
     await pool.ensureOpen(ts, client as unknown as StdioLspClient, '/ws/src/b.ts');
     expect(client.openDocument).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens a source document before the first cross-file query initializes the project', async () => {
+    const cwd = process.cwd();
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-lsp-pool-')));
+    process.chdir(root);
+    try {
+      await fs.mkdir('src');
+      await fs.writeFile('src/a.ts', 'export const a = 1;\n');
+      const client = fakeClient();
+      vi.spyOn(StdioLspClient, 'start').mockReturnValue(client as unknown as StdioLspClient);
+
+      await pool.prepareCrossFileQuery(ts);
+
+      expect(client.openDocument).toHaveBeenCalledTimes(1);
+      expect(client.openDocument).toHaveBeenCalledWith(path.join(root, 'src/a.ts'));
+      expect(client.waitForIndexing).toHaveBeenCalledTimes(1);
+    } finally {
+      await pool.close();
+      process.chdir(cwd);
+      await fs.rm(root, {recursive: true, force: true});
+    }
   });
 
   it('restarts a client that has terminated (crash recovery)', async () => {

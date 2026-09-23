@@ -45,8 +45,6 @@ function fakeChild(): ChildProcessWithoutNullStreams & {stdout: EventEmitter; st
     write: vi.fn((data: string) => {
       const message = parseOutgoing(data);
       if (message?.method === 'shutdown' && typeof message.id === 'number') {
-        // Defer the response so it lands after `request()` registers the pending
-        // entry (pending.set runs synchronously after send returns).
         queueMicrotask(() => stdout.emit('data', frame({id: message.id, result: null})));
       }
     }),
@@ -85,6 +83,17 @@ describe('StdioLspClient', () => {
     await client.close();
   });
 
+  it('registers a request before writing so a synchronous response is not lost', async () => {
+    const child = fakeChild();
+    const client = new StdioLspClient(ts, child);
+    (child.stdin.write as ReturnType<typeof vi.fn>).mockImplementationOnce((data: string) => {
+      const message = parseOutgoing(data);
+      if (typeof message?.id === 'number') child.stdout.emit('data', frame({id: message.id, result: 'immediate'}));
+    });
+    await expect(client.request('workspace/symbol', {query: 'foo'})).resolves.toBe('immediate');
+    await client.close();
+  });
+
   it('rejects when the server returns an error result', async () => {
     vi.useFakeTimers();
     const child = fakeChild();
@@ -112,6 +121,8 @@ describe('StdioLspClient', () => {
     const assertion = expect(pending).rejects.toThrow('LSP server exited with code 1');
     child.emit('exit', 1);
     await assertion;
+    expect(client.terminated).toBe(true);
+    await expect(client.request('workspace/symbol')).rejects.toThrow(/terminated/);
   });
 
   it('rejects all pending requests on child error', async () => {
@@ -122,6 +133,7 @@ describe('StdioLspClient', () => {
     const assertion = expect(pending).rejects.toThrow('spawn failed');
     child.emit('error', new Error('spawn failed'));
     await assertion;
+    expect(client.terminated).toBe(true);
   });
 
   it('parses messages split across multiple data chunks', async () => {

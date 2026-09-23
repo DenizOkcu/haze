@@ -52,7 +52,9 @@ function offsetAt(text: string, line: number, character: number) {
   let offset = 0;
   for (let index = 0; index < line - 1; index++) offset += (lines[index]?.length ?? 0) + 1;
   // LSP character positions are UTF-16 code units, as are JavaScript string offsets.
-  return offset + Math.min(character - 1, lines[line - 1]!.replace(/\r$/, '').length);
+  const lineLength = lines[line - 1]!.replace(/\r$/, '').length;
+  if (character - 1 > lineLength) throw new Error('LSP edit position is outside the document.');
+  return offset + character - 1;
 }
 
 export function applyTextEdits(content: string, edits: readonly TextEdit[]) {

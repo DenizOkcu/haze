@@ -1,4 +1,5 @@
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
+import path from 'node:path';
 import type {HazeLspServer} from '../../config/lspSettings.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {LSP_BUFFER_BYTES, LSP_DOCUMENT_BYTES, LSP_FRAME_BYTES, LSP_HEADER_BYTES} from '../../core/limits.js';
@@ -28,6 +29,7 @@ export class StdioLspClient {
   private buffer = Buffer.alloc(0);
   private pending = new Map<number, Pending>();
   private terminating = false;
+  private failed = false;
   private initializeResult: unknown;
   private readonly published = new Map<string, {diagnostics: unknown[]; version?: number}>();
   private readonly activeProgress = new Set<string>();
@@ -44,8 +46,8 @@ export class StdioLspClient {
       }
     });
     child.stderr.on('data', () => undefined);
-    child.on('error', error => this.rejectAll(error instanceof Error ? error : new Error(String(error))));
-    child.on('exit', code => this.rejectAll(new LspError(`LSP server exited${code == null ? '' : ` with code ${code}`}`)));
+    child.on('error', error => this.fail(error instanceof Error ? error : new Error(String(error))));
+    child.on('exit', code => this.fail(new LspError(`LSP server exited${code == null ? '' : ` with code ${code}`}`)));
   }
 
   static start(server: HazeLspServer) {
@@ -62,6 +64,11 @@ export class StdioLspClient {
     this.pending.clear();
   }
 
+  private fail(error: Error) {
+    this.failed = true;
+    this.rejectAll(error);
+  }
+
   private terminate() {
     if (this.terminating) return;
     this.terminating = true;
@@ -75,7 +82,7 @@ export class StdioLspClient {
 
   /** Whether this client has begun (or completed) teardown and must not be reused. */
   get terminated() {
-    return this.terminating;
+    return this.terminating || this.failed;
   }
 
   private onData(chunk: Buffer) {
@@ -139,14 +146,21 @@ export class StdioLspClient {
   }
 
   request(method: string, params?: Json, timeoutMs = 8000) {
+    if (this.terminated) return Promise.reject(new LspError(`LSP client is terminated; cannot request ${method}.`));
     const id = ++this.id;
-    this.send({id, method, params});
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new LspError(`LSP request timed out: ${method}`));
       }, timeoutMs);
       this.pending.set(id, {resolve, reject, timer});
+      try {
+        this.send({id, method, params});
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error instanceof Error ? error : new LspError(String(error)));
+      }
     });
   }
 
@@ -155,9 +169,13 @@ export class StdioLspClient {
   }
 
   async initialize() {
+    const root = workspaceRoot();
+    const rootUri = toUri(root);
     this.initializeResult = await this.request('initialize', {
       processId: process.pid,
-      rootUri: toUri(workspaceRoot()),
+      rootPath: root,
+      rootUri,
+      workspaceFolders: [{uri: rootUri, name: path.basename(root)}],
       capabilities: {
         textDocument: {
           documentSymbol: {hierarchicalDocumentSymbolSupport: true},

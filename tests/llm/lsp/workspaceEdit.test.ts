@@ -10,11 +10,12 @@ describe('LSP workspace edit helpers', () => {
     expect(() => workspaceEditChanges({changes: {'file:///tmp/a.ts': [{range: {start, end: {line: 1, character: 1}}, newText: 'x'}]}})).toThrow();
   });
 
-  it('rejects reversed and out-of-document ranges, while clamping CRLF character offsets', () => {
+  it('rejects reversed and out-of-document ranges, including oversized character offsets', () => {
     const edit = (start: {line: number; character: number}, end: {line: number; character: number}) => ({range: {start, end}, newText: 'X'});
     expect(() => applyTextEdits('abc', [edit({line: 1, character: 3}, {line: 1, character: 1})])).toThrow(/Reversed/);
     expect(() => applyTextEdits('abc', [edit({line: 2, character: 1}, {line: 2, character: 1})])).toThrow(/outside/);
-    expect(applyTextEdits('😀\r\nnext', [edit({line: 1, character: 3}, {line: 1, character: 100})])).toBe('😀X\r\nnext');
+    expect(() => applyTextEdits('😀\r\nnext', [edit({line: 1, character: 3}, {line: 1, character: 100})])).toThrow(/outside/);
+    expect(applyTextEdits('😀\r\nnext', [edit({line: 1, character: 3}, {line: 1, character: 3})])).toBe('😀X\r\nnext');
   });
 
   it('preflights all files and reports partial write failures truthfully', async () => {

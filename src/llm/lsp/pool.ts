@@ -92,8 +92,14 @@ export class LspPool {
       filter: entry => entry.isDirectory || (entry.isFile && extensions.has(path.extname(entry.path).toLowerCase())),
       ignoreBatch: async entriesToClassify => await ignore.classify(entriesToClassify.map(entry => ({path: entry.path, isDirectory: entry.isDirectory}))),
     });
+    const sourceEntries = entries.filter(entry => entry.isFile);
     const current = new Map<string, string>();
-    for (const entry of entries) if (entry.isFile) current.set(entry.path, await fileFingerprint(entry.absolutePath));
+    for (const entry of sourceEntries) current.set(entry.path, await fileFingerprint(entry.absolutePath));
+    // TypeScript and some other servers do not instantiate a project from the
+    // initialize root alone. Open one source document before the first
+    // workspace/symbol request so project-wide navigation has a project to query.
+    const bootstrap = sourceEntries[0];
+    if (bootstrap) await this.ensureOpen(server, client, bootstrap.absolutePath);
     const previous = this.workspaceSnapshots.get(server.name);
     this.workspaceSnapshots.set(server.name, current);
     let changedFiles = 0;
