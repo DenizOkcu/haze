@@ -673,6 +673,34 @@ describe('goal ledger (P1: durable frontier)', () => {
     expect(await readGoalLedgerFrontier(session)).toMatchObject({cycle: 1, mutationCount: 4});
   });
 
+  it('vacuum goal trimming keeps the live frontier when snapshots interleave goal entries (R2-01)', async () => {
+    // Real-world shape: one deferred vacuum after entries accumulated (the
+    // auto-vacuum-on-every-append shape keeps index spaces aligned and hides
+    // the original bug). Snapshots before and between goal entries shift
+    // candidate positions; the keep-set must still reference original indexes.
+    setSessionVacuumThresholdForTests(100 * 1024 * 1024); // no auto-vacuum during setup
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'start a long goal'});
+    for (let turn = 0; turn < 8; turn++) {
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: `s${turn}`, messages: [{role: 'user', content: `turn ${turn} `.repeat(500)}] as ModelMessage[]});
+    }
+    await appendSessionEntry(session, goalEntry({phase: 'goal_start', cycle: 1, mutationCount: 3}));
+    for (let turn = 0; turn < 8; turn++) {
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: `m${turn}`, messages: [{role: 'user', content: `mid ${turn} `.repeat(500)}] as ModelMessage[]});
+    }
+    await appendSessionEntry(session, goalEntry({phase: 'goal_continue', cycle: 2, mutationCount: 5}));
+    expect(await readGoalLedgerFrontier(session)).toMatchObject({cycle: 2, mutationCount: 5});
+    // The single vacuum over the accumulated file must keep the live frontier
+    // (and the trailing keep window) while dropping superseded snapshots.
+    await expect(vacuumSessionFileIfLarge(session, 1)).resolves.toBe(true);
+    expect(await readGoalLedgerFrontier(session)).toMatchObject({goalId: 'goal-1', cycle: 2, mutationCount: 5});
+    const {entries} = await readSessionEntries(session);
+    const goalEntries = entries.filter(entry => entry.type === 'goal');
+    expect(goalEntries.length).toBe(2); // trailing window: start + latest continue
+    // Only the newest snapshot of each type survives.
+    expect(entries.filter(entry => entry.type === 'conversation_snapshot').length).toBe(1);
+  });
+
   it('bounds ledger growth: the vacuum keeps only the trailing entries per goal id', async () => {
     setSessionVacuumThresholdForTests(1);
     const session = await createSession({cwd, sessionsDir});

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type {CompletionReadiness, TurnExecutionState} from '../../../core/agent/completionController.js';
 import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress} from '../../../core/agent/workState.js';
+import type {ValidationKind} from '../../../llm/toolResultTypes.js';
 import type {GoalLedgerFrontier} from '../../../core/session/sessionStore.js';
 
 /**
@@ -29,6 +30,8 @@ export interface IncompleteGoalResume {
   requestHash?: string;
   /** Unresolved pre-mutation failing repro for fix goals. */
   redEvidence?: RedEvidence;
+  /** Kind of the carried validation, when one rode the checkpoint (R2-03). */
+  validationKind?: ValidationKind;
 }
 
 /** Supervisor-level checkpoint persisted between physical turns (in memory and, via the goal ledger, in the session JSONL). */
@@ -53,7 +56,10 @@ export interface GoalCheckpoint {
   requestHash?: string;
   intent?: RequestIntent;
   redEvidence?: RedEvidence;
+  /** Kind of the carried validation, when one rode the checkpoint (R2-03). */
+  validationKind?: ValidationKind;
 }
+
 
 /** Durable goal-ledger append (P1): one entry per supervisor boundary; the writer stamps `type`/`at`. Shared by the supervisor and the session recorder. */
 export interface GoalLedgerAppend {
@@ -87,6 +93,7 @@ export interface CarriedGoalEvidence {
   requestHash?: string;
   intent?: RequestIntent;
   redEvidence?: RedEvidence;
+  validationKind?: ValidationKind;
 }
 
 /**
@@ -139,5 +146,6 @@ export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCh
     ...(frontier.intent ? {intent: frontier.intent as RequestIntent} : {}),
     ...(frontier.taskCounts ? {taskCounts: frontier.taskCounts} : {}),
     ...(frontier.redEvidence ? {redEvidence: {...frontier.redEvidence}} : {}),
+    ...(frontier.validationKind ? {validationKind: frontier.validationKind} : {}),
   };
 }

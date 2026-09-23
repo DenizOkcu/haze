@@ -267,6 +267,22 @@ describe('seedCarriedGoalEvidence (cross-physical-turn hydration)', () => {
     expect(deriveValidationOutcome(state)).toBe('failed');
   });
 
+  it('carries the validation kind so cross-turn generic clears keep parity with the in-turn rule (R2-03)', () => {
+    // A carried GENERIC failure can be cleared by a generic green on the
+    // continuation turn — same as in-turn semantics — while a carried
+    // confirmed (non-generic) failure still demands a confirmed green.
+    const genericRed = createWorkState('fix it', 'fix', []);
+    seedCarriedGoalEvidence(genericRed, {mutationCount: 2, validationOutcome: 'failed', validationKind: 'generic'});
+    observeWorkToolEvent(genericRed, {toolName: 'shell', input: {command: 'node check.js'}, success: true, output: {ok: true, code: 0, validationSummary: genericPassedSummary()}});
+    expect(genericRed.carriedValidation).toEqual({status: 'failed', kind: 'generic'});
+    expect(deriveValidationOutcome(genericRed)).toBe('passed');
+
+    const confirmedRed = createWorkState('fix it', 'fix', []);
+    seedCarriedGoalEvidence(confirmedRed, {mutationCount: 2, validationOutcome: 'failed', validationKind: 'test'});
+    observeWorkToolEvent(confirmedRed, {toolName: 'shell', input: {command: 'node check.js'}, success: true, output: {ok: true, code: 0, validationSummary: genericPassedSummary()}});
+    expect(deriveValidationOutcome(confirmedRed)).toBe('failed');
+  });
+
   it('seeds carried task counts so an undeclared list still gates completion', () => {
     const state = createWorkState('do it', 'implement', []);
     seedCarriedGoalEvidence(state, {mutationCount: 0, validationOutcome: 'not_applicable', taskProgress: {total: 7, pending: 6, inProgress: 1, completed: 0, revision: 4}});
@@ -347,6 +363,14 @@ describe('red→green pair (P4)', () => {
     expect(validationCommandKey('time npm test')).toBe('npm test');
     expect(validationCommandKey('npm test --')).toBe('npm test');
     expect(validationCommandKey('npm test')).not.toBe('npm run build');
+    // `env` with assignments is the same check as the bare command (R2-06).
+    expect(validationCommandKey('env NODE_ENV=test npm test')).toBe('npm test');
+    expect(validationCommandKey('env -i FOO=bar npm test')).toBe('npm test');
+    expect(validationCommandKey('env npm test')).toBe('npm test');
+    // An env-prefixed red binds to a bare-command green and vice versa.
+    expect(validationCommandKey('env CI=1 npm test')).toBe(validationCommandKey('npm test'));
+    // A token like `env-file` (flag of another command) is not stripped.
+    expect(validationCommandKey('npm run env-file')).toBe('npm run env-file');
   });
 
   it('requires same-check green only when a red was actually captured', () => {

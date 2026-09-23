@@ -88,6 +88,7 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
       validationOutcome: checkpoint.validationOutcome,
       ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {}),
       ...(checkpoint.redEvidence ? {redEvidence: {...checkpoint.redEvidence}} : {}),
+      ...(checkpoint.validationKind ? {validationKind: checkpoint.validationKind} : {}),
     }
     : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
@@ -143,6 +144,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       // Unresolved red evidence keeps crash resumes at parity with in-process
       // continuation; satisfied pairs are deliberately not carried.
       ...(source?.redEvidence ? {redEvidence: {...source.redEvidence}} : {}),
+      ...(source?.validationKind ? {validationKind: source.validationKind} : {}),
       ...extra,
     });
   };

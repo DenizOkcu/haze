@@ -5,6 +5,7 @@ import fs from 'fs-extra';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
+import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';
 import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
 import {JSONL_LINE_BYTES} from '../limits.js';
@@ -18,7 +19,7 @@ export type SessionEntry =
   | {type: 'event'; at: string; name: string; text?: string}
   /** First-class compaction audit entry (Pillar 1.7): conversation snapshots remain the restore source of truth; this records what was compacted, when, and how. */
   | {type: 'compact'; at: string; method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}
-  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; stopReason?: string; status?: string};
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; validationKind?: ValidationKind; stopReason?: string; status?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
 export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
@@ -36,6 +37,8 @@ export interface GoalLedgerFrontier {
   taskCounts?: GoalLedgerEntry['taskCounts'];
   /** Unresolved red evidence carried so crash resume preserves the pending same-check green requirement. */
   redEvidence?: GoalLedgerEntry['redEvidence'];
+  /** Kind of the frontier's carried validation, when one rode the ledger (R2-03). */
+  validationKind?: ValidationKind;
   at: string;
 }
 
@@ -193,7 +196,10 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   // turn; intermediate `goal_continue` entries of superseded cycles are audit
   // trail only. Keep the trailing few per goal id — the frontier and the
   // terminal entry are always among them — so a very long-lived session file
-  // stays bounded without ever losing a live frontier.
+  // stays bounded without ever losing a live frontier. The keep decision and
+  // `keepGoal` must both use original `entries` indexes (R2-01): filtering a
+  // candidate array first would shift positions whenever snapshots precede or
+  // interleave goal entries, silently dropping the live frontier.
   const keepGoal = new Set<number>();
   const goalIndexesByGoal = new Map<string, number[]>();
   entries.forEach((entry, index) => {
@@ -205,12 +211,12 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   // Malformed lines are dropped by the rewrite: they were already unusable
   // (and reported as parse errors on read) and keeping them would defeat the
   // size bound the vacuum exists to enforce.
-  const candidate = entries.filter((entry, index) =>
-    (entry.type !== 'conversation_snapshot' && entry.type !== 'work_state_snapshot')
-    || index === lastConversation
-    || index === lastWorkState);
-  const kept = candidate.filter((entry, index) => entry.type !== 'goal' || keepGoal.has(index));
-  const droppedGoalBytes = candidate
+  const kept = entries.filter((entry, index) =>
+    ((entry.type !== 'conversation_snapshot' && entry.type !== 'work_state_snapshot')
+      || index === lastConversation
+      || index === lastWorkState)
+    && (entry.type !== 'goal' || keepGoal.has(index)));
+  const droppedGoalBytes = entries
     .filter((entry, index) => entry.type === 'goal' && !keepGoal.has(index))
     .reduce((sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry), 'utf8'), 0);
   const serialized = kept.map(entry => JSON.stringify(entry)).join('\n') + '\n';
@@ -255,6 +261,12 @@ function optionalLedgerRedEvidence(value: unknown): boolean {
   return value === undefined || parseLedgerRedEvidence(value) !== undefined;
 }
 
+const LEDGER_VALIDATION_KINDS: ReadonlySet<string> = new Set(['test', 'typecheck', 'lint', 'build', 'generic']);
+
+function optionalLedgerValidationKind(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && LEDGER_VALIDATION_KINDS.has(value));
+}
+
 function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
   return {
     goalId: entry.goalId,
@@ -267,6 +279,7 @@ function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
     progressSignature: entry.progressSignature,
     ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
     ...(entry.redEvidence ? {redEvidence: entry.redEvidence} : {}),
+    ...(entry.validationKind ? {validationKind: entry.validationKind} : {}),
     at: entry.at,
   };
 }
@@ -314,7 +327,8 @@ function parseSessionEntry(value: unknown): SessionEntry {
         || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
         || !optionalTaskCounts(value.taskCounts)
         || !optionalString(value.stopReason) || !optionalString(value.status)
-        || !optionalLedgerRedEvidence(value.redEvidence)) return invalid('invalid goal');
+        || !optionalLedgerRedEvidence(value.redEvidence)
+        || !optionalLedgerValidationKind(value.validationKind)) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);

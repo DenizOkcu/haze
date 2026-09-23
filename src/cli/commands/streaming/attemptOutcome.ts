@@ -1,8 +1,7 @@
-import {createTurnExecutionState, decideTerminalStatus, normalizeFinishReason, type TurnExecutionState} from '../../../core/agent/completionController.js';
+import {assessCompletionReadiness, classifyTerminalOutcome, createTurnExecutionState, decideGoalContinuation, decideLengthRecovery, decideRescue, decideTerminalStatus, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, normalizeFinishReason, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification, type TurnExecutionState} from '../../../core/agent/completionController.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {assessCompletionReadiness, classifyTerminalOutcome, decideGoalContinuation, decideLengthRecovery, decideRescue, describeCompletionReadiness, goalContinuationRecoverable, isBudgetExhausted, rescueEligibleRequest, type CompletionEvidence, type TerminalClassification} from '../../../core/agent/completionController.js';
 import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
 import {deriveValidationOutcome, redPairStatus} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
@@ -154,6 +153,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
     // Carry red evidence until the same check passes after the mutation. This
     // includes boundaries reached after red capture but before the first edit.
     ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
+    ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
   };
   const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
   const checkpointResult = (): AgentAttemptResult => {
@@ -283,7 +283,16 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
   if (overflowRetries >= MAX_OVERFLOW_RETRIES && isContextOverflowError(error)) {
     callbacks.onEvent?.(agentEvent({type: 'context_overflow', recovered: false, error: text}));
     callbacks.addMessage({role: 'system', text: 'Context overflow persisted after bounded compaction retries; pausing the goal with a checkpoint. Completed work is preserved in the conversation. Press R to resume after compacting or clearing context, or switch to a larger-context model.'});
-    return {status: 'failed', resume: buildIncompleteGoalResume(value, turnOptions.goalContext?.goalId ?? goal.id, turnOptions.goalContext?.cycle ?? 1, turnState, 'context_exhausted', {})};
+    // Project the goal's evidence before checkpointing: the failing attempt
+    // threw before finalizeAttemptOutcome, so its validation outcome/kind and
+    // unresolved red evidence would otherwise be lost from the checkpoint
+    // (R2-02) — a resumed goal must still owe the same checks.
+    projectGoalEvidence(turnState, goal);
+    const carried: CarriedGoalEvidence = {
+      ...(turnOptions.goalContext?.requestHash ? {requestHash: turnOptions.goalContext.requestHash} : {}),
+      ...(redPairStatus(goal) !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
+    };
+    return {status: 'failed', resume: buildIncompleteGoalResume(value, turnOptions.goalContext?.goalId ?? goal.id, turnOptions.goalContext?.cycle ?? 1, turnState, 'context_exhausted', carried)};
   }
   if (isContextOverflowError(error)) {
     const canCompact = typeof callbacks.compactConversation === 'function';

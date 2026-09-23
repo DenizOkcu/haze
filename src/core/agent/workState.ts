@@ -28,11 +28,21 @@ export function intentExpectsValidation(intent: RequestIntent): boolean {
 /**
  * Normalize a validation command into a matching key so a green run can be
  * bound to the red repro it must supersede (P4). Whitespace-insensitive; a
- * leading `time`/`env`/`nice` prefix and a trailing `--` separator are noise.
+ * leading `time`/`nice` prefix, `env` with or without `VAR=value` assignments,
+ * a lone line-continuation backslash, and a trailing `--` separator are noise.
  */
 export function validationCommandKey(command: string): string {
   const words = command.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  while (words.length > 1 && ['time', 'env', 'nice', '\\'].includes(words[0]!)) words.shift();
+  while (words.length > 1 && ['time', 'nice', '\\'].includes(words[0]!)) words.shift();
+  // `env` — bare, with flags, or with `VAR=value` assignments — is wrapper
+  // noise for pair matching (R2-06): drop it together with any flag tokens
+  // and assignments, keeping at least the command word. `env` is handled here
+  // only (not in the loop above) so its assignments are stripped too.
+  if (words[0] === 'env') {
+    let i = 1;
+    while (i < words.length && (words[i]!.startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!))) i++;
+    if (i < words.length) words.splice(0, i);
+  }
   while (words.length > 1 && words.at(-1) === '--') words.pop();
   return words.join(' ');
 }
@@ -85,7 +95,9 @@ export interface WorkState {
    * logical goal (see the goal supervisor). Used by `deriveValidationOutcome`
    * only while this turn itself has recorded no validation; a fresh
    * validation this turn supersedes it. Bounded to status/kind — never a
-   * command or output.
+   * command or output. `kind` keeps cross-turn parity with the in-turn rule
+   * that a generic (self-declared) pass cannot clear a confirmed failure
+   * (R2-03).
    */
   carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
   /** Captured pre-mutation failing repro for fix goals. Optional, but same-check green is required when present. */
@@ -117,7 +129,7 @@ export interface WorkTaskProgress {
   revision: number;
 }
 
-export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence}) {
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; validationKind?: ValidationKind}) {
   if (carried.taskProgress && carried.taskProgress.total > 0) {
     state.taskProgress = {...carried.taskProgress, revision: 1};
   }
@@ -127,7 +139,9 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
   }
   if (carried.validationOutcome === 'passed' || carried.validationOutcome === 'failed') {
     state.validationSeq = 1;
-    state.carriedValidation = carried.validationOutcome === 'passed' ? {status: 'passed'} : {status: 'failed'};
+    state.carriedValidation = carried.validationOutcome === 'passed'
+      ? {status: 'passed', ...(carried.validationKind ? {kind: carried.validationKind} : {})}
+      : {status: 'failed', ...(carried.validationKind ? {kind: carried.validationKind} : {})};
   }
   // Red→green evidence is goal-scoped and rides the checkpoint across
   // physical turns so a continuation cannot complete while a carried pair

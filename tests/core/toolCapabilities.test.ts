@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {hasCapability, isMutatingCapability, isReadOrDiscoveryCapability, isValidationCapable, toolCapability} from '../../src/core/agent/toolCapabilities.js';
+import {hasCapability, isMutatingCapability, isValidationCapable, toolCapability} from '../../src/core/agent/toolCapabilities.js';
 
 describe('tool capability metadata', () => {
   it('maps built-in tools to their static capabilities', () => {
@@ -34,11 +34,12 @@ describe('tool capability metadata', () => {
   });
 
   it('recognizes read/discovery-only tools', () => {
-    expect(isReadOrDiscoveryCapability('listFiles')).toBe(true);
-    expect(isReadOrDiscoveryCapability('readFile')).toBe(true);
-    expect(isReadOrDiscoveryCapability('grep')).toBe(true);
-    expect(isReadOrDiscoveryCapability('shell')).toBe(false);
-    expect(isReadOrDiscoveryCapability('writeFile')).toBe(false);
+    // Every mapped read/discovery tool is side-effect free; shell/write are not.
+    expect(toolCapability('listFiles')).toEqual(['discovery']);
+    expect(toolCapability('readFile')).toEqual(['read']);
+    expect(toolCapability('grep')).toEqual(['discovery']);
+    expect(toolCapability('shell')).toEqual(['process']);
+    expect(toolCapability('writeFile')).toEqual(['mutate']);
     expect(hasCapability('readFile', 'read')).toBe(true);
     expect(hasCapability('writeFile', 'read')).toBe(false);
   });

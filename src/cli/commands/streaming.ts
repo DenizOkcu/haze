@@ -8,6 +8,7 @@ import type {TurnCompletionEvidence} from '../../core/agent/completionController
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
+import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
 import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import type {ContextUsageAnchor} from '../../core/agent/contextBudget.js';
@@ -63,7 +64,7 @@ interface TurnGoalContext {
   /** 1-based physical-turn counter for the logical goal. */
   cycle: number;
   /** Cumulative evidence carried from earlier physical turns. */
-  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence};
+  carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; validationKind?: ValidationKind};
   /** Consecutive no-progress physical turns at goal level (diagnostics). */
   noProgressCount: number;
   /** Hash binding of the exact mission bytes (P1); rides every checkpoint downstream. */
@@ -251,6 +252,7 @@ export async function runAgentTurn(
       noProgressCount: turnOptions.goalContext?.noProgressCount ?? 0,
       requestHash: turnOptions.goalContext?.requestHash, intent: goal.normalizedIntent,
       ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
+      ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
     };
     return {status, evidence, ...(status !== 'complete' ? {checkpoint} : {}), ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
   } finally {

@@ -12,7 +12,7 @@
  * `tests/core/**` and reusable by the subagent flow.
  */
 
-export type ToolCapability = 'discovery' | 'read' | 'mutate' | 'validate' | 'process' | 'coordinate';
+export type ToolCapability = 'discovery' | 'read' | 'mutate' | 'process' | 'coordinate';
 
 const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   // File discovery / inspection.
@@ -36,7 +36,6 @@ const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   // Coordination / durable state.
   writeTasks: ['coordinate'],
   subagent: ['coordinate'],
-  // LSP diagnostic reads.
 } as const;
 
 /**
@@ -59,8 +58,8 @@ export function isMutatingCapability(name: string): boolean {
 
 /** Confirmed effects, including completed writes from failed multi-file/worker calls. */
 export function changedPathsFromTool(toolName: string, input: unknown, output: unknown, success = true): string[] {
-  if (typeof output !== 'object' || output === null) return [];
-  const result = output as Record<string, unknown>;
+  if (output !== undefined && output !== null && typeof output !== 'object') return [];
+  const result = (output ?? {}) as Record<string, unknown>;
   if (result.duplicateSkipped === true || result.dryRun === true || result.noChange === true) return [];
   const strings = (value: unknown) => Array.isArray(value) ? value.filter((path): path is string => typeof path === 'string' && path.length > 0).slice(0, 20_000) : [];
   if (toolName === 'subagent') {
@@ -71,6 +70,8 @@ export function changedPathsFromTool(toolName: string, input: unknown, output: u
   if (Array.isArray(result.changedPaths)) return [...new Set(strings(result.changedPaths))];
   if (result.ok === false || !success) return [];
   if (Array.isArray(result.files)) return [...new Set(result.files.flatMap(file => typeof file === 'object' && file !== null && 'path' in file && typeof file.path === 'string' && !('noChange' in file && file.noChange === true) ? [file.path] : []))];
+  // Single-file tools confirm their effect from success plus the input path;
+  // a null output is tolerated for callers that report only a success flag.
   if (!['writeFile', 'editFile', 'replaceLines'].includes(toolName)) return [];
   const path = typeof result.path === 'string' ? result.path : typeof input === 'object' && input !== null && 'path' in input ? input.path : undefined;
   return typeof path === 'string' && path.length > 0 ? [path] : [];
@@ -78,11 +79,6 @@ export function changedPathsFromTool(toolName: string, input: unknown, output: u
 
 /** Tools that can act as a validation step (runtime-classifier dependent). */
 export function isValidationCapable(name: string): boolean {
-  return hasCapability(name, 'validate') || name === 'shell';
+  return name === 'shell';
 }
 
-/** Read/discovery-only built-in tools (no mutation side effects). */
-export function isReadOrDiscoveryCapability(name: string): boolean {
-  const caps = toolCapability(name);
-  return caps.length > 0 && caps.every(capability => capability === 'read' || capability === 'discovery');
-}
