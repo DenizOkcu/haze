@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {NdjsonSink, type WritableSink} from '../../../src/cli/commands/ndjsonSink.js';
+import {NdjsonSink, queueNdjsonWrite, type WritableSink} from '../../../src/cli/commands/ndjsonSink.js';
 
 /** A fake stream that backpressures the first write (returns false) then drains on demand. */
 function backpressureStream(): WritableSink & {lines: string[]; drain(): void} {
@@ -57,6 +57,15 @@ describe('NdjsonSink delivery (SU-05)', () => {
     // headless command can exit non-zero instead of reporting a lost result.
     stream.errorListeners[0]?.();
     await expect(sink.write({late: true})).rejects.toThrow(/output stream failed/);
+    await expect(sink.flush()).rejects.toThrow(/output stream failed/);
+  });
+
+  it('observes fire-and-forget event write failures while preserving them for flush', async () => {
+    const stream = errorCapturingStream();
+    const sink = new NdjsonSink(stream);
+    stream.errorListeners[0]?.();
+    queueNdjsonWrite(sink, {late: true});
+    await new Promise(resolve => setTimeout(resolve, 0));
     await expect(sink.flush()).rejects.toThrow(/output stream failed/);
   });
 

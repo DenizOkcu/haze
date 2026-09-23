@@ -150,7 +150,7 @@ describe('handleAttemptFailure: bounded overflow recovery (Pillar 1.4)', () => {
     expect(events.find(event => event.type === 'context_overflow')).toMatchObject({recovered: false});
   });
 
-  it('carries unresolved red evidence on a context_exhausted checkpoint (R2-02)', () => {
+  it('carries unresolved red evidence and validation kind on a context_exhausted checkpoint (R2-02/R2-03)', () => {
     const {deps} = failureDeps({error: new Error('prompt is too long'), overflowRetries: 2});
     // Fix-intent goal that captured a red repro before the overflow exhausted retries.
     deps.goal = createSessionGoal('fix the failing build');
@@ -161,6 +161,7 @@ describe('handleAttemptFailure: bounded overflow recovery (Pillar 1.4)', () => {
       kind: 'incomplete-goal',
       reason: 'context_exhausted',
       redEvidence: {command: 'npm test', commandKey: 'npm test'},
+      validationKind: 'test',
     });
   });
 

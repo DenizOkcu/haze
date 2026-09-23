@@ -291,6 +291,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
     const carried: CarriedGoalEvidence = {
       ...(turnOptions.goalContext?.requestHash ? {requestHash: turnOptions.goalContext.requestHash} : {}),
       ...(redPairStatus(goal) !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
+      ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
     };
     return {status: 'failed', resume: buildIncompleteGoalResume(value, turnOptions.goalContext?.goalId ?? goal.id, turnOptions.goalContext?.cycle ?? 1, turnState, 'context_exhausted', carried)};
   }

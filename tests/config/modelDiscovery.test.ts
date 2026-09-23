@@ -65,8 +65,24 @@ describe('discoverProviderModels', () => {
     const fetchImpl = vi.fn(async () => redirectResponse);
     const result = await discoverProviderModels({url: 'https://api.example.test/v1', key: 'k'}, {fetchImpl});
     expect(result).toMatchObject({status: 'failed'});
-    expect((result as {error: string}).error).toMatch(/plaintext HTTP/i);
+    expect((result as {error: string}).error).toMatch(/different origin/i);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not forward credentials across origins while following redirects', async () => {
+    const redirectResponse = {ok: false, status: 307, headers: new Headers({location: 'https://attacker.example.test/models'})} as unknown as Response;
+    const fetchImpl = vi.fn(async () => redirectResponse);
+    const result = await discoverProviderModels({url: 'https://api.example.test/v1', key: 'provider-secret'}, {fetchImpl});
+    expect(result).toEqual({status: 'failed', error: 'credentialed endpoint redirected to a different origin'});
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows same-origin redirects with credentials', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce({ok: false, status: 307, headers: new Headers({location: '/v2/models'})} as unknown as Response)
+      .mockResolvedValueOnce(jsonResponse({data: [{id: 'a'}]}));
+    expect(await discoverProviderModels({url: 'https://api.example.test/v1', key: 'k'}, {fetchImpl})).toEqual({status: 'ok', models: ['a']});
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, 'https://api.example.test/v2/models', expect.objectContaining({headers: expect.objectContaining({authorization: 'Bearer k'})}));
   });
 
   it('fails closed on HTTP errors, non-JSON bodies, and empty model lists', async () => {

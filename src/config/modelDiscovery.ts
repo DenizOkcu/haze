@@ -262,7 +262,11 @@ export async function discoverProviderModels(
       const location = response.status >= 300 && response.status < 400 ? response.headers?.get('location') : null;
       if (!location) break;
       if (hop >= MAX_DISCOVERY_REDIRECTS) return {status: 'failed', error: `endpoint redirected more than ${MAX_DISCOVERY_REDIRECTS} times`};
-      url = new URL(location, url).toString();
+      const nextUrl = new URL(location, url).toString();
+      if (provider.key && new URL(nextUrl).origin !== new URL(url).origin) {
+        return {status: 'failed', error: 'credentialed endpoint redirected to a different origin'};
+      }
+      url = nextUrl;
       assertCredentialedEndpointSecure(url, provider.key);
     }
   } catch (error) {

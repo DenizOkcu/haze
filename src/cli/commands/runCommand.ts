@@ -16,7 +16,7 @@ import {compactModelMessages} from '../../core/agent/compaction.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
-import {NdjsonSink} from './ndjsonSink.js';
+import {NdjsonSink, queueNdjsonWrite} from './ndjsonSink.js';
 
 export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
@@ -237,12 +237,12 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     ? (event: AgentEvent) => {
         if (event.type === 'message_update') {
           const delta = messageUpdateDelta(event, emittedSegmentText);
-          if (delta) void streamSink.write(delta);
+          if (delta) queueNdjsonWrite(streamSink, delta);
           return;
         }
         if (event.type === 'message_end') emittedSegmentText.delete(event.id);
         const headlessEvent = toHeadlessStreamEvent(event);
-        if (headlessEvent) void streamSink.write(headlessEvent);
+        if (headlessEvent) queueNdjsonWrite(streamSink, headlessEvent);
       }
     : undefined;
 

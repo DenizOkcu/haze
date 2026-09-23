@@ -18,6 +18,15 @@ export interface WritableSink {
 /** Upper bound on queued lines: an unbounded producer would grow without limit under a stalled consumer. */
 const MAX_PENDING_LINES = 1000;
 
+/**
+ * Queue a best-effort event write without creating an unhandled rejection.
+ * NdjsonSink retains the first delivery error, so the caller's final flush still
+ * reports failure and can return a non-zero exit code.
+ */
+export function queueNdjsonWrite(sink: NdjsonSink, value: unknown): void {
+  void sink.write(value).catch(() => undefined);
+}
+
 export class NdjsonSink {
   private tail: Promise<void> = Promise.resolve();
   private firstError: Error | undefined;

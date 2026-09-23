@@ -132,7 +132,7 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
   it('continues automatically after a budget-boundary checkpoint and completes in the next physical turn', async () => {
     const {runAgentGoal} = await loadSupervisor([
       {
-        result: turnResult('failed', {resume: incompleteGoalResume()}),
+        result: turnResult('failed', {resume: incompleteGoalResume({validationKind: 'generic'})}),
         inspect: options => {
           cycle0GoalId = options.goalContext?.goalId;
         },
@@ -146,6 +146,7 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
           expect(options.ephemeralControl).toMatch(/Continue the active goal/);
           expect(options.goalContext?.carried.mutationCount).toBe(3);
           expect(options.goalContext?.carried.validationOutcome).toBe('stale');
+          expect(options.goalContext?.carried.validationKind).toBe('generic');
           expect(options.goalContext?.carried.taskProgress).toMatchObject({total: 7, pending: 6});
           // The logical goal identity is continuous across physical turns.
           expect(options.goalContext?.goalId).toBe(cycle0GoalId);

@@ -67,6 +67,7 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     noProgressCount,
     ...(resume.requestHash ? {requestHash: resume.requestHash} : {}),
     ...(resume.redEvidence ? {redEvidence: {...resume.redEvidence}} : {}),
+    ...(resume.validationKind ? {validationKind: resume.validationKind} : {}),
   };
 }
 
