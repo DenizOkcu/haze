@@ -4,7 +4,7 @@ import {createSubagentTool, internals, runSubagent, type SubagentResult} from '.
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 
-// Subagents use generateText (non-streaming). Mocks return a fully-resolved
+// Subagents use streamText (non-streaming). Mocks return a fully-resolved
 // result whose `text` is the final step's text and `steps`/`usage` are read
 // directly — mirroring the real AI SDK contract.
 type GenConfig = {
@@ -148,7 +148,7 @@ describe('runSubagent status mapping', () => {
   it('returns ok status when the model finishes within the step budget', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: 'done'})};
+      return {...actual, streamText: async () => genResult({text: 'done'})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -163,7 +163,7 @@ describe('runSubagent status mapping', () => {
   it('returns timeout status when the model hits the step limit (steps.length >= maxSteps)', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: '', steps: steps(25)})};
+      return {...actual, streamText: async () => genResult({text: '', steps: steps(25)})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -175,7 +175,7 @@ describe('runSubagent status mapping', () => {
     let actualExecutions = 0;
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async (config: GenConfig) => {
+      return {...actual, streamText: async (config: GenConfig) => {
         await Promise.all(Array.from({length: 12}, () => config.tools?.probe?.execute?.({})));
         return genResult({text: 'partial evidence'});
       }};
@@ -195,7 +195,7 @@ describe('runSubagent status mapping', () => {
   it('returns cancelled status when the abort signal is already aborted', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: 'partial'})};
+      return {...actual, streamText: async () => genResult({text: 'partial'})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -210,7 +210,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async () => {
+        streamText: async () => {
           throw new Error('boom');
         },
       };
@@ -226,7 +226,7 @@ describe('runSubagent status mapping', () => {
     const controller = new AbortController();
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: vi.fn(async (config: {onToolExecutionEnd: (event: unknown) => void}) => {
+      return {...actual, streamText: vi.fn(async (config: {onToolExecutionEnd: (event: unknown) => void}) => {
         config.onToolExecutionEnd({toolCall: {toolName: 'writeFile', input: {path: 'a.ts'}}, toolOutput: {type: 'tool-result', output: {ok: true, path: 'a.ts'}}, toolExecutionMs: 1});
         config.onToolExecutionEnd({toolCall: {toolName: 'shell'}, toolOutput: {type: 'tool-result', output: {ok: true, command: 'npm test', validationSummary: {status: 'passed'}}}, toolExecutionMs: 1});
         if (termination === 'cancelled') controller.abort();
@@ -244,7 +244,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async () => {
+        streamText: async () => {
           throw new Error('x'.repeat(500));
         },
       };
@@ -267,7 +267,7 @@ describe('runSubagent status mapping', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async () => {
+        streamText: async () => {
           throw 'not even an error';
         },
       };
@@ -291,7 +291,7 @@ describe('runSubagent status mapping', () => {
   it('uses a no-text fallback summary when the model produces no text', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: ''})};
+      return {...actual, streamText: async () => genResult({text: ''})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -303,7 +303,7 @@ describe('runSubagent status mapping', () => {
     const huge = 'x'.repeat(5000);
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: huge})};
+      return {...actual, streamText: async () => genResult({text: huge})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -317,7 +317,7 @@ describe('runSubagent status mapping', () => {
   it('reports token usage from the resolved result', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async () => genResult({text: 'done', usage: {inputTokens: 42, outputTokens: 7}})};
+      return {...actual, streamText: async () => genResult({text: 'done', usage: {inputTokens: 42, outputTokens: 7}})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
@@ -339,7 +339,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async (config: GenConfig) => {
+        streamText: async (config: GenConfig) => {
           captured.prepareStep = config.prepareStep;
           return genResult({text: ''});
         },
@@ -372,7 +372,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async (config: GenConfig) => {
+        streamText: async (config: GenConfig) => {
           captured.prepareStep = config.prepareStep;
           return genResult({text: ''});
         },
@@ -391,7 +391,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async () => genResult({
+        streamText: async () => genResult({
           text: '# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts',
           steps: [
             {stepNumber: 0, text: 'Now let me look at the MCP/LSP settings.'},
@@ -441,14 +441,14 @@ describe('createSubagentTool', () => {
 describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
   // The /fleet command relies on an existing core guarantee: the turn's AbortSignal
   // is forwarded from the tool execution context through runSubagent into the
-  // generateText call, so one user abort cancels every in-flight subagent.
+  // streamText call, so one user abort cancels every in-flight subagent.
   it('cancels a queued/pre-aborted worker without invoking the provider', async () => {
     const captured: {abortSignal?: AbortSignal} = {};
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async (config: GenConfig) => {
+        streamText: async (config: GenConfig) => {
           captured.abortSignal = config.abortSignal;
           return genResult({text: 'partial'});
         },
@@ -468,14 +468,14 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
 
 describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
   // A /fleet run fans out several subagents; one failing or timing out must not
-  // collapse the others. Each parallel subagent is an independent generateText
+  // collapse the others. Each parallel subagent is an independent streamText
   // run with its own try/catch, so failures are returned per subtask, never thrown.
   it('a failing subagent does not collapse parallel subagents; each result is returned independently', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async (config: GenConfig) => {
+        streamText: async (config: GenConfig) => {
           const message = config.messages?.[0]?.content ?? '';
           const objective = JSON.parse(message).objective as string;
           if (objective === 'fail') throw new Error('boom');
@@ -513,7 +513,7 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
         ...actual,
-        generateText: async (config: GenConfig) => {
+        streamText: async (config: GenConfig) => {
           captured.push(config.messages ?? []);
           return genResult({text: 'ok'});
         },
@@ -557,7 +557,7 @@ describe('subagent V2 boundary', () => {
     let captured: Record<string, unknown> = {};
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
+      return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');

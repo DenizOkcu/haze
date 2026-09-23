@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {generateText, isStepCount, type LanguageModel} from 'ai';
-import type {LanguageModelV3, LanguageModelV3GenerateResult} from '@ai-sdk/provider';
+import type {LanguageModelV3, LanguageModelV3GenerateResult, LanguageModelV3StreamPart} from '@ai-sdk/provider';
 import {createSubagentTool} from '../../src/core/subagent/subagentRunner.js';
 
 const usage: LanguageModelV3GenerateResult['usage'] = {
@@ -13,7 +13,23 @@ function model(generate: (call: number) => LanguageModelV3GenerateResult): Langu
   const value: LanguageModelV3 = {
     specificationVersion: 'v3', provider: 'test', modelId: 'test', supportedUrls: {},
     doGenerate: async () => generate(++calls),
-    doStream: async () => { throw new Error('not used'); },
+    doStream: async () => {
+      const generated = generate(++calls);
+      const chunks: LanguageModelV3StreamPart[] = [{type: 'stream-start', warnings: generated.warnings}];
+      for (const content of generated.content) {
+        if (content.type !== 'text') throw new Error(`unsupported streamed test content: ${content.type}`);
+        chunks.push(
+          {type: 'text-start', id: 'text-1'},
+          {type: 'text-delta', id: 'text-1', delta: content.text},
+          {type: 'text-end', id: 'text-1'},
+        );
+      }
+      chunks.push({type: 'finish', finishReason: generated.finishReason, usage: generated.usage});
+      return {stream: new ReadableStream({start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      }})};
+    },
   };
   return value;
 }

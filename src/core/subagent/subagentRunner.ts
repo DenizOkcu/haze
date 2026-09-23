@@ -1,4 +1,4 @@
-import {generateText, isStepCount, tool, type JSONValue, type ModelMessage, type ToolSet} from 'ai';
+import {isStepCount, streamText, tool, type JSONValue, type ModelMessage, type ToolSet} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {estimateToolSchemas, estimateValueTokens} from '../agent/contextBudget.js';
 import {
@@ -137,7 +137,10 @@ export async function runSubagent(
 
   try {
     const {omitMaxOutputTokens, ...providerRequestOptions} = runtime.requestOptions;
-    const result = await generateText({
+    // Use the streaming model path even though workers return one collected
+    // capsule. ChatGPT Codex's Responses endpoint requires `stream: true`;
+    // `generateText` takes the non-streaming doGenerate path and is rejected.
+    const result = await streamText({
       model: runtime.model,
       instructions: bundle.systemPrompt,
       messages: [{role: 'user', content: workerTaskMessage(task)}],
@@ -172,9 +175,10 @@ export async function runSubagent(
         }
       },
     });
-    usageIn = result.usage.inputTokens ?? usageIn;
-    usageOut = result.usage.outputTokens ?? usageOut;
-    const fullText = result.text.trim();
+    const [text, usage, steps] = await Promise.all([result.text, result.usage, result.steps]);
+    usageIn = usage.inputTokens ?? usageIn;
+    usageOut = usage.outputTokens ?? usageOut;
+    const fullText = text.trim();
     const truncated = fullText.length > profile.maxSummaryChars;
     const resultHandle = truncated ? storeToolOutput(fullText) : undefined;
     const deliverable = fullText
@@ -185,7 +189,7 @@ export async function runSubagent(
     const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded'
       : options.abortSignal?.aborted ? 'cancelled'
         : toolLimited ? 'tool_limit'
-          : result.steps.length >= maxSteps && !fullText ? 'step_limit'
+          : steps.length >= maxSteps && !fullText ? 'step_limit'
             : !fullText ? 'no_output'
               : 'completed';
     const capsule: SubagentResultCapsule = {id: task.id, termination, usable: fullText.length > 0, deliverable, changedPaths: [...changedPaths].sort(), validation, coverageGaps: [], truncated, ...(resultHandle ? {resultHandle} : {})};
