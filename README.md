@@ -2,18 +2,20 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.2.1
+## What's new in 1.3.0
 
-haze 1.2.1 makes long-running work more truthful under context pressure and provider instability.
+haze 1.3.0 hardens the whole agent stack after a 40-finding architecture review: consistent secret and file boundaries across every tool path, truthful validation and mutation evidence that survives failed exits and crashes, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
 
-- Provider-aware context accounting: completed steps re-anchor estimates on provider usage, a curated model catalog supplies known context/output limits, and live or user-configured model metadata still takes precedence.
-- Recoverable overflow handling: thrown, silent, and length-stop context overflows compact and retry with progressively smaller budgets. Exhausted recovery checkpoints the goal as `context_exhausted` instead of hard-failing or looping on the same request.
-- Better continuity: large mid-turn compactions use model-written, split-turn-aware summaries; every compaction emits stream events and a durable session entry for auditability.
-- Truthful validation: validation pipelines run with `pipefail`; masking command lists and quoted lookalikes cannot claim validation authority; and a generic custom pass cannot erase a real classified failure.
-- Resilient retries: `retryBaseDelayMs` configures exponential backoff, the retry pool resets after measurable step progress, and provider/model settings are re-read for each attempt.
+- Uniform safety boundaries: `replaceInFiles` scans, grep traversal, and skill bodies/references all share one secret-file policy; bulk-edit and LSP edits preflight every file before the first write; task storage refuses symlinked escapes.
+- Evidence that survives exits: validation evidence records in execution order, one shared mutation-effects projection feeds work state and worker capsules, and structured completion obligations ride every checkpoint — including `context_exhausted` and headless relaunches.
+- Durable sessions: a `context_exhausted` checkpoint keeps its goal frontier across a crash resume, `/clear` stays cleared after restore, and manual compaction can no longer overwrite newer conversation state.
+- Honest output: semantic reducers apply only to unambiguous single foreground commands, so mixed-command output is never misread as a clean git status or passing test run.
+- Credential-safe discovery: provider model discovery validates the endpoint transport before sending any key and bounds its responses.
 
 Previous releases:
 
+- `1.2.1`: edit-recovery instructs instead of restricting — the model is told which path to read and why, while the execution-time gate enforces the fresh read.
+- `1.2.0`: provider-usage context accounting, recoverable compact-and-retry overflow handling, model-written split-turn-aware compaction, `pipefail` validation truthfulness, and a configurable retry pool.
 - `1.1.1`: durable goal ledgers and crash-resume frontiers; headless `--until-done` relaunches with bounded notices and a no-progress guard; proportional task/validation completion gates; and smaller orchestration internals.
 - `1.1.0`: terminal theming with 14 built-in palettes and live `/themes` switching; hard secret-file protection across every file tool, including symlink, read-blessing, ignore-override, and grep-traversal defenses.
 - `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).

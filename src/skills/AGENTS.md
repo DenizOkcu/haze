@@ -1,6 +1,6 @@
 # src/skills/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-09-22 for the 1.3.0 release (round-1 review fixes).
 
 Markdown skill loading, registry, model-facing skill tool, and skill builder.
 
@@ -11,7 +11,7 @@ Markdown skill loading, registry, model-facing skill tool, and skill builder.
 - Required frontmatter: `name` (letters/numbers/hyphens/underscores only) and non-empty `description`.
 - The Markdown body is instructions only; skills do not execute code.
 - Referenced files may be Markdown links or plain file-looking relative paths in the body.
-- `SKILL.md` is capped at `SKILL_MARKDOWN_BYTES` (256 KB); references must stay inside the skill directory and be <= 50k bytes. Both `SKILL.md` and references are real-path-confined to the skill root so symlink escapes are rejected.
+- `SKILL.md` is capped at `SKILL_MARKDOWN_BYTES` (256 KB); references must stay inside the skill directory and be <= 50k bytes. Both `SKILL.md` and references are real-path-confined to the skill root so symlink escapes are rejected, and the shared secret-file policy (`isProtectedSecretPath`, lexical and real path) applies to both before any read — a skill cannot smuggle a protected secret as its body or a reference (CI-03). Aggregate allocation is bounded too: at most 20 references per skill and one aggregate reference byte budget, failing loudly instead of growing silently (CI-04).
 
 ## Loader/registry behavior
 

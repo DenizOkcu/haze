@@ -2,10 +2,37 @@
 
 ## Unreleased
 
+## 1.3.0 - 2026-09-22
+
+Hardening pass from a 40-finding architecture review (2026-09-22; `reviews/2026-09-22/` — 33 round-1 findings plus a 7-finding round-2 follow-up, all resolved): consistent secret/file boundaries across every tool path, one shared mutation-effects projection, completion obligations that survive every failed exit, durable session lifecycle fixes, credential-safe discovery, and honest output reduction.
+
 ### Added
 
-- Symbol-aware LSP workflow: hierarchical symbol/body/signature retrieval, reference results enriched with enclosing symbols and snippets, symbol-scoped diagnostics, semantic rename, and reference-guarded safe delete. Warm language servers now receive external file-change notifications, wait for bounded indexing progress, and restart once after termination.
-- Guarded `replaceInFiles` bulk edits with dry-run previews, stable occurrence IDs, include/exclude globs, expected-count checks, stale-selection refusal, bounded diffs, and retrievable overflow output.
+- Symbol-aware LSP workflow: hierarchical symbol/body/signature retrieval, reference results enriched with enclosing symbols and snippets, symbol-scoped diagnostics, semantic rename, and reference-guarded safe delete. Warm language servers now receive external file-change notifications, wait for bounded indexing progress, and restart once after termination. Malformed LSP positions/ranges are rejected instead of being coerced into edits, and every file in a workspace edit is preflighted before the first write (TS-05).
+- Guarded `replaceInFiles` bulk edits with dry-run previews, stable occurrence IDs, include/exclude globs, expected-count checks, stale-selection refusal, bounded diffs, and retrievable overflow output. Bulk scans guard every matched descendant through the shared read policy (secret protection included) before opening it (TS-01).
+
+### Fixed
+
+- Secret and search boundaries are uniform across tools (TS-01/TS-02/TS-07): `replaceInFiles` scans refuse protected descendants before any read; grep traversal exclusions derive from the one secret-policy list (negated-only globs after any model glob, case-insensitive matching); and `includeIgnored` affects the ripgrep traversal only on explicit override, keeping `.git` and dependency roots out either way.
+- Regex replacements use the engine's native sticky-regex mode, so lookarounds and capture-group semantics match the preview exactly instead of drifting on repeated matches (TS-04). Multi-file `writeFile` batches report changed and uncertain paths truthfully when a later write fails partway (TS-08).
+- Shell output reducers apply only to unambiguous single foreground commands (TS-06): the git reducer requires a leading git command, stdout-owned output, and no stderr, and unknown status content no longer renders as a clean-status summary.
+- Provider model discovery validates the endpoint transport before its first fetch and re-checks redirects, so a draft API key is never sent to an unvalidated URL; LSP pull diagnostics use the advertised `diagnosticProvider` capability and method names, distinguishing an explicit empty report from an absent or timed-out one (CI-01/CI-02).
+- Skill bodies, references, and discovery responses share the file tools' secret-file policy and are bounded (count and aggregate bytes) (CI-03/CI-04); task storage resolves real workspace paths, refusing symlinked escapes out of the workspace (CI-05).
+- Validation evidence is recorded in execution order so the latest run of a command decides the outcome, not insertion order; newline/background commands no longer count as direct artifact validation — the shared single-foreground-command check decides (AR-01/AR-03).
+- One shared mutation-effects projection (`changedPathsFromTool`) feeds work state, LSP diagnostics, and worker capsules, and it tolerates success-only outputs; bulk edits, LSP workspace edits, delegated subagent mutations, and failed workers all count their confirmed effects and validation evidence (AR-02/AR-08).
+- Structured completion obligations survive every failed exit (AR-04/AR-05): `TurnResult.checkpoint` preserves tasks, mutation counts, and red evidence on hard failures; an idle-stall resume keeps its checkpoint; headless relaunches never duplicate the request or drop carried evidence.
+- Session lifecycle is durable and honest (SU-01..SU-06): one shared goal-frontier tracker reopens a paused goal on same-id resume instead of an earlier terminal entry winning; `/clear` persists an empty snapshot and restore replays the clear marker so a cleared session stays cleared; manual LLM compaction is timeout/output-bounded and discards commits over newer conversation state; recovery slash commands keep the paused-goal `R` affordance; the NDJSON sink captures async stream errors, bounds its queue, and exits non-zero on producer failure; mention completion is token-bound so stale results can never apply.
+- The goal-ledger vacuum keeps the live frontier when snapshots interleave goal entries (round-2 R2-01, reproduced): the keep decision now uses original entry indexes in one pass, so a deferred vacuum can no longer drop the crash-resume frontier.
+- `context_exhausted` checkpoints carry unresolved red→green evidence and the validation kind rides goal checkpoints end to end (R2-02/R2-03): a continuation cannot complete on a self-declared pass while a classifier-confirmed failure is carried — the same rule that already held inside a turn.
+- Deadlines and attempt teardown are honest (AR-06/AR-07): a cleared deadline is permanently disposed and never fires late; abort listeners drop after settlement; every state-mutating callback — compaction recording included — is quarantined once an attempt is abandoned.
+- Legacy slimmed tool results are re-wrapped into the AI SDK output envelope on session restore, so older persisted conversations load as protocol-safe `ModelMessage[]` values for the next provider request.
+- Session-retrospective friction fixes (RT-01..RT-06): an empty `listFiles` cursor normalizes to absent (no more empty-repository misreport) and outside-workspace paths fail with a structured refusal; a ready voluntary stop at a budget boundary completes instead of looping; subagent provider-error capsules and validation summaries carry actionable detail; `turn_end` persists an explicit failure reason without `--debug`.
+
+### Changed
+
+- Validation-command pairing normalizes `env` prefixes (bare, with flags, or with `VAR=value` assignments), so `env CI=1 npm test` after a bare `npm test` failure satisfies the same-check green rule (R2-06). The dead `validate` capability kind was removed — only a runtime-classifier-confirmed `shell` command is validation evidence (R2-04/R2-05).
+- Release hygiene (MR-01..MR-06): `npm run release:verify` checks lockfile root, README, changelog, SECURITY series, docs stamps, and AGENTS stamps for the package version and runs in CI; CI packs a real tarball and fails the upload when it is absent; the launcher artifact suite runs after build; both Git HEAD readers resolve relative `gitdir`/`commondir` (spaces included); all ten unused exports were triaged (unexported or deleted).
+- Refreshed all runtime and development dependencies to their latest releases, including Vitest 5; TypeScript deliberately remains on the latest 6.x release (`6.0.3`) rather than upgrading to TypeScript 7.
 
 ## 1.2.1 - 2026-09-07
 

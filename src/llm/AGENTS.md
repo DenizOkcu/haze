@@ -1,6 +1,6 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-09-22 for the 1.3.0 release (round-1 review fixes).
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
@@ -54,4 +54,4 @@ Current reliability contracts:
 
 - Do not invent default providers/models; honor `config/providers.ts` resolution.
 - MCP tools are optional per turn. Failures should be isolated and surfaced as system/UI messages, not crash unrelated turns.
-- LSP tools should only appear when enabled and the configured server command is available. Mutating LSP workspace edits must pass the same confinement, secret, ignore, scoped-instruction, coordination, and bounded-diff contracts as built-in file mutations.
+- LSP tools should only appear when enabled and the configured server command is available. Mutating LSP workspace edits must pass the same confinement, secret, ignore, scoped-instruction, coordination, and bounded-diff contracts as built-in file mutations. Pull diagnostics honor the server's advertised `diagnosticProvider` capability and use the `textDocument/diagnostic` method (CI-02): an explicit empty report is a valid empty result, while an absent or timed-out response is reported as such — never as empty diagnostics.

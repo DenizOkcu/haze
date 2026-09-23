@@ -1,6 +1,6 @@
 # src/core/shellOutput/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-09-22 for the 1.3.0 release (round-1 review fixes).
 
 Command-aware reduction of shell stdout/stderr.
 
@@ -27,6 +27,8 @@ Maintainability focus:
 7. Generic cap/passthrough fallback.
 
 Keep this order intentional: earlier reducers have more semantic knowledge.
+
+Semantic reducers (steps 2–5) apply only to unambiguous single foreground commands (`isSingleForegroundCommand` from `core/safety/shellClassifier.ts`), so mixed-command or background output falls through to line filters and the generic cap instead of being misread (TS-06). Within that gate, the git reducer additionally requires a leading `git` command word, stdout-owned output (any stderr disqualifies it), and returns `undefined` for status content it cannot parse — never a fabricated clean-status summary.
 
 ## Reducer contracts
 

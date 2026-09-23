@@ -1,6 +1,6 @@
 # src/core/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-08-31 for the 1.3.0 release.
 
 Core agent behavior, output reduction, safety classification, sessions, validation parsing, tasks, and subagents.
 

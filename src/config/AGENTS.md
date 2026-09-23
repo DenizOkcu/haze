@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-09-22 for the 1.3.0 release (round-1 review fixes).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -9,7 +9,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `paths.ts` defines haze's user-data roots such as `~/.haze` and global skills paths.
 - `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types. Optional tunables (`modelRetries`, `contextWindowFallbackTokens`, `localContextWindowFallbackTokens`, `manualCompaction`, `theme`, …) are validated loudly at parse time and left unset on disk when defaulted; `theme` names are validated by `resolveTheme` at startup (the schema passes the string through).
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists.
-- `providerPresets.ts` contains UI presets for provider setup, authored in a compact definition form (`ProviderPresetDefinition`, model tuples `[id, context, maxOutput]`) and expanded once into the public `PROVIDER_PRESETS` records; do not make presets active implicitly. `modelDiscovery.ts` performs bounded OpenAI-compatible `/models` discovery for pickers and falls back to manual entry on failure.
+- `providerPresets.ts` contains UI presets for provider setup, authored in a compact definition form (`ProviderPresetDefinition`, model tuples `[id, context, maxOutput]`) and expanded once into the public `PROVIDER_PRESETS` records; do not make presets active implicitly. `modelDiscovery.ts` performs bounded OpenAI-compatible `/models` discovery for pickers and falls back to manual entry on failure. Discovery is credential-safe (CI-01/CI-04): the endpoint transport is validated (`endpointSecurity.ts`) before the first fetch — a draft API key is never sent to an unvalidated URL — redirects are re-checked the same way, and the response body is byte-bounded.
 - `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.
 - `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations. Skill overrides are keyed by name plus scope (`global` or `project`); an omitted scope is legacy-compatible and means `global`.
 - `inputHistory.ts` persists prompt history.

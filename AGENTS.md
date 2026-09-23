@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Last updated: 2026-08-31 for the 1.2.1 release.
+Last updated: 2026-09-22 for the 1.3.0 release.
 
 Project instructions for haze coding agents. Keep this root file concise; read nested `AGENTS.md` files in the subtree you touch for precise contracts.
 
-Last analysis: 2026-08-15.
+Last analysis: 2026-09-22.
 
 ## Project overview
 

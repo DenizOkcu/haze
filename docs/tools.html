@@ -25,7 +25,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.2.1</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.3.0</a>
       </nav>
     </div>
   </header>
@@ -70,7 +70,7 @@
               <tbody>
                 <tr><td>listFiles</td><td>Browse project files with cursor pagination. Skips <code>.git</code> and <code>node_modules</code>; respects <code>.gitignore</code> by default. A directory path typed by the user can also be listed for that turn.</td></tr>
                 <tr><td>readFile</td><td>Read numbered UTF-8 lines in bounded pages (exact or outline mode). A small signature-checked sparse index makes later pages cheap. User-typed paths may open files outside the workspace, read-only, for that turn.</td></tr>
-                <tr><td>grep</td><td>Regex search over the workspace using a bundled ripgrep binary. Results carry a global cap; ignored paths require an explicit override.</td></tr>
+                <tr><td>grep</td><td>Regex search over the workspace using a bundled ripgrep binary. Results carry a global cap; ignored paths require an explicit override, and traversal stays out of <code>.git</code> and dependency roots either way.</td></tr>
                 <tr><td>readToolOutput</td><td>Re-page raw output that was too large for the original tool result, by offset or substring query. Retained data has fixed per-entry and total memory limits.</td></tr>
                 <tr><td>lsp*</td><td>Optional symbol-path retrieval, enriched references, diagnostics, rename, and safe-delete operations through a language server configured with <code>/lsp</code>. See below.</td></tr>
               </tbody>
@@ -83,7 +83,7 @@
             <table>
               <tbody>
                 <tr><td>editFile</td><td>Batched unique text replacements with line-prefix tolerance and recovery hints on failure. Small edits render as inline diffs; large ones as summaries.</td></tr>
-                <tr><td>replaceInFiles</td><td>Guarded literal or regex replacement across files, with dry-run previews, stable occurrence IDs, include/exclude globs, and an expected-count guard.</td></tr>
+                <tr><td>replaceInFiles</td><td>Guarded literal or regex replacement across files, with dry-run previews, stable occurrence IDs, include/exclude globs, and an expected-count guard. Matched files pass the same read policy as every file tool — protected secret files are refused before the scan opens anything.</td></tr>
                 <tr><td>replaceLines</td><td>1-based inclusive line-range replacement with EOF clamping for slightly-oversized ranges. The fallback when exact text matching is ambiguous.</td></tr>
                 <tr><td>writeFile</td><td>Create files and parent directories. Overwriting an existing file requires an explicit flag.</td></tr>
               </tbody>
