@@ -2,15 +2,16 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.3.0
+## What's new in 1.4.0
 
-haze 1.3.0 hardens the whole agent stack after a 40-finding architecture review: consistent secret and file boundaries across every tool path, truthful validation and mutation evidence that survives failed exits and crashes, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
+haze 1.4.0 adds per-run reasoning control (`--reasoning <level>` for headless runs and a live status-bar indicator) on top of the 1.3.0 hardening pass: consistent secret and file boundaries across every tool path, truthful validation and mutation evidence that survives failed exits and crashes, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
 
 - Uniform safety boundaries: `replaceInFiles` scans, grep traversal, and skill bodies/references all share one secret-file policy; bulk-edit and LSP edits preflight every file before the first write; task storage refuses symlinked escapes.
 - Evidence that survives exits: validation evidence records in execution order, one shared mutation-effects projection feeds work state and worker capsules, and structured completion obligations ride every checkpoint — including `context_exhausted` and headless relaunches.
 - Durable sessions: a `context_exhausted` checkpoint keeps its goal frontier across a crash resume, `/clear` stays cleared after restore, and manual compaction can no longer overwrite newer conversation state.
 - Honest output: semantic reducers apply only to unambiguous single foreground commands, so mixed-command output is never misread as a clean git status or passing test run.
-- Credential-safe discovery: provider model discovery validates the endpoint transport before sending any key and bounds its responses.
+- Credential-safe discovery: provider model discovery validates the endpoint transport before sending any key and re-checks redirects before credential forwarding.
+- Reasoning control: `haze -p "…" --reasoning <level>` (or `--reasoning unset|off` for the provider default) steers thinking effort per run; the chat status bar shows the active level next to the model name.
 
 Previous releases:
 

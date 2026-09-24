@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.4.0 - 2026-09-24
+
+Reasoning effort becomes a first-class per-run control, plus follow-up fixes from the 1.3.0 review.
+
+### Added
+
+- `--reasoning <level>` CLI flag for headless/print mode: `haze -p "…" --reasoning xhigh` steers thinking effort for that run, and `--reasoning unset|off` sends no reasoning parameter so the provider default applies. The interactive status bar now shows the active reasoning level next to the model name (default `high` when unset), and `/reasoning` persists the choice across runs.
+
+### Fixed
+
+- Provider model discovery no longer forwards credentials across redirect origins: the endpoint transport is validated before the first fetch and re-checked on redirects, so a draft API key can never leak to a different origin (follow-up to CI-01/CI-02).
+- The NDJSON event sink queues events safely when the producer and consumer race on async stream errors, and goal checkpoints preserve their validation kind across supervisor boundaries (follow-ups to SU-06/R2-03).
+
 ## 1.3.0 - 2026-09-22
 
 Hardening pass from a 40-finding architecture review (2026-09-22; `reviews/2026-09-22/` — 33 round-1 findings plus a 7-finding round-2 follow-up, all resolved): consistent secret/file boundaries across every tool path, one shared mutation-effects projection, completion obligations that survive every failed exit, durable session lifecycle fixes, credential-safe discovery, and honest output reduction.
