@@ -41,6 +41,7 @@ import {compactHomePath, statusBarMetrics} from '../chat/chatMetrics.js';
 import {formatTokenCount} from '../../utils/format.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
+import {DEFAULT_REASONING_LEVEL, isReasoningLevel} from '../../core/agent/reasoningPolicy.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
@@ -618,6 +619,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
+  const reasoningSuffix = isReasoningLevel(settings.reasoning) || settings.reasoning === undefined
+    ? ` (${isReasoningLevel(settings.reasoning) ? settings.reasoning : DEFAULT_REASONING_LEVEL})`
+    : '';
   const headerSubtitle = (
     <Text>
       {'A minimal coding agent for your terminal.\n\nStart with chat. Turn repeated work into Markdown skills:\n'}
@@ -750,7 +754,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
       </Box>
       <Box flexShrink={0} marginLeft={2}>
-        <Text color={theme.muted} wrap="truncate-start">{activeModelName}</Text>
+        <Text color={theme.muted} wrap="truncate-start">{activeModelName}{reasoningSuffix}</Text>
       </Box>
     </Box>
   </Box>;

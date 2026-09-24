@@ -299,6 +299,40 @@ describe('runHeadless: model pre-resolution', () => {
     expect(runAgentGoal).not.toHaveBeenCalled();
   });
 
+  it('forwards a valid --reasoning value to the goal supervisor as reasoningOverride', async () => {
+    captureStdout();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: PROVIDER_SETTINGS});
+    const code = await runHeadless({prompt: 'hi', reasoning: 'xhigh', output: 'text'});
+    expect(code).toBe(0);
+    expect(runAgentGoal).toHaveBeenCalledWith(expect.objectContaining({reasoningOverride: 'xhigh'}));
+  });
+
+  it('maps --reasoning unset to the provider-default sentinel (no parameter sent)', async () => {
+    captureStdout();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: PROVIDER_SETTINGS});
+    const code = await runHeadless({prompt: 'hi', reasoning: 'unset', output: 'text'});
+    expect(code).toBe(0);
+    expect(runAgentGoal).toHaveBeenCalledWith(expect.objectContaining({reasoningOverride: 'provider-default'}));
+  });
+
+  it('rejects an invalid --reasoning value before invoking the agent', async () => {
+    const errs = captureStderr();
+    captureStdout();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: PROVIDER_SETTINGS});
+    const code = await runHeadless({prompt: 'hi', reasoning: 'ultra', output: 'text'});
+    expect(code).toBe(2);
+    expect(errs.join('')).toMatch(/Unknown reasoning level "ultra"/);
+    expect(runAgentGoal).not.toHaveBeenCalled();
+  });
+
+  it('omits reasoningOverride entirely when --reasoning is not given', async () => {
+    captureStdout();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({settings: PROVIDER_SETTINGS});
+    await runHeadless({prompt: 'hi', output: 'text'});
+    const call = (runAgentGoal as unknown as {mock: {calls: Array<Record<string, unknown>>}}).mock.calls[0]![0];
+    expect('reasoningOverride' in call).toBe(false);
+  });
+
   it('reports an ambiguous --model selector across multiple providers', async () => {
     const errs = captureStderr();
     captureStdout();

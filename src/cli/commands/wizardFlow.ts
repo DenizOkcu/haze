@@ -7,6 +7,7 @@ import {PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
+import {DEFAULT_REASONING_LEVEL, REASONING_LEVELS} from '../../core/agent/reasoningPolicy.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {BUILT_IN_THEME_SPECS, DEFAULT_THEME_NAME, resolveTheme} from '../../ui/theme.js';
 import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
@@ -394,6 +395,26 @@ export function themeSuggestions(settings: HazeSettings): TextInputSuggestion[] 
   }));
 }
 
+/** Reasoning-effort picker values: every level plus the unset action. */
+export function reasoningSuggestions(settings: HazeSettings): TextInputSuggestion[] {
+  const descriptions: Record<string, string> = {
+    none: 'disable reasoning',
+    minimal: 'least reasoning',
+    low: 'light reasoning',
+    medium: 'moderate reasoning',
+    high: 'deep reasoning',
+    xhigh: 'maximum reasoning',
+  };
+  return [
+    ...REASONING_LEVELS.map(level => ({
+      value: level,
+      description: `${descriptions[level] ?? 'reasoning level'}${settings.reasoning === level || (settings.reasoning === undefined && level === DEFAULT_REASONING_LEVEL) ? ' · active' : ''}`,
+      kind: 'command' as const,
+    })),
+    {value: 'unset', description: 'provider default — sends no reasoning parameter', kind: 'command' as const},
+  ];
+}
+
 // ── The step table ──────────────────────────────────────────────────────────
 
 type WizardStepKind = 'pick' | 'input' | 'masked-input' | 'confirm';
@@ -474,6 +495,8 @@ export const WIZARD_STEPS = [
   {id: 'mcpConfirmRemove', kind: 'confirm', placeholder: 'Type "yes" to confirm', suggestions: () => []},
   // Themes
   {id: 'themes', kind: 'pick', placeholder: 'Choose a theme', suggestions: (s: WizardSuggestionState) => themeSuggestions(s.settings)},
+  // Reasoning effort
+  {id: 'reasoning', kind: 'pick', placeholder: 'Choose a reasoning effort level', suggestions: (s: WizardSuggestionState) => reasoningSuggestions(s.settings)},
 ] as const satisfies readonly WizardStepDef[];
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number]['id'];

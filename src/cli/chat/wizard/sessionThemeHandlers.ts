@@ -1,9 +1,10 @@
 import type {Mode} from '../../commands/chatModes.js';
+import {resolveReasoningCommand} from '../../commands/reasoningCommand.js';
 import {selectThemeResult} from '../../commands/themesCommand.js';
 import {SESSION_ACTIONS} from '../../commands/sessionPicker.js';
 import type {WizardDispatchDeps, WizardHandler, WizardSetterContext} from './types.js';
 
-/** Session picker and theme picker handlers (both tiny single-purpose flows). */
+/** Session picker, theme picker, and reasoning picker handlers (tiny single-purpose flows). */
 export function createSessionThemeHandlers(deps: WizardDispatchDeps, ctx: WizardSetterContext): Partial<Record<Mode, WizardHandler>> {
   const {setMode, showMessage} = ctx;
   const setSelectedSessionId = ctx.setSelectedSessionId;
@@ -45,9 +46,23 @@ export function createSessionThemeHandlers(deps: WizardDispatchDeps, ctx: Wizard
     showMessage(result.message);
   }
 
+  async function selectReasoning(value: string) {
+    const result = resolveReasoningCommand(value, deps.settings.reasoning);
+    if (result.action === 'set' || result.action === 'clear') {
+      await ctx.applySettings(result.settingsPatch);
+      setMode('chat');
+      showMessage(result.message);
+      return;
+    }
+    // Unreachable from the picker (its values always set or clear) but narrows
+    // the remaining variants for the type checker.
+    if (result.action !== 'open-picker') showMessage(result.message);
+  }
+
   return {
     sessions: selectSession,
     sessionAction: selectSessionAction,
     themes: selectTheme,
+    reasoning: selectReasoning,
   };
 }

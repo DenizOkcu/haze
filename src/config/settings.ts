@@ -4,10 +4,16 @@ import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 import {customProfileSchema} from '../core/subagent/executionProfiles.js';
+import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, type ReasoningLevel, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
 
-/** Optional, explicitly user-controlled reasoning depth (provider/protocol gated). */
-export type ReasoningLevel = 'low' | 'medium' | 'high';
-export const reasoningLevelSchema = z.enum(['low', 'medium', 'high']);
+export type {ReasoningLevel, StoredReasoningSetting};
+/**
+ * Optional, explicitly user-controlled reasoning depth (provider/protocol
+ * gated). Absent means the built-in default (`high`); the `provider-default`
+ * sentinel stores an explicit "send no parameter" opt-out.
+ */
+const storedReasoningValues: StoredReasoningSetting[] = [...REASONING_LEVELS, REASONING_PROVIDER_DEFAULT];
+export const reasoningLevelSchema = z.enum(storedReasoningValues as [StoredReasoningSetting, ...StoredReasoningSetting[]]);
 
 export interface HazeProviderSettings {
   name: string;
@@ -81,8 +87,8 @@ export interface HazeSettings {
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
   subagents?: HazeSubagentSettings;
-  /** Optional reasoning depth; unset by default, mapped by supported provider protocol. */
-  reasoning?: ReasoningLevel;
+  /** Optional reasoning depth; absent means the built-in default (`high`), the `provider-default` sentinel sends no parameter. */
+  reasoning?: StoredReasoningSetting;
   /**
    * Context-window fallback for models without `modelLimits` metadata, in
    * tokens. Unset means the built-in default (128K hosted / 32K local —

@@ -13,6 +13,7 @@ import {isMutatingCapability, isValidationCapable} from '../../../core/agent/too
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
 import {WorkspaceMutationPolicy} from '../../../core/subagent/workspaceMutationPolicy.js';
 import {modelWithConfig, providerRequestSettings, type ModelRuntimeSelection} from '../../../llm/client.js';
+import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import {assembleRequestContext, type ToolCategory, type TurnExecutionScope} from '../../../llm/requestContext.js';
 import type {LoadedMcpTools} from '../../../llm/mcp.js';
 import type {LspPool} from '../../../llm/lsp/pool.js';
@@ -78,6 +79,8 @@ export interface AttemptSetupDeps {
   overflowShrinkFactor: number;
   session: PromptSession | undefined;
   modelOverride: string | undefined;
+  /** Run-scoped reasoning level/sentinel (CLI `--reasoning`); overrides the stored setting for this run. */
+  reasoningOverride: StoredReasoningSetting | undefined;
   abortController: AbortController;
   turnOptions: TurnExecutionOptions;
   turnScope: {executionScope?: TurnExecutionScope};
@@ -99,13 +102,13 @@ export interface AttemptSetupDeps {
  * configured (the caller-reported failure path).
  */
 export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSetup | undefined> {
-  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead, usageAnchor} = deps;
+  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead, usageAnchor} = deps;
   // Single choke point: one fresh settings read per attempt, shared by model
   // resolution and request assembly (CR-024, relaxed in Pillar 1.9 so a
   // provider/model switch mid-goal applies from the next attempt — the first
   // attempt of each physical turn keeps the original read).
   const turnSettings = await readSettings();
-  const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride}, turnSettings);
+  const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride, reasoningOverride}, turnSettings);
   if (!runtime?.model) {
     callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
     return undefined;

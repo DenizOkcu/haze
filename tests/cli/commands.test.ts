@@ -139,6 +139,56 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown theme name "nope"'));
   });
 
+  it('opens the reasoning picker from /reasoning', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/reasoning', ctx)).toBe('handled');
+    expect(ctx.setMode).toHaveBeenCalledWith('reasoning');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Choose a reasoning effort level'));
+  });
+
+  it('sets the reasoning level directly with /reasoning <level>', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/reasoning xhigh', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith({reasoning: 'xhigh'});
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort set to xhigh'));
+  });
+
+  it('accepts every reasoning level through the slash command', async () => {
+    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+      const ctx = mockContext();
+      expect(await handleSlashCommand(`/reasoning ${level}`, ctx)).toBe('handled');
+      expect(ctx.updateSettings, level).toHaveBeenCalledWith({reasoning: level});
+    }
+  });
+
+  it('clears the reasoning setting with /reasoning unset', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/reasoning unset', ctx)).toBe('handled');
+    expect(ctx.updateSettings).toHaveBeenCalledWith({reasoning: 'provider-default'});
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort unset'));
+  });
+
+  it('rejects an unknown reasoning level with the valid levels listed', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/reasoning max', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown reasoning level "max"'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('none, minimal, low, medium, high, xhigh'));
+  });
+
+  it('shows the requested and effective reasoning level from /reasoning status', async () => {
+    const ctx = mockContext({settings: {reasoning: 'medium'} as Partial<CommandContext['settings']>});
+    expect(await handleSlashCommand('/reasoning status', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort: medium'));
+    const defaultCtx = mockContext();
+    expect(await handleSlashCommand('/reasoning status', defaultCtx)).toBe('handled');
+    expect(defaultCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining(`Reasoning effort: high (default high)`));
+    const unsetCtx = mockContext({settings: {reasoning: 'provider-default'} as Partial<CommandContext['settings']>});
+    expect(await handleSlashCommand('/reasoning status', unsetCtx)).toBe('handled');
+    expect(unsetCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining(`Reasoning effort: high (default high)`));
+  });
+
   it('treats /create-skill as an unknown command now that skills use the picker', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/create-skill ignored inline args', ctx)).toBe('handled');

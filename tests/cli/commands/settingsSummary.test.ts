@@ -48,6 +48,7 @@ describe('formatSettingsSummary', () => {
     const out = await formatSettingsSummary(baseSettings, []);
     expect(out).toContain('Provider: openrouter');
     expect(out).toContain('Model: gpt-4o');
+    expect(out).toContain('Reasoning: high (default)');
     expect(out).toContain('Base URL: https://openrouter.ai/api/v1');
     expect(out).toContain('API key: saved');
     expect(out).toContain('Configured providers: openrouter, local');

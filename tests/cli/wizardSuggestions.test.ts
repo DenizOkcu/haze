@@ -18,6 +18,7 @@ import {
   skillsActionSuggestions,
   skillScopeSuggestions,
   themeSuggestions,
+  reasoningSuggestions,
 } from '../../src/cli/commands/wizardFlow.js';
 
 const settings = (overrides: Partial<HazeSettings> = {}): HazeSettings => ({...overrides});
@@ -177,6 +178,22 @@ describe('themeSuggestions', () => {
     expect(suggestions.find(suggestion => suggestion.value === 'solarized-light')?.description).toContain('light palette');
     expect(suggestions.find(suggestion => suggestion.value === 'purple')?.description).toContain('dark palette');
     expect(suggestions.find(suggestion => suggestion.value === 'solarized-dark')?.description).toContain('dark palette');
+  });
+});
+
+describe('reasoningSuggestions', () => {
+  it('lists every level plus unset and marks the active one', () => {
+    const suggestions = reasoningSuggestions({reasoning: 'medium'});
+    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset']);
+    expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'unset')?.description).toContain('provider default');
+  });
+
+  it('marks the default level active when the setting is absent', () => {
+    const suggestions = reasoningSuggestions({});
+    expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).not.toContain('active');
   });
 });
 

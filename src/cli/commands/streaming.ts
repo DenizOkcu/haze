@@ -14,6 +14,7 @@ import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline
 import type {ContextUsageAnchor} from '../../core/agent/contextBudget.js';
 import type {SubagentOverrides, TurnExecutionScope} from '../../llm/requestContext.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
+import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {goalCheckpointSignature, taskCountsOf, type GoalCheckpoint, type IncompleteGoalResume} from './streaming/goalCheckpoint.js';
@@ -122,6 +123,7 @@ export async function runAgentTurn(
   session?: PromptSession,
   modelOverride?: string,
   turnOptions: TurnExecutionOptions = {},
+  reasoningOverride?: StoredReasoningSetting,
 ): Promise<TurnResult> {
   // The controller is replaced when an idle-stall retry needs a live signal
   // after aborting a hung stream, so both it and the cause are mutable.
@@ -193,7 +195,7 @@ export async function runAgentTurn(
         },
       });
       const cleanup = createAttemptCleanupRegistry();
-      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, overflowShrinkFactor, overflowRetries, progressSinceLastRetry: turnState.stepsUsed > stepsUsedAtLastRetry, session, modelOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)), usageAnchor}), {
+      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, overflowShrinkFactor, overflowRetries, progressSinceLastRetry: turnState.stepsUsed > stepsUsedAtLastRetry, session, modelOverride, reasoningOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)), usageAnchor}), {
         abortController,
         cleanup,
         quarantine,

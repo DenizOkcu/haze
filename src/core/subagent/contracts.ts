@@ -1,5 +1,6 @@
 import type {JSONValue, LanguageModel} from 'ai';
 import {z} from 'zod';
+import type {ReasoningLevel} from '../agent/reasoningPolicy.js';
 import {
   SUBAGENT_ACCEPTANCE_CHARS,
   SUBAGENT_ACCEPTANCE_ITEMS,
@@ -86,13 +87,19 @@ export interface ProviderCapabilities {
   supportsStickySessionId: boolean;
   supportsServerCompaction: boolean;
   supportsTextVerbosity: boolean;
-  /** Protocol accepts an OpenAI-style reasoning-effort provider option. */
+  /**
+   * Protocol accepts a reasoning-effort request. The AI SDK maps its top-level
+   * `reasoning` parameter per provider; endpoints without native support ignore
+   * the field. Kept as a capability so a future provider kind can opt out.
+   */
   supportsReasoningEffort: boolean;
 }
 
 export interface ProviderRequestOptions {
   providerOptions?: Record<string, Record<string, JSONValue | undefined>>;
   headers?: Record<string, string>;
+  /** AI SDK top-level `reasoning` call setting; omitted when unset/unsupported. */
+  reasoning?: ReasoningLevel;
   /** Codex subscription requests let the provider manage the output limit. */
   omitMaxOutputTokens?: boolean;
 }

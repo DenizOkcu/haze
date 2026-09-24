@@ -71,7 +71,7 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 Recent decisions to preserve:
 
 - Runtime support floor is Node >=22. Keep docs, package metadata, and generated docs aligned.
-- Provider/model selection is explicit: do not silently fall back to the first configured provider/model.
+- Provider/model selection is explicit: do not silently fall back to the first configured provider/model. Reasoning effort is user-controlled via `/reasoning` (levels `none`–`xhigh`, default `high` when the settings key is absent; the stored `provider-default` sentinel means no parameter is sent) and travels as the AI SDK's portable top-level `reasoning` parameter — never as a `providerOptions` reasoning key, which would take precedence and shadow it. Print mode can override it per run with `--reasoning <level|unset>` (a run-scoped setting override through `modelWithConfig`, never a settings write), routed via `GoalRunOptions.reasoningOverride` → `runAgentTurn` → `prepareAttempt`.
 - Settings parsing should fail loudly for malformed files and preserve unrelated/unknown fields when patching.
 
 - No default provider/model. Users configure providers via `/provider`; no user-facing env vars for provider/model settings.

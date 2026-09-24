@@ -102,6 +102,8 @@ Saved settings live in `~/.haze/settings.json`. ChatGPT OAuth credentials live s
 
 Switch the interface palette with `/themes`. The picker lists every built-in theme — light palettes and oh-my-zsh ports like `robbyrussell`, `af-magic`, and `solarized-dark` — and applies the choice immediately; `/themes <name>` sets one directly. The selection persists as `theme` in `~/.haze/settings.json`, and text already on screen keeps its old colors.
 
+Control reasoning effort with `/reasoning`. The picker (or `/reasoning <level>`) sets one of `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`; the default is `high` when nothing is saved. `/reasoning unset` returns to the provider default (no reasoning parameter is sent) and `/reasoning status` shows the current level. The level is sent as the AI SDK's portable reasoning parameter (the standard `reasoning_effort` field on OpenAI-compatible endpoints) and applies from the next turn. Endpoints without native support ignore it. The selection persists as `reasoning` in `~/.haze/settings.json`; the current level is shown in the bottom status bar next to the model name.
+
 haze focuses on chat, local tools, context files, sessions, and Markdown skills. Use `/skills` for workflows outside that core. Its interactive picker can generate a skill from a description, then enable, disable, validate, or remove it. For reviews, release prep, deploy checks, debugging routines, or a team-specific checklist, ask haze to create a skill and edit the resulting Markdown as needed.
 
 ## Start using haze
@@ -214,6 +216,7 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /settings open
 /themes
 /themes <name>
+/reasoning [level|unset|status]
 /logs [id]
 /lsp
 /mcp
@@ -396,6 +399,7 @@ Most haze behaviour needs no configuration; a few optional keys in `~/.haze/sett
 - `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata or a curated catalog entry. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
 - `manualCompaction` (`"llm-summary"` default, or `"heuristic"`): whether manual `/compact` asks the active model for a continuity summary or keeps the model-free bounded excerpt.
 - `theme` (string, default `purple`): name of a built-in palette (`/themes` lists and sets them, with `light` and oh-my-zsh ports like `robbyrussell` included). Unknown names fail loudly at startup with the valid names listed.
+- `reasoning` (`"none"` | `"minimal"` | `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"provider-default"`, default `high`): reasoning-effort level sent as the portable reasoning parameter. An absent key means `high`; the `provider-default` sentinel means no parameter is sent. `/reasoning` lists, sets, and clears it.
 
 ## Safety model
 

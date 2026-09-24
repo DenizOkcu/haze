@@ -24,6 +24,7 @@ program
   .option('--no-session', 'run without saving or resuming a durable session')
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
+  .addOption(new Option('--reasoning <level>', 'print-mode reasoning effort for this run only — none, minimal, low, medium, high, xhigh, or unset (no parameter sent; provider default)').choices(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset', 'off']))
   .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'))
   .option('--timeout <duration>', 'print-mode absolute turn deadline (e.g. 30s, 10m, 2h); bounds total elapsed time so a busy tool cannot run indefinitely')
   .option('--until-done', 'print mode: relaunch the goal after transient model failures (with backoff) until it structurally completes, the --timeout deadline hits, or repeated relaunches make no progress');
@@ -36,6 +37,7 @@ Examples:
   $ haze -p "list the top 3 bugs" --output json    emit a JSON envelope { type, status, result, usage }
   $ haze -p "audit src/" --output stream-json       stream NDJSON events live, then the final result envelope
   $ haze -p "summarize" --model openai:gpt-4o-mini override the model for this run only
+  $ haze -p "audit src/" --reasoning xhigh        run with maximum reasoning effort (unset = provider default)
   $ haze --resume <id> -p "continue the review"   load a saved context for one print-mode turn
   $ haze -p "audit auth.ts" --debug                also write a detailed JSONL log to ~/.haze/logs/
 
@@ -50,7 +52,8 @@ Print mode (-p):
   harnesses live progress, per-step usage, bounded tool-failure diagnostics, and stagnation
   detection without raw tool inputs or outputs. --model overrides the model for this
   run only (no settings change) and must already be registered under a provider (add it once via
-  the /provider picker). Print-mode runs are non-durable: --continue is ignored and no session is
+  the /provider picker). --reasoning overrides the reasoning effort for this run only (levels
+  none–xhigh; unset sends no reasoning parameter, provider default). Print-mode runs are non-durable: --continue is ignored and no session is
   saved. --resume <id> loads saved context for the turn without changing that session. On a
   provider context overflow, haze compacts the conversation and retries at a progressively smaller
   message budget (up to twice); exhausted retries pause with a context_exhausted checkpoint, and
@@ -102,7 +105,7 @@ program.command('doctor')
   });
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; reasoning?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
   if (opts.version) {
     // Handled here (not via commander's built-in .version()) so --verbose can
     // enrich it and the bin launcher can answer without loading dist.
@@ -121,6 +124,7 @@ program.action(async () => {
     const code = await runHeadless({
       prompt,
       modelOverride: opts.model,
+      reasoning: opts.reasoning,
       resumeSessionId: opts.resume,
       // commander validates --output against the choices above, so opts.output is one of
       // 'text' | 'json' | 'stream-json'; default to text for piped/stdin runs without the flag.

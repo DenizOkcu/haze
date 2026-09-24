@@ -6,6 +6,7 @@ import {describeCompletionReadiness} from '../../../core/agent/completionControl
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
 import {classifyRequestIntent, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
+import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import type {TurnExecutionScope} from '../../../llm/requestContext.js';
 import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type TurnResult} from '../streaming.js';
 import {goalCheckpointSignature, hashRequest, type GoalCheckpoint, type GoalLedgerAppend, type IncompleteGoalResume} from './goalCheckpoint.js';
@@ -38,6 +39,8 @@ export interface GoalRunOptions {
   callbacks: StreamCallbacks;
   session?: PromptSession;
   modelOverride?: string;
+  /** Run-scoped reasoning level/sentinel (CLI `--reasoning`); applies to every attempt of the goal. */
+  reasoningOverride?: StoredReasoningSetting;
   /** Whole-logical-goal wall-clock budget (headless `--timeout`); unset means continue while progress. */
   goalDeadlineMs?: number;
   /** Base per-turn options (attachments, blessed paths); attachments apply to the first physical turn only. */
@@ -193,7 +196,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       sharedTurnScope,
       ...(remainingMs != null ? {turnDeadlineMs: Math.min(remainingMs, DEFAULT_TURN_DEADLINE_MS)} : {}),
     };
-    const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, options.modelOverride, turnOptions);
+    const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, options.modelOverride, turnOptions, options.reasoningOverride);
     initialRetryAttempt = 0;
     cycle += 1;
     lastEvidence = result.evidence;

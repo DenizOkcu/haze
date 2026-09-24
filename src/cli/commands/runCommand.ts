@@ -4,7 +4,7 @@ import {runAgentGoal, type GoalRunOptions, type GoalRunResult} from './streaming
 import {type Message, type StreamCallbacks, type TurnStatus} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
-import type {EffectiveReasoning, ReasoningLevel} from '../../core/agent/reasoningPolicy.js';
+import {parseReasoningOverride, type EffectiveReasoning, type ReasoningLevel, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
@@ -23,6 +23,8 @@ export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 export interface HeadlessOptions {
   prompt: string;
   modelOverride?: string;
+  /** Raw `--reasoning` value (level or unset alias); validated in `runHeadless` so the error path is testable. */
+  reasoning?: string;
   resumeSessionId?: string;
   output: HeadlessOutput;
   debug?: boolean;
@@ -170,6 +172,13 @@ function messageUpdateDelta(event: Extract<AgentEvent, {type: 'message_update'}>
  * selector or a missing provider produces a precise error (not the generic no-provider
  * message) with a non-zero exit. Returns an error string when the run cannot proceed.
  */
+/** Parse a `--reasoning` value into the run-scoped override. Returns an error string when invalid. */
+export function parseHeadlessReasoning(raw: string | undefined): {setting: StoredReasoningSetting | undefined} | {error: string} {
+  if (raw === undefined || raw.trim() === '') return {setting: undefined};
+  const parsed = parseReasoningOverride(raw);
+  return parsed.ok ? {setting: parsed.setting} : {error: parsed.error};
+}
+
 async function resolveModelOrError(modelOverride?: string): Promise<string | undefined> {
   const settings = await readSettings();
   const override = modelOverride?.trim();
@@ -201,6 +210,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   if (options.resumeSessionId && !resumed) {
     process.stderr.write(`No session named ${options.resumeSessionId} exists for this workspace.\n`);
     return 1;
+  }
+  const reasoning = parseHeadlessReasoning(options.reasoning);
+  if ('error' in reasoning) {
+    process.stderr.write(`${reasoning.error}\n`);
+    return 2;
   }
   const modelError = await resolveModelOrError(options.modelOverride);
   if (modelError) {
@@ -316,6 +330,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       callbacks,
       session,
       modelOverride: options.modelOverride,
+      ...(reasoning.setting !== undefined ? {reasoningOverride: reasoning.setting} : {}),
       ...(turnDeadlineMs != null ? {goalDeadlineMs: Math.max(1, deadlineAt! - Date.now())} : {}),
       ...(relaunchOptions.resumeFrom ? {resumeFrom: relaunchOptions.resumeFrom} : {}),
       ...(relaunchOptions.conversationCarriesRequest ? {conversationCarriesRequest: true} : {}),

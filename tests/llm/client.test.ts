@@ -68,11 +68,44 @@ describe('providerRequestSettings', () => {
     expect(providerRequestSettings(config({}))).toEqual({});
   });
 
+  it('emits the top-level reasoning setting instead of openai.reasoningEffort', () => {
+    const opts = providerRequestSettings({...config({}), reasoningPolicy: {requested: 'high', effective: 'high', reason: 'ok'}});
+    expect(opts.reasoning).toBe('high');
+    expect(opts.providerOptions?.openai?.reasoningEffort).toBeUndefined();
+  });
+
+  it('omits reasoning when unset and never emits openai.reasoningEffort', () => {
+    const opts = providerRequestSettings(config({}));
+    expect(opts.reasoning).toBeUndefined();
+    expect('reasoning' in opts).toBe(false);
+    expect(opts.providerOptions).toBeUndefined();
+  });
+
+  it('omits reasoning when the policy is disabled on an unsupported protocol', () => {
+    const opts = providerRequestSettings({...config({supportsReasoningEffort: false}), reasoningPolicy: {requested: 'high', effective: 'disabled', reason: 'unsupported'}});
+    expect(opts.reasoning).toBeUndefined();
+    expect('reasoning' in opts).toBe(false);
+  });
+
   it('uses stateless Responses options and provider-managed output limits for ChatGPT Codex', () => {
     expect(providerRequestSettings({...config({}), providerKind: 'chatgpt-codex'})).toEqual({
       omitMaxOutputTokens: true,
       providerOptions: {openai: {store: false, include: ['reasoning.encrypted_content']}},
       headers: {'session-id': 'stable-cache-key'},
+    });
+  });
+
+  it('carries reasoning alongside the fixed codex providerOptions', () => {
+    const opts = providerRequestSettings({
+      ...config({}),
+      providerKind: 'chatgpt-codex',
+      reasoningPolicy: {requested: 'xhigh', effective: 'xhigh', reason: 'ok'},
+    });
+    expect(opts).toEqual({
+      omitMaxOutputTokens: true,
+      providerOptions: {openai: {store: false, include: ['reasoning.encrypted_content']}},
+      headers: {'session-id': 'stable-cache-key'},
+      reasoning: 'xhigh',
     });
   });
 
@@ -206,7 +239,90 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.capabilities.supportsTextVerbosity).toBe(false);
   });
 
-  it('returns all-false capabilities for an unrelated provider', async () => {
+  it('applies the default reasoning level high when the setting is absent', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
+      provider: 'openai',
+      model: 'gpt-4o',
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'high', effective: 'high'});
+  });
+
+  it('keeps the reasoning-effort capability true for every provider kind (pass-through marker)', async () => {
+    const fixtures: Array<{name: string; url: string; kind?: string}> = [
+      {name: 'openrouter', url: 'https://openrouter.ai/api/v1'},
+      {name: 'custom', url: 'https://example.com/v1'},
+      {name: 'ollama', url: 'http://localhost:11434/v1'},
+      {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex'},
+    ];
+    await writeSettings({
+      providers: fixtures.map(provider => ({key: 'k', models: ['m'], ...provider})),
+      provider: 'openrouter',
+      model: 'm',
+    });
+    // Both model factories must exist: the codex fixture uses `responses`.
+    const {modelWithConfig} = await loadClient(() => ({chat: () => undefined, responses: () => undefined}));
+    for (const fixture of fixtures) {
+      const runtime = await modelWithConfig({modelSelector: `${fixture.name}:m`});
+      expect(runtime!.config.capabilities.supportsReasoningEffort, fixture.name).toBe(true);
+    }
+  });
+
+  it('resolves the requested reasoning level into an effective policy and the transport setting', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      provider: 'custom',
+      model: 'm',
+      reasoning: 'minimal',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime!.config.reasoningPolicy).toEqual({requested: 'minimal', effective: 'minimal', reason: 'applied via supported provider protocol'});
+    expect(providerRequestSettings(runtime!.config).reasoning).toBe('minimal');
+  });
+
+  it('lets a run-scoped reasoningOverride win over the stored setting', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      provider: 'custom',
+      model: 'm',
+      reasoning: 'minimal',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig({reasoningOverride: 'xhigh'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'xhigh', effective: 'xhigh'});
+    expect(providerRequestSettings(runtime!.config).reasoning).toBe('xhigh');
+  });
+
+  it('maps a run-scoped unset override to no reasoning parameter, overriding a stored level', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      provider: 'custom',
+      model: 'm',
+      reasoning: 'minimal',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig({reasoningOverride: 'provider-default'});
+    expect(runtime!.config.reasoningPolicy).toEqual({requested: undefined, effective: 'disabled', reason: 'no reasoning depth requested'});
+    const opts = providerRequestSettings(runtime!.config);
+    expect(opts.reasoning).toBeUndefined();
+    expect('reasoning' in opts).toBe(false);
+  });
+
+  it('applies the default high when the reasoningOverride is absent', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      provider: 'custom',
+      model: 'm',
+    });
+    const {modelWithConfig} = await loadClient();
+    const runtime = await modelWithConfig({});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'high', effective: 'high'});
+  });
+
+  it('returns all-false capabilities except the reasoning pass-through for an unrelated provider', async () => {
     await writeSettings({
       providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
       provider: 'custom',
@@ -221,7 +337,7 @@ describe('modelWithConfig', () => {
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
-      supportsReasoningEffort: false,
+      supportsReasoningEffort: true,
     });
   });
 

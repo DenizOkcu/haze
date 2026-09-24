@@ -46,4 +46,15 @@ describe('agentEvent', () => {
     const second = agentEvent({type: 'message_start', id: 'm2', role: 'assistant'});
     expect(Date.parse(second.at)).toBeGreaterThan(Date.parse(first.at));
   });
+
+  it('serializes the widened reasoning_policy requested values, keeping requested optional-preserving', () => {
+    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+      const event = agentEvent({type: 'reasoning_policy', requested: level, effective: level, reason: 'applied via supported provider protocol'});
+      expect(event).toMatchObject({type: 'reasoning_policy', requested: level, effective: level});
+      // 'none' is an explicit request and must serialize as such, not as absent.
+      expect('requested' in event).toBe(true);
+    }
+    const unset = agentEvent({type: 'reasoning_policy', effective: 'disabled', reason: 'no reasoning depth requested'});
+    expect('requested' in unset).toBe(false);
+  });
 });

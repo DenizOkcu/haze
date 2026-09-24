@@ -2,6 +2,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from 'fs-extra';
 import os from 'node:os';
 import path from 'node:path';
+import type {HazeSettings} from '../../src/config/settings.js';
 
 let tmp = '';
 let settingsFile = '';
@@ -153,9 +154,26 @@ describe('settings', () => {
     expect(settings.reasoning).toBe('high');
     // Unknown fields are preserved (passthrough).
     expect(settings.unknownField).toBe('keep');
+    // Every widened enum value is accepted, plus the provider-default sentinel.
+    for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'provider-default'] as const) {
+      await writeSettings({reasoning: level});
+      expect((await readSettings()).reasoning, level).toBe(level);
+    }
     // Invalid reasoning is rejected loudly.
     await fs.writeJson(settingsFile, {reasoning: 'turbo'});
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
+  it('clearing the reasoning setting removes the key entirely', async () => {
+    const {writeSettings, updateSettings, readSettings} = await loadSettings();
+    await writeSettings({reasoning: 'medium', plugin: true});
+    await updateSettings({reasoning: undefined} as Partial<HazeSettings>);
+    const settings = await readSettings();
+    expect(settings.reasoning).toBeUndefined();
+    expect('reasoning' in settings).toBe(false);
+    expect(settings.plugin).toBe(true);
+    const raw = await fs.readJson(settingsFile);
+    expect('reasoning' in raw).toBe(false);
   });
 
   it('keeps reasoning unset by default and survives a patch that does not mention it', async () => {

@@ -17,6 +17,7 @@ import {finalizeAttemptOutcome, handleAttemptFailure, type AgentAttemptResult} f
 import type {AttemptCleanupRegistry} from './attemptLifecycle.js';
 import {ATTEMPT_TEARDOWN_BOUND_MS} from './attemptLifecycle.js';
 import type {TurnAbortCause} from './abortCause.js';
+import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
 
 export interface AgentAttemptInput {
@@ -33,6 +34,8 @@ export interface AgentAttemptInput {
   progressSinceLastRetry: boolean;
   session: PromptSession | undefined;
   modelOverride: string | undefined;
+  /** Run-scoped reasoning level/sentinel (CLI `--reasoning`); overrides the stored setting for this run. */
+  reasoningOverride: StoredReasoningSetting | undefined;
   abortController: AbortController;
   turnOptions: TurnExecutionOptions;
   turnScope: {executionScope?: TurnExecutionScope};
@@ -58,7 +61,7 @@ export interface AgentAttemptInput {
  * display are always torn down.
  */
 export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAttemptResult> {
-  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs, usageAnchor} = input;
+  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs, usageAnchor} = input;
   // Pillar 1.3: progress since the previous retry resets the shared retry pool
   // (mirrors a per-burst budget), applied to both the stall guard's retry
   // eligibility and the failure classification below.
@@ -90,7 +93,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
   let stallGuard: StreamStallGuard | undefined;
   let setup: Awaited<ReturnType<typeof prepareAttempt>> | undefined;
   try {
-    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, overflowShrinkFactor: input.overflowShrinkFactor, session, modelOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path), usageAnchor});
+    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, overflowShrinkFactor: input.overflowShrinkFactor, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path), usageAnchor});
     if (!setup) return {status: 'failed'};
     const attemptSetupResult = setup;
     loadedMcp = setup.loadedMcp;

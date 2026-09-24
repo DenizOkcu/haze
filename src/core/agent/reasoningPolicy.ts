@@ -1,10 +1,40 @@
 import type {ProviderCapabilities} from '../subagent/contracts.js';
 
 /**
- * Provider-neutral reasoning-depth setting. Unset by default; explicitly user
- * controlled. Mapped to a supported provider protocol (not a model name).
+ * Provider-neutral reasoning-depth levels (the AI SDK `reasoning` enum minus
+ * `provider-default`). `'none'` is an explicit request to disable reasoning;
+ * the stored `provider-default` sentinel means "send no parameter at all".
  */
-export type ReasoningLevel = 'low' | 'medium' | 'high';
+export type ReasoningLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+export const REASONING_LEVELS: readonly ReasoningLevel[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+
+/**
+ * Level applied when settings carry no `reasoning` key. Users opt out with an
+ * explicit `none` (reasoning off) or the stored `provider-default` sentinel
+ * (written by `/reasoning unset`); key-absent means this default.
+ */
+export const DEFAULT_REASONING_LEVEL: ReasoningLevel = 'high';
+
+/** Value the settings file may store: a level or the `provider-default` sentinel. */
+export type StoredReasoningSetting = ReasoningLevel | 'provider-default';
+
+/** Stored sentinel meaning "send no reasoning parameter at all". */
+export const REASONING_PROVIDER_DEFAULT = 'provider-default' as const;
+
+export function isStoredReasoning(value: unknown): value is StoredReasoningSetting {
+  return isReasoningLevel(value) || value === REASONING_PROVIDER_DEFAULT;
+}
+
+/**
+ * The level a session actually requests: the stored setting when present, the
+ * default when the key is absent. The `provider-default` sentinel maps to
+ * undefined — no parameter is sent.
+ */
+export function effectiveRequestedReasoning(setting: StoredReasoningSetting | undefined): ReasoningLevel | undefined {
+  if (setting === REASONING_PROVIDER_DEFAULT) return undefined;
+  return setting ?? DEFAULT_REASONING_LEVEL;
+}
 
 export type EffectiveReasoning = ReasoningLevel | 'disabled';
 
@@ -19,9 +49,9 @@ export interface ResolvedReasoningPolicy {
 
 /**
  * Resolve a requested reasoning level against provider capabilities. Pure and
- * capability based: only protocols that accept the OpenAI `reasoningEffort`
- * provider option receive a level; everything else is disabled (never silently
- * passed in a shape the protocol does not define). No model-name branching.
+ * capability based: only protocols that accept the reasoning parameter receive
+ * a level; everything else is disabled (the parameter is omitted entirely,
+ * never sent in a shape the protocol does not define). No model-name branching.
  */
 export function resolveReasoningPolicy(input: {requested: ReasoningLevel | undefined; capabilities: ProviderCapabilities}): ResolvedReasoningPolicy {
   const {requested, capabilities} = input;
@@ -31,16 +61,35 @@ export function resolveReasoningPolicy(input: {requested: ReasoningLevel | undef
 }
 
 /**
- * The provider-option fragment to merge into request settings for a resolved
- * policy. Returns undefined when disabled so unsupported protocols send nothing.
+ * The AI SDK top-level `reasoning` call setting for a resolved policy.
+ * Returns undefined when disabled so unsupported or unrequested turns omit the
+ * parameter entirely. Never returns `'provider-default'` today; the sentinel
+ * stays in the return type for forward compatibility.
  */
-export function reasoningProviderOptions(policy: ResolvedReasoningPolicy): Record<string, unknown> | undefined {
+export function reasoningCallSetting(policy: ResolvedReasoningPolicy): ReasoningLevel | 'provider-default' | undefined {
   if (policy.effective === 'disabled') return undefined;
-  return {openai: {reasoningEffort: policy.effective}};
+  return policy.effective;
 }
 
-const LEVELS: readonly ReasoningLevel[] = ['low', 'medium', 'high'];
-
 export function isReasoningLevel(value: unknown): value is ReasoningLevel {
-  return typeof value === 'string' && (LEVELS as readonly string[]).includes(value);
+  return typeof value === 'string' && (REASONING_LEVELS as readonly string[]).includes(value);
+}
+
+/** Aliases accepted by CLI paths (`/reasoning`, `--reasoning`) for "send no reasoning parameter". */
+export function isReasoningUnsetAlias(value: string): boolean {
+  return value === 'unset' || value === 'off' || value === REASONING_PROVIDER_DEFAULT;
+}
+
+export type ParsedReasoningOverride = {ok: true; setting: StoredReasoningSetting} | {ok: false; error: string};
+
+/**
+ * Parse a `--reasoning` CLI value (case-insensitive): a level maps directly,
+ * the unset aliases mean "send no reasoning parameter for this run". Shared by
+ * the commander flag surface and the headless option validation.
+ */
+export function parseReasoningOverride(raw: string): ParsedReasoningOverride {
+  const value = raw.trim().toLowerCase();
+  if (isReasoningUnsetAlias(value)) return {ok: true, setting: REASONING_PROVIDER_DEFAULT};
+  if (isReasoningLevel(value)) return {ok: true, setting: value};
+  return {ok: false, error: `Unknown reasoning level "${raw.trim()}". Valid levels: ${REASONING_LEVELS.join(', ')} — or unset for the provider default.`};
 }
