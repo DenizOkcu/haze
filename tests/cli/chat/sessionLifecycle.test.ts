@@ -26,7 +26,7 @@ function makeDeps(over: Partial<SessionLifecycleDeps> = {}): SessionLifecycleDep
     llmLogRef: {current: undefined},
     contextFileSignaturesRef: {current: new Map()},
     setMessages: () => undefined,
-    setLiveMessagesState: () => undefined,
+    clearLiveMessages: () => undefined,
     setTokenUsage: (_usage: TokenUsage) => undefined,
     debugLog: () => undefined,
     showPersistenceWarning: () => undefined,

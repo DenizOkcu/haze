@@ -43,7 +43,8 @@ export interface SessionLifecycleDeps {
   llmLogRef: {current: LlmLog | undefined};
   contextFileSignaturesRef: {current: Map<string, string>};
   setMessages: (updater: (messages: Message[]) => Message[]) => void;
-  setLiveMessagesState: (updater: (messages: Message[]) => Message[]) => void;
+  /** Drop the live tail (clear/new-session). */
+  clearLiveMessages: () => void;
   setTokenUsage: (usage: TokenUsage) => void;
   /** Manual /compact mode: model-written summary (default) or heuristic excerpt. */
   manualCompaction?: () => 'llm-summary' | 'heuristic';
@@ -105,7 +106,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     const {messages: conversation, workState, parseErrors, goalFrontier} = await restoreSessionState(session);
     deps.sessionRef.current = session;
     deps.conversationRef.current = conversation;
-    deps.setLiveMessagesState(() => []);
+    deps.clearLiveMessages();
     const restoredMessages = displayMessagesFromConversation(conversation);
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
     deps.workStateRef.current = workState;
@@ -224,7 +225,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       deps.lastAssistantTextRef.current = '';
       deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
       deps.workStateRef.current = undefined;
-      deps.setLiveMessagesState(() => []);
+      deps.clearLiveMessages();
       deps.setMessages(() => [{role: 'system', text: 'Cleared. The void is productive.'}]);
       // SU-02: record the empty snapshot so the clear is durable immediately;
       // restore replays the clear marker and yields an empty conversation even

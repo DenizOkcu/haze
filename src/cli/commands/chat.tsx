@@ -31,6 +31,7 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {AssistantMarkdownChunkView, MessageView} from '../chat/messages.js';
 import {partitionDisplayMessages, type TranscriptStaticItem} from '../chat/transcriptPartition.js';
+import {useLiveMessages} from '../chat/liveMessages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../chat/wizardDispatch.js';
@@ -100,15 +101,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const setMessages = (updater: React.SetStateAction<Message[]>) => {
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
   };
-  const [liveMessages, setLiveMessages] = useState<Message[]>([]);
-  const liveMessagesRef = useRef<Message[]>([]);
-  const setLiveMessagesState = (updater: (messages: Message[]) => Message[]) => {
-    setLiveMessages(previous => {
-      const next = withDisplayOrders(updater(previous));
-      liveMessagesRef.current = next;
-      return next;
-    });
-  };
   const [settings, setSettings] = useState<HazeSettings>({});
   const [settingsError, setSettingsError] = useState<string | undefined>();
   const conversationRef = useRef<ModelMessage[]>([]);
@@ -117,6 +109,18 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const sessionRef = useRef<HazeSession | undefined>(undefined);
   const sessionRecorderRef = useRef<SessionRecorder | undefined>(undefined);
   if (!sessionRecorderRef.current) sessionRecorderRef.current = createSessionRecorder(() => sessionRef.current);
+
+  /** Finalize a formerly-live message into the append-only transcript and session record. */
+  function finalizeMessage(message: Message) {
+    if (message.hidden) return;
+    const ordered = withDisplayOrder(message);
+    setMessages(m => [...m, ordered]);
+    sessionRecorderRef.current?.recordUiMessage(ordered);
+  }
+
+  // Synchronous live-tail store (see chat/liveMessages.ts): stream callbacks
+  // that land inside one React batch window must route against fresh state.
+  const {liveMessages, addStreaming, patch: patchLiveMessage, drain: drainLiveMessages, clear: clearLiveMessages} = useLiveMessages(finalizeMessage);
   const sessionStartRef = useRef<Date>(new Date());
   // Stable PromptSession object across turns so per-session flags (the
   // context-fallback warning key) persist; rebuilt when a new session starts,
@@ -284,7 +288,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     llmLogRef,
     contextFileSignaturesRef,
     setMessages,
-    setLiveMessagesState,
+    clearLiveMessages,
     setTokenUsage,
     manualCompaction: () => settings.manualCompaction ?? 'llm-summary',
     // P1 resume path: an unterminated goal frontier detected on resume becomes
@@ -393,7 +397,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       newSession: async () => {
         conversationRef.current = [];
         lastAssistantTextRef.current = '';
-        setLiveMessagesState(() => []);
+        clearLiveMessages();
         setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
         await sessionLifecycle.startNewSession('New session started.');
       },
@@ -531,12 +535,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint}) {
     const sessionRecorder = sessionRecorderRef.current!;
-    const finalizeMessage = (msg: Message) => {
-      if (msg.hidden) return;
-      const ordered = withDisplayOrder(msg);
-      setMessages(m => [...m, ordered]);
-      sessionRecorder.recordUiMessage(ordered);
-    };
 
     // The logical-goal supervisor owns this submission: recoverable-incomplete
     // physical turns (including step/tool budget boundaries) continue
@@ -551,23 +549,13 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);
         if (ordered.streaming) {
-          setLiveMessagesState(m => [...m, ordered]);
+          addStreaming(ordered);
           return;
         }
         finalizeMessage(ordered);
       },
       updateMessage: (id, update) => {
-        const liveMessage = liveMessagesRef.current.find(msg => msg.id === id);
-        if (liveMessage) {
-          const updated = {...liveMessage, ...update};
-          if (updated.streaming === false) {
-            setLiveMessagesState(m => m.filter(msg => msg.id !== id));
-            finalizeMessage(updated);
-            return;
-          }
-          setLiveMessagesState(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg));
-          return;
-        }
+        if (patchLiveMessage(id, update)) return;
         setMessages(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg));
       },
       setConversation: msgs => {
@@ -604,6 +592,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})});
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
+    // Turn boundary: an aborted or forcibly-settled attempt is quarantined
+    // before it can emit the finalizing update, so settle anything still in
+    // the live tail now; the streamed text is preserved verbatim in <Static>.
+    drainLiveMessages();
     // Only a genuinely paused goal (supervisor already attempted automatic
     // continuation) exposes the one-key resume affordance; it stays until the
     // user submits something else.
