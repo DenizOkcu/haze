@@ -180,6 +180,13 @@ describe('hasSatisfactoryTerminalOutcome', () => {
 });
 
 describe('assessCompletionReadiness (Cycle 1)', () => {
+  it('holds broad implementation work until an outcome list is declared and finished', () => {
+    const broad = {intent: 'implement' as const, requiresTaskLedger: true, mutationCount: 1, validationOutcome: 'passed' as const};
+    expect(assessCompletionReadiness(state(broad), evidence({lastToolOk: true}))).toBe('task_ledger_absent');
+    expect(assessCompletionReadiness(state({...broad, taskProgress: {total: 0, pending: 0, inProgress: 0, completed: 0, revision: 1}}), evidence({lastToolOk: true}))).toBe('task_ledger_absent');
+    expect(assessCompletionReadiness(state({...broad, taskProgress: {total: 2, pending: 1, inProgress: 0, completed: 1, revision: 1}}), evidence({lastToolOk: true}))).toBe('pending_tasks');
+    expect(assessCompletionReadiness(state({...broad, taskProgress: {total: 2, pending: 0, inProgress: 0, completed: 2, revision: 2}}), evidence({lastToolOk: true}))).toBe('ready');
+  });
   it('reproduces the roadmap failure: substantive text plus five pending tasks is not ready', () => {
     const s = state({intent: 'implement', taskProgress: {total: 5, pending: 5, inProgress: 0, completed: 0, revision: 2}});
     const readiness = assessCompletionReadiness(s, evidence({assistantText: 'Next unfinished action: implement the tool.', sawToolCall: true, lastToolOk: true}));
@@ -202,6 +209,12 @@ describe('assessCompletionReadiness (Cycle 1)', () => {
     expect(assessCompletionReadiness(state({intent: 'fix', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: true}))).toBe('validation_failed');
     // A fresh passing validation after the latest mutation is ready.
     expect(assessCompletionReadiness(state({intent: 'fix', mutationCount: 1, validationOutcome: 'passed'}), evidence({lastToolOk: true}))).toBe('ready');
+    expect(assessCompletionReadiness(state({intent: 'unknown', mutationCount: 1, validationOutcome: 'absent'}), evidence({lastToolOk: true}))).toBe('validation_absent_after_mutation');
+    expect(assessCompletionReadiness(state({intent: 'unknown', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: true}))).toBe('validation_failed');
+    // Only a failed *validation check* is repairable work; a failed tool after
+    // a failed validation stays a hard tool failure.
+    expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: false, lastFailedToolWasValidation: true}))).toBe('validation_failed');
+    expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: false, lastFailedToolWasValidation: false}))).toBe('tool_failure');
   });
 
   it('never demands validation for plan/review/answer turns', () => {
@@ -302,7 +315,7 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
   });
 
   it('continues for recoverable validation reasons and not for hard failures', () => {
-    for (const readiness of ['pending_tasks', 'validation_failed', 'validation_stale', 'validation_absent_after_mutation'] as const) {
+    for (const readiness of ['pending_tasks', 'task_ledger_absent', 'validation_failed', 'validation_stale', 'validation_absent_after_mutation', 'red_check_not_green'] as const) {
       expect(goalContinuationRecoverable(readiness)).toBe(true);
     }
     for (const readiness of ['ready', 'tool_failure', 'unresolved_tool_input', 'aborted'] as const) {
@@ -310,6 +323,22 @@ describe('decideGoalContinuation (Cycle 2: bounded, progress-guarded)', () => {
     }
     expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', mutationCount: 1, validationOutcome: 'absent'}), evidence({sawToolCall: true, assistantText: 'Wrote the file.', lastToolOk: true}), budget).action).toBe('continue');
     expect(decideGoalContinuation(state({finishCause: 'stop', intent: 'implement', taskProgress: pendingTasks}), evidence({sawToolCall: true, assistantText: 'Done.', lastToolOk: false}), budget).action).toBe('stop');
+  });
+
+  it('continues when a broad request has no outcome list yet, instead of hard-blocking', () => {
+    // Regression: the ledger gate must steer via writeTasks continuation, not
+    // terminate the goal as a hard blocker.
+    const s = state({finishCause: 'stop', intent: 'implement', requiresTaskLedger: true, mutationCount: 1, validationOutcome: 'passed'});
+    const ev = evidence({sawToolCall: true, assistantText: 'Implemented the endpoints.', lastToolOk: true});
+    expect(classifyTerminalOutcome(s, ev)).toBe('recoverable-incomplete');
+    const decision = decideGoalContinuation(s, ev, budget);
+    expect(decision.action).toBe('continue');
+    // Standard goal slice — the ledger nudge is not the smaller single-use
+    // validation-repair slice.
+    expect(decision.slice).toEqual({steps: 6, toolCalls: 12});
+    // The ledger nudge is repeatable: it never consumes the single-use
+    // validation-repair credit.
+    expect(s.validationContinuationUsed).toBe(false);
   });
 
   it('allows only one focused validation-repair continuation', () => {

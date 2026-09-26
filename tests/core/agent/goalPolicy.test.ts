@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {classifyRequestIntent, createSessionGoal, formatGoalStatus, isPlanOnlyRequest, malformedToolCallPrompt, observeGoalToolEvent, repeatedToolCallPrompt, toolLoopBudgetPrompt} from '../../../src/core/agent/goalPolicy.js';
+import {classifyRequestIntent, createSessionGoal, formatGoalStatus, goalDirectionPrompt, isPlanOnlyRequest, malformedToolCallPrompt, observeGoalToolEvent, repeatedToolCallPrompt, requiresTaskLedger, toolLoopBudgetPrompt} from '../../../src/core/agent/goalPolicy.js';
 
 describe('requestClassifier', () => {
   it('classifies plan-only requests without treating them as actions', () => {
@@ -11,6 +11,21 @@ describe('requestClassifier', () => {
     expect(classifyRequestIntent('add password reset emails')).toBe('implement');
     expect(classifyRequestIntent('fix login tests')).toBe('fix');
     expect(classifyRequestIntent('run npm test')).toBe('test');
+    expect(classifyRequestIntent('create a Koa API and make the models run locally')).toBe('implement');
+    expect(classifyRequestIntent('build a React frontend')).toBe('implement');
+    expect(classifyRequestIntent('commit')).toBe('implement');
+    expect(classifyRequestIntent('review the logs and implement the feature')).toBe('implement');
+    expect(classifyRequestIntent('review how to build the app')).toBe('review');
+    expect(classifyRequestIntent('review the logs, fix the failures')).toBe('fix');
+  });
+
+  it('requires an outcome list for broad work while keeping small edits quick', () => {
+    expect(requiresTaskLedger('build a frontend\n- meal search\n- recommendations', 'implement')).toBe(true);
+    expect(requiresTaskLedger('add a button', 'implement')).toBe(false);
+    // A single detailed item, however long, is not breadth.
+    expect(requiresTaskLedger(`implement the login form with email and password validation, rate limiting, and full accessibility support across the entire app`, 'implement')).toBe(false);
+    expect(requiresTaskLedger('review this file\n- security\n- readability', 'review')).toBe(false);
+    expect(createSessionGoal('build a frontend\n- meal search\n- recommendations').requiresTaskLedger).toBe(true);
   });
 });
 
@@ -39,6 +54,13 @@ describe('SessionGoal', () => {
 });
 
 describe('completionPrompts', () => {
+  it('directs implementation toward outcomes, vertical slices, and honest UI coverage', () => {
+    const prompt = goalDirectionPrompt('implement', true);
+    expect(prompt).toContain('writeTasks');
+    expect(prompt).toContain('one runnable slice');
+    expect(prompt).toContain('real interaction');
+    expect(prompt).toContain('Compact profile');
+  });
   it('uses autonomous-friendly tool slice wording', () => {
     const prompt = toolLoopBudgetPrompt();
     expect(prompt).toMatch(/haze continues the active goal automatically/i);

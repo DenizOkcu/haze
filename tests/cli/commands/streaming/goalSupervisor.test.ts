@@ -19,7 +19,7 @@ interface ScriptedTurn {
 const calls = vi.hoisted(() => ({
   turns: [] as ScriptedTurn[],
   options: [] as TurnExecutionOptions[],
-  positional: [] as Array<{retryAttempt: number; retryingExistingRequest: boolean}>,
+  positional: [] as Array<{retryAttempt: number; retryingExistingRequest: boolean; modelOverride?: string}>,
 }));
 
 function incompleteGoalResume(over: Partial<IncompleteGoalResume> = {}): IncompleteGoalResume {
@@ -69,10 +69,10 @@ async function loadSupervisor(scripted: ScriptedTurn[]) {
   calls.options = [];
   calls.positional = [];
   vi.doMock('../../../../src/cli/commands/streaming.js', () => ({
-    runAgentTurn: async (_value: string, _display: string | undefined, _contextFiles: unknown, _callbacks: unknown, retryAttempt: number, retryingExistingRequest: boolean, _overflow: boolean, _session: unknown, _modelOverride: string | undefined, options: TurnExecutionOptions) => {
+    runAgentTurn: async (_value: string, _display: string | undefined, _contextFiles: unknown, _callbacks: unknown, retryAttempt: number, retryingExistingRequest: boolean, _overflow: boolean, _session: unknown, modelOverride: string | undefined, options: TurnExecutionOptions) => {
       const index = calls.positional.length;
       calls.options.push(options);
-      calls.positional.push({retryAttempt, retryingExistingRequest});
+      calls.positional.push({retryAttempt, retryingExistingRequest, modelOverride});
       const scriptedTurn = calls.turns[Math.min(index, calls.turns.length - 1)];
       scriptedTurn.inspect?.(options, {retryAttempt, retryingExistingRequest});
       return scriptedTurn.result;
@@ -196,6 +196,19 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
     expect(calls.positional).toHaveLength(1);
     expect(cb.events.some(event => event.type === 'goal_notice' && /context window was exhausted/.test(String(event.text)))).toBe(true);
     expect(cb.events.filter(event => event.type === 'goal_end')).toHaveLength(1);
+  });
+
+  it('uses an explicitly configured escalation model once after context exhaustion', async () => {
+    const {runAgentGoal} = await loadSupervisor([
+      {result: turnResult('failed', {resume: incompleteGoalResume({reason: 'context_exhausted'})})},
+      {result: turnResult('complete')},
+    ]);
+    const cb = makeCallbacks();
+    const result = await runAgentGoal(baseOptions({callbacks: cb, modelOverride: 'local:small', escalationModel: 'hosted:large'}));
+    expect(result.escalations).toBe(1);
+    expect(result.status).toBe('complete');
+    expect(calls.positional.map(call => call.modelOverride)).toEqual(['local:small', 'hosted:large']);
+    expect(cb.events.some(event => event.type === 'goal_notice' && /explicitly configured escalation model/.test(String(event.text)))).toBe(true);
   });
 
   it('pauses safely after one corrective no-progress cycle, with a resumable checkpoint', async () => {
@@ -371,7 +384,7 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
     const entries: Array<{phase: string; [key: string]: unknown}> = [];
     const {runAgentGoal} = await loadSupervisor([
       {result: turnResult('failed', {resume: incompleteGoalResume()})},
-      {result: turnResult('complete', {evidence: {validationOutcome: 'passed', validationAfterMutation: true, mutationCount: 3, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}})},
+      {result: turnResult('complete', {evidence: {validationOutcome: 'passed', validationAfterMutation: true, mutationCount: 5, taskProgress: {total: 7, pending: 0, inProgress: 0, completed: 7}, finishCause: 'stop', recoveryUsed: {length: false, rescue: false, goal: 0}, budgetBoundary: false}})},
     ]);
     const result = await runAgentGoal(baseOptions({goalLedger: {append: entry => entries.push({...entry, phase: entry.phase})}}));
     expect(result).toMatchObject({status: 'complete'});
@@ -388,6 +401,7 @@ describe('runAgentGoal: durable goal ledger (P1)', () => {
     const end = entries[2]!;
     expect(end.phase).toBe('goal_end');
     expect(end.status).toBe('complete');
+    expect(end).toMatchObject({mutationCount: 5, validationOutcome: 'passed', taskCounts: {total: 7, pending: 0, inProgress: 0, completed: 7}});
   });
 
   it('resumes from a stored-goal frontier without re-sending the request', async () => {

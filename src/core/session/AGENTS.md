@@ -26,6 +26,8 @@ Current entry types are:
 
 Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt files.
 
+The `haze report` projection in `sessionReport.ts` reads only bounded metadata and never copies prompts, commands, paths, or tool output. It flags a terminal goal ledger whose mutation, validation, or task evidence disagrees with the `goal_end` event.
+
 ## Size policy
 
 - `appendSessionEntry` is the choke point for durable writes; keep session-size policy centralized there or in `sessionSlimming.ts`.

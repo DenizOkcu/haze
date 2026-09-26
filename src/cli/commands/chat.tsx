@@ -545,6 +545,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       displayValue,
       contextFiles,
       session: currentPromptSession(),
+      escalationModel: settings.escalationModel,
       callbacks: {
       addMessage: msg => {
         const ordered = withDisplayOrder(msg);

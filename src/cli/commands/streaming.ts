@@ -6,7 +6,7 @@ import {type BlessedPath} from '../../core/attachments/readBlessings.js';
 import {createTurnExecutionState, describeTurnFailure, toCompletionEvidence} from '../../core/agent/completionController.js';
 import type {TurnCompletionEvidence} from '../../core/agent/completionController.js';
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
-import {seedCarriedGoalEvidence} from '../../core/agent/workState.js';
+import {seedCarriedGoalEvidence, unresolvedFailedCheckIds} from '../../core/agent/workState.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
@@ -255,6 +255,7 @@ export async function runAgentTurn(
       requestHash: turnOptions.goalContext?.requestHash, intent: goal.normalizedIntent,
       ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
       ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
+      ...(unresolvedFailedCheckIds(goal).length ? {failedCheckIds: unresolvedFailedCheckIds(goal)} : {}),
     };
     return {status, evidence, ...(status !== 'complete' ? {checkpoint} : {}), ...(abortReason ? {abortReason} : {}), ...(resume ? {resume} : {})};
   } finally {

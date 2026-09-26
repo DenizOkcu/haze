@@ -3,7 +3,8 @@ import {Command, Option} from 'commander';
 import {chatCommand} from './commands/chat.js';
 import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
-import {findSession} from '../core/session/sessionStore.js';
+import {findSession, latestSession, readSessionEntries} from '../core/session/sessionStore.js';
+import {formatSessionReport, summarizeSessionEntries} from '../core/session/sessionReport.js';
 import {installBackgroundProcessSignalHandlers, teardownBackgroundProcesses} from '../core/process/backgroundRegistry.js';
 import {STDIN_PROMPT_BYTES} from '../core/limits.js';
 import {readPackageVersion} from '../utils/version.js';
@@ -39,6 +40,7 @@ Examples:
   $ haze -p "summarize" --model openai:gpt-4o-mini override the model for this run only
   $ haze -p "audit src/" --reasoning xhigh        run with maximum reasoning effort (unset = provider default)
   $ haze --resume <id> -p "continue the review"   load a saved context for one print-mode turn
+  $ haze report --json                          review the latest workspace session as safe metadata
   $ haze -p "audit auth.ts" --debug                also write a detailed JSONL log to ~/.haze/logs/
 
 Print mode (-p):
@@ -102,6 +104,21 @@ program.command('doctor')
   .description('print runtime provenance (version, commit, executable/runtime paths), verify build integrity, and show the capability registry')
   .action(async () => {
     process.exitCode = await runDoctor();
+  });
+
+program.command('report [id]')
+  .description('summarize a saved session without exposing prompts or tool output (defaults to the latest session in this workspace)')
+  .option('--json', 'print the structured report')
+  .action(async (id: string | undefined, options: {json?: boolean}) => {
+    const session = id ? await findSession(id) : await latestSession();
+    if (!session) {
+      process.stderr.write(`${id ? `No session named ${id} exists for this workspace.` : 'No saved session exists for this workspace.'}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const {entries, parseErrors} = await readSessionEntries(session);
+    const report = summarizeSessionEntries(entries);
+    process.stdout.write(options.json ? `${JSON.stringify({...report, parseErrors: parseErrors.length})}\n` : `${formatSessionReport(report, parseErrors.length)}\n`);
   });
 
 program.action(async () => {

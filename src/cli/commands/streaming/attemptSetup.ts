@@ -3,7 +3,8 @@ import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
-import {isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
+import {goalDirectionPrompt, isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
+import {projectPreflight} from '../../../core/agent/projectPreflight.js';
 import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {calculateRequestTokenBudget, estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
@@ -68,6 +69,7 @@ export interface AttemptSetup {
   modelRetries: number;
   /** Backoff base for the shared model-retry pool, from the `retryBaseDelayMs` setting (default 1000ms). */
   retryBaseDelayMs: number;
+  steeringProfile: 'standard' | 'compact';
 }
 
 export interface AttemptSetupDeps {
@@ -108,6 +110,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // provider/model switch mid-goal applies from the next attempt — the first
   // attempt of each physical turn keeps the original read).
   const turnSettings = await readSettings();
+  const steeringProfile = turnSettings.steeringProfile ?? 'standard';
   const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride, reasoningOverride}, turnSettings);
   if (!runtime?.model) {
     callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
@@ -145,6 +148,9 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
         : {type: 'subagent_state', id: event.id, state: 'settled', mode: event.mode, queueMs: event.queueMs, durationMs: event.durationMs, termination: event.termination, execution: 'settled', running: event.running}))});
   turnScope.executionScope ??= assembled.executionScope;
   const availableTools = assembled.availableTools;
+  const direction = goalDirectionPrompt(goal.intent, steeringProfile === 'compact');
+  const preflight = steeringProfile === 'compact' ? await projectPreflight(session?.cwd ?? process.cwd()) : '';
+  const systemPrompt = [assembled.systemPrompt, direction, preflight].filter(Boolean).join('\n\n');
   const toolCategories = assembled.toolCategories;
   const loadedMcp = assembled.loadedMcp;
   const lspPool = assembled.lspPool;
@@ -167,12 +173,13 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // margin — not a fixed 40K constant. Small contexts get a safe budget; the
   // assembled request plus output reserve stays within configured capacity.
   const requestedOutputTokens = runtime.config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-  const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: assembled.systemPrompt, tools: availableTools});
+  const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: systemPrompt, tools: availableTools});
   // A context-overflow retry progressively shrinks the target so it cannot loop
   // at an unchanged budget; further overflows get even smaller (RH-005, Pillar
   // 1.4: 0.6 after the first, 0.36 after the second).
   const overflowShrinkFactor = deps.overflowShrinkFactor;
-  const overflowTargetTokens = overflowShrinkFactor < 1 ? Math.floor(requestBudget.messageTokens * overflowShrinkFactor) : requestBudget.messageTokens;
+  const profileTargetTokens = Math.floor(requestBudget.messageTokens * (steeringProfile === 'compact' ? 0.7 : 1));
+  const overflowTargetTokens = overflowShrinkFactor < 1 ? Math.floor(profileTargetTokens * overflowShrinkFactor) : profileTargetTokens;
   const overheadTokens = requestBudget.systemTokens + requestBudget.toolSchemaTokens;
   let requestMessages = durableRequestMessages;
   if (estimateConversationTokens(requestMessages, usageAnchor.current, overheadTokens).tokens > overflowTargetTokens) {
@@ -189,7 +196,6 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   callbacks.setConversation(stripSyntheticControls(requestMessages));
   if (turnOptions.ephemeralControl) requestMessages = withSyntheticControl(requestMessages, turnOptions.ephemeralControl);
 
-  const systemPrompt = assembled.systemPrompt;
   const inputBreakdown = estimateInputBreakdown({system: systemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: availableTools});
   logEntry(callbacks.log, {at: new Date().toISOString(), type: 'request', stream: 'main', system: systemPrompt, messages: requestMessages, tools: Object.keys(availableTools), context: inputBreakdown.breakdown});
 
@@ -255,5 +261,6 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     toolCategories,
     modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
     retryBaseDelayMs: typeof turnSettings.retryBaseDelayMs === 'number' ? turnSettings.retryBaseDelayMs : DEFAULT_RETRY_BASE_DELAY_MS,
+    steeringProfile,
   };
 }

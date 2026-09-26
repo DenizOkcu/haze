@@ -22,6 +22,8 @@ export interface GoalRunResult {
   stopReason: GoalStopReason;
   /** Physical turns consumed by the logical goal. */
   cycles: number;
+  /** Number of explicit fallback switches used by this run (zero or one). */
+  escalations: number;
   /** Last physical turn's bounded evidence. */
   evidence?: TurnCompletionEvidence;
   /**
@@ -39,6 +41,8 @@ export interface GoalRunOptions {
   callbacks: StreamCallbacks;
   session?: PromptSession;
   modelOverride?: string;
+  /** Explicit opt-in fallback model; attempted once only after no progress or context exhaustion. */
+  escalationModel?: string;
   /** Run-scoped reasoning level/sentinel (CLI `--reasoning`); applies to every attempt of the goal. */
   reasoningOverride?: StoredReasoningSetting;
   /** Whole-logical-goal wall-clock budget (headless `--timeout`); unset means continue while progress. */
@@ -71,6 +75,7 @@ function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: num
     ...(resume.requestHash ? {requestHash: resume.requestHash} : {}),
     ...(resume.redEvidence ? {redEvidence: {...resume.redEvidence}} : {}),
     ...(resume.validationKind ? {validationKind: resume.validationKind} : {}),
+    ...(resume.failedCheckIds?.length ? {failedCheckIds: [...resume.failedCheckIds]} : {}),
   };
 }
 
@@ -93,6 +98,7 @@ function carriedOf(checkpoint: GoalCheckpoint | undefined) {
       ...(checkpoint.taskCounts ? {taskProgress: countsToTaskProgress(checkpoint.taskCounts)} : {}),
       ...(checkpoint.redEvidence ? {redEvidence: {...checkpoint.redEvidence}} : {}),
       ...(checkpoint.validationKind ? {validationKind: checkpoint.validationKind} : {}),
+      ...(checkpoint.failedCheckIds?.length ? {failedCheckIds: [...checkpoint.failedCheckIds]} : {}),
     }
     : {mutationCount: 0, validationOutcome: 'not_applicable' as ValidationOutcome};
 }
@@ -130,6 +136,21 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
   let noProgressCount = checkpoint?.noProgressCount ?? 0;
   let prevSignature = checkpoint?.progressSignature;
   let lastEvidence: TurnCompletionEvidence | undefined;
+  let activeModelOverride = options.modelOverride;
+  let escalated = false;
+  const tryEscalation = (reason: string): boolean => {
+    const selected = options.escalationModel?.trim();
+    if (!selected || escalated || selected === activeModelOverride) return false;
+    escalated = true;
+    activeModelOverride = selected;
+    noProgressCount = 0;
+    prevSignature = undefined;
+    // The model switch is a supervisor boundary like any other: it must reach
+    // the durable ledger so a crash resume does not silently lose it.
+    appendLedger('goal_continue');
+    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Continuing with explicitly configured escalation model ${selected} after ${reason}.`}));
+    return true;
+  };
 
   const appendLedger = (phase: GoalLedgerAppend['phase'], extra: Partial<GoalLedgerAppend> = {}) => {
     if (!options.goalLedger) return;
@@ -149,6 +170,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       // continuation; satisfied pairs are deliberately not carried.
       ...(source?.redEvidence ? {redEvidence: {...source.redEvidence}} : {}),
       ...(source?.validationKind ? {validationKind: source.validationKind} : {}),
+      ...(source?.failedCheckIds?.length ? {failedCheckIds: [...source.failedCheckIds]} : {}),
       ...extra,
     });
   };
@@ -161,9 +183,21 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
   callbacks.debugLog('goal supervisor enabled; automatic continuation across physical-turn budgets');
 
   const finish = (status: GoalRunResult['status'], stopReason: GoalStopReason, resume?: GoalRunResult['resume']): GoalRunResult => {
-    appendLedger('goal_end', {status, ...(stopReason !== 'completed' ? {stopReason} : {})});
+    appendLedger('goal_end', {
+      status,
+      gateDecision: status === 'complete' ? 'ready' : ['no-progress', 'context-exhausted', 'goal-deadline'].includes(stopReason) ? checkpoint?.readiness : undefined,
+      ...(lastEvidence ? {
+        mutationCount: lastEvidence.mutationCount,
+        validationOutcome: lastEvidence.validationOutcome,
+        validationKind: lastEvidence.validationKind,
+        taskCounts: lastEvidence.taskProgress,
+        progressSignature: goalCheckpointSignature({mutationCount: lastEvidence.mutationCount, validationOutcome: lastEvidence.validationOutcome, taskCounts: lastEvidence.taskProgress}),
+      } : {}),
+      ...(status === 'complete' ? {failedCheckIds: [], redEvidence: undefined} : {}),
+      ...(stopReason !== 'completed' ? {stopReason} : {}),
+    });
     callbacks.onEvent?.(agentEvent({type: 'goal_end', goalId, status, cycles: cycle, ...(stopReason !== 'completed' ? {stopReason} : {}), ...(lastEvidence ? {evidence: lastEvidence} : {})}));
-    return {status, stopReason, cycles: cycle, ...(lastEvidence ? {evidence: lastEvidence} : {}), ...(resume ? {resume} : {})};
+    return {status, stopReason, cycles: cycle, escalations: escalated ? 1 : 0, ...(lastEvidence ? {evidence: lastEvidence} : {}), ...(resume ? {resume} : {})};
   };
 
   while (true) {
@@ -179,7 +213,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
           // The conversation already carries the user message; a continuation
           // turn rides it with a synthetic control. Attachments belong to the
           // first attempt only.
-          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts),
+          ephemeralControl: goalContinuationPrompt(checkpointReason(checkpoint), checkpoint.taskCounts, checkpoint.redEvidence ? 'The captured pre-edit failing check still needs the same validation command to pass after the fix.' : undefined),
           attachments: undefined,
         }
         : {}),
@@ -196,7 +230,7 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       sharedTurnScope,
       ...(remainingMs != null ? {turnDeadlineMs: Math.min(remainingMs, DEFAULT_TURN_DEADLINE_MS)} : {}),
     };
-    const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, options.modelOverride, turnOptions, options.reasoningOverride);
+    const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, activeModelOverride, turnOptions, options.reasoningOverride);
     initialRetryAttempt = 0;
     cycle += 1;
     lastEvidence = result.evidence;
@@ -220,11 +254,13 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
       // Pause with the resumable checkpoint instead (Pillar 1.4); the user
       // compacts/clears context or switches models, then resumes.
       if (checkpoint.readiness === 'context_exhausted') {
+        if (tryEscalation('context exhaustion')) continue;
         callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Goal paused: ${checkpointReason(checkpoint)}. Compact or clear context, or switch to a larger-context model, then resume.`}));
         return finish('failed', 'context-exhausted', {kind: 'incomplete-goal', checkpoint});
       }
       appendLedger('goal_continue');
       if (noProgressCount >= GOAL_NO_PROGRESS_LIMIT) {
+        if (tryEscalation('no progress')) continue;
         callbacks.addMessage({role: 'system', text: `Unfinished goal paused after ${noProgressCount} corrective cycle${noProgressCount === 1 ? '' : 's'} without measurable progress (${checkpointReason(checkpoint)}). Completed work is preserved in the conversation. Press R to resume, or send a follow-up.`});
         callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Unfinished goal paused without measurable progress: ${checkpointReason(checkpoint)}`}));
         return finish('failed', 'no-progress', {kind: 'incomplete-goal', checkpoint});

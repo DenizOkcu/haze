@@ -224,6 +224,16 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow();
   });
 
+  it('keeps the compact steering profile and fallback model explicit', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({steeringProfile: 'compact', escalationModel: 'hosted:large'});
+    expect(await readSettings()).toMatchObject({steeringProfile: 'compact', escalationModel: 'hosted:large'});
+    await fs.writeJson(settingsFile, {steeringProfile: 'guess'});
+    await expect(readSettings()).rejects.toThrow();
+    await fs.writeJson(settingsFile, {escalationModel: 'hosted large'});
+    await expect(readSettings()).rejects.toThrow();
+  });
+
   it('parses the model retry-pool size and rejects implausible values loudly', async () => {
     const {writeSettings, readSettings} = await loadSettings();
     await writeSettings({modelRetries: 5});

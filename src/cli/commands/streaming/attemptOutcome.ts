@@ -3,7 +3,7 @@ import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
-import {deriveValidationOutcome, redPairStatus} from '../../../core/agent/workState.js';
+import {deriveValidationOutcome, redPairStatus, unresolvedFailedCheckIds} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
 import {formatSeconds} from '../../../utils/format.js';
@@ -26,7 +26,7 @@ import type {ValidationOutcome, WorkTaskProgress} from '../../../core/agent/work
  * progress) project the turn-wide `TurnExecutionState`; when omitted, the
  * defaults cannot reject a turn (unknown intent, no mutations, no task list).
  */
-export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; redPair?: 'not-required' | 'missing' | 'satisfied'}): TurnStatus {
+export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; assistantText: string; sawToolCall: boolean; lastToolOk?: boolean; lastFailedToolWasValidation?: boolean; finishReason?: string; budgetReached?: boolean; unresolvedToolInputError?: boolean; intent?: RequestIntent; mutationCount?: number; validationOutcome?: ValidationOutcome; taskProgress?: WorkTaskProgress; requiresTaskLedger?: boolean; redPair?: 'not-required' | 'missing' | 'satisfied'}): TurnStatus {
   void input.error;
   const state: TurnExecutionState = {
     ...createTurnExecutionState(),
@@ -36,6 +36,7 @@ export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; as
     mutationCount: input.mutationCount ?? 0,
     ...(input.validationOutcome ? {validationOutcome: input.validationOutcome} : {}),
     ...(input.taskProgress ? {taskProgress: input.taskProgress} : {}),
+    requiresTaskLedger: Boolean(input.requiresTaskLedger),
     ...(input.redPair ? {redPair: input.redPair} : {}),
   };
   return decideTerminalStatus(
@@ -44,6 +45,7 @@ export function terminalTurnStatus(input: {aborted: boolean; error?: unknown; as
       sawToolCall: input.sawToolCall,
       assistantText: input.assistantText,
       lastToolOk: input.lastToolOk,
+      lastFailedToolWasValidation: Boolean(input.lastFailedToolWasValidation),
       unresolvedToolInputError: Boolean(input.unresolvedToolInputError),
     },
     Boolean(input.budgetReached),
@@ -68,6 +70,7 @@ export function projectGoalEvidence(turnState: TurnExecutionState, goal: Session
   turnState.validationKind = goal.validations.at(-1)?.kind ?? goal.carriedValidation?.kind;
   turnState.validationAfterMutation = goal.validationSeq > 0 && goal.validationSeq >= goal.mutationSeq;
   turnState.taskProgress = goal.taskProgress;
+  turnState.requiresTaskLedger = Boolean(goal.requiresTaskLedger);
   // Opportunistic red→green: only an actually observed red can gate.
   turnState.redPair = redPairStatus(goal);
 }
@@ -102,10 +105,10 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   // terminal paths report the same cumulative state.
   projectGoalEvidence(turnState, goal);
   turnState.budgetBoundary = isBudgetExhausted(turnState, turnBudget);
-  const completionEvidence: CompletionEvidence = {sawToolCall: stream.sawToolCall, assistantText: stream.assistantText, lastToolOk: stream.lastToolOk, unresolvedToolInputError: stream.unresolvedToolInputError};
+  const completionEvidence: CompletionEvidence = {sawToolCall: stream.sawToolCall, assistantText: stream.assistantText, lastToolOk: stream.lastToolOk, lastFailedToolWasValidation: stream.lastFailedToolWasValidation, unresolvedToolInputError: stream.unresolvedToolInputError};
   const readiness = assessCompletionReadiness(turnState, completionEvidence);
   const classification: TerminalClassification = classifyTerminalOutcome(turnState, completionEvidence);
-  const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
+  const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, lastFailedToolWasValidation: stream.lastFailedToolWasValidation, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, requiresTaskLedger: turnState.requiresTaskLedger, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
   if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
   goal.phase = 'done';
 
@@ -154,6 +157,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
     // includes boundaries reached after red capture but before the first edit.
     ...(turnState.redPair !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
     ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
+    ...(unresolvedFailedCheckIds(goal).length ? {failedCheckIds: unresolvedFailedCheckIds(goal)} : {}),
   };
   const discardRejectedFinal = () => callbacks.setConversation(withoutRejectedAssistantFinal(callbacks.getConversation()));
   const checkpointResult = (): AgentAttemptResult => {
@@ -179,7 +183,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
       if (goalSlice && goalSlice.steps > 0) {
         discardRejectedFinal();
         if (readiness === 'validation_failed' || readiness === 'validation_stale' || readiness === 'validation_absent_after_mutation') turnState.validationContinuationUsed = true;
-        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress), taskCountsOf(turnState.taskProgress)), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
+        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress), taskCountsOf(turnState.taskProgress), turnState.redPair === 'missing' ? 'The captured pre-edit failing check still needs the same validation command to pass after the fix.' : undefined), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
       } else if (rescueSlice && rescueSlice.steps > 0) {
         return {status: turnStatus, recovery: {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}}};
       } else if (classification === 'recoverable-incomplete') {
@@ -292,6 +296,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       ...(turnOptions.goalContext?.requestHash ? {requestHash: turnOptions.goalContext.requestHash} : {}),
       ...(redPairStatus(goal) !== 'satisfied' && goal.redEvidence ? {redEvidence: {...goal.redEvidence}} : {}),
       ...(turnState.validationKind ? {validationKind: turnState.validationKind} : {}),
+      ...(unresolvedFailedCheckIds(goal).length ? {failedCheckIds: unresolvedFailedCheckIds(goal)} : {}),
     };
     return {status: 'failed', resume: buildIncompleteGoalResume(value, turnOptions.goalContext?.goalId ?? goal.id, turnOptions.goalContext?.cycle ?? 1, turnState, 'context_exhausted', carried)};
   }

@@ -83,7 +83,10 @@ export async function loadMcpTools(servers: HazeMcpServer[], reserved: ReadonlyS
     clients.push(result.client);
     for (const [name, toolDef] of Object.entries(result.serverTools)) {
       if (taken.has(name)) { errors.push(`${result.server.name}: skipped tool "${name}" (name already in use)`); continue; }
-      taken.add(name); tools[name] = toolDef;
+      // MCP tool schemas are discovered at runtime. The MCP package's schema
+      // generic is wider than the core AI SDK ToolSet generic, although both
+      // expose the same runtime tool contract here.
+      taken.add(name); tools[name] = toolDef as ToolSet[string];
     }
   }
   return {tools, clients, errors};

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, redPairStatus, seedCarriedGoalEvidence, taskProgressFromOutput, validationCommandKey, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
+import {createWorkState, deriveValidationOutcome, intentExpectsValidation, observeWorkToolEvent, redPairStatus, seedCarriedGoalEvidence, taskProgressFromOutput, unresolvedFailedCheckIds, validationCommandKey, validationSummaryFromOutput, workStatePrompt, type WorkTaskProgress} from '../../src/core/agent/workState.js';
 
 function passedSummary(text = 'tests passed') {
   return {kind: 'test', status: 'passed', summaryText: text, failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false};
@@ -59,6 +59,15 @@ describe('work state', () => {
     expect(workStatePrompt(state)).toContain('<work_state>');
   });
 
+  it('keeps the compaction work capsule bounded', () => {
+    const state = createWorkState('build a service', 'implement', Array.from({length: 30}, () => 'criterion'.repeat(100)));
+    state.files = Array.from({length: 100}, (_, index) => ({path: `src/${index}-${'long'.repeat(100)}`, action: 'modified'}));
+    state.blockers = Array.from({length: 20}, () => 'error'.repeat(100));
+    const prompt = workStatePrompt(state);
+    expect(prompt.length).toBeLessThan(6_000);
+    expect(prompt).toContain('src/99-');
+  });
+
   it('preserves an actionable edit blocker', () => {
     const state = createWorkState('fix', 'fix', []);
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'src/a.ts'}, success: false, output: {ok: false, error: 'stale text'}});
@@ -106,6 +115,33 @@ describe('work state', () => {
 });
 
 describe('deriveValidationOutcome', () => {
+  it('matches equivalent npm package checks and clears the failed build', () => {
+    const state = createWorkState('build a frontend', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'frontend/src/main.tsx'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'cd frontend && npm run build'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm --prefix frontend run build'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(state.validations.map(entry => entry.command)).toEqual(['npm --prefix frontend run build']);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('requires validation after a mutation with unknown intent', () => {
+    const state = createWorkState('make it work', 'unknown', []);
+    observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'app.ts'}, success: true, output: {ok: true}});
+    expect(deriveValidationOutcome(state)).toBe('absent');
+  });
+
+  it('carries a failed check by identity across turns', () => {
+    const first = createWorkState('fix tests', 'fix', []);
+    observeWorkToolEvent(first, {toolName: 'shell', input: {command: 'cd api && npm test'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    const next = createWorkState('fix tests', 'fix', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: unresolvedFailedCheckIds(first)});
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm run lint'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(deriveValidationOutcome(next)).toBe('failed');
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm --prefix api test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(next)).toEqual([]);
+    expect(deriveValidationOutcome(next)).toBe('passed');
+  });
+
   it.each(['passed', 'failed'] as const)('uses execution order when an earlier check reruns %s', status => {
     const state = createWorkState('implement', 'implement', []);
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
@@ -117,11 +153,14 @@ describe('deriveValidationOutcome', () => {
     check('npm run lint', status !== 'passed');
     check('npm test', status === 'passed');
     observeWorkToolEvent(state, {toolName: 'readFile', input: {path: 'a.ts'}, success: true});
-    expect(deriveValidationOutcome(state)).toBe(status);
+    // A passed rerun of one suite must not conceal a different failed suite.
+    expect(deriveValidationOutcome(state)).toBe('failed');
     expect(state.validations.map(item => item.command)).toEqual(['npm run lint', 'npm test']);
     expect(state.validationCommands.at(-1)).toEqual({command: 'npm test', status});
     expect(state.validations.at(-1)?.revision).toBe(state.validationSeq);
     expect(state.validationSeq).toBeGreaterThan(state.mutationSeq);
+    check('npm run lint', true);
+    expect(deriveValidationOutcome(state)).toBe(status);
   });
 
   it('marks a fresh passing validation as passed', () => {

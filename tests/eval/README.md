@@ -45,7 +45,7 @@ assertions). Assert, in this order of strength:
 
 Every run writes a full transcript under `.eval/runs/<name>-<timestamp>/`
 (messages, agent events, goal-ledger appends, usage, debug lines, result) and
-appends a one-line summary to `.eval/runs.jsonl`. Workspaces live in the OS
+appends a one-line summary to `.eval/runs.jsonl` with duration, tool calls, input/output tokens, and explicit escalation count. Compare those fields alongside the fixture's pass/fail result; token counts are a usage measure, not a price quote. Workspaces live in the OS
 temp dir and are kept for post-mortem inspection (their path is recorded in the
 transcript). `.eval/` is gitignored and disposable.
 

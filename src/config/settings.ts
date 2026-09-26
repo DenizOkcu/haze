@@ -89,6 +89,10 @@ export interface HazeSettings {
   subagents?: HazeSubagentSettings;
   /** Optional reasoning depth; absent means the built-in default (`high`), the `provider-default` sentinel sends no parameter. */
   reasoning?: StoredReasoningSetting;
+  /** `compact` keeps working context small for models with limited reliable context/tool calling. Default: `standard`. */
+  steeringProfile?: 'standard' | 'compact';
+  /** Optional, explicitly configured model to try once after a stalled goal. */
+  escalationModel?: string;
   /**
    * Context-window fallback for models without `modelLimits` metadata, in
    * tokens. Unset means the built-in default (128K hosted / 32K local —
@@ -184,6 +188,13 @@ const modelRetriesSchema = z.number().int().min(0).max(10);
 /** Retry backoff base must be a plausible delay (not fractions/junk). */
 const retryBaseDelaySchema = z.number().int().min(250).max(60_000);
 
+/**
+ * An escalation model is an explicit `provider:model` selector (KISS: shape
+ * only — whether the provider/model actually resolves is checked by the
+ * provider layer when the switch is attempted).
+ */
+const escalationModelSchema = z.string().trim().regex(/^[^\s:]+:.+$/, 'must be a provider:model selector');
+
 const settingsSchema = z.object({
   provider: z.string().optional(),
   model: z.string().optional(),
@@ -193,6 +204,8 @@ const settingsSchema = z.object({
   skills: z.array(skillSettingSchema).optional(),
   subagents: subagentSettingsSchema.optional(),
   reasoning: reasoningLevelSchema.optional(),
+  steeringProfile: z.enum(['standard', 'compact']).optional(),
+  escalationModel: escalationModelSchema.optional(),
   contextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   localContextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   modelRetries: modelRetriesSchema.optional(),

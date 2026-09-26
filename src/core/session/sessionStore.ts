@@ -19,7 +19,7 @@ export type SessionEntry =
   | {type: 'event'; at: string; name: string; text?: string}
   /** First-class compaction audit entry (Pillar 1.7): conversation snapshots remain the restore source of truth; this records what was compacted, when, and how. */
   | {type: 'compact'; at: string; method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}
-  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; validationKind?: ValidationKind; stopReason?: string; status?: string};
+  | {type: 'goal'; at: string; goalId: string; phase: 'goal_start' | 'goal_continue' | 'goal_end'; request: string; requestHash: string; intent: string; cycle: number; mutationCount: number; validationOutcome: string; progressSignature: string; taskCounts?: {total: number; pending: number; inProgress: number; completed: number}; redEvidence?: {command: string; commandKey: string; summary: string}; validationKind?: ValidationKind; failedCheckIds?: string[]; stopReason?: string; status?: string; gateDecision?: string};
 
 /** Durable goal-ledger entry (P1): one append per supervisor boundary. */
 export type GoalLedgerEntry = Extract<SessionEntry, {type: 'goal'}>;
@@ -39,6 +39,7 @@ export interface GoalLedgerFrontier {
   redEvidence?: GoalLedgerEntry['redEvidence'];
   /** Kind of the frontier's carried validation, when one rode the ledger (R2-03). */
   validationKind?: ValidationKind;
+  failedCheckIds?: string[];
   at: string;
 }
 
@@ -166,7 +167,7 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
  * type, so dropping superseded ones is lossless for restore; summaries keep
  * their ui_message/event history). Atomic replace, never partial.
  */
-export const SESSION_VACUUM_THRESHOLD_BYTES = 16 * 1024 * 1024;
+export const SESSION_VACUUM_THRESHOLD_BYTES = 5 * 1024 * 1024;
 
 let effectiveVacuumThresholdBytes = SESSION_VACUUM_THRESHOLD_BYTES;
 
@@ -267,6 +268,10 @@ function optionalLedgerValidationKind(value: unknown): boolean {
   return value === undefined || (typeof value === 'string' && LEDGER_VALIDATION_KINDS.has(value));
 }
 
+function optionalFailedCheckIds(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.length <= 8 && value.every(id => typeof id === 'string' && /^[0-9a-f]{16}$/.test(id)));
+}
+
 function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
   return {
     goalId: entry.goalId,
@@ -280,6 +285,7 @@ function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {
     ...(entry.taskCounts ? {taskCounts: entry.taskCounts} : {}),
     ...(entry.redEvidence ? {redEvidence: entry.redEvidence} : {}),
     ...(entry.validationKind ? {validationKind: entry.validationKind} : {}),
+    ...(entry.failedCheckIds?.length ? {failedCheckIds: [...entry.failedCheckIds]} : {}),
     at: entry.at,
   };
 }
@@ -326,9 +332,10 @@ function parseSessionEntry(value: unknown): SessionEntry {
         || typeof value.cycle !== 'number' || typeof value.mutationCount !== 'number'
         || typeof value.validationOutcome !== 'string' || typeof value.progressSignature !== 'string'
         || !optionalTaskCounts(value.taskCounts)
-        || !optionalString(value.stopReason) || !optionalString(value.status)
+        || !optionalString(value.stopReason) || !optionalString(value.status) || !optionalString(value.gateDecision)
         || !optionalLedgerRedEvidence(value.redEvidence)
-        || !optionalLedgerValidationKind(value.validationKind)) return invalid('invalid goal');
+        || !optionalLedgerValidationKind(value.validationKind)
+        || !optionalFailedCheckIds(value.failedCheckIds)) return invalid('invalid goal');
       return value as SessionEntry;
     default:
       return invalid(`unknown entry type '${type}'`);

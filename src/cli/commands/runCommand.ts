@@ -221,6 +221,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     process.stderr.write(`${modelError}\n`);
     return 1;
   }
+  const runSettings = await readSettings();
 
   // stderr keeps stdout clean for --output json/stream-json consumers.
   const debugLog = (line: string) => {
@@ -309,7 +310,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   let status: TurnStatus;
   let result: string;
   let evidence: TurnCompletionEvidence | undefined;
-  let goal: {cycles: number; stopReason: string; mutations: number; validationOutcome?: string; taskProgress?: {total: number; pending: number; inProgress: number; completed: number}} | undefined;
+  let goal: {cycles: number; stopReason: string; mutations: number; escalations?: number; validationOutcome?: string; taskProgress?: {total: number; pending: number; inProgress: number; completed: number}} | undefined;
   let persistenceError: string | undefined;
   let backgroundTeardownError: string | undefined;
   try {
@@ -330,6 +331,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       callbacks,
       session,
       modelOverride: options.modelOverride,
+      escalationModel: runSettings.escalationModel,
       ...(reasoning.setting !== undefined ? {reasoningOverride: reasoning.setting} : {}),
       ...(turnDeadlineMs != null ? {goalDeadlineMs: Math.max(1, deadlineAt! - Date.now())} : {}),
       ...(relaunchOptions.resumeFrom ? {resumeFrom: relaunchOptions.resumeFrom} : {}),
@@ -372,6 +374,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       cycles: goalResult.cycles,
       stopReason: goalResult.stopReason,
       mutations: goalResult.evidence?.mutationCount ?? 0,
+      ...(goalResult.escalations ? {escalations: goalResult.escalations} : {}),
       ...(goalResult.evidence && goalResult.evidence.validationOutcome !== 'not_applicable' ? {validationOutcome: goalResult.evidence.validationOutcome} : {}),
       ...(goalResult.evidence?.taskProgress ? {taskProgress: goalResult.evidence.taskProgress} : {}),
     };

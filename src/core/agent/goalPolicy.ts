@@ -19,12 +19,29 @@ export function isPlanOnlyRequest(value: string) {
 
 export function classifyRequestIntent(value: string): RequestIntent {
   if (isPlanOnlyRequest(value)) return 'plan';
-  if (/\b(review|audit|inspect|analy[sz]e|compare)\b/i.test(value)) return 'review';
+  // A leading review request remains read-only unless it explicitly asks for
+  // follow-on changes. Incidental terms such as "how to build" are context.
+  if (/^\s*(?:please\s+)?(?:review|audit|inspect|analy[sz]e|compare)\b/i.test(value)
+    && !/\b(?:,|;|and|then)\s*(?:please\s+)?(?:fix|repair|implement|build|add|create|update|change)\b/i.test(value)) return 'review';
   if (/\b(fix|repair|resolve|debug)\b/i.test(value)) return 'fix';
-  if (/\b(run|verify|check|validate)\b/i.test(value) || /\btests?\b/i.test(value) && !/\b(add|create|write)\b/i.test(value)) return 'test';
-  if (/\b(add|create|write|implement|update|change|support|wire|document|docs|documentation)\b/i.test(value)) return 'implement';
+  // Creation verbs win over incidental words such as "run locally" or
+  // "test the app" in a larger implementation request.
+  if (/\b(add|create|write|implement|build|make|update|change|support|wire|document|docs|documentation|commit)\b/i.test(value)) return 'implement';
+  if (/\b(review|audit|inspect|analy[sz]e|compare)\b/i.test(value)) return 'review';
+  if (/\b(run|verify|check|validate)\b/i.test(value) || /\btests?\b/i.test(value)) return 'test';
   if (/\b(what|why|how|explain|tell me)\b/i.test(value)) return 'answer';
   return 'unknown';
+}
+
+/**
+ * Only broad implementation requests need a declared outcome ledger. Breadth
+ * needs two or more enumerated outcomes (bullet/numbered lines) — a single
+ * detailed item, however long, stays a quick focused edit.
+ */
+export function requiresTaskLedger(request: string, intent: RequestIntent): boolean {
+  if (intent !== 'implement' && intent !== 'fix') return false;
+  const items = request.match(/(?:^|\n)\s*(?:[-*]|\d+[.)])\s+\S/g) ?? [];
+  return items.length >= 2;
 }
 
 // ── Session goal state ──────────────────────────────────────────────────────
@@ -47,7 +64,9 @@ export function createSessionGoal(request: string, now = Date.now()): SessionGoa
         : intent === 'answer'
           ? ['Answer the user using current project context when needed']
           : ['Inspect the relevant files', 'Make the requested change when needed', 'Validate the change when practical', 'Summarize only current-task changes and validation'];
-  return createWorkState(request, intent, successCriteria, now);
+  const state = createWorkState(request, intent, successCriteria, now);
+  state.requiresTaskLedger = requiresTaskLedger(request, intent);
+  return state;
 }
 
 export function observeGoalToolEvent(goal: SessionGoal, event: GoalToolEvent, now = Date.now()) {
@@ -62,6 +81,22 @@ export function formatGoalStatus(goal: SessionGoal) {
           : goal.phase === 'summarizing' ? 'summarizing'
             : 'done';
   return `Goal: ${shortRequest(goal.originalUserRequest)} · ${action}`;
+}
+
+/** One-request direction for the active goal. The user request remains the source of truth. */
+export function goalDirectionPrompt(intent: RequestIntent, compact: boolean) {
+  if (intent === 'plan' || intent === 'review' || intent === 'answer') return '';
+  return [
+    'For this goal, turn the user\'s explicit requirements into observable outcomes. For substantial work, use writeTasks as the outcome ledger and keep it current.',
+    'Implement one runnable slice, check it, then extend it. Run a relevant check before generating a large batch of dependent files. Keep failed checks open until the same check passes after the fix.',
+    'For UI work, exercise a real interaction when a browser runner is available; otherwise name that coverage gap. Do not describe shadcn-style components as an installed shadcn system unless the project actually has one.',
+    compact ? 'Compact profile: handle a few files per slice, make one dependent tool decision at a time, prefer concise tool output and targeted reads, and keep the next action explicit.' : '',
+  ].filter(Boolean).join(' ');
+}
+
+/** A single mid-implementation nudge; the caller prevents repeats. */
+export function earlyValidationPrompt() {
+  return 'Several files changed without a check. Run the smallest relevant build, test, typecheck, or direct artifact check now; use its result to guide the next slice.';
 }
 
 // ── Completion/continuation control prompts ─────────────────────────────────
@@ -129,9 +164,12 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
   const validationLine = reason.includes('validation')
     ? ' No recognized post-edit validation was recorded. Run one standard test/build command, directly execute the changed artifact as one unchained command, or call shell with purpose=validation for a custom assertion check.'
     : '';
+  const ledgerLine = reason.includes('outcome list')
+    ? ' First call writeTasks with the concrete user-visible outcomes and their checks; keep the list until each outcome is complete.'
+    : '';
   const redLine = reason.includes('failing check')
     ? ' Rerun the same validation command that failed before the edit and resolve it; a different check does not close the captured red evidence.'
     : '';
   const detailLine = detail ? ` ${detail}` : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${ledgerLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }

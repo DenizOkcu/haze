@@ -53,6 +53,7 @@ export interface TurnExecutionState {
   intent: RequestIntent;
   /** Latest current-turn task-list evidence from a successful writeTasks call. */
   taskProgress: WorkTaskProgress | undefined;
+  requiresTaskLedger: boolean;
   /** Goal-continuation cycles issued this turn (bounded by the global budget + progress guard). */
   goalContinuationsUsed: number;
   /** Whether the single focused post-edit validation-repair slice was admitted. */
@@ -82,6 +83,7 @@ export function createTurnExecutionState(): TurnExecutionState {
     validationAfterMutation: false,
     intent: 'unknown',
     taskProgress: undefined,
+    requiresTaskLedger: false,
     goalContinuationsUsed: 0,
     validationContinuationUsed: false,
     goalContinuationProgress: undefined,
@@ -131,6 +133,8 @@ export interface CompletionEvidence {
   sawToolCall: boolean;
   assistantText: string;
   lastToolOk: boolean | undefined;
+  /** True when the last failed tool call was the classifier-confirmed validation check itself. */
+  lastFailedToolWasValidation: boolean;
   unresolvedToolInputError: boolean;
 }
 
@@ -146,6 +150,7 @@ export type TurnStatus = 'complete' | 'aborted' | 'failed';
 export type CompletionReadiness =
   | 'ready'
   | 'pending_tasks'
+  | 'task_ledger_absent'
   | 'validation_failed'
   | 'validation_stale'
   | 'validation_absent_after_mutation'
@@ -163,6 +168,7 @@ export interface CompletionReadinessInput {
   mutationCount: number;
   validationOutcome: ValidationOutcome;
   taskProgress: WorkTaskProgress | undefined;
+  requiresTaskLedger?: boolean;
   /** Red→green pair state; absent/not-required disables the gate. */
   redPair?: 'not-required' | 'missing' | 'satisfied';
 }
@@ -175,12 +181,16 @@ export interface CompletionReadinessInput {
  * the fix-intent red→green pair. A task list is enforced only when this turn
  * declared one via a successful writeTasks call.
  */
-export function assessCompletionReadiness(state: CompletionReadinessInput, evidence: Pick<CompletionEvidence, 'lastToolOk' | 'unresolvedToolInputError'>): CompletionReadiness {
+export function assessCompletionReadiness(state: CompletionReadinessInput, evidence: Pick<CompletionEvidence, 'lastToolOk' | 'lastFailedToolWasValidation' | 'unresolvedToolInputError'>): CompletionReadiness {
   if (state.aborted) return 'aborted';
   if (evidence.unresolvedToolInputError) return 'unresolved_tool_input';
-  if (evidence.lastToolOk === false) return 'tool_failure';
+  // A failing validation command is repairable work, not a terminal tool
+  // failure — but only when the failed call *is* that validation check. A
+  // failed edit/write after a failed validation stays a hard tool failure.
+  if (evidence.lastToolOk === false && !(state.validationOutcome === 'failed' && evidence.lastFailedToolWasValidation)) return 'tool_failure';
+  if (state.requiresTaskLedger && (!state.taskProgress || state.taskProgress.total === 0)) return 'task_ledger_absent';
   if (state.taskProgress && (state.taskProgress.pending > 0 || state.taskProgress.inProgress > 0)) return 'pending_tasks';
-  if (intentExpectsValidation(state.intent)) {
+  if (intentExpectsValidation(state.intent) || (state.intent === 'unknown' && state.mutationCount > 0)) {
     if (state.validationOutcome === 'failed') return 'validation_failed';
     if (state.validationOutcome === 'stale') return 'validation_stale';
     if (state.validationOutcome === 'absent' && state.mutationCount > 0) return 'validation_absent_after_mutation';
@@ -196,6 +206,7 @@ export function describeCompletionReadiness(readiness: CompletionReadiness, task
       const open = taskProgress ? taskProgress.pending + taskProgress.inProgress : 0;
       return `${open} declared task${open === 1 ? '' : 's'} still pending or in progress`;
     }
+    case 'task_ledger_absent': return 'this broad request has no declared outcome list';
     case 'validation_failed': return 'the latest validation failed and remains unresolved';
     case 'validation_stale': return 'edits landed after the latest validation';
     case 'validation_absent_after_mutation': return 'edits landed without any relevant validation';
@@ -364,6 +375,7 @@ export interface GoalContinuationDecision {
 /** Readiness reasons a bounded continuation can plausibly resolve with more work. */
 export function goalContinuationRecoverable(readiness: CompletionReadiness): boolean {
   return readiness === 'pending_tasks'
+    || readiness === 'task_ledger_absent'
     || readiness === 'validation_failed'
     || readiness === 'validation_stale'
     || readiness === 'validation_absent_after_mutation'
@@ -442,7 +454,7 @@ export function decideGoalContinuation(state: TurnExecutionState, evidence: Comp
   if (state.aborted) return stop('turn aborted');
   if (!isRecoverableFinishCause(state.finishCause)) return stop('finish shape is not recoverable');
   if (evidence.assistantText.trim().length === 0) return stop('no substantive final to reject');
-  if (evidence.lastToolOk === false || evidence.unresolvedToolInputError) return stop('unresolved tool failure');
+  if ((evidence.lastToolOk === false && !(state.validationOutcome === 'failed' && evidence.lastFailedToolWasValidation)) || evidence.unresolvedToolInputError) return stop('unresolved tool failure');
   const readiness = assessCompletionReadiness(state, evidence);
   if (readiness === 'ready') return stop('completion readiness satisfied');
   if (!goalContinuationRecoverable(readiness)) return stop(`readiness '${readiness}' is not autonomously recoverable`);

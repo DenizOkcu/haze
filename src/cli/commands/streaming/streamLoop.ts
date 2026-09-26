@@ -38,6 +38,9 @@ export interface AttemptLoopState {
   streamFinished: boolean;
   finishReason: string | undefined;
   lastToolOk: boolean | undefined;
+  /** True when the last failed call was the classifier-confirmed validation check itself. */
+  lastFailedToolWasValidation: boolean;
+  earlyValidationNudgeIssued: boolean;
   sawToolCall: boolean;
   pendingMalformedToolName: string | undefined;
   unresolvedMalformedToolName: string | undefined;
@@ -77,6 +80,8 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     streamFinished: false,
     finishReason: undefined,
     lastToolOk: undefined,
+    lastFailedToolWasValidation: false,
+    earlyValidationNudgeIssued: false,
     sawToolCall: false,
     pendingMalformedToolName: undefined,
     unresolvedMalformedToolName: undefined,
@@ -133,6 +138,8 @@ function recordCompletedStep(loopState: AttemptLoopState, input: {text: string; 
 export interface AttemptStreamOutcome {
   finishReason: string | undefined;
   lastToolOk: boolean | undefined;
+  /** True when the last failed call was the classifier-confirmed validation check itself. */
+  lastFailedToolWasValidation: boolean;
   assistantText: string;
   sawToolCall: boolean;
   unresolvedMalformedToolName: string | undefined;
@@ -536,6 +543,7 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
   return {
     finishReason: loopState.finishReason,
     lastToolOk: loopState.lastToolOk,
+    lastFailedToolWasValidation: loopState.lastFailedToolWasValidation,
     assistantText: loopState.assistantText,
     sawToolCall: loopState.sawToolCall,
     unresolvedMalformedToolName: loopState.unresolvedMalformedToolName,

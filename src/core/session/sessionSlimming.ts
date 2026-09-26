@@ -148,11 +148,17 @@ export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry |
     if (entry.name === 'tool_end' && entry.text) {
       try {
         const event = JSON.parse(entry.text) as Record<string, unknown>;
+        const output = isRecord(event.output) ? event.output : undefined;
+        const validation = isRecord(output?.validationSummary) ? output.validationSummary : undefined;
+        // Keep the outcome even when the output body is replaced by a preview.
+        // The report needs only these enums, never command text or diagnostics.
+        if (validation && typeof validation.kind === 'string' && (validation.status === 'passed' || validation.status === 'failed')) {
+          event.validation = {kind: validation.kind, status: validation.status};
+        }
         if (event.name === 'subagent' && typeof event.output === 'object' && event.output != null) {
-          const output = event.output as Record<string, unknown>;
-          const telemetry = typeof output.telemetry === 'object' && output.telemetry != null ? output.telemetry as Record<string, unknown> : undefined;
+          const telemetry = typeof output?.telemetry === 'object' && output.telemetry != null ? output.telemetry as Record<string, unknown> : undefined;
           event.output = {
-            capsule: output.capsule,
+            capsule: output?.capsule,
             coordinator: telemetry ? {modelSelector: telemetry.modelSelector, profile: telemetry.profile, durationMs: telemetry.durationMs, queueMs: telemetry.queueMs, toolCallCount: telemetry.toolCallCount} : undefined,
           };
         } else event.output = slimLargeValue(event.output);

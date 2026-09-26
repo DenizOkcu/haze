@@ -1,6 +1,6 @@
 import type {ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
-import {editRecoveryReadPrompt, malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
+import {earlyValidationPrompt, editRecoveryReadPrompt, malformedToolCallPrompt, repeatedToolCallPrompt, toolLoopBudgetPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
@@ -80,9 +80,9 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
     // prefers provider usage from the last completed step (Pillar 1.1); this
     // sync path is the safety net under the epoch-boundary LLM compaction.
     const contextEstimate = estimateConversationTokens(scopedMessages, usageAnchor.current, requestBudget.systemTokens + requestBudget.toolSchemaTokens);
-    if (contextEstimate.tokens > requestBudget.messageTokens) {
+    if (contextEstimate.tokens > Math.floor(requestBudget.messageTokens * (setup.steeringProfile === 'compact' ? 0.7 : 1))) {
       callbacks.onEvent?.(agentEvent({type: 'compaction_start', reason: 'threshold', method: 'heuristic'}));
-      const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: requestBudget.messageTokens, workState: goal});
+      const compacted = compactModelMessages(stripSyntheticControls(scopedMessages), {tokenBudget: Math.floor(requestBudget.messageTokens * (setup.steeringProfile === 'compact' ? 0.7 : 1)), workState: goal});
       if (compacted.compacted) {
         scopedMessages = compacted.messages;
         loopState.contextCompactedInEpoch = true;
@@ -134,6 +134,10 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       return activeTools.length > 0
         ? {activeTools, messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
         : {toolChoice: 'none', messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
+    }
+    if (!loopState.earlyValidationNudgeIssued && goal.mutationCount >= (setup.steeringProfile === 'compact' ? 4 : 8) && goal.validationSeq === 0 && 'shell' in sliceTools) {
+      loopState.earlyValidationNudgeIssued = true;
+      return {messages: appendSyntheticControl(scopedMessages, earlyValidationPrompt())};
     }
     if (turnToolCallsExhausted || sliceToolCallsExhausted || toolOnlyBoundaryHit || sliceToolCalls >= MAIN_TOOL_CALL_LIMIT) {
       callbacks.debugLog('forcing text response to avoid tool loop');

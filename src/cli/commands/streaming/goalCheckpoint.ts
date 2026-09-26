@@ -32,6 +32,7 @@ export interface IncompleteGoalResume {
   redEvidence?: RedEvidence;
   /** Kind of the carried validation, when one rode the checkpoint (R2-03). */
   validationKind?: ValidationKind;
+  failedCheckIds?: string[];
 }
 
 /** Supervisor-level checkpoint persisted between physical turns (in memory and, via the goal ledger, in the session JSONL). */
@@ -58,6 +59,7 @@ export interface GoalCheckpoint {
   redEvidence?: RedEvidence;
   /** Kind of the carried validation, when one rode the checkpoint (R2-03). */
   validationKind?: ValidationKind;
+  failedCheckIds?: string[];
 }
 
 
@@ -71,11 +73,14 @@ export interface GoalLedgerAppend {
   cycle: number;
   mutationCount: number;
   validationOutcome: ValidationOutcome;
+  validationKind?: ValidationKind;
+  failedCheckIds?: string[];
   progressSignature: string;
   taskCounts?: {total: number; pending: number; inProgress: number; completed: number};
   redEvidence?: RedEvidence;
   stopReason?: string;
   status?: 'complete' | 'failed' | 'aborted';
+  gateDecision?: CompletionReadiness;
 }
 
 /** Hash binding for the exact mission bytes (P1): everything downstream that references "the mission" carries this. */
@@ -94,6 +99,7 @@ export interface CarriedGoalEvidence {
   intent?: RequestIntent;
   redEvidence?: RedEvidence;
   validationKind?: ValidationKind;
+  failedCheckIds?: string[];
 }
 
 /**
@@ -147,5 +153,6 @@ export function checkpointFromGoalFrontier(frontier: GoalLedgerFrontier): GoalCh
     ...(frontier.taskCounts ? {taskCounts: frontier.taskCounts} : {}),
     ...(frontier.redEvidence ? {redEvidence: {...frontier.redEvidence}} : {}),
     ...(frontier.validationKind ? {validationKind: frontier.validationKind} : {}),
+    ...(frontier.failedCheckIds?.length ? {failedCheckIds: [...frontier.failedCheckIds]} : {}),
   };
 }

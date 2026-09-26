@@ -6,6 +6,10 @@
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
+    // pnpm workspaces resolve deps through the .pnpm store via symlinks; without
+    // preserveSymlinks every inferred export type referencing a dependency
+    // becomes "not portable" against the store path and typecheck fails.
+    "preserveSymlinks": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",

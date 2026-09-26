@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
@@ -44,7 +45,19 @@ export function validationCommandKey(command: string): string {
     if (i < words.length) words.splice(0, i);
   }
   while (words.length > 1 && words.at(-1) === '--') words.pop();
-  return words.join(' ');
+  const normalized = words.join(' ');
+  // npm's --prefix form and a simple `cd` wrapper address the same package.
+  // Keep this deliberately narrow: parsing arbitrary shell syntax would risk
+  // treating unrelated checks as interchangeable.
+  const cdNpm = /^cd ([A-Za-z0-9_./-]+) && npm (.+)$/.exec(normalized);
+  const prefixNpm = /^npm --prefix ([A-Za-z0-9_./-]+) (.+)$/.exec(normalized);
+  const match = cdNpm ?? prefixNpm;
+  return match ? `npm@${workspacePathKey(match[1]!)} ${match[2]}` : normalized;
+}
+
+/** Stable, non-reversible identity safe to carry in a goal checkpoint. */
+export function validationCheckId(command: string): string {
+  return crypto.createHash('sha256').update(validationCommandKey(command)).digest('hex').slice(0, 16);
 }
 
 /**
@@ -70,6 +83,8 @@ export interface WorkState {
   intent: RequestIntent;
   normalizedIntent: RequestIntent;
   successCriteria: string[];
+  /** Broad requests must declare and finish an outcome list through writeTasks. */
+  requiresTaskLedger?: boolean;
   constraints: string[];
   decisions: Array<{decision: string; reason?: string}>;
   files: Array<{path: string; action: WorkFileAction; note?: string}>;
@@ -100,6 +115,8 @@ export interface WorkState {
    * (R2-03).
    */
   carriedValidation?: {status: 'passed' | 'failed'; kind?: ValidationKind};
+  /** Failed confirmed checks from earlier physical turns, identified without persisting commands. */
+  carriedFailedCheckIds?: string[];
   /** Captured pre-mutation failing repro for fix goals. Optional, but same-check green is required when present. */
   redEvidence?: RedEvidence;
   /** Single source of truth for blockers; the most recent entry is the current one (CR-023). */
@@ -129,7 +146,7 @@ export interface WorkTaskProgress {
   revision: number;
 }
 
-export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; validationKind?: ValidationKind}) {
+export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCount: number; validationOutcome: ValidationOutcome; taskProgress?: WorkTaskProgress; redEvidence?: RedEvidence; validationKind?: ValidationKind; failedCheckIds?: string[]}) {
   if (carried.taskProgress && carried.taskProgress.total > 0) {
     state.taskProgress = {...carried.taskProgress, revision: 1};
   }
@@ -143,6 +160,7 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
       ? {status: 'passed', ...(carried.validationKind ? {kind: carried.validationKind} : {})}
       : {status: 'failed', ...(carried.validationKind ? {kind: carried.validationKind} : {})};
   }
+  if (carried.failedCheckIds?.length) state.carriedFailedCheckIds = carried.failedCheckIds.slice(0, 8);
   // Red→green evidence is goal-scoped and rides the checkpoint across
   // physical turns so a continuation cannot complete while a carried pair
   // stays unsatisfied.
@@ -180,7 +198,8 @@ function outputSummary(output: unknown) {
 
 function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined, revision: number) {
   // Keep both evidence and status display in execution order when a check reruns.
-  state.validations = state.validations.filter(validation => validation.command !== command);
+  const key = validationCommandKey(command);
+  state.validations = state.validations.filter(validation => validationCommandKey(validation.command) !== key);
   state.validations.push({command, status, summary, revision, ...(kind ? {kind} : {})});
   state.validationCommands = state.validationCommands.filter(item => item.command !== command);
   state.validationCommands.push({command, status});
@@ -306,6 +325,7 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       const status: Exclude<WorkValidationStatus, 'pending'> = passed ? 'passed' : 'failed';
       const summaryText = summary?.summaryText ?? (passed ? `Executed changed artifact ${artifact} successfully.` : `Changed artifact ${artifact} exited unsuccessfully.`);
       upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
+      if (status === 'passed') state.carriedFailedCheckIds = state.carriedFailedCheckIds?.filter(id => id !== validationCheckId(command));
       state.validationSeq = seq;
       state.phase = 'validating';
       state.lastProgressAt = now;
@@ -370,7 +390,8 @@ export function taskProgressFromOutput(output: unknown, revision: number): WorkT
 export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   const hasValidation = state.validationSeq > 0;
   if (!hasValidation) {
-    return intentExpectsValidation(state.normalizedIntent) ? 'absent' : 'not_applicable';
+    return intentExpectsValidation(state.normalizedIntent) || (state.normalizedIntent === 'unknown' && state.mutationCount > 0)
+      ? 'absent' : 'not_applicable';
   }
   // A validation is stale when a mutation happened after it. `mutationSeq === 0`
   // means no mutation occurred (e.g. a pure test/run request), so the latest
@@ -380,6 +401,7 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   if (stale) return 'stale';
   const latest = state.validations.at(-1) ?? state.carriedValidation;
   if (latest?.status !== 'passed') return 'failed';
+  if (unresolvedFailedCheckIds(state).length > 0) return 'failed';
   // A self-declared custom check (generic kind, `purpose=validation`) cannot
   // clear a failed classifier-confirmed validation: known test/build commands
   // are the authoritative completion evidence, custom checks supplement them
@@ -387,11 +409,37 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   // passed an unrelated self-written script and claimed completion). A failed
   // validation carried from a goal checkpoint counts as confirmed too.
   const confirmedFailed = state.validations.some(entry => entry.kind !== 'generic' && entry.status === 'failed')
-    || (state.carriedValidation?.status === 'failed' && state.carriedValidation.kind !== 'generic');
-  if (latest.kind === 'generic' && confirmedFailed) return 'failed';
+    || (latest.kind === 'generic' && !state.carriedFailedCheckIds && state.carriedValidation?.status === 'failed' && state.carriedValidation.kind !== 'generic');
+  if (confirmedFailed) return 'failed';
   return 'passed';
 }
 
+export function unresolvedFailedCheckIds(state: WorkState): string[] {
+  const local = state.validations.filter(entry => entry.kind !== 'generic' && entry.status === 'failed').map(entry => validationCheckId(entry.command));
+  return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])].slice(0, 8);
+}
+
 export function workStatePrompt(state: WorkState) {
-  return `<work_state>\n${JSON.stringify(state)}\n</work_state>`;
+  // Compaction needs a continuity capsule, not a second copy of every file
+  // read and validation ever observed. Keep the exact request and open-check
+  // identities; the recent conversation still carries detailed tool results.
+  const capsule = {
+    request: state.originalUserRequest.slice(0, 1_200),
+    intent: state.normalizedIntent,
+    successCriteria: state.successCriteria.slice(0, 8).map(item => item.slice(0, 160)),
+    requiresTaskLedger: state.requiresTaskLedger,
+    constraints: state.constraints.slice(0, 8).map(item => item.slice(0, 160)),
+    decisions: state.decisions.slice(-5).map(item => ({decision: item.decision.slice(0, 160), reason: item.reason?.slice(0, 160)})),
+    files: state.files.slice(-12).map(file => ({path: file.path.slice(0, 160), action: file.action})),
+    mutationCount: state.mutationCount,
+    validationOutcome: deriveValidationOutcome(state),
+    openCheckIds: unresolvedFailedCheckIds(state),
+    // The red-check command is safe checkpoint metadata; without it a compacted
+    // model cannot know which command must pass to close the red pair.
+    ...(state.redEvidence && redPairStatus(state) !== 'satisfied' ? {openRedCheck: state.redEvidence.command.slice(0, 200)} : {}),
+    taskProgress: state.taskProgress,
+    blockers: state.blockers.slice(-3).map(item => item.slice(0, 160)),
+    nextAction: state.nextAction?.slice(0, 200),
+  };
+  return `<work_state>\n${JSON.stringify(capsule)}\n</work_state>`;
 }

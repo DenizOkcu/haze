@@ -3,6 +3,7 @@ import {formatGoalStatus, observeGoalToolEvent, type SessionGoal} from '../../..
 import {DEFAULT_TOOL_DEADLINE_MS, SUBAGENT_TOOL_DEADLINE_MS, isToolBudgetBlocked} from '../../../core/agent/budgets.js';
 import {isToolDeadlineExceeded} from '../../../core/deadline.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../../core/agent/toolResults.js';
+import {validationSummaryFromOutput} from '../../../core/agent/workState.js';
 import {toolResultSummary} from '../formatters.js';
 import {toolDiffFromResult, type NativeToolCall, type ToolGroupRenderer} from './toolGroupRenderer.js';
 import {isMalformedToolInputError} from './toolCallRecovery.js';
@@ -77,6 +78,10 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
   }
   const ok = toolOutputOk(part.output, true);
   loopState.lastToolOk = ok;
+  // Only a failed classifier-confirmed validation check is repairable work in
+  // the completion gates; a failed edit/write stays a hard tool failure even
+  // when an earlier check also failed.
+  loopState.lastFailedToolWasValidation = !ok && toolName === 'shell' && validationSummaryFromOutput(part.output) != null;
   if (ok && part.toolName === loopState.unresolvedMalformedToolName) loopState.unresolvedMalformedToolName = undefined;
   const finish: NativeToolFinish = {toolCall, success: ok, output: part.output, durationMs: Date.now() - startedAt};
   const item = toolDisplay.ensureToolItem(toolCall);
