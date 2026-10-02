@@ -85,6 +85,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   }},
   {match: exactOrArgs('/themes'), run: async (args, ctx) => await handleThemesCommand(args, ctx)},
   {match: exactOrArgs('/reasoning'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
+  {match: exactOrArgs('/thinking'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
 ];
 

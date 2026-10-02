@@ -12,6 +12,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/settings', description: 'Show provider, model, API key, and context status', kind: 'command'},
   {value: '/themes', description: 'Choose a terminal theme (light palettes and oh-my-zsh ports included)', kind: 'command'},
   {value: '/reasoning', description: 'Set reasoning effort (none, minimal, low, medium, high, xhigh) or unset', kind: 'command'},
+  {value: '/thinking', description: 'Alias for /reasoning. Set reasoning effort (none, minimal, low, medium, high, xhigh) or unset', kind: 'command'},
   {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
   {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
   {value: '/tips', description: 'Toggle the rotating tips shown while the model is thinking', kind: 'command'},

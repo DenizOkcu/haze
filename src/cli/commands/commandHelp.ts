@@ -14,6 +14,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/themes <name>', description: 'Set the theme directly, e.g. /themes robbyrussell. Saved to ~/.haze/settings.json; text already on screen keeps its old colors.'},
   {usage: '/reasoning', description: 'Choose a reasoning effort level (none, minimal, low, medium, high, xhigh) or unset; high is the default and applies from the next turn.'},
   {usage: '/reasoning <level|unset|status>', description: 'Set the reasoning effort directly, clear it with unset (no parameter sent), or show the current level with status. Endpoints without native support ignore the parameter.'},
+  {usage: '/thinking', description: 'Alias for /reasoning. Choose a reasoning effort level (none, minimal, low, medium, high, xhigh) or unset; high is the default and applies from the next turn.'},
+  {usage: '/thinking <level|unset|status>', description: 'Alias for /reasoning. Set the reasoning effort directly, clear it with unset (no parameter sent), or show the current level with status. Endpoints without native support ignore the parameter.'},
   {usage: '/skills', description: 'Manage Markdown skills: generate a custom skill, show info, enable/disable, validate, or remove.'},
   {usage: '/tips', description: 'Toggle the rotating tips shown under the busy label while the model is thinking.'},
   {usage: '/fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] [--] <prompt>', description: 'Run genuinely independent tasks through disposable contexts. Runtime enforces profile concurrency, deadlines, and mutation serialization; control guidance is not persisted. Declines non-parallel work.'},
