@@ -114,6 +114,7 @@ export function handleToolErrorPart(deps: ToolPartHandlerDeps, part: AttemptStre
   const toolCall = {toolCallId, toolName, input: part.input ?? existing?.input};
   const startedAt = loopState.startedTools.get(toolCallId) ?? Date.now();
   loopState.lastToolOk = false;
+  loopState.lastFailedToolWasValidation = false;
   if (isMalformedToolInputError(part.error)) {
     loopState.pendingMalformedToolName = toolName;
     loopState.unresolvedMalformedToolName = toolName;

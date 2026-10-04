@@ -1348,6 +1348,31 @@ describe('runAgentTurn: bounded completion recovery', () => {
     expect(outcome).toMatchObject({status: 'complete'});
   });
 
+  it.each(['validation-only', 'tool execution error'])('keeps a failure report without repair continuation: %s', async scenario => {
+      const report = 'The check failed; no files were changed.';
+      const {runAgentTurn} = await loadStreaming({
+        modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+        availableTools: fullTools,
+        streamParts: [
+          {type: 'tool-call', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}},
+          {type: 'tool-result', toolCallId: 'v1', toolName: 'shell', input: {command: 'npm test'}, output: {ok: false, code: 1, validationSummary: {kind: 'test', status: 'failed', summaryText: 'failed', failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}}},
+          ...(scenario === 'tool execution error' ? [
+            {type: 'tool-call', toolCallId: 'e1', toolName: 'editFile', input: {path: 'a.ts'}},
+            {type: 'tool-error', toolCallId: 'e1', toolName: 'editFile', error: new Error('synthetic permission denied')},
+          ] : []),
+          {type: 'text-delta', text: report},
+          {type: 'finish', finishReason: 'stop'},
+        ],
+        responseMessages: [{role: 'assistant', content: report}],
+      });
+      const cb = makeCallbacks();
+      const outcome = await runAgentTurn(scenario === 'validation-only' ? 'run the tests' : 'implement a feature', undefined, [], cb);
+      expect(mocks.streamedMessages).toHaveLength(1);
+      expect(outcome.status).toBe('failed');
+      expect(outcome.resume).toBeUndefined();
+      expect(cb.getConversation()).toContainEqual({role: 'assistant', content: report});
+  });
+
   it('a length finish triggers one continuation slice that writes the file and completes', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {model: {modelId: 'test'}, config: {providerName: 't', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},

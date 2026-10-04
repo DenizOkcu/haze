@@ -124,6 +124,16 @@ describe('deriveValidationOutcome', () => {
     expect(deriveValidationOutcome(state)).toBe('passed');
   });
 
+  it.each(['&& npm run lint', '| cat', '; npm run lint', '> result.txt'])('does not normalize npm compounds or redirects: %s', suffix => {
+    const firstCommand = `cd web && npm test ${suffix}`;
+    const secondCommand = `npm --prefix web test ${suffix}`;
+    expect(validationCommandKey(firstCommand)).not.toBe(validationCommandKey(secondCommand));
+    const state = createWorkState('implement a feature', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: firstCommand}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: secondCommand}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
   it('requires validation after a mutation with unknown intent', () => {
     const state = createWorkState('make it work', 'unknown', []);
     observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'app.ts'}, success: true, output: {ok: true}});
@@ -140,6 +150,25 @@ describe('deriveValidationOutcome', () => {
     observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm --prefix api test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
     expect(unresolvedFailedCheckIds(next)).toEqual([]);
     expect(deriveValidationOutcome(next)).toBe('passed');
+  });
+
+  it('carries every failed check while keeping the model preview bounded', () => {
+    const first = createWorkState('implement services', 'implement', []);
+    const commands = Array.from({length: 12}, (_, index) => `npm --prefix package-${index} test`);
+    for (const command of commands) {
+      observeWorkToolEvent(first, {toolName: 'shell', input: {command}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    }
+    expect(unresolvedFailedCheckIds(first)).toHaveLength(12);
+    const capsule = JSON.parse(workStatePrompt(first).split('\n')[1]!);
+    expect(capsule.openCheckIds).toHaveLength(8);
+    expect(capsule.openCheckCount).toBe(12);
+    const next = createWorkState('implement services', 'implement', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: unresolvedFailedCheckIds(first)});
+    for (const [index, command] of commands.entries()) {
+      observeWorkToolEvent(next, {toolName: 'shell', input: {command}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+      expect(unresolvedFailedCheckIds(next)).toHaveLength(commands.length - index - 1);
+      expect(deriveValidationOutcome(next)).toBe(index === commands.length - 1 ? 'passed' : 'failed');
+    }
   });
 
   it.each(['passed', 'failed'] as const)('uses execution order when an earlier check reruns %s', status => {

@@ -52,7 +52,10 @@ export function validationCommandKey(command: string): string {
   const cdNpm = /^cd ([A-Za-z0-9_./-]+) && npm (.+)$/.exec(normalized);
   const prefixNpm = /^npm --prefix ([A-Za-z0-9_./-]+) (.+)$/.exec(normalized);
   const match = cdNpm ?? prefixNpm;
-  return match ? `npm@${workspacePathKey(match[1]!)} ${match[2]}` : normalized;
+  // `cd` changes the directory for subsequent stages; --prefix does not.
+  // Only normalize a single npm invocation, never a compound command.
+  return match && isSingleForegroundCommand(match[2]!)
+    ? `npm@${workspacePathKey(match[1]!)} ${match[2]}` : normalized;
 }
 
 /** Stable, non-reversible identity safe to carry in a goal checkpoint. */
@@ -160,7 +163,7 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
       ? {status: 'passed', ...(carried.validationKind ? {kind: carried.validationKind} : {})}
       : {status: 'failed', ...(carried.validationKind ? {kind: carried.validationKind} : {})};
   }
-  if (carried.failedCheckIds?.length) state.carriedFailedCheckIds = carried.failedCheckIds.slice(0, 8);
+  if (carried.failedCheckIds?.length) state.carriedFailedCheckIds = [...carried.failedCheckIds];
   // Red→green evidence is goal-scoped and rides the checkpoint across
   // physical turns so a continuation cannot complete while a carried pair
   // stays unsatisfied.
@@ -416,7 +419,9 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
 
 export function unresolvedFailedCheckIds(state: WorkState): string[] {
   const local = state.validations.filter(entry => entry.kind !== 'generic' && entry.status === 'failed').map(entry => validationCheckId(entry.command));
-  return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])].slice(0, 8);
+  // Completion evidence must keep every open identity across turn boundaries.
+  // Bound only the model-facing preview, not the authoritative check set.
+  return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])];
 }
 
 export function workStatePrompt(state: WorkState) {
@@ -433,7 +438,8 @@ export function workStatePrompt(state: WorkState) {
     files: state.files.slice(-12).map(file => ({path: file.path.slice(0, 160), action: file.action})),
     mutationCount: state.mutationCount,
     validationOutcome: deriveValidationOutcome(state),
-    openCheckIds: unresolvedFailedCheckIds(state),
+    openCheckIds: unresolvedFailedCheckIds(state).slice(0, 8),
+    openCheckCount: unresolvedFailedCheckIds(state).length,
     // The red-check command is safe checkpoint metadata; without it a compacted
     // model cannot know which command must pass to close the red pair.
     ...(state.redEvidence && redPairStatus(state) !== 'satisfied' ? {openRedCheck: state.redEvidence.command.slice(0, 200)} : {}),

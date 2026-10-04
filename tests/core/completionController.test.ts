@@ -217,6 +217,15 @@ describe('assessCompletionReadiness (Cycle 1)', () => {
     expect(assessCompletionReadiness(state({intent: 'implement', mutationCount: 1, validationOutcome: 'failed'}), evidence({lastToolOk: false, lastFailedToolWasValidation: false}))).toBe('tool_failure');
   });
 
+  it.each([false, true])('does not repair a validation-only failure after lastToolOk=%s', lastToolOk => {
+    const s = state({intent: 'test', mutationCount: 0, validationOutcome: 'failed', finishCause: 'stop'});
+    const ev = evidence({sawToolCall: true, assistantText: 'The requested tests failed. No files changed.', lastToolOk, lastFailedToolWasValidation: !lastToolOk});
+    expect(assessCompletionReadiness(s, ev)).toBe('tool_failure');
+    expect(classifyTerminalOutcome(s, ev)).toBe('hard-blocked');
+    expect(decideGoalContinuation(s, ev, budget).action).toBe('stop');
+    expect(decideTerminalStatus(s, ev, false)).toBe('failed');
+  });
+
   it('never demands validation for plan/review/answer turns', () => {
     for (const intent of ['plan', 'review', 'answer'] as const) {
       expect(assessCompletionReadiness(state({intent, mutationCount: 0, validationOutcome: 'not_applicable'}), evidence({lastToolOk: true}))).toBe('ready');

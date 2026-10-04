@@ -184,6 +184,10 @@ export interface CompletionReadinessInput {
 export function assessCompletionReadiness(state: CompletionReadinessInput, evidence: Pick<CompletionEvidence, 'lastToolOk' | 'lastFailedToolWasValidation' | 'unresolvedToolInputError'>): CompletionReadiness {
   if (state.aborted) return 'aborted';
   if (evidence.unresolvedToolInputError) return 'unresolved_tool_input';
+  // A validation-only goal is fulfilled by running the check and reporting its
+  // failure, not by repairing code. Keep the failed status, but do not turn a
+  // truthful report into an automatic repair slice (even after another read).
+  if (state.intent === 'test' && state.mutationCount === 0 && state.validationOutcome === 'failed') return 'tool_failure';
   // A failing validation command is repairable work, not a terminal tool
   // failure — but only when the failed call *is* that validation check. A
   // failed edit/write after a failed validation stays a hard tool failure.
