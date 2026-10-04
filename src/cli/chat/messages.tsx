@@ -5,6 +5,7 @@ import type {Message} from '../commands/streaming.js';
 import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../../utils/format.js';
 import {MarkdownText} from '../../ui/components/MarkdownText.js';
+import {StreamingMarkdownText} from '../../ui/components/StreamingMarkdownText.js';
 import {clampTextTail, wrapLine} from './liveRegion.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
@@ -250,7 +251,9 @@ export const MessageView = React.memo(function MessageView({message, width, show
   if (maxVisibleLines != null && message.role !== 'tool') {
     return <Box flexDirection="column" flexShrink={0} maxHeight={maxVisibleLines + (showHeader ? 1 : 0)} overflow="hidden">
       {showHeader && <Text color={theme.muted} wrap="truncate-end">{message.role === 'assistant' ? 'haze' : message.role === 'user' ? 'You asked' : 'Info'}</Text>}
-      <StreamingClampedText text={message.text} width={width} maxVisibleLines={maxVisibleLines} />
+      {message.role === 'assistant'
+        ? <StreamingMarkdownText content={message.text} width={width} maxVisibleLines={maxVisibleLines} />
+        : <StreamingClampedText text={message.text} width={width} maxVisibleLines={maxVisibleLines} />}
     </Box>;
   }
   if (message.role === 'user') {
@@ -269,11 +272,10 @@ export const MessageView = React.memo(function MessageView({message, width, show
     </Text> : null}
     {message.role === 'tool'
       ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} maxVisibleLines={maxVisibleLines} />
-      : message.role === 'assistant' && !message.streaming
-        // Only settled assistant messages get Markdown rendering. Streaming
-        // text re-tokenizes on every delta (expensive) and the partial Markdown
-        // would flicker; user text stays plain to keep pasted Markdown literal.
-        ? <MarkdownText content={message.text} width={width} />
+      : message.role === 'assistant'
+        ? message.streaming
+          ? <StreamingMarkdownText content={message.text} width={width} />
+          : <MarkdownText content={message.text} width={width} />
         : message.role === 'system'
           ? <SystemMessageText text={message.text} />
           : message.streaming && maxVisibleLines != null
