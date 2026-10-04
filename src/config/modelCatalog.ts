@@ -12,6 +12,9 @@
  * little earlier, over-budgeting hard-fails the request. First match wins, so
  * keep more specific patterns before broader family prefixes.
  *
+ * Refreshed 2026-10-04 against https://models.dev/api.json. Provider-specific
+ * caps belong in provider presets/settings, not these conservative family entries.
+ *
  * Local inference servers (localhost URLs) never consult the catalog: their
  * effective window is set by server configuration (often far below the model's
  * nominal window) and silent truncation there is undetectable.
@@ -30,6 +33,16 @@ interface CatalogEntry extends CatalogModelLimits {
 
 const MODEL_CATALOG: readonly CatalogEntry[] = [
   // ── OpenAI ────────────────────────────────────────────────────────────────
+  {match: 'gpt-6.1-sol', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-6-astra', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-6-sol', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-6-luna', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-5.6', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-5.5', contextWindowTokens: 400_000, maxOutputTokens: 128_000, note: 'Poe caps this family at 400K; origin limits belong in presets'},
+  {match: 'gpt-5.4-mini', contextWindowTokens: 400_000, maxOutputTokens: 128_000},
+  {match: 'gpt-5.4-nano', contextWindowTokens: 400_000, maxOutputTokens: 128_000},
+  {match: 'gpt-5.4', contextWindowTokens: 1_050_000, maxOutputTokens: 128_000},
+  {match: 'gpt-5.3-codex-spark', contextWindowTokens: 128_000, maxOutputTokens: 32_000},
   {match: 'gpt-5.1-codex', contextWindowTokens: 400_000, maxOutputTokens: 128_000},
   {match: 'gpt-5.1-codex-mini', contextWindowTokens: 400_000, maxOutputTokens: 128_000},
   {match: 'gpt-5', contextWindowTokens: 400_000, maxOutputTokens: 128_000},
@@ -39,6 +52,9 @@ const MODEL_CATALOG: readonly CatalogEntry[] = [
   {match: 'o3', contextWindowTokens: 200_000, maxOutputTokens: 100_000},
   {match: 'o1', contextWindowTokens: 200_000, maxOutputTokens: 100_000},
   // ── Anthropic ─────────────────────────────────────────────────────────────
+  {match: 'claude-opus-5', contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
+  {match: 'claude-sonnet-5', contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
+  {match: 'claude-fable-5', contextWindowTokens: 1_000_000, maxOutputTokens: 128_000},
   {match: 'claude-opus-4', contextWindowTokens: 200_000, maxOutputTokens: 32_000},
   {match: 'claude-sonnet-4', contextWindowTokens: 200_000, maxOutputTokens: 64_000},
   {match: 'claude-haiku-4', contextWindowTokens: 200_000, maxOutputTokens: 32_000},
@@ -49,17 +65,30 @@ const MODEL_CATALOG: readonly CatalogEntry[] = [
   {match: 'gemini-2.5', contextWindowTokens: 1_048_576, maxOutputTokens: 65_536},
   {match: 'gemini-2.0', contextWindowTokens: 1_048_576, maxOutputTokens: 8_192},
   // ── xAI ───────────────────────────────────────────────────────────────────
+  {match: 'grok-4.7', contextWindowTokens: 500_000, maxOutputTokens: 450_000, note: 'smaller OpenRouter output cap'},
+  {match: 'grok-4.6', contextWindowTokens: 500_000, maxOutputTokens: 500_000},
+  {match: 'grok-4.5', contextWindowTokens: 500_000, maxOutputTokens: 500_000},
   {match: 'grok-4', contextWindowTokens: 256_000, maxOutputTokens: 32_768},
   {match: 'grok-3', contextWindowTokens: 131_072, maxOutputTokens: 32_768},
   // ── DeepSeek ──────────────────────────────────────────────────────────────
+  {match: 'deepseek-v4.1', contextWindowTokens: 1_000_000, maxOutputTokens: 384_000, note: 'smaller gateway window and output cap'},
+  {match: 'deepseek-v4', contextWindowTokens: 512_000, maxOutputTokens: 384_000, note: 'Together caps V4 Pro at 512K'},
+  {match: 'deepseek-flash', contextWindowTokens: 1_000_000, maxOutputTokens: 393_216},
   {match: 'deepseek-reasoner', contextWindowTokens: 128_000, maxOutputTokens: 32_768, note: 'R1/reasoner family'},
   {match: 'deepseek-r1', contextWindowTokens: 128_000, maxOutputTokens: 32_768},
   {match: 'deepseek', contextWindowTokens: 128_000, maxOutputTokens: 8_192},
   // ── Alibaba / Moonshot / Zhipu / MiniMax ─────────────────────────────────
+  {match: 'qwen3.8-max', contextWindowTokens: 262_144, maxOutputTokens: 131_072, note: 'smaller OpenCode window'},
   {match: 'qwen3-coder', contextWindowTokens: 262_144, maxOutputTokens: 32_768},
   {match: 'qwen3', contextWindowTokens: 131_072, maxOutputTokens: 32_768, note: 'native window without YaRN extension'},
   {match: 'qwen', contextWindowTokens: 131_072, maxOutputTokens: 8_192},
+  {match: 'kimi-k3', contextWindowTokens: 1_048_576, maxOutputTokens: 131_072, note: 'smaller gateway output cap'},
   {match: 'kimi-k2', contextWindowTokens: 131_072, maxOutputTokens: 32_768, note: 'input-safe half of the 256K total'},
+  {match: 'glm-5.3', contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
+  {match: 'glm-5.2', contextWindowTokens: 262_144, maxOutputTokens: 131_072, note: 'smaller Hugging Face window'},
+  {match: 'glm-5.1', contextWindowTokens: 200_000, maxOutputTokens: 131_072},
+  {match: 'glm-5-turbo', contextWindowTokens: 200_000, maxOutputTokens: 131_072},
+  {match: 'glm-4.7', contextWindowTokens: 200_000, maxOutputTokens: 131_072},
   {match: 'glm-4.6', contextWindowTokens: 200_000, maxOutputTokens: 32_768},
   {match: 'glm-4.5', contextWindowTokens: 131_072, maxOutputTokens: 32_768},
   {match: 'minimax-m2', contextWindowTokens: 204_800, maxOutputTokens: 1_048_576, note: 'output budget exceeds window in interleave mode'},

@@ -11,6 +11,32 @@ describe('model catalog', () => {
     expect(catalogLimitsFor('openrouter/qwen3-coder')).toMatchObject({contextWindowTokens: 262_144});
   });
 
+  it.each([
+    ['gpt-6.1-sol', 1_050_000, 128_000],
+    ['OPENAI/GPT-6-ASTRA', 1_050_000, 128_000],
+    ['subscription:gpt-6-luna', 1_050_000, 128_000],
+    ['gpt-6-sol', 1_050_000, 128_000],
+    ['gpt-5.6-sol', 1_050_000, 128_000],
+    ['gpt-5.4', 1_050_000, 128_000],
+    ['gpt-5.4-mini', 400_000, 128_000],
+    ['gpt-5.4-nano', 400_000, 128_000],
+    ['gpt-5.3-codex-spark', 128_000, 32_000],
+    ['anthropic/claude-opus-5.5', 1_000_000, 128_000],
+    ['claude-sonnet-5-5', 1_000_000, 128_000],
+    ['claude-fable-5-1', 1_000_000, 128_000],
+    ['google/gemini-3.8-flash', 1_048_576, 65_536],
+    ['x-ai/grok-4.7', 500_000, 450_000],
+    ['deepseek/deepseek-v4.1-flash', 1_000_000, 384_000],
+    ['deepseek-ai/DeepSeek-V4-Pro', 512_000, 384_000],
+    ['deepseek-flash', 1_000_000, 393_216],
+    ['qwen/qwen3.8-max-prime', 262_144, 131_072],
+    ['moonshotai/kimi-k3', 1_048_576, 131_072],
+    ['z-ai/glm-5.3-prime', 1_000_000, 131_072],
+    ['z-ai/glm-5.2', 262_144, 131_072],
+  ])('resolves refreshed limits for %s', (model, contextWindowTokens, maxOutputTokens) => {
+    expect(catalogLimitsFor(model)).toEqual({contextWindowTokens, maxOutputTokens});
+  });
+
   it('keeps specific entries before broader family prefixes (first match wins)', () => {
     // qwen3-coder (256K) must win over the qwen3 family entry.
     expect(catalogLimitsFor('qwen3-coder-480b')?.contextWindowTokens).toBeGreaterThan(catalogLimitsFor('qwen3-32b')!.contextWindowTokens);

@@ -133,6 +133,24 @@ describe('preset model limits', () => {
     expect(missing).toEqual([]);
   });
 
+  it.each([
+    ['openai-api-key', 'gpt-6.1-sol', 1_050_000, 128_000],
+    ['openai-subscription', 'gpt-6.1-sol', 1_050_000, 128_000],
+    ['openrouter', 'anthropic/claude-sonnet-5.5', 1_000_000, 128_000],
+    ['openrouter', 'deepseek/deepseek-v4.1-flash', 1_048_576, 943_718],
+    ['google-gemini', 'gemini-3.8-flash', 1_048_576, 65_536],
+    ['z-ai', 'glm-5.3-flash', 1_000_000, 131_072],
+    ['xai', 'grok-4.7', 500_000, 500_000],
+    ['openrouter', 'x-ai/grok-4.7', 500_000, 450_000],
+    ['opencode-zen', 'claude-opus-5-5', 1_000_000, 128_000],
+    ['requesty', 'gemini-3.8-flash', 1_048_576, 65_535],
+    ['kilo', 'openai/gpt-6.1-sol', 1_050_000, 128_000],
+  ])('includes verified recent limits for %s:%s', (presetId, model, contextWindowTokens, maxOutputTokens) => {
+    const preset = findPreset(presetId)!;
+    expect(preset.suggestedModels).toContain(model);
+    expect(preset.modelLimits?.[model]).toEqual({contextWindowTokens, maxOutputTokens});
+  });
+
   it('carries no limit entries for models not in suggestedModels', () => {
     for (const preset of PROVIDER_PRESETS) {
       const suggested = new Set(preset.suggestedModels ?? []);
@@ -158,7 +176,7 @@ describe('preset model limits', () => {
 
   it('resolves limits by provider URL and name without cross-preset leakage', () => {
     const byUrl = presetModelLimitsForModels({url: 'https://api.deepseek.com/v1'}, ['deepseek-v4-pro', 'kimi-k3']);
-    expect(byUrl['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 384_000});
+    expect(byUrl['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 393_216});
     // The same model id on a different provider resolves to that provider's cap.
     const byRouter = presetModelLimitsForModels({url: 'https://api.together.ai/v1'}, ['deepseek-ai/DeepSeek-V4-Pro']);
     expect(byRouter['deepseek-ai/DeepSeek-V4-Pro']?.contextWindowTokens).toBe(512_000);

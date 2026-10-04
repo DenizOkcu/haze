@@ -14,7 +14,7 @@
  * ones never do).
  *
  * `modelLimits` values are curated from models.dev (the same catalog pi and nanocoder
- * consume; refreshed 2026-08-15). They are keyed by the exact suggested model id for
+ * consume; recent releases refreshed 2026-10-04 from https://models.dev/api.json). They are keyed by the exact suggested model id for
  * THIS preset: aggregators may cap context below the origin model's capability (e.g.
  * Together serves DeepSeek-V4-Pro at 512K vs DeepSeek's own 1M), so limits never
  * transfer between providers. When the wizard adds a suggested model, these values are
@@ -91,12 +91,22 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'OPENROUTER_API_KEY',
     models: [
       // SOTA
+      ['openai/gpt-6.1-sol', 1_050_000, 128_000],
+      ['openai/gpt-6-astra', 1_050_000, 128_000],
+      ['anthropic/claude-opus-5.5', 1_000_000, 128_000],
+      ['anthropic/claude-sonnet-5.5', 1_000_000, 128_000],
+      ['anthropic/claude-fable-5.1', 1_000_000, 128_000],
+      ['google/gemini-3.8-flash', 1_048_576, 65_536],
       ['anthropic/claude-opus-5', 1_048_576, 128_000],
       ['openai/gpt-5.6', 1_050_000, 128_000],
       ['google/gemini-3.7-flash', 1_048_576, 65_536],
       ['anthropic/claude-sonnet-5', 1_000_000, 128_000],
       ['qwen/qwen3.8-2.4t-a95b', 1_048_576, 262_144],
       // Fast
+      ['openai/gpt-6-luna', 1_050_000, 128_000],
+      ['x-ai/grok-4.7', 500_000, 450_000],
+      ['deepseek/deepseek-v4.1-flash', 1_048_576, 943_718],
+      ['z-ai/glm-5.3-prime', 1_000_000, 131_072],
       ['x-ai/grok-4.6', 500_000, 500_000],
       ['openai/gpt-5.4-mini', 400_000, 128_000],
       ['google/gemini-3.5-flash', 1_048_576, 65_536],
@@ -111,6 +121,10 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'OPENAI_API_KEY',
     models: [
       // SOTA
+      ['gpt-6.1-sol', 1_050_000, 128_000],
+      ['gpt-6-astra', 1_050_000, 128_000],
+      ['gpt-6-sol', 1_050_000, 128_000],
+      ['gpt-6-luna', 1_050_000, 128_000],
       ['gpt-5.6', 1_050_000, 128_000],
       ['gpt-5.6-sol', 1_050_000, 128_000],
       ['gpt-5.6-terra', 1_050_000, 128_000],
@@ -132,6 +146,7 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'GEMINI_API_KEY',
     models: [
       // SOTA
+      ['gemini-3.8-flash', 1_048_576, 65_536],
       ['gemini-3.1-pro-preview', 1_048_576, 65_536],
       ['gemini-3.7-flash', 1_048_576, 65_536],
       // Fast
@@ -165,9 +180,10 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'DEEPSEEK_API_KEY',
     models: [
       // SOTA
-      ['deepseek-v4-pro', 1_000_000, 384_000],
+      ['deepseek-v4-pro', 1_000_000, 393_216],
       // Fast
-      ['deepseek-v4-flash', 1_000_000, 384_000],
+      ['deepseek-flash', 1_000_000, 393_216],
+      ['deepseek-v4-flash', 1_000_000, 393_216],
     ],
     category: 'cloud',
   },
@@ -178,6 +194,7 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'XAI_API_KEY',
     models: [
       // SOTA
+      ['grok-4.7', 500_000, 500_000],
       ['grok-4.6', 500_000, 500_000],
       ['grok-4.5', 500_000, 500_000],
       ['grok-4.3', 1_000_000, 30_000],
@@ -192,6 +209,8 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     baseUrl: 'https://api.z.ai/api/paas/v4/',
     apiKeyEnvVar: 'ZAI_API_KEY',
     models: [
+      ['glm-5.3-flash', 1_000_000, 131_072],
+      ['glm-5.3-flashx', 1_000_000, 131_072],
       ['glm-5.2', 1_000_000, 131_072],
       ['glm-5.1', 200_000, 131_072],
       ['glm-5-turbo', 200_000, 131_072],
@@ -354,6 +373,11 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'OPENCODE_API_KEY',
     models: [
       // SOTA
+      ['gpt-6.1-sol', 1_050_000, 128_000],
+      ['gpt-6-astra', 1_050_000, 128_000],
+      ['claude-opus-5-5', 1_000_000, 128_000],
+      ['claude-sonnet-5-5', 1_000_000, 128_000],
+      ['gemini-3.8-flash', 1_048_576, 65_536],
       ['claude-opus-5', 1_000_000, 128_000],
       ['gpt-5.5', 1_050_000, 128_000],
       ['claude-opus-4-8', 1_000_000, 128_000],
@@ -371,6 +395,12 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     baseUrl: 'https://router.requesty.ai/v1',
     apiKeyHint: 'API Key (from https://app.requesty.ai/api-keys)',
     models: [
+      ['gpt-6.1-sol', 1_050_000, 128_000],
+      ['gpt-6.1-sol@eu', 1_050_000, 128_000],
+      ['claude-opus-5-5', 1_000_000, 128_000],
+      ['claude-sonnet-5-5', 1_000_000, 128_000],
+      ['gemini-3.8-flash', 1_048_576, 65_535],
+      ['deepseek-v4.1-flash', 1_048_576, 393_216],
       ['claude-opus-4-8', 1_000_000, 128_000],
       ['gpt-5.5@eu', 1_050_000, 128_000],
       ['gemini-3.5-flash', 1_048_576, 65_535],
@@ -406,6 +436,10 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     baseUrl: 'https://chatgpt.com/backend-api/codex',
     auth: 'chatgpt-oauth',
     models: [
+      ['gpt-6.1-sol', 1_050_000, 128_000],
+      ['gpt-6-astra', 1_050_000, 128_000],
+      ['gpt-6-sol', 1_050_000, 128_000],
+      ['gpt-6-luna', 1_050_000, 128_000],
       ['gpt-5.6-sol', 1_050_000, 128_000],
       ['gpt-5.6-terra', 1_050_000, 128_000],
       ['gpt-5.6-luna', 1_050_000, 128_000],
@@ -443,6 +477,11 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     apiKeyEnvVar: 'KILO_API_KEY',
     models: [
       // SOTA
+      ['openai/gpt-6.1-sol', 1_050_000, 128_000],
+      ['anthropic/claude-opus-5.5', 1_000_000, 128_000],
+      ['anthropic/claude-sonnet-5.5', 1_000_000, 128_000],
+      ['google/gemini-3.8-flash', 1_048_576, 65_536],
+      ['deepseek/deepseek-v4.1-flash', 1_048_576, 943_718],
       ['anthropic/claude-opus-5', 1_000_000, 128_000],
       ['openai/gpt-5.6-sol', 1_050_000, 128_000],
       ['moonshotai/kimi-k3', 1_048_576, 1_048_576],
