@@ -703,7 +703,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         // Allocate the sum, not a positive minimum for every pending item.
         const displayed = streamingItems.slice(0, Math.floor(rows / 2));
         const itemRows = displayed.length > 0 ? Math.floor(rows / displayed.length) : 0;
-        return displayed.map(item => <Box key={item.key} height={itemRows} flexShrink={0} overflow="hidden">
+        return displayed.map(item => <Box key={item.key} maxHeight={itemRows} flexShrink={0} overflow="hidden">
           <MessageView message={item.message} width={contentWidth} showHeader={item.showHeader}
             maxVisibleLines={itemRows - 1} />
         </Box>);

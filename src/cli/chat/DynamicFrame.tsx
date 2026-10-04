@@ -1,5 +1,5 @@
 import React, {useRef, useState} from 'react';
-import {Box, Text, useBoxMetrics, type DOMElement} from 'ink';
+import {Box, useBoxMetrics, type DOMElement} from 'ink';
 import {theme} from '../../ui/theme.js';
 
 export interface FrameSections {
@@ -15,7 +15,9 @@ export interface InputDemand {input: number; suggestions: number}
 
 /** Allocate the entire normal-screen dynamic frame, never Static history. */
 export function allocateFrame(rows: number, columns: number, sections: FrameSections, demand: InputDemand = {input: 1, suggestions: 0}) {
-  let remaining = Math.max(1, Math.floor(rows));
+  // Keep normal-screen output below Ink's fullscreen threshold, including long
+  // live previews. One-cell terminals still get an editable input row.
+  let remaining = Math.max(1, Math.floor(rows) - 1);
   const take = (wanted: number) => {
     const granted = Math.min(remaining, wanted);
     remaining -= granted;
@@ -34,15 +36,11 @@ export function allocateFrame(rows: number, columns: number, sections: FrameSect
   return {compact, input, border, activity, status, suggestions, tasks, queue, debug, live};
 }
 
-/** Fixed outer geometry is a safety boundary for wrapped metadata and nested views. */
-function Panel({rows, children, preview = false}: {rows: number; children: React.ReactNode; preview?: boolean}) {
+/** Cap panel geometry without stretching short output into a fullscreen frame. */
+function Panel({rows, children}: {rows: number; children: React.ReactNode}) {
   if (rows === 0) return null;
-  const detailRows = rows - (preview ? 1 : 0);
-  return <Box flexDirection="column" height={rows} flexShrink={0} overflow="hidden">
-    {detailRows > 0 && <Box height={detailRows} flexShrink={0} overflow="hidden">
-      <Box flexDirection="column" flexShrink={0} width="100%">{children}</Box>
-    </Box>}
-    {preview && <Text color={theme.muted} wrap="truncate-end">⋯ Live preview · full output preserved</Text>}
+  return <Box flexDirection="column" maxHeight={rows} flexShrink={0} overflow="hidden">
+    <Box flexDirection="column" flexShrink={0} width="100%">{children}</Box>
   </Box>;
 }
 
@@ -62,7 +60,7 @@ export function DynamicFrame({rows, columns, sections, input}: {
   const onRowsChange = (next: InputDemand) => setDemand(previous =>
     previous.input === next.input && previous.suggestions === next.suggestions ? previous : next);
   return <Box flexDirection="column" width={Math.max(1, columns)} flexShrink={0}>
-    <Panel rows={budget.live} preview>{typeof sections.live === 'function' ? sections.live(Math.max(0, budget.live - 1)) : sections.live}</Panel>
+    <Panel rows={budget.live}>{typeof sections.live === 'function' ? sections.live(budget.live) : sections.live}</Panel>
     <Panel rows={budget.debug}>{sections.debug}</Panel>
     <Panel rows={budget.queue}>{sections.queue}</Panel>
     <Panel rows={budget.tasks}>{sections.tasks}</Panel>
