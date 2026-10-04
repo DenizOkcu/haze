@@ -77,11 +77,14 @@ if (fs.existsSync(docsDir) && series) {
   }
 }
 
-// 6. AGENTS.md stamps must target the current release.
+// 6. AGENTS.md stamps must target the current release. Only files tracked by
+// Git are release metadata: local worktrees and ignored checkouts (excluded
+// via .git/info/exclude, which the walker below would otherwise descend into)
+// are out of scope.
 const agentsStamp = new RegExp(`for the ${version.replace(/\./g, '\\.')} release`);
 function* walk(dir) {
   for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
-    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git') continue;
+    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git' || entry.name === '.kilo') continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) yield* walk(full);
     else if (entry.name === 'AGENTS.md') yield full;
