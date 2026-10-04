@@ -235,8 +235,8 @@ describe('live-region clamping', () => {
     expect(frame).toContain('⋯ 1 diff preview hidden');
   });
 
-  it('never clamps settled tool messages or static markdown chunks', () => {
-    const {lastFrame} = render(<MessageView width={40} maxVisibleLines={2} message={{
+  it('never clamps Static messages when no dynamic allowance is supplied', () => {
+    const {lastFrame} = render(<MessageView width={40} message={{
       id: 't1',
       role: 'tool',
       text: 'one\ntwo\nthree\nfour',

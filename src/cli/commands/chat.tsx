@@ -29,6 +29,9 @@ import type {LoadedSkill} from '../../skills/types.js';
 import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
+import {DynamicFrame} from '../chat/DynamicFrame.js';
+import {createChatShutdown, runTerminalSession} from '../chat/shutdown.js';
+import {createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
 import {AssistantMarkdownChunkView, MessageView} from '../chat/messages.js';
 import {partitionDisplayMessages, type TranscriptStaticItem} from '../chat/transcriptPartition.js';
 import {useLiveMessages} from '../chat/liveMessages.js';
@@ -88,9 +91,13 @@ function BusyBar({label, elapsed, tip}: {label: string; elapsed: string; tip?: s
   </Box>;
 }
 
-function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false}: ChatOptions) {
+function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false, onShutdownReady}: ChatOptions & {onShutdownReady?: (shutdown: () => Promise<void>) => void}) {
   const {exit} = useApp();
   const {columns: width, rows: terminalRows} = useWindowSize();
+  const stoppingRef = useRef(false);
+  const sealedRef = useRef(false);
+  const activeGoalRef = useRef<Promise<unknown> | undefined>(undefined);
+  const quarantineRef = useRef<(() => void) | undefined>(undefined);
   const nextDisplayOrderRef = useRef(1);
   const withDisplayOrder = (message: Message): Message => {
     if (message.displayOrder != null) return message;
@@ -99,6 +106,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const withDisplayOrders = (next: Message[]) => next.map(withDisplayOrder);
   const [messages, setMessagesRaw] = useState<Message[]>([]);
   const setMessages = (updater: React.SetStateAction<Message[]>) => {
+    if (stoppingRef.current) return;
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
   };
   const [settings, setSettings] = useState<HazeSettings>({});
@@ -112,7 +120,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 
   /** Finalize a formerly-live message into the append-only transcript and session record. */
   function finalizeMessage(message: Message) {
-    if (message.hidden) return;
+    if (message.hidden || sealedRef.current) return;
     const ordered = withDisplayOrder(message);
     setMessages(m => [...m, ordered]);
     sessionRecorderRef.current?.recordUiMessage(ordered);
@@ -156,6 +164,33 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint; pauseReason?: 'no-progress' | 'goal-deadline' | 'context-exhausted'} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
+  const shutdownRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  if (!shutdownRef.current) shutdownRef.current = createChatShutdown({
+    stop: () => { stoppingRef.current = true; followUps.clear(); },
+    abort: () => abortControllerRef.current?.abort('Chat is exiting.'),
+    settle: () => activeGoalRef.current,
+    seal: () => {
+      drainLiveMessages();
+      sealedRef.current = true;
+      quarantineRef.current?.();
+    },
+    flush: () => sessionRecorderRef.current?.flush(),
+    endLog: () => {
+      const log = llmLogRef.current;
+      llmLogRef.current = undefined;
+      return log ? endLlmLog(log) : undefined;
+    },
+    cleanup: async () => {
+      await Promise.all([teardownBackgroundProcesses(), clearTasksFromStore()]);
+    },
+    exit,
+    report: message => process.stderr.write(`[haze] ${message}\n`),
+  });
+  const shutdown = shutdownRef.current;
+  useEffect(() => {
+    onShutdownReady?.(shutdown);
+    return () => { void shutdown(); };
+  }, [onShutdownReady, shutdown]);
 
   // Wizard flow state (selection, drafts, model discovery) in one reducer;
   // this replaced twelve individual useState hooks.
@@ -193,7 +228,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const settingsThemeLoadedRef = useRef(false);
   const activeThemeName = settings.theme ?? DEFAULT_THEME_NAME;
   useEffect(() => {
-    if (!settingsThemeLoadedRef.current) return;
+    if (!settingsThemeLoadedRef.current || stoppingRef.current) return;
     try {
       setActiveTheme(resolveTheme(activeThemeName));
       applyTerminalColors(theme.foreground, theme.background);
@@ -258,7 +293,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }
 
   function debugLog(line: string) {
-    if (!debug) return;
+    if (!debug || stoppingRef.current) return;
     setDebugLogs(current => [...current.slice(-7), line]);
   }
 
@@ -353,6 +388,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   });
 
   async function submit(value: string) {
+    if (stoppingRef.current) return;
+    if (mode === 'chat' && /^\/(?:exit|quit)\s*$/i.test(value)) return shutdown();
     if (settingsError) {
       try {
         const repaired = await readSettings();
@@ -430,12 +467,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       setMessages(m => [...m, {role: 'system', text: `Command failed: ${text}`}]);
       return;
     }
-    if (result === 'exit') {
-      await teardownBackgroundProcesses().catch(showPersistenceWarning);
-      await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
-      if (llmLogRef.current) await endLlmLog(llmLogRef.current).catch(showPersistenceWarning);
-      return exit();
-    }
+    if (result === 'exit') return shutdown();
     if (result === 'handled') {
       if (value === '/clear') {
         loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
@@ -479,6 +511,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }
 
   async function doAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
+    if (stoppingRef.current) return;
     setDebugLogs([]);
     // When every task is already completed, start the new turn with a clean
     // slate: the task bar clears (nothing shown for simple questions) and the
@@ -490,7 +523,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       await clearTasksFromStore().catch(() => undefined);
     }
     await runSingleAgentTurn(value, displayValue, turnOptions);
-    for (let next = followUps.takeNext(); next !== undefined; next = followUps.takeNext()) {
+    for (let next = followUps.takeNext(); !stoppingRef.current && next !== undefined; next = followUps.takeNext()) {
       const preparedFollowUp = await prepareUserInput(next);
       if (!preparedFollowUp) continue;
       await runSingleAgentTurn(preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
@@ -534,13 +567,14 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }
 
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint}) {
+    if (stoppingRef.current) return;
     const sessionRecorder = sessionRecorderRef.current!;
 
     // The logical-goal supervisor owns this submission: recoverable-incomplete
     // physical turns (including step/tool budget boundaries) continue
     // automatically; per-turn limits stay safety boundaries. An explicit
     // resumeFrom restarts a genuinely paused goal from its checkpoint/pool.
-    const goalResult = await runAgentGoal({
+    const goalOptions = {
       request: value,
       displayValue,
       contextFiles,
@@ -569,7 +603,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       getConversation: () => conversationRef.current,
       getLastAssistantText: () => lastAssistantTextRef.current,
       setLastAssistantText: text => { lastAssistantTextRef.current = text; },
-      setAbortController: controller => { abortControllerRef.current = controller; },
+      setAbortController: controller => {
+        abortControllerRef.current = controller;
+        if (stoppingRef.current) controller?.abort('Chat is exiting.');
+      },
       setWorkState: state => {
         workStateRef.current = state;
         sessionRecorder.recordWorkState(state);
@@ -582,15 +619,25 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       onEvent: event => {
         sessionRecorder.recordEvent(event);
       },
-      onTasksChanged: () => { loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined); },
+      onTasksChanged: () => { loadTasksFromStore().then(t => {
+        if (stoppingRef.current) return;
+        setVisibleTasks(t); setTaskBarPadding(0);
+      }).catch(() => undefined); },
       contextFileSignatures: contextFileSignaturesRef.current,
       log: llmLogRef.current,
     },
     ...(resumeExisting ? {resumeFrom: resumeExisting} : {}),
     // Durable goal ledger (P1): every supervisor boundary appends to the
     // session JSONL so a crash or restart leaves a resumable frontier.
-    goalLedger: {append: entry => sessionRecorder.recordGoalEntry(entry)},
-    ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})});
+    goalLedger: {append: entry => { if (!sealedRef.current) sessionRecorder.recordGoalEntry(entry); }},
+    ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})} satisfies Parameters<typeof runAgentGoal>[0];
+    const guarded = createQuarantinableCallbacks(goalOptions.callbacks);
+    quarantineRef.current = guarded.quarantine;
+    const goalPromise = runAgentGoal({...goalOptions, callbacks: guarded.callbacks});
+    activeGoalRef.current = goalPromise;
+    const goalResult = await goalPromise;
+    activeGoalRef.current = undefined;
+    if (stoppingRef.current) return goalResult;
     await sessionRecorder.flush().catch(showPersistenceWarning);
     await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
     // Turn boundary: an aborted or forcibly-settled attempt is quarantined
@@ -640,28 +687,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,
   ];
-  const contentWidth = Math.max(1, width - 2);
+  const horizontalPadding = width >= 12 ? 1 : 0;
+  const contentWidth = Math.max(1, width - horizontalPadding * 2);
 
-  // Live-region budget: once the dynamic frame exceeds the viewport, Ink falls
-  // back to clearTerminal + full transcript replay, which wipes scrollback and
-  // jumps to the top on every render. Every dynamic section is therefore
-  // clamped so the frame stays under one screen (see chat/liveRegion.ts).
-  const busyRows = busy ? (showingTip ? 2 : 1) : 0;
-  const queuedRows = followUps.queued.length > 0 ? 2 + followUps.queued.length : 0;
-  const collapsedTaskRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS);
-  const expandedTaskCap = Math.max(MAX_VISIBLE_TASKS, terminalRows - 18);
-  const expandedTaskRows = Math.min(visibleTasks.length, expandedTaskCap) + (visibleTasks.length > expandedTaskCap ? 1 : 0);
-  const taskRows = visibleTasks.length > 0 ? 2 + taskBarPadding + (tasksExpanded ? expandedTaskRows : collapsedTaskRows) : 0;
-  // Debug-only panels are counted conservatively so debug mode cannot overflow either.
-  const debugPanelRows = debug && debugLogs.length > 0 ? 4 + debugLogs.length : 0;
-  const tokenPanelRows = debug && metrics.hasTokenBreakdown ? 5 : 0;
-  // The input box is border (2) + one row; a user-pasted multiline draft can
-  // exceed this estimate (accepted: it is transient, user-driven editing state).
-  const fixedLiveRows = busyRows + queuedRows + taskRows + debugPanelRows + tokenPanelRows + 3 /* input */ + 2 /* status */ + 2 /* safety */;
-  const streamingRowsBudget = Math.max(1, terminalRows - fixedLiveRows);
-  const perStreamingItemRows = streamingItems.length > 0 ? Math.max(2, Math.floor(streamingRowsBudget / streamingItems.length)) : 0;
-
-  return <Box flexDirection="column" paddingX={1}>
+  return <Box flexDirection="column" paddingX={horizontalPadding}>
     <Static items={staticItems}>
       {item => item.kind === 'header'
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
@@ -669,87 +698,66 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
           ? <AssistantMarkdownChunkView key={item.key} message={item.message} content={item.content} width={contentWidth} first={item.first} final={item.final} />
           : <MessageView key={item.key} message={item.message} width={contentWidth} />}
     </Static>
-    {streamingItems.length > 0 && <Box flexDirection="column" flexShrink={0}>
-      {streamingItems.map(item => {
-        // One row for the optional header plus one for the item's bottom margin.
-        const chrome = (item.showHeader === false ? 0 : 1) + 1;
-        return <MessageView key={item.key} message={item.message} width={contentWidth} showHeader={item.showHeader} maxVisibleLines={Math.max(1, perStreamingItemRows - chrome)} />;
-      })}
-    </Box>}
-    {debug && debugLogs.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1} borderStyle="round" borderColor={theme.muted} paddingX={1}>
-      <Text color={theme.muted} bold>Debug</Text>
-      {debugLogs.map((line, index) => <Text key={index} color={theme.muted}>• {line}</Text>)}
-    </Box>}
-    {followUps.queued.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}>Queued follow-ups:</Text>
-      {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted}>  {index + 1}. {item}</Text>)}
-    </Box>}
-    {pausedResume && !busy && <Box flexShrink={0} marginBottom={1}>
-      <Text color={theme.muted}>{pausedResume.kind === 'incomplete-goal'
-        ? pausedResume.pauseReason === 'context-exhausted'
-          ? 'Unfinished goal paused (context window exhausted — compact or switch models, then resume)'
-          : pausedResume.pauseReason === 'goal-deadline'
-            ? 'Unfinished goal paused (goal deadline reached)'
-            : 'Unfinished goal paused (no measurable progress)'
-        : 'Unfinished goal paused (model stream stalled)'} · </Text>
-      <Text color={theme.command} bold>Press R to {pausedResume.kind === 'incomplete-goal' ? 'resume' : 'retry'}</Text>
-      <Text color={theme.muted}> or type a follow-up</Text>
-    </Box>}
-    {visibleTasks.length > 0 && <Box flexDirection="column" flexShrink={0} marginBottom={1}>
-      <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={expandedTaskCap} />
-    </Box>}
-    {busy && <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />}
-    <Box borderStyle="round" borderColor={theme.border} paddingX={1} flexShrink={0}>
-      <Box flexGrow={1} minWidth={0}>
-        <TextInput
-          placeholder={placeholder}
-          disabled={busy && mode !== 'chat'}
-          mask={MASKED_MODES.has(mode)}
-          historyItems={inputHistory}
-          recordHistory={mode === 'chat'}
-          suggestions={inputSuggestions}
-          suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
-          submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
-          width={Math.max(20, contentWidth - 4)}
-          getMentionSuggestions={fileMentionSuggestions}
-          onHistoryAdd={persistInputHistory}
-          onToggleTasks={() => {
-            if (!tasksExpanded) {
-              setTaskBarPadding(0);
-              setTasksExpanded(true);
-            } else {
-              const expandedRows = visibleTasks.length + 1;
-              const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
-              setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
-              setTasksExpanded(false);
-            }
-          }}
-          onCancel={cancelThinking}
-          onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
-          onInterrupt={() => exit()}
-          onEscape={() => {
-            if (busy) cancelThinking();
-            else closeInputList();
-          }}
-          onSubmit={submit}
-        />
-      </Box>
-    </Box>
-    {debug && metrics.hasTokenBreakdown && <Box flexShrink={0} flexDirection="column" paddingX={1}>
-      <Text color={theme.muted} bold>Token usage {metrics.inputEstimated || metrics.outputEstimated ? '(estimated)' : '(precise)'}</Text>
-      <Text color={theme.muted}>  in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)}{tokenUsage.cacheReadTokens > 0 ? ` cached=${formatTokenCount(tokenUsage.cacheReadTokens)}` : ''}{tokenUsage.noCacheTokens > 0 ? ` uncached=${formatTokenCount(tokenUsage.noCacheTokens)}` : ''}{tokenUsage.cacheWriteTokens > 0 ? ` cache_write=${formatTokenCount(tokenUsage.cacheWriteTokens)}` : ''}{tokenUsage.reasoningTokens > 0 ? ` reasoning=${formatTokenCount(tokenUsage.reasoningTokens)}` : ''}</Text>
-      <Text color={theme.muted}>  logical={formatTokenCount(tokenUsage.logicalInputEstimate)}{tokenUsage.effectiveNonCachedInput != null ? ` effective_non_cached=${formatTokenCount(tokenUsage.effectiveNonCachedInput)}` : ''}</Text>
-      <Text color={theme.muted}>  system={formatTokenCount(tokenUsage.systemPrompt)} messages={formatTokenCount(tokenUsage.messages)} tools={formatTokenCount(tokenUsage.toolSchemas)} output={formatTokenCount(tokenUsage.outputEstimate)}</Text>
-    </Box>}
-    <Box flexShrink={0} justifyContent="space-between">
-      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+    <DynamicFrame rows={terminalRows} columns={contentWidth} sections={{
+      live: streamingItems.length > 0 ? rows => {
+        // Allocate the sum, not a positive minimum for every pending item.
+        const displayed = streamingItems.slice(0, Math.floor(rows / 2));
+        const itemRows = displayed.length > 0 ? Math.floor(rows / displayed.length) : 0;
+        return displayed.map(item => <Box key={item.key} height={itemRows} flexShrink={0} overflow="hidden">
+          <MessageView message={item.message} width={contentWidth} showHeader={item.showHeader}
+            maxVisibleLines={itemRows - 1} />
+        </Box>);
+      } : undefined,
+      debug: debug ? <>
+        {debugLogs.map((line, index) => <Text key={index} color={theme.muted} wrap="truncate-end">• {line}</Text>)}
+        {metrics.hasTokenBreakdown && <Text color={theme.muted} wrap="truncate-end">Tokens: in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)} logical={formatTokenCount(tokenUsage.logicalInputEstimate)}</Text>}
+      </> : undefined,
+      queue: followUps.queued.length > 0 ? <>
+        <Text color={theme.muted} wrap="truncate-end">Queued follow-ups: {followUps.queued.length}</Text>
+        {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} wrap="truncate-end">{index + 1}. {item}</Text>)}
+      </> : undefined,
+      tasks: visibleTasks.length > 0 ? <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={Math.max(1, terminalRows - 8)} /> : undefined,
+      activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />
+        : pausedResume ? <Text color={theme.command} wrap="truncate-end">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</Text> : undefined,
+      status: <>
         <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
-        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
-      </Box>
-      <Box flexShrink={0} marginLeft={2}>
-        <Text color={theme.muted} wrap="truncate-start">{activeModelName}{reasoningSuffix}</Text>
-      </Box>
-    </Box>
+        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel} · {activeModelName}{reasoningSuffix}</Text>
+      </>,
+    }} input={({width: inputWidth, inputRows, suggestionRows, onRowsChange}) => <TextInput
+      placeholder={placeholder}
+      disabled={busy && mode !== 'chat'}
+      mask={MASKED_MODES.has(mode)}
+      historyItems={inputHistory}
+      recordHistory={mode === 'chat'}
+      suggestions={inputSuggestions}
+      suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
+      submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
+      width={inputWidth}
+      inputRows={inputRows}
+      suggestionRows={suggestionRows}
+      onRowsChange={onRowsChange}
+      getMentionSuggestions={fileMentionSuggestions}
+      onHistoryAdd={persistInputHistory}
+      onToggleTasks={() => {
+        if (!tasksExpanded) {
+          setTaskBarPadding(0);
+          setTasksExpanded(true);
+        } else {
+          const expandedRows = visibleTasks.length + 1;
+          const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
+          setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
+          setTasksExpanded(false);
+        }
+      }}
+      onCancel={cancelThinking}
+      onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
+      onInterrupt={() => { void shutdown(); }}
+      onEscape={() => {
+        if (busy) cancelThinking();
+        else closeInputList();
+      }}
+      onSubmit={submit}
+    />} />
   </Box>;
 }
 
@@ -762,46 +770,22 @@ export async function chatCommand(options: ChatOptions = {}) {
   } catch (error) {
     console.error(`[haze] ${error instanceof Error ? error.message : String(error)}; using the ${DEFAULT_THEME_NAME} theme.`);
   }
-  if (process.stdout.isTTY) {
-    process.stdout.write('\u001B[2J\u001B[3J\u001B[H');
-    // Adopt the theme's foreground AND background as the terminal defaults
-    // (OSC 10 + 11; ignored by terminals without support). Both sides must be
-    // themed together: unstyled text inherits the terminal fg, so a light
-    // background without a light-mode fg would be unreadable. Restored
-    // (OSC 110 + 111) on exit below.
-    applyTerminalColors(theme.foreground, theme.background);
-  }
   await clearTasksFromStore().catch(() => undefined);
-  // Incremental rendering rewrites only changed lines of the live frame, removing
-  // the full-frame erase/rewrite flicker while streaming. The fps cap aligns with
-  // the ~80ms spinner cadence; faster renders would only repaint unchanged lines.
-  //
-  // Kitty keyboard protocol (auto-detected): without opting in, terminals send a
-  // bare \r for Shift+Enter — indistinguishable from Enter — so Shift+Enter would
-  // submit the prompt instead of inserting a newline. With the disambiguate flag,
-  // compliant terminals (kitty, WezTerm, Ghostty, iTerm2 >=3.5, foot, recent
-  // Windows Terminal, tmux passthrough) report modified Enter as CSI 13;<mod>u,
-  // which TextInput maps to a newline. Ink queries support first (CSI ? u) with a
-  // 200ms timeout, pushes/pops the terminal's flag stack across lifecycle, and
-  // leaves unsupporting terminals (e.g. macOS Terminal.app) untouched; Enter,
-  // Tab, and Backspace without modifiers keep their legacy bytes.
-  //
-  // The protocol also re-encodes Ctrl+C as CSI 99;5u, which Ink 7.1.1's
-  // exit-on-CtrlC (raw \x03 check) does not recognize — its useInput layer
-  // would swallow the parsed c+ctrl without exiting. haze therefore owns the
-  // interrupt: render with exitOnCtrlC disabled and let ChatScreen's TextInput
-  // onInterrupt (useApp exit) terminate for both encodings.
-  const app = render(<ChatScreen debug={options.debug} version={options.version} build={options.build} continueSession={options.continueSession} resumeSessionId={options.resumeSessionId} noSession={options.noSession} />, {
-    incrementalRendering: true,
-    maxFps: 15,
-    kittyKeyboard: {mode: 'auto', flags: ['disambiguateEscapeCodes']},
-    exitOnCtrlC: false,
+  let shutdown: (() => Promise<void>) | undefined;
+  await runTerminalSession({
+    adopt: () => {
+      if (!process.stdout.isTTY) return;
+      // Clear the viewport, not preexisting terminal scrollback.
+      process.stdout.write('\u001B[2J\u001B[H');
+      applyTerminalColors(theme.foreground, theme.background);
+    },
+    create: () => render(<ChatScreen {...options} onShutdownReady={owner => { shutdown = owner; }} />, {
+      incrementalRendering: true,
+      maxFps: 15,
+      kittyKeyboard: {mode: 'auto', flags: ['disambiguateEscapeCodes']},
+      exitOnCtrlC: false,
+    }),
+    shutdown: () => shutdown?.(),
+    restore: resetTerminalColors,
   });
-  try {
-    await app.waitUntilExit();
-    await teardownBackgroundProcesses().catch(() => undefined);
-    await clearTasksFromStore().catch(() => undefined);
-  } finally {
-    resetTerminalColors();
-  }
 }

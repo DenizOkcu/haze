@@ -22,7 +22,7 @@ describe('provider wizard helpers', () => {
 
   it('writes preset-curated limits for matching models and never overwrites user limits', () => {
     const created = providerFinishAdd({}, {name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: 'k'}, 'deepseek-v4-pro, other');
-    expect(created.provider?.modelLimits?.['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 384_000});
+    expect(created.provider?.modelLimits?.['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 393_216});
     expect(Object.keys(created.provider?.modelLimits ?? {})).toEqual(['deepseek-v4-pro', 'other'].filter(model => created.provider?.modelLimits?.[model]));
 
     const withUserLimits = {

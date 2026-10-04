@@ -1,3 +1,5 @@
+import {cellWidth, graphemes} from './textGeometry.js';
+
 export type PasteBlock = {
   id: number;
   start: number;
@@ -36,7 +38,7 @@ export function displayCursorForValueCursor(blocks: PasteBlock[], valueCursor: n
     const placeholderLength = pastePlaceholder(block).length;
     const compactedLength = block.end - block.start - placeholderLength;
     if (valueCursor <= block.start) break;
-    if (valueCursor < block.end) return block.start + placeholderLength;
+    if (valueCursor < block.end) return block.start - (valueCursor - displayCursor) + placeholderLength;
     displayCursor -= compactedLength;
   }
   return displayCursor;
@@ -76,20 +78,24 @@ export function wrapDisplayValue(displayValue: string, width: number): WrappedLi
   const lines: WrappedLine[] = [];
   let start = 0;
   let text = '';
-  for (let index = 0; index < displayValue.length; index += 1) {
-    const char = displayValue[index]!;
+  let cells = 0;
+  for (const {text: char, start: index} of graphemes(displayValue)) {
     if (char === '\n') {
       lines.push({text, start, end: index});
       start = index + 1;
       text = '';
+      cells = 0;
       continue;
     }
-    if (text.length >= wrapWidth) {
+    const charWidth = cellWidth(char);
+    if (text && cells + charWidth > wrapWidth) {
       lines.push({text, start, end: index});
       start = index;
       text = '';
+      cells = 0;
     }
     text += char;
+    cells += charWidth;
   }
   lines.push({text, start, end: displayValue.length});
   return lines;
@@ -103,6 +109,7 @@ export function cursorPosition(lines: WrappedLine[], displayCursor: number) {
     return displayCursor >= line.start && (displayCursor < line.end || (nextLineStartsAfterNewline && displayCursor === line.end) || (isLast && displayCursor <= line.end));
   });
   const lineIndex = Math.max(0, foundIndex);
-  const line = lines[lineIndex] ?? lines[0] ?? {start: 0, end: 0};
-  return {lineIndex, column: Math.max(0, Math.min(displayCursor - line.start, line.end - line.start))};
+  const line = lines[lineIndex] ?? lines[0] ?? {text: '', start: 0, end: 0};
+  const offset = Math.max(0, Math.min(displayCursor - line.start, line.end - line.start));
+  return {lineIndex, column: cellWidth(line.text.slice(0, offset))};
 }

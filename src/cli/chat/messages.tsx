@@ -8,12 +8,13 @@ import {MarkdownText} from '../../ui/components/MarkdownText.js';
 import {clampTextTail, wrapLine} from './liveRegion.js';
 import {isSubstantiveAssistantText} from '../commands/streaming/assistantText.js';
 import {theme} from '../../ui/theme.js';
+import {cellWidth} from '../../ui/textGeometry.js';
 import {highlightedCodeLine, languageForPath} from '../../ui/codeHighlight.js';
 
 function fullWidthLines(text: string, width: number, leftPadding = 0) {
   const safeWidth = Math.max(1, width);
   const prefix = ' '.repeat(leftPadding);
-  return text.replace(/\r\n|\r/g, '\n').split('\n').map(line => `${prefix}${line}`.padEnd(Math.max(safeWidth, line.length + leftPadding)));
+  return text.replace(/\r\n|\r/g, '\n').split('\n').map(line => `${prefix}${line}${' '.repeat(Math.max(0, safeWidth - cellWidth(line) - leftPadding))}`);
 }
 
 function fullWidthBlankLine(width: number) {
@@ -234,12 +235,18 @@ export const AssistantMarkdownChunkView = React.memo(function AssistantMarkdownC
 function StreamingClampedText({text, width, maxVisibleLines}: {text: string; width: number; maxVisibleLines: number}) {
   const clamped = clampTextTail(text, width, maxVisibleLines);
   return <Box flexDirection="column">
-    {clamped.hiddenLineCount > 0 ? <Text color={theme.muted}>{`⋯ +${clamped.hiddenLineCount} line${clamped.hiddenLineCount === 1 ? '' : 's'} above`}</Text> : null}
-    <Text>{clamped.text}</Text>
+    {clamped.hiddenLineCount > 0 ? <Text color={theme.muted} wrap="truncate-end">{`⋯ +${clamped.hiddenLineCount} line${clamped.hiddenLineCount === 1 ? '' : 's'} above`}</Text> : null}
+    {clamped.text || clamped.hiddenLineCount === 0 ? <Text>{clamped.text}</Text> : null}
   </Box>;
 }
 
 export const MessageView = React.memo(function MessageView({message, width, showHeader = true, maxVisibleLines}: {message: Message; width: number; showHeader?: boolean; maxVisibleLines?: number}) {
+  if (maxVisibleLines != null && message.role !== 'tool') {
+    return <Box flexDirection="column" flexShrink={0} maxHeight={maxVisibleLines + (showHeader ? 1 : 0)} overflow="hidden">
+      {showHeader && <Text color={theme.muted} wrap="truncate-end">{message.role === 'assistant' ? 'haze' : message.role === 'user' ? 'You asked' : 'Info'}</Text>}
+      <StreamingClampedText text={message.text} width={width} maxVisibleLines={maxVisibleLines} />
+    </Box>;
+  }
   if (message.role === 'user') {
     return <Box flexDirection="column" marginBottom={1}>
       <Text backgroundColor={theme.surfaceBg}>{fullWidthBlankLine(width)}</Text>
@@ -255,7 +262,7 @@ export const MessageView = React.memo(function MessageView({message, width, show
       {messageElapsedLabel(message) ? <Text color={theme.muted} bold={false}> · {messageElapsedLabel(message)}</Text> : null}
     </Text> : null}
     {message.role === 'tool'
-      ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} maxVisibleLines={message.streaming ? maxVisibleLines : undefined} />
+      ? <ToolMessageText text={message.text} streaming={message.streaming} width={width} toolDiffs={message.toolDiffs} maxVisibleLines={maxVisibleLines} />
       : message.role === 'assistant' && !message.streaming
         // Only settled assistant messages get Markdown rendering. Streaming
         // text re-tokenizes on every delta (expensive) and the partial Markdown

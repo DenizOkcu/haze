@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Box, Text, useInput} from 'ink';
+import {Box, Text, useInput, usePaste} from 'ink';
+import {cellWidth, graphemes, nextBoundary, offsetAtColumn, previousBoundary, safeInputDisplay} from '../textGeometry.js';
 import {theme} from '../theme.js';
 import {
   compactPasteBlocksForDisplay,
@@ -17,7 +18,7 @@ import {useInputSuggestions} from './useInputSuggestions.js';
 const COMPACT_PASTE_MIN_LINES = 4;
 
 // Enhanced-keyboard encodings of Enter with modifiers that some terminals emit
-// verbatim (kitty/CSI-u `u` form and xterm modifyOtherKeys `~` form). Ink 7's
+// verbatim (kitty/CSI-u `u` form and xterm modifyOtherKeys `~` form). Ink's
 // keypress parser already resolves the CSI-u variants to `key.return` plus the
 // modifier flags before TextInput sees them; these entries cover pipelines that
 // deliver the raw sequence through `input`.
@@ -34,22 +35,6 @@ export function shouldInsertNewline(input: string, key: TextInputKey) {
   return (key.return === true && (key.shift === true || key.ctrl === true || key.meta === true))
     || input === '\n'
     || NEWLINE_ESCAPE_INPUTS.has(input);
-}
-
-// Ink's kitty-keyboard auto-detection (enabled via the chat render option)
-// queries the terminal with CSI ? u. The terminal's CSI ? <flags> u response
-// can race Ink's detection listener and leak through the normal input pipeline
-// as literal text (Ink's keypress handling strips the leading ESC), which would
-// type e.g. `[?0u` into an otherwise empty prompt at startup. Drop probe
-// responses instead of inserting them.
-const KITTY_QUERY_RESPONSE_INPUT = /^\[\?\d+(?:;\d+)*u$/;
-
-export function isKittyQueryResponseInput(input: string) {
-  // Ink's keypress handling strips one leading ESC from unresolved sequences,
-  // so the probe response normally arrives as `[?0u`; tolerate the raw
-  // ESC-prefixed form as well.
-  const stripped = input.startsWith('\u001B') ? input.slice(1) : input;
-  return KITTY_QUERY_RESPONSE_INPUT.test(stripped);
 }
 
 /**
@@ -82,6 +67,9 @@ export function TextInput({
   suggestionMode = 'slash',
   submitOnEmpty = false,
   width = 80,
+  inputRows = 4,
+  suggestionRows = 6,
+  onRowsChange,
   getMentionSuggestions,
   onHistoryAdd,
   onCancel,
@@ -100,6 +88,9 @@ export function TextInput({
   suggestionMode?: 'slash' | 'always';
   submitOnEmpty?: boolean;
   width?: number;
+  inputRows?: number;
+  suggestionRows?: number;
+  onRowsChange?: (demand: {input: number; suggestions: number}) => void;
   getMentionSuggestions?: MentionSuggestionsProvider;
   onHistoryAdd?: (value: string) => void;
   onCancel?: () => void;
@@ -129,6 +120,8 @@ export function TextInput({
   const draft = useRef('');
   const nextPasteId = useRef(1);
   const preferredColumn = useRef<number | null>(null);
+  const inputRef = useRef({value, cursor, pasteBlocks});
+  inputRef.current = {value, cursor, pasteBlocks};
 
   useEffect(() => {
     history.current = historyItems;
@@ -150,17 +143,20 @@ export function TextInput({
 
   function setInput(next: string, nextCursor = next.length, nextPasteBlocks: PasteBlock[] = []) {
     preferredColumn.current = null;
+    const clampedCursor = Math.max(0, Math.min(nextCursor, next.length));
+    inputRef.current = {value: next, cursor: clampedCursor, pasteBlocks: nextPasteBlocks};
     setValue(next);
-    setCursor(Math.max(0, Math.min(nextCursor, next.length)));
+    setCursor(clampedCursor);
     setPasteBlocks(nextPasteBlocks);
     suggestionLayers.resetSelection();
   }
 
   function replaceInput(start: number, end: number, inserted: string) {
     const normalizedInserted = normalizeLineEndings(inserted);
-    const next = value.slice(0, start) + normalizedInserted + value.slice(end);
+    const current = inputRef.current;
+    const next = current.value.slice(0, start) + normalizedInserted + current.value.slice(end);
     const insertedLineCount = lineCount(normalizedInserted);
-    const updatedPasteBlocks = updatePasteBlocksForReplacement(pasteBlocks, start, end, normalizedInserted.length);
+    const updatedPasteBlocks = updatePasteBlocksForReplacement(current.pasteBlocks, start, end, normalizedInserted.length);
     const insertedPasteBlock = !mask && insertedLineCount >= COMPACT_PASTE_MIN_LINES
       ? [{id: nextPasteId.current++, start, end: start + normalizedInserted.length, lineCount: insertedLineCount}]
       : [];
@@ -173,15 +169,22 @@ export function TextInput({
     setInput(history.current[index] ?? '');
   }
 
-  const displayValue = mask ? '•'.repeat(value.length) : compactPasteBlocksForDisplay(value, pasteBlocks);
-  const displayCursor = mask ? cursor : displayCursorForValueCursor(pasteBlocks, cursor);
-  const inputWidth = Math.max(1, width - 2);
+  const valueGraphemes = mask ? graphemes(value) : [];
+  const displayValue = mask ? '•'.repeat(valueGraphemes.length) : safeInputDisplay(compactPasteBlocksForDisplay(value, pasteBlocks));
+  const displayCursor = mask ? valueGraphemes.filter(part => part.end <= cursor).length : displayCursorForValueCursor(pasteBlocks, cursor);
+  // Leave a cell for the end-of-line cursor, even on a completely full draft.
+  const inputWidth = Math.max(1, width - (width > 2 ? 2 : 0) - 1);
   const wrappedLines = wrapDisplayValue(displayValue, inputWidth);
   const currentCursorPosition = cursorPosition(wrappedLines, displayCursor);
 
+  function moveValueCursor(nextCursor: number) {
+    inputRef.current.cursor = nextCursor;
+    setCursor(nextCursor);
+  }
+
   function moveCursorToDisplayPosition(nextDisplayCursor: number) {
     const clampedDisplayCursor = Math.max(0, Math.min(nextDisplayCursor, displayValue.length));
-    setCursor(mask ? clampedDisplayCursor : valueCursorForDisplayCursor(pasteBlocks, clampedDisplayCursor));
+    moveValueCursor(mask ? (valueGraphemes[clampedDisplayCursor]?.start ?? value.length) : valueCursorForDisplayCursor(pasteBlocks, clampedDisplayCursor));
   }
 
   function moveCursorVertically(direction: -1 | 1) {
@@ -189,20 +192,27 @@ export function TextInput({
     if (!targetLine) return false;
     const column = preferredColumn.current ?? currentCursorPosition.column;
     preferredColumn.current = column;
-    moveCursorToDisplayPosition(Math.min(targetLine.start + column, targetLine.end));
+    moveCursorToDisplayPosition(targetLine.start + offsetAtColumn(targetLine.text, column));
     return true;
   }
 
   function submitValue(submitted: string, historyValue = submitted) {
-    if (recordHistory && historyValue) {
+    if (recordHistory && !mask && historyValue) {
       if (history.current[history.current.length - 1] !== historyValue) history.current = [...history.current, historyValue];
       onHistoryAdd?.(historyValue);
     }
     onSubmit(submitted);
   }
 
+  // Always subscribe: disabled paste is discarded, never re-routed as shortcuts.
+  usePaste(text => {
+    if (disabled) return;
+    const current = inputRef.current;
+    replaceInput(current.cursor, current.cursor, text);
+  });
+
   useInput((input, key) => {
-    if (isKittyQueryResponseInput(input)) return;
+    const {value, cursor} = inputRef.current;
 
     if (isInterruptInput(input, key)) {
       onInterrupt?.();
@@ -272,13 +282,13 @@ export function TextInput({
 
     if (key.leftArrow) {
       preferredColumn.current = null;
-      setCursor(current => Math.max(0, current - 1));
+      moveValueCursor(previousBoundary(value, cursor));
       return;
     }
 
     if (key.rightArrow) {
       preferredColumn.current = null;
-      setCursor(current => Math.min(value.length, current + 1));
+      moveValueCursor(nextBoundary(value, cursor));
       return;
     }
 
@@ -312,25 +322,25 @@ export function TextInput({
 
     if (key.backspace) {
       if (cursor === 0) return;
-      replaceInput(cursor - 1, cursor, '');
+      replaceInput(previousBoundary(value, cursor), cursor, '');
       return;
     }
 
     if (key.delete) {
       if (cursor >= value.length) return;
-      replaceInput(cursor, cursor + 1, '');
+      replaceInput(cursor, nextBoundary(value, cursor), '');
       return;
     }
 
     if (key.ctrl && input === 'a') {
       preferredColumn.current = null;
-      setCursor(0);
+      moveValueCursor(0);
       return;
     }
 
     if (key.ctrl && input === 'e') {
       preferredColumn.current = null;
-      setCursor(value.length);
+      moveValueCursor(value.length);
       return;
     }
 
@@ -339,25 +349,33 @@ export function TextInput({
       return;
     }
 
+    if (key.ctrl) return; // Unsupported Ctrl combinations are controls, not text.
     if (input) {
-      replaceInput(cursor, cursor, input);
+      replaceInput(inputRef.current.cursor, inputRef.current.cursor, input);
     }
   });
 
-  const maxVisibleLines = 4;
+  const maxVisibleLines = Math.max(1, inputRows);
   const firstVisibleLine = Math.max(0, Math.min(currentCursorPosition.lineIndex - maxVisibleLines + 1, wrappedLines.length - maxVisibleLines));
   const visibleLines = wrappedLines.slice(firstVisibleLine, firstVisibleLine + maxVisibleLines);
   const displayList = inMentionMode ? mentionList : filteredSuggestions;
   const displayActiveIndex = inMentionMode ? activeMentionIndex : activeSuggestionIndex;
+  const suggestionStart = Math.max(0, displayActiveIndex - Math.max(0, suggestionRows - 1));
+  const visibleSuggestions = displayList.slice(suggestionStart, suggestionStart + suggestionRows);
+  const wantedInputRows = Math.min(4, wrappedLines.length);
+  const wantedSuggestionRows = Math.min(5, displayList.length);
+  useEffect(() => {
+    onRowsChange?.({input: wantedInputRows, suggestions: wantedSuggestionRows});
+  }, [onRowsChange, wantedInputRows, wantedSuggestionRows]);
 
   return <Box flexDirection="column" width="100%">
-    {displayList.length > 0 && <Box flexDirection="column" marginBottom={1}>
-      {displayList.map((suggestion, index) => <Text key={suggestion.value} color={index === displayActiveIndex ? theme.success : theme.muted} wrap="truncate-end">
-        {index === displayActiveIndex ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind ?? 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
+    {visibleSuggestions.length > 0 && <Box flexDirection="column">
+      {visibleSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index + suggestionStart === displayActiveIndex ? theme.success : theme.muted} wrap="truncate-end">
+        {index + suggestionStart === displayActiveIndex ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind ?? 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
       </Text>)}
     </Box>}
     {value.length === 0 ? <Text wrap="truncate-end">
-<Text color={theme.accent}>› </Text>
+<Text color={theme.accent}>{width > 2 ? '› ' : ''}</Text>
       <Text inverse> </Text>
       <Text color={theme.muted}> {placeholder ?? 'Type a message...'}</Text>
     </Text> : visibleLines.map((line, index) => {
@@ -365,15 +383,16 @@ export function TextInput({
       const isCursorLine = absoluteLineIndex === currentCursorPosition.lineIndex;
       const lineCursor = isCursorLine ? Math.max(0, Math.min(displayCursor - line.start, line.text.length)) : -1;
       const beforeCursor = isCursorLine ? line.text.slice(0, lineCursor) : line.text;
-      const cursorChar = isCursorLine ? line.text[lineCursor] ?? ' ' : '';
-      const afterCursor = isCursorLine ? line.text.slice(lineCursor + 1) : '';
+      const cursorEnd = nextBoundary(line.text, lineCursor);
+      const cursorChar = isCursorLine ? line.text.slice(lineCursor, cursorEnd) || ' ' : '';
+      const afterCursor = isCursorLine ? line.text.slice(cursorEnd) : '';
       return <Text key={`${line.start}-${absoluteLineIndex}`} wrap="truncate-end">
-<Text color={theme.accent}>{absoluteLineIndex === 0 ? '› ' : '  '}</Text>
+<Text color={theme.accent}>{width > 2 ? (absoluteLineIndex === 0 ? '› ' : '  ') : ''}</Text>
         {isCursorLine ? <>
-          {beforeCursor}
-          <Text inverse>{cursorChar}</Text>
-          {afterCursor}
-        </> : line.text}
+          {width > 2 ? beforeCursor : ''}
+          <Text inverse>{cellWidth(cursorChar) > inputWidth ? '�' : cursorChar}</Text>
+          {width > 2 ? afterCursor : ''}
+        </> : cellWidth(line.text) > inputWidth ? '�' : line.text}
       </Text>;
     })}
   </Box>;

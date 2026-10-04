@@ -48,9 +48,9 @@ describe('clampTextTail', () => {
     expect(result.hiddenLineCount).toBeGreaterThanOrEqual(1);
   });
 
-  it('clamps to the last row for a budget of one row', () => {
+  it('uses only an omission cue for a budget of one row', () => {
     const result = clampTextTail('one\ntwo', 20, 1);
-    expect(result.hiddenLineCount).toBe(1);
-    expect(result.text).toBe('two');
+    expect(result.hiddenLineCount).toBe(2);
+    expect(result.text).toBe('');
   });
 });

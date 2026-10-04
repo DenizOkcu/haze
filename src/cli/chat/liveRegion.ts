@@ -41,7 +41,7 @@ export function clampTextTail(text: string, width: number, maxLines: number): Ta
   const total = rows.reduce((sum, count) => sum + count, 0);
   if (total <= maxLines) return {text, hiddenLineCount: 0};
 
-  const visibleBudget = Math.max(1, maxLines - 1); // reserve the indicator row
+  const visibleBudget = Math.max(0, maxLines - 1); // reserve the indicator row
   let used = 0;
   let start = logical.length;
   while (start > 0) {

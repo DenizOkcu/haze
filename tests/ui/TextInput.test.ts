@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {isInterruptInput, isKittyQueryResponseInput, shouldInsertNewline} from '../../src/ui/components/TextInput.js';
+import {isInterruptInput, shouldInsertNewline} from '../../src/ui/components/TextInput.js';
 
 describe('TextInput keyboard helpers', () => {
   it('treats explicit ctrl/shift/alt return as newline insertion', () => {
@@ -36,20 +36,6 @@ describe('TextInput keyboard helpers', () => {
     expect(isInterruptInput('a', {ctrl: true})).toBe(false);
   });
 
-  it('drops kitty protocol probe responses racing the input pipeline', () => {
-    // The leading ESC is stripped by Ink before the input reaches TextInput;
-    // accept both forms defensively.
-    expect(isKittyQueryResponseInput('[?0u')).toBe(true);
-    expect(isKittyQueryResponseInput('[?1u')).toBe(true);
-    expect(isKittyQueryResponseInput('[?65u')).toBe(true);
-    expect(isKittyQueryResponseInput('[?0;1u')).toBe(true);
-    expect(isKittyQueryResponseInput('\u001B[?0u')).toBe(true);
-    // User-typed or pasted text, key sequences, and malformed probes pass through.
-    expect(isKittyQueryResponseInput('?0u')).toBe(false);
-    expect(isKittyQueryResponseInput('[?u')).toBe(false);
-    expect(isKittyQueryResponseInput('[?0v')).toBe(false);
-    expect(isKittyQueryResponseInput('[13;5u')).toBe(false);
-    expect(isKittyQueryResponseInput('hello')).toBe(false);
-    expect(isKittyQueryResponseInput('')).toBe(false);
-  });
+  // Probe filtering is now tested through real stdin in TextInput.integration.
+  // Payload text must not be classified as a probe by an application regex.
 });

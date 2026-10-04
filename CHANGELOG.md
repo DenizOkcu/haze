@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- Upgrade to pinned Ink 8.0.0, retaining normal-screen scrollback, incremental rendering, the 15 FPS cap, and application-owned interrupts. Startup now clears only the viewport, not preexisting scrollback.
+- Budget the complete dynamic chat frame, including multiline drafts, suggestions, tasks, queued follow-ups, pause hints, debug panels, and live previews. Tiny terminals use a borderless prompt; clipped previews never truncate finalized transcript/session content.
+- Use native bracketed paste so pasted newlines, slash commands, probe-shaped text, and control bytes remain data rather than shortcuts. Unsafe control characters are replaced only in the input display; submitted data keeps its normalized content.
+- Edit and wrap input by graphemes and terminal cells, with Unicode-aware table/code widths and background padding. Unsupported Ctrl combinations no longer insert letters; masked values are excluded from input history.
+- Route `/exit`, `/quit`, and legacy/Kitty Ctrl+C through one bounded shutdown that aborts active work, quarantines late callbacks, flushes owned persistence, and cleans resources. Terminal defaults are restored even when rendering or exit waiting fails.
+
 ## 1.4.0 - 2026-09-24
 
 Reasoning effort becomes a first-class per-run control, plus follow-up fixes from the 1.3.0 review.

@@ -1,5 +1,5 @@
 import {highlight, supportsLanguage} from 'cli-highlight';
-import stripAnsi from 'strip-ansi';
+import {cellWidth, clipCells} from './textGeometry.js';
 
 /** Map a source path to a cli-highlight language when its extension is known. */
 export function languageForPath(filePath: string) {
@@ -17,8 +17,8 @@ export function languageForPath(filePath: string) {
 export function highlightedCodeLine(code: string, width: number, language?: string) {
   const safeWidth = Math.max(1, width);
   const singleLine = code.replace(/\t/g, '  ');
-  const fitted = singleLine.length > safeWidth
-    ? `${singleLine.slice(0, Math.max(0, safeWidth - 1))}…`
+  const fitted = cellWidth(singleLine) > safeWidth
+    ? `${clipCells(singleLine, safeWidth - 1)}…`
     : singleLine;
   let rendered = fitted;
   try {
@@ -26,6 +26,6 @@ export function highlightedCodeLine(code: string, width: number, language?: stri
   } catch {
     // Unknown or malformed source still renders as plain text.
   }
-  const padding = Math.max(0, safeWidth - stripAnsi(rendered).length);
+  const padding = Math.max(0, safeWidth - cellWidth(rendered));
   return `${rendered}${' '.repeat(padding)}`;
 }

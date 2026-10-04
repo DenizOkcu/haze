@@ -1,7 +1,8 @@
 import React from 'react';
 import {Box, Text} from 'ink';
 import {marked, type Tokens} from 'marked';
-import stripAnsi from 'strip-ansi';
+import {cellWidth} from '../textGeometry.js';
+import {wrapDisplayValue} from '../inputBuffer.js';
 import {theme} from '../theme.js';
 import {highlightedCodeLine} from '../codeHighlight.js';
 
@@ -9,7 +10,7 @@ const MARKED_OPTIONS = {gfm: true, breaks: true} as const;
 
 export const MarkdownText = React.memo(function MarkdownText({content, width}: {content: string; width: number}) {
   const tokens = marked.lexer(content, MARKED_OPTIONS);
-  const contentWidth = Math.max(20, width - 2);
+  const contentWidth = Math.max(1, width - 2);
   return <Box flexDirection="column">
     {tokens.map((token, index) => {
       const codeLead = token.type === 'paragraph' || token.type === 'text' ? codeLeadForFollowingFence(tokens, index) : undefined;
@@ -209,7 +210,7 @@ function ListItemBlock({token, marker, markerWidth, width}: {
   return <Box flexDirection="column">
     {marker ? <Text color={theme.accent}>{marker}</Text> : null}
     <Box flexDirection="column" marginLeft={markerWidth}>
-      <MarkdownBlock token={token} width={Math.max(20, width - markerWidth)} />
+      <MarkdownBlock token={token} width={Math.max(1, width - markerWidth)} />
     </Box>
   </Box>;
 }
@@ -442,7 +443,7 @@ function wrapTableCell(text: string, width: number): string[] {
   for (const word of text.split(/\s+/)) {
     if (!word) continue;
     if (!current && visibleLength(word) > width) {
-      for (let index = 0; index < word.length; index += width) lines.push(word.slice(index, index + width));
+      lines.push(...wrapDisplayValue(word, width).map(line => line.text));
       continue;
     }
     const next = current ? `${current} ${word}` : word;
@@ -450,7 +451,7 @@ function wrapTableCell(text: string, width: number): string[] {
     else {
       flush();
       if (visibleLength(word) > width) {
-        for (let index = 0; index < word.length; index += width) lines.push(word.slice(index, index + width));
+        lines.push(...wrapDisplayValue(word, width).map(line => line.text));
       } else {
         current = word;
       }
@@ -488,7 +489,7 @@ function stripInline(text: string): string {
 }
 
 function visibleLength(value: string): number {
-  return stripAnsi(value).length;
+  return cellWidth(value);
 }
 
 function padAnsi(value: string, width: number): string {
