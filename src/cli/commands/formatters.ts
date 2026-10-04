@@ -135,7 +135,7 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
 
 /**
  * A short, human label for the live busy indicator while a tool is running,
- * e.g. "Running command", "Reading src/foo.ts", "Searching".
+ * e.g. "Running npm test", "Reading src/foo.ts", "Searching".
  * Lets the developer see *what* is happening, not just that something is.
  */
 export function busyToolLabel(toolName: string, input: unknown) {
@@ -143,7 +143,8 @@ export function busyToolLabel(toolName: string, input: unknown) {
   const pathLabel = typeof data?.path === 'string' ? compact(data.path, 80) : undefined;
   switch (toolName) {
     case 'shell':
-      return data?.background === true ? 'Starting background process' : 'Running command';
+      if (data?.background === true) return 'Starting background process';
+      return typeof data?.command === 'string' && data.command ? `Running ${compact(data.command, 80)}` : 'Running command';
     case 'process':
       return 'Managing background process';
     case 'grep':

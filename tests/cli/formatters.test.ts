@@ -99,8 +99,12 @@ describe('toolCallSummary', () => {
 });
 
 describe('busyToolLabel', () => {
-  it('labels shell as running a command', () => {
-    expect(busyToolLabel('shell', {command: 'npm test'})).toBe('Running command');
+  it('labels shell with the command it is running', () => {
+    expect(busyToolLabel('shell', {command: 'npm test'})).toBe('Running npm test');
+  });
+
+  it('labels shell generically when the command is not yet known', () => {
+    expect(busyToolLabel('shell', {})).toBe('Running command');
   });
 
   it('labels readFile with its path', () => {
