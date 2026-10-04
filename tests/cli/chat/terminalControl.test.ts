@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {resolveEditorCommand, resolvePager} from '../../../src/cli/chat/terminalControl.js';
+import {resolveEditorCommand, resolvePager, runSuspendedChild} from '../../../src/cli/chat/terminalControl.js';
 
 describe('resolveEditorCommand', () => {
   it('returns false without an editor configured', () => {
@@ -32,9 +32,35 @@ describe('resolvePager', () => {
     expect(pager?.args).toEqual(['-R', '-X']);
   });
 
+  it.each([
+    ['less -R', {command: 'less', args: ['-R']}],
+    ['less -S -R', {command: 'less', args: ['-S', '-R']}],
+    ['"my pager" --label "two words"', {command: 'my pager', args: ['--label', 'two words']}],
+  ])('splits pager executable and arguments: %s', (pager, expected) => {
+    expect(resolvePager('a\n'.repeat(50), 10, {PAGER: pager})).toEqual(expected);
+  });
+
   it('honours $PAGER when set', () => {
     const pager = resolvePager('a\n'.repeat(50), 10, {PAGER: 'bat --paging=always'});
-    expect(pager?.command).toBe('bat --paging=always');
-    expect(pager?.args).toEqual([]);
+    expect(pager?.command).toBe('bat');
+    expect(pager?.args).toEqual(['--paging=always']);
+  });
+});
+
+describe('runSuspendedChild', () => {
+  it('survives a pager quitting before consuming a large pending write', async () => {
+    await expect(runSuspendedChild({command: process.execPath, args: ['-e', 'process.exit(0)']}, 'x'.repeat(10_000_000))).resolves.toBe(0);
+  });
+
+  it('passes quoted arguments to a real pager executable', async () => {
+    const pager = resolvePager('a\n'.repeat(50), 10, {
+      PAGER: `"${process.execPath}" -e 'process.exit(process.argv[1] === "two words" ? 0 : 1)' 'two words'`,
+    });
+    expect(pager).toBeDefined();
+    await expect(runSuspendedChild(pager!, 'a\n'.repeat(50))).resolves.toBe(0);
+  });
+
+  it('rejects a spawn failure without an unhandled input-stream error', async () => {
+    await expect(runSuspendedChild({command: 'haze-test-nonexistent-pager', args: []}, 'x'.repeat(1_000_000))).rejects.toMatchObject({code: 'ENOENT'});
   });
 });

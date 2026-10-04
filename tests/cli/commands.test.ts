@@ -436,13 +436,26 @@ describe('handleSlashCommand /logs', () => {
     await fs.remove(log.file);
   });
 
-  it('/logs <id> view falls back to the summary when the pager declines', async () => {
+  it.each(['short', 'long', 'no pager'])('/logs <id> view shows bounded raw content when paging is skipped: %s', async scenario => {
     const {createLog, appendLogEntry} = await import('../../src/core/log/llmLog.js');
+    const {SESSION_PREVIEW_CHARS} = await import('../../src/core/limits.js');
     const log = await createLog();
-    await appendLogEntry(log, {at: new Date().toISOString(), type: 'request', stream: 'main'});
-    const ctx = mockContext({viewInPager: vi.fn(async () => false)});
+    const warning = 'synthetic log content' + (scenario === 'long' ? 'x'.repeat(SESSION_PREVIEW_CHARS * 2) : '');
+    await appendLogEntry(log, {at: new Date().toISOString(), type: 'warning', warning});
+    const ctx = mockContext({viewInPager: scenario === 'no pager' ? undefined : vi.fn(async () => false)});
     expect(await handleSlashCommand(`/logs ${log.id} view`, ctx)).toBe('handled');
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('fits on screen'));
+    const message = vi.mocked(ctx.addSystemMessage).mock.calls[0]![0];
+    expect(message).toContain('inline view; pager not used');
+    expect(message).toContain('synthetic log content');
+    expect(message).not.toContain('fits on screen');
+    if (scenario === 'long') {
+      expect(message).toContain('preview truncated');
+      expect(message.length).toBeLessThan(SESSION_PREVIEW_CHARS + 250);
+    } else {
+      expect(message).toContain(JSON.stringify(warning));
+      expect(message).not.toContain('truncated');
+    }
+    await log.writer?.close();
     await fs.remove(log.file);
   });
 });

@@ -1,5 +1,6 @@
 import {listLogs, readLogEntries, summarizeLog} from '../../core/log/llmLog.js';
 import {formatBytes} from '../../utils/format.js';
+import {SESSION_PREVIEW_CHARS} from '../../core/limits.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
 export async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
@@ -29,13 +30,18 @@ export async function handleLogsCommand(args: string, ctx: CommandContext): Prom
     return 'handled';
   }
 
-  // Long raw transcripts page through $PAGER via suspendTerminal when the
-  // interactive screen provides the affordance; the summary stays the default.
-  if (viewRaw && ctx.viewInPager) {
+  // Page raw transcripts when possible; short logs and screen-reader mode
+  // still get the requested content through a bounded inline preview.
+  if (viewRaw) {
     const entries = await readLogEntries(id);
     const text = entries.map(entry => JSON.stringify(entry)).join('\n');
-    const paged = await ctx.viewInPager(text);
-    if (!paged) ctx.addSystemMessage(`Log ${id} fits on screen; nothing paged.`);
+    const paged = await ctx.viewInPager?.(text);
+    if (!paged) {
+      const preview = text.length > SESSION_PREVIEW_CHARS
+        ? `${text.slice(0, SESSION_PREVIEW_CHARS)}\n[Raw log preview truncated; /logs ${id} shows the summary.]`
+        : text || '(empty log)';
+      ctx.addSystemMessage(`Log: ${id} (inline view; pager not used)\n${preview}`);
+    }
     return 'handled';
   }
 

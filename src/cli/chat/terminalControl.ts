@@ -10,6 +10,14 @@ export interface EditorLaunch {
   args: string[];
 }
 
+/** Split an editor/pager executable and quoted arguments without invoking a shell. */
+function parseTerminalCommand(raw: string): EditorLaunch | false {
+  const parts = raw.match(/"([^"]+)"|'([^']+)'|(\S+)/g) ?? [];
+  const words = parts.map(part => part.replace(/^["']|["']$/g, '')).filter(Boolean);
+  const command = words[0];
+  return command ? {command, args: words.slice(1)} : false;
+}
+
 /**
  * Resolve the editor command for an external `$EDITOR` compose. Follows the
  * common `VISUAL` over `EDITOR` precedence; `false` means the environment has
@@ -18,12 +26,7 @@ export interface EditorLaunch {
  */
 export function resolveEditorCommand(env: NodeJS.ProcessEnv = process.env): EditorLaunch | false {
   const raw = (env['VISUAL'] || env['EDITOR'] || '').trim();
-  if (!raw) return false;
-  const parts = raw.match(/"([^"]+)"|'([^']+)'|(\S+)/g) ?? [];
-  const words = parts.map(part => part.replace(/^["']|["']$/g, '')).filter(Boolean);
-  const command = words[0];
-  if (!command) return false;
-  return {command, args: words.slice(1)};
+  return parseTerminalCommand(raw);
 }
 
 /**
@@ -34,13 +37,16 @@ export function resolveEditorCommand(env: NodeJS.ProcessEnv = process.env): Edit
 export function resolvePager(text: string, terminalRows: number, env: NodeJS.ProcessEnv = process.env): {command: string; args: string[]} | undefined {
   if (text.split('\n').length <= Math.max(1, terminalRows - 1)) return undefined;
   const pager = env['PAGER']?.trim() || (process.platform === 'win32' ? 'more' : 'less');
-  return {command: pager, args: pager === 'less' ? ['-R', '-X'] : []};
+  const launch = parseTerminalCommand(pager);
+  if (!launch) return undefined;
+  return launch.command === 'less' && launch.args.length === 0
+    ? {command: launch.command, args: ['-R', '-X']} : launch;
 }
 
 /**
  * Run a child process while Ink has suspended the terminal (raw mode off,
- * child owns the TTY). Resolves with the exit code; rejects only when the
- * process fails to spawn. `stdinText` pipes text into the child (pager);
+ * child owns the TTY). Resolves with the exit code; rejects on spawn or
+ * unexpected input-stream errors. Early pager closure (EPIPE) is normal. `stdinText` pipes text into the child (pager);
  * without it the child inherits the terminal stdin (editor).
  */
 export function runSuspendedChild(launch: {command: string; args: string[]}, stdinText?: string): Promise<number | null> {
@@ -50,7 +56,14 @@ export function runSuspendedChild(launch: {command: string; args: string[]}, std
       : spawn(launch.command, launch.args, {stdio: ['pipe', 'inherit', 'inherit']});
     child.once('error', reject);
     child.once('close', code => resolve(code));
-    if (stdinText != null) child.stdin?.end(stdinText);
+    if (stdinText != null && child.stdin) {
+      // Quitting a pager can close its pipe while a large write is pending.
+      // Stream errors are separate from the child's spawn error event.
+      child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EPIPE') reject(error);
+      });
+      child.stdin.end(stdinText);
+    }
   });
 }
 
