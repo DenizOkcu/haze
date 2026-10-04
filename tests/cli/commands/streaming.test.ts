@@ -62,6 +62,7 @@ const mocks = vi.hoisted(() => {
     closeMcpCalls: [] as unknown[],
     generateTextCalls: [] as unknown[],
     generateTextFails: false,
+    deadlineCalls: [] as number[],
     assembleContextResult: null as null | {
       systemPrompt: string;
       availableTools: Record<string, unknown>;
@@ -282,6 +283,17 @@ async function loadStreaming(config: MocksConfig) {
     };
   });
 
+  vi.doMock('../../../src/core/deadline.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../../src/core/deadline.js')>();
+    return {
+      ...actual,
+      createAbsoluteDeadline: (input: {timeoutMs: number}) => {
+        mocks.deadlineCalls.push(input.timeoutMs);
+        return actual.createAbsoluteDeadline(input);
+      },
+    };
+  });
+
   vi.resetModules();
   const streamingModule = await import('../../../src/cli/commands/streaming.js');
   // The goal supervisor imports runAgentTurn from streaming.js; load it from
@@ -344,6 +356,7 @@ beforeEach(() => {
   mocks.closeMcpCalls.length = 0;
   mocks.generateTextCalls.length = 0;
   mocks.generateTextFails = false;
+  mocks.deadlineCalls.length = 0;
   mocks.assembleContextResult = null;
 });
 
@@ -1202,6 +1215,21 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     expect(cb.messages.some(m => m.role === 'system' && /turn budget elapsed/.test(m.text))).toBe(true);
     expect(cb.messages.some(m => /Thinking aborted/.test(m.text))).toBe(false);
     expect(outcome).toMatchObject({status: 'aborted'});
+  });
+
+  it('imposes no default absolute turn deadline: no deadline timer is armed without an explicit one', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    await runAgentTurn('ordinary work', undefined, [], makeCallbacks());
+    // The former 30-minute default must not arm any absolute deadline; only an
+    // explicit --timeout / goal budget does.
+    expect(mocks.deadlineCalls).toEqual([]);
+    // Sanity: an explicit deadline still arms exactly one, with the full budget.
+    await runAgentTurn('bounded work', undefined, [], makeCallbacks(), 0, false, false, undefined, undefined, {turnDeadlineMs: 5_000});
+    expect(mocks.deadlineCalls).toEqual([5_000]);
   });
 
   it('forcibly settles an abort-ignoring stream at the turn deadline: bounded result, exactly-once close, quarantined late output', async () => {

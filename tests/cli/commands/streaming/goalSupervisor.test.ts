@@ -310,7 +310,8 @@ describe('runAgentGoal: automatic continuation across physical turns', () => {
       {
         result: turnResult('failed', {resume: incompleteGoalResume()}),
         inspect: options => {
-          // First physical turn sees the whole goal budget (capped per turn).
+          // First physical turn sees the whole goal budget (turns are unbounded
+          // by default; only the explicit goal deadline clamps them).
           expect(options.turnDeadlineMs).toBe(150_000);
           // Simulate the first turn consuming 30s of the goal budget.
           vi.setSystemTime(30_000);

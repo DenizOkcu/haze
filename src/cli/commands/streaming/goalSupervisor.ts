@@ -1,6 +1,5 @@
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {agentEvent} from '../../../core/agent/events.js';
-import {DEFAULT_TURN_DEADLINE_MS} from '../../../core/agent/budgets.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import type {ValidationOutcome} from '../../../core/agent/workState.js';
@@ -228,7 +227,9 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
         requestHash,
       },
       sharedTurnScope,
-      ...(remainingMs != null ? {turnDeadlineMs: Math.min(remainingMs, DEFAULT_TURN_DEADLINE_MS)} : {}),
+      // Only an explicit whole-goal deadline (headless --timeout) bounds a
+      // physical turn; without one, turns run unbounded.
+      ...(remainingMs != null ? {turnDeadlineMs: remainingMs} : {}),
     };
     const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, activeModelOverride, turnOptions, options.reasoningOverride);
     initialRetryAttempt = 0;

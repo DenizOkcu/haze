@@ -8,9 +8,7 @@ export const IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_TOOL_DEADLINE_MS = 10 * 60_000;
 /** Subagents legitimately run long; give their wrapper a larger deadline. */
 export const SUBAGENT_TOOL_DEADLINE_MS = 20 * 60_000;
-/** Absolute main-turn deadline: no single turn runs longer than this by default. */
-export const DEFAULT_TURN_DEADLINE_MS = 30 * 60_000;
-/** Maximum accepted explicit `--timeout` value (24 hours). */
+/** Maximum accepted explicit `--timeout` value (24 hours). No deadline is imposed unless the user sets one. */
 export const MAX_TURN_DEADLINE_MS = 24 * 60 * 60_000;
 export const MAIN_STEP_LIMIT = 64;
 export const MAIN_TOOL_CALL_LIMIT = 120;

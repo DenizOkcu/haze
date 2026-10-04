@@ -2,7 +2,7 @@ import {assessCompletionReadiness, classifyTerminalOutcome, createTurnExecutionS
 import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
-import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, DEFAULT_TURN_DEADLINE_MS, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
+import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
 import {deriveValidationOutcome, redPairStatus, unresolvedFailedCheckIds} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
@@ -271,7 +271,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       // the bound), but completed-step progress stays in the conversation.
       turnState.aborted = true;
       callbacks.debugLog('turn exceeded the absolute deadline');
-      callbacks.addMessage({role: 'system', text: `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? DEFAULT_TURN_DEADLINE_MS)} turn budget elapsed before the model finished. Completed steps are preserved in the conversation; send a follow-up to continue.`});
+      callbacks.addMessage({role: 'system', text: `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? 0)} turn budget elapsed before the model finished. Completed steps are preserved in the conversation; send a follow-up to continue.`});
       return {status: 'aborted', abortReason: 'turn-deadline'};
     }
     turnState.aborted = true;

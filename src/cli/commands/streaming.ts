@@ -9,7 +9,7 @@ import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence, unresolvedFailedCheckIds} from '../../core/agent/workState.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
-import {createToolExecutionBudget, mainTurnBudget, DEFAULT_TURN_DEADLINE_MS, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
+import {createToolExecutionBudget, mainTurnBudget, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
 import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import type {ContextUsageAnchor} from '../../core/agent/contextBudget.js';
 import type {SubagentOverrides, TurnExecutionScope} from '../../llm/requestContext.js';
@@ -81,7 +81,7 @@ export interface TurnExecutionOptions {
   blessedPaths?: readonly BlessedPath[];
   /** When set, this attempt is a bounded recovery slice (length-continuation, rescue, or goal continuation). */
   recoverySlice?: {kind: 'length' | 'rescue' | 'goal'; maxSteps: number; maxToolCalls: number};
-  /** Absolute turn deadline in milliseconds (headless `--timeout`); defaults to DEFAULT_TURN_DEADLINE_MS. */
+  /** Absolute turn deadline in milliseconds (headless `--timeout` / goal budget); absent means no time bound. */
   turnDeadlineMs?: number;
   /** Logical-goal context from the goal supervisor; hydrates cumulative evidence so a fresh physical turn cannot complete while carried work remains. */
   goalContext?: TurnGoalContext;
@@ -139,7 +139,10 @@ export async function runAgentTurn(
   if (!retryingExistingRequest) callbacks.addMessage({role: 'user', text: displayValue ?? value});
   let turnDeadline: AbsoluteDeadline | undefined;
   const turnStartedAt = Date.now();
-  const turnDeadlineMs = turnOptions.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
+  // Absolute turn deadline is opt-in only (headless --timeout / goal budget);
+  // by default a turn runs until the model finishes, the user cancels, or an
+  // idle-stall/step/tool budget boundary ends it.
+  const turnDeadlineMs = turnOptions.turnDeadlineMs;
   try {
     // Retries are one logical turn and therefore share coordinator admission and
     // the workspace mutation lease, including quarantined lingering work. A
@@ -182,10 +185,11 @@ export async function runAgentTurn(
     while (true) {
       // Absolute main-turn deadline (RH-004): distinct from the idle timer, it
       // bounds total turn elapsed time so a stream of busy tools cannot defer
-      // it. Recreated per attempt with the remaining wall-clock budget and bound
+      // it. Opt-in only (headless --timeout or remaining goal budget). Recreated
+      // per attempt with the remaining wall-clock budget and bound
       // to the current attempt's controller — an idle-stall retry replaces the
       // controller and must not trip this deadline early via the old signal.
-      turnDeadline = createAbsoluteDeadline({
+      if (turnDeadlineMs != null) turnDeadline = createAbsoluteDeadline({
         timeoutMs: Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)),
         signal: abortController.signal,
         onTimeout: () => {
@@ -195,8 +199,9 @@ export async function runAgentTurn(
         },
       });
       const cleanup = createAttemptCleanupRegistry();
-      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, overflowShrinkFactor, overflowRetries, progressSinceLastRetry: turnState.stepsUsed > stepsUsedAtLastRetry, session, modelOverride, reasoningOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)), usageAnchor}), {
+      const result = await awaitAttemptWithForcedSettlement(runAgentAttempt({value, contextFiles, callbacks: attemptCallbacks, retryAttempt: attempt, retryingExistingRequest: retrying, overflowShrinkFactor, overflowRetries, progressSinceLastRetry: turnState.stepsUsed > stepsUsedAtLastRetry, session, modelOverride, reasoningOverride, abortController, turnOptions: activeOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, abortCause, cleanup, remainingTurnDeadlineMs: () => turnDeadlineMs == null ? Number.POSITIVE_INFINITY : Math.max(0, turnDeadlineMs - (Date.now() - turnStartedAt)), usageAnchor}), {
         abortController,
+
         cleanup,
         quarantine,
         onForced: tornDown => {
@@ -205,12 +210,12 @@ export async function runAgentTurn(
           turnState.aborted = true;
           callbacks.debugLog(`attempt ignored cancellation; forced settlement after grace (teardown ${tornDown ? 'completed' : 'still settling'})`);
           callbacks.addMessage({role: 'system', text: abortCause.kind === 'turn-deadline'
-            ? `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? turnDeadlineMs)} turn budget elapsed before the model finished.${tornDown ? '' : ' Some background teardown is still settling.'} Completed steps are preserved in the conversation; send a follow-up to continue.`
+            ? `Turn stopped: the ${formatIdleMinutes(abortCause.timeoutMs ?? turnDeadlineMs ?? 0)} turn budget elapsed before the model finished.${tornDown ? '' : ' Some background teardown is still settling.'} Completed steps are preserved in the conversation; send a follow-up to continue.`
             : 'Thinking aborted. You can type again.'});
           return {status: 'aborted', abortReason: abortCause.kind === 'turn-deadline' ? 'turn-deadline' : 'user'};
         },
       });
-      turnDeadline.clear();
+      turnDeadline?.clear();
       turnDeadline = undefined;
       status = result.status;
       abortReason = result.abortReason;
