@@ -6,7 +6,11 @@ function uniq(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function inferKind(command: string, classification?: ShellClassification): ValidationKind {
+/**
+ * Shape-only kind inference on the unquoted command, exported for per-stage
+ * classification of `&&` compounds in work-state validation recording.
+ */
+export function inferValidationKind(command: string, classification?: ShellClassification): ValidationKind {
   // Shape-only inference on the unquoted command: kind authority must come
   // from running a recognized tool, never from words the model authored
   // inside a quoted payload (found by the honest-impossibility eval — a
@@ -34,7 +38,7 @@ export function parseValidationOutput(input: {
   const diagnostics: ValidationSummary['diagnostics'] = [];
   const failedTests: string[] = [];
   const failedFiles: string[] = [];
-  const kind = inferKind(input.command, input.classification);
+  const kind = inferValidationKind(input.command, input.classification);
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];

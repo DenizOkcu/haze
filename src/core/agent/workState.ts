@@ -3,7 +3,8 @@ import type {RequestIntent} from './goalPolicy.js';
 import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
-import {isSingleForegroundCommand} from '../safety/shellClassifier.js';
+import {isSingleForegroundCommand, stripQuotedSpans} from '../safety/shellClassifier.js';
+import {inferValidationKind} from '../validation/outputParser.js';
 import {changedPathsFromTool} from './toolCapabilities.js';
 
 export type WorkFileAction = 'read' | 'created' | 'modified';
@@ -59,6 +60,38 @@ export function validationCommandKey(command: string): string {
 }
 
 /**
+ * Split an `&&`-chained command into per-stage validation identities, or
+ * undefined when the command must stay whole (R2-08). `&&` means every stage
+ * ran to success or the chain stopped at its first failure — so a green `&&`
+ * chain is green evidence for every stage, and each stage is separately
+ * clearable by kind+scope. Not split:
+ *  - `cd pkg && npm x` — a single path-scoped invocation already normalized by
+ *    `validationCommandKey`;
+ *  - `;`/`||` chains — their stages' exit statuses are independent, so the
+ *    whole chain keeps one opaque compound identity.
+ * A leading `cd DIR` stage is composed into each later stage so
+ * `cd web && npm test && npm run lint` keeps web-scoped check identities.
+ */
+function validationStages(command: string): string[] | undefined {
+  if (validationCommandKey(command).startsWith('npm@')) return undefined;
+  const unquoted = stripQuotedSpans(command);
+  if (!unquoted.includes('&&') || /;|\|\|/.test(unquoted)) return undefined;
+  // stripQuotedSpans blanked quoted text, so split on it and slice the original
+  // by part lengths — quoted `&&` stays inside its stage.
+  const parts = unquoted.split('&&');
+  const stages: string[] = [];
+  let index = 0;
+  for (const part of parts) {
+    const stage = command.slice(index, index + part.length).trim();
+    if (stage) stages.push(stage);
+    index += part.length + 2;
+  }
+  if (stages.length < 2) return undefined;
+  const cd = /^cd ([A-Za-z0-9_./-]+)$/.exec(stages[0]!);
+  return cd ? stages.slice(1).map(stage => `${cd[0]} && ${stage}`) : stages;
+}
+
+/**
  * Scope identity for failed-check pairing: the check kind plus, for package
  * managers, the package root the check ran against. A failed check stays open
  * until an equivalent check in the same scope passes — the observed failure
@@ -74,12 +107,13 @@ function failedCheckScope(command: string): string {
   const normalized = validationCommandKey(command);
   const scoped = /^npm@(\S+) /.exec(normalized);
   if (scoped) return `npm@${scoped[1]}`;
-  // Chained commands (`&&`, `;`, `||`) are a different check than their stages:
-  // a red `npm test && npm run lint` must not be cleared by a green bare
-  // `npm test`. The compound gets its own hashed (non-reversible) scope.
-  // Pipes/redirects (`| tail`, `2>&1`) are decoration, not chaining — the
-  // pipefail-injected pipeline reports the check's own exit status.
-  if (/&&|;|\|\|/.test(normalized)) return `compound@${validationCheckId(normalized)}`;
+  // `// `&&` compounds are recorded per stage (see andStages)// `&&` compounds are recorded per stage (see andStages)` compounds are recorded per stage (see validationStages), so a stage reaching
+  // this function is a single invocation; `;`/`||` chains are a different
+  // check than their stages: a red `npm test; npm run lint` must not be cleared
+  // by a green bare `npm test`. The compound gets its own hashed (non-reversible)
+  // scope.
+  if (/;|\|\|/.test(normalized)) return `compound@${validationCheckId(normalized)}`;
+  if (normalized.includes('&&')) return `compound@${validationCheckId(normalized)}`;
   const manager = /^(?:npm|npx|pnpm|yarn|bun|bunx|deno)\b/.test(normalized) ? 'npm' : 'direct';
   if (manager === 'npm') return `npm@${workspacePathKey('.')}`;
   // Direct commands pair only within the same executable: `cargo test` red
@@ -395,15 +429,33 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       const passed = summary ? summary.status === 'passed' : ok && exitCode === 0;
       const status: Exclude<WorkValidationStatus, 'pending'> = passed ? 'passed' : 'failed';
       const summaryText = summary?.summaryText ?? (passed ? `Executed changed artifact ${artifact} successfully.` : `Changed artifact ${artifact} exited unsuccessfully.`);
-      upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
+      // `&&` compounds record per stage (R2-08, observed 2026-10-04 goal
+      // `78jmtd8ht4r`: red compound `typecheck && eslint && vitest` could never be
+      // cleared — a green full chain classified only as its first stage's kind,
+      // and the compound scope paired only with byte-identical text, so six green
+      // `npm test` runs left the goal permanently `failed` and it paused twice as
+      // no-progress). A green `&&` chain proves every stage green, each under its
+      // own inferred kind and scope; a red one records every stage failed (the
+      // chain stops at the first failure; which stages ran is unverified, so all
+      // stages are treated as unresolved — individually clearable by a green rerun).
+      const stages = validationStages(command);
+      if (stages) {
+        for (const stage of stages) {
+          upsertValidation(state, stage, status, summaryText, inferValidationKind(stage), seq);
+        }
+      } else {
+        upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
+      }
       if (status === 'passed' && summary && summary.kind !== 'generic') {
         // Clear the failed-check identities this authoritative pass satisfies,
         // not just the exact same command text: a red `npm test -- tests/x | tail`
         // must be cleared by a green bare `npm test` in the same package scope.
         // Generic custom checks never clear — the self-certification guard holds
-        // across turn boundaries too.
-        const passId = scopedCheckId(command, summary.kind);
-        const remaining = state.carriedFailedCheckIds?.filter(id => !checkIdEquivalent(passId, id)) ?? [];
+        // across turn boundaries too. Per-stage `&&` passes clear by their own
+        // stage kind/scope.
+        const stageIds = stages ? stages.map(stage => scopedCheckId(stage, inferValidationKind(stage))) : [scopedCheckId(command, summary.kind)];
+        const passIds = stageIds.filter(id => { const kind = kindOfCheckId(id); return kind != null && kind !== 'generic'; });
+        const remaining = state.carriedFailedCheckIds?.filter(id => !passIds.some(passId => checkIdEquivalent(passId, id))) ?? [];
         state.carriedFailedCheckIds = remaining.length ? remaining : undefined;
       }
       state.validationSeq = seq;

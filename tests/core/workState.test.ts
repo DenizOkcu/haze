@@ -562,3 +562,43 @@ describe('seedCarriedGoalEvidence (goal-scoped red state)', () => {
     expect(state.mutationCount).toBe(2);
   });
 });
+
+describe('&& compound validation recording (R2-08)', () => {
+  const shell = (command: string, kind: string, status: 'passed' | 'failed') => ({
+    toolName: 'shell',
+    ok: status === 'passed',
+    input: {command},
+    output: {ok: status === 'passed', code: status === 'passed' ? 0 : 1, command, validationSummary: {kind, status, summaryText: `${kind} ${status}`, failedFiles: [], failedTests: [], diagnostics: []}},
+  });
+
+  it('a green && chain clears red stages of the kinds it ran (observed goal 78jmtd8ht4r)', () => {
+    const state = createWorkState('goal', 'implement', []);
+    // Red bare lint + red compound, exactly as the session recorded them.
+    observeWorkToolEvent(state, shell('npm run lint 2>&1 | tail -5', 'lint', 'failed'));
+    observeWorkToolEvent(state, shell('npm run typecheck 2>&1 | tail -2 && npx vitest run tests/cli 2>&1 | tail -4', 'typecheck', 'failed'));
+    expect(deriveValidationOutcome(state)).toBe('failed');
+    // The full green chain the session produced at 20:09:29.
+    observeWorkToolEvent(state, shell('npm run typecheck 2>&1 | tail -2 && npm run lint 2>&1 | tail -2 && npm test 2>&1 | grep -E "Test Files|Tests " | head -2', 'typecheck', 'passed'));
+    expect(deriveValidationOutcome(state)).toBe('passed');
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+  });
+
+  it('a green bare check clears only its own kind from a red && chain', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('npm test && npm run lint', 'test', 'failed'));
+    expect(unresolvedFailedCheckIds(state).length).toBe(2);
+    observeWorkToolEvent(state, shell('npm test', 'test', 'passed'));
+    const open = unresolvedFailedCheckIds(state);
+    expect(open.length).toBe(1);
+    expect(open[0]).toContain(':lint:');
+  });
+
+  it('; and || compounds keep the opaque compound scope', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('npm test; npm run lint', 'test', 'failed'));
+    observeWorkToolEvent(state, shell('npm test', 'test', 'passed'));
+    // The ; compound is its own check identity; the green bare run cannot clear it.
+    expect(unresolvedFailedCheckIds(state).length).toBe(1);
+    expect(unresolvedFailedCheckIds(state)[0]).toContain('compound@');
+  });
+});
