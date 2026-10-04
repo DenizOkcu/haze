@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
-import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/core/subagent/subagentRunner.js';
+import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/llm/subagentRunner.js';
 
 const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
 
@@ -151,7 +151,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: 'done'})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result: SubagentResult = await runSubagent('inspect', {model: noopModel, contextFiles: []});
     expect(result.status).toBe('ok');
     expect(result.summary).toBe('done');
@@ -166,7 +166,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: '', steps: steps(25)})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('long task', {model: noopModel, contextFiles: [], maxSteps: 25});
     expect(result.status).toBe('timeout');
   });
@@ -181,7 +181,7 @@ describe('runSubagent status mapping', () => {
       }};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const profile = {...(await import('../../../src/core/subagent/executionProfiles.js')).COMPATIBILITY_PROFILE, maxToolCalls: 3};
     const result = await runSubagent('burst', {model: noopModel, profile, contextBundle: {
       instructions: [], systemPrompt: '', tools: {probe: {execute: async () => { actualExecutions++; return {ok: true}; }} as never}, taskTokens: 1, estimatedTokens: 1, validatedScope: [], loadedPaths: new Set(), loadedSignatures: new Map(),
@@ -198,7 +198,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: 'partial'})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const controller = new AbortController();
     controller.abort();
     const result = await runSubagent('aborted task', {model: noopModel, contextFiles: [], abortSignal: controller.signal});
@@ -216,7 +216,7 @@ describe('runSubagent status mapping', () => {
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('explodes', {model: noopModel, contextFiles: []});
     expect(result.status).toBe('error');
     expect(result.error).toBe('boom');
@@ -234,7 +234,7 @@ describe('runSubagent status mapping', () => {
       })};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('edit then fail', {model: noopModel, contextFiles: [], abortSignal: controller.signal, deadlineExpired: () => termination === 'deadline_exceeded'});
     expect(result.capsule).toMatchObject({termination, usable: false, changedPaths: ['a.ts'], validation: [{command: 'npm test', ok: true}]});
   });
@@ -250,7 +250,7 @@ describe('runSubagent status mapping', () => {
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('fails loudly', {model: noopModel, contextFiles: []});
     expect(result.capsule.termination).toBe('provider_error');
     expect(result.capsule.usable).toBe(false);
@@ -273,7 +273,7 @@ describe('runSubagent status mapping', () => {
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('opaque failure', {model: noopModel, contextFiles: []});
     expect(result.capsule.termination).toBe('provider_error');
     expect(result.capsule.deliverable).toContain('the provider call failed before any output');
@@ -282,7 +282,7 @@ describe('runSubagent status mapping', () => {
 
   it('policy-blocks an out-of-range maxSteps instead of silently clamping it', async () => {
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('huge', {model: noopModel, contextFiles: [], maxSteps: 999});
     expect(result.status).toBe('error');
     expect(result.capsule.termination).toBe('policy_blocked');
@@ -294,7 +294,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: ''})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('silent', {model: noopModel, contextFiles: []});
     expect(result.summary).toBe('Subagent completed without text output.');
   });
@@ -306,7 +306,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: huge})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('huge summary', {model: noopModel, contextFiles: []});
     expect(result.summary.startsWith('x'.repeat(8000))).toBe(true);
     expect(result.capsule.truncated).toBe(true);
@@ -320,7 +320,7 @@ describe('runSubagent status mapping', () => {
       return {...actual, streamText: async () => genResult({text: 'done', usage: {inputTokens: 42, outputTokens: 7}})};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result = await runSubagent('metered', {model: noopModel, contextFiles: []});
     expect(result.tokens).toEqual({in: 42, out: 7});
   });
@@ -346,7 +346,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       };
     });
     vi.resetModules();
-    const {runSubagent, internals} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent, internals} = await import('../../../src/llm/subagentRunner.js');
     await runSubagent('the assigned task', {model: noopModel, contextFiles: []});
 
     // Force synthesis via tool-call volume (TOOL_CALL_BUDGET = 40).
@@ -379,7 +379,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await runSubagent('quick task', {model: noopModel, contextFiles: []});
     expect(captured.prepareStep!({steps: [{toolCalls: [{}], text: ''}], messages: [{role: 'user', content: 'quick task'}]})).toBeUndefined();
   });
@@ -401,7 +401,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const result: SubagentResult = await runSubagent('security review', {model: noopModel, contextFiles: []});
     expect(result.summary).toBe('# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts');
     expect(result.summary.startsWith('Now let me')).toBe(false);
@@ -455,7 +455,7 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
       };
     });
     vi.resetModules();
-    const {createSubagentTool} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {createSubagentTool} = await import('../../../src/llm/subagentRunner.js');
     const controller = new AbortController();
     controller.abort();
     const subagentTool = createSubagentTool({model: noopModel, contextFiles: []});
@@ -484,7 +484,7 @@ describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const results = await Promise.all([
       runSubagent('audit', {model: noopModel, contextFiles: []}),
       runSubagent('fail', {model: noopModel, contextFiles: []}),
@@ -520,7 +520,7 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
       };
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await Promise.all([
       runSubagent('task-a', {model: noopModel, contextFiles: []}),
       runSubagent('task-b', {model: noopModel, contextFiles: []}),
@@ -560,7 +560,7 @@ describe('subagent V2 boundary', () => {
       return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const profile = {name: 'test', maxConcurrency: 1, maxSteps: 8, maxToolCalls: 6, maxOutputTokens: 2048, maxSummaryChars: 4000, maxInputTokens: 40000, deadlineMs: 1000, maxRetries: 1};
     await runSubagent('provider parity', {contextFiles: [], runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
     expect(captured).toMatchObject({providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}, maxRetries: 1, maxOutputTokens: 2048});
@@ -573,7 +573,7 @@ describe('subagent V2 boundary', () => {
       return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await runSubagent('reasoning override', {contextFiles: [], runtime: {
       model: noopModel, selector: 'zai:glm-5.3', providerName: 'zai',
       capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true},
@@ -589,7 +589,7 @@ describe('subagent V2 boundary', () => {
       return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
     });
     vi.resetModules();
-    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await runSubagent('unsupported protocol', {contextFiles: [], runtime: {
       model: noopModel, selector: 'local:m', providerName: 'local',
       capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: false},

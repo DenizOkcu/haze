@@ -187,6 +187,12 @@ export function captureMcpCommand(value: string): FieldCaptureResult {
 
 // ── Suggestion builders (pure; bound to steps in the table below) ───────────
 
+/** Shared enable/disable toggle suggestion for an entity picker row. */
+function toggleAction(kind: TextInputSuggestion['kind'], enabled: boolean): TextInputSuggestion {
+  const action = enabled ? COMMON_ACTIONS.disable : COMMON_ACTIONS.enable;
+  return {value: action, description: `${action} this ${kind === 'lsp' ? 'server' : kind === 'mcp' ? 'server' : 'skill'}`, kind};
+}
+
 export function providerSuggestions(settings: HazeSettings): TextInputSuggestion[] {
   return [
     ...configuredProviders(settings).map(provider => ({
@@ -294,7 +300,7 @@ export function lspSuggestions(settings: HazeSettings): TextInputSuggestion[] {
 export function lspActionSuggestions(settings: HazeSettings, selectedLspName: string | undefined): TextInputSuggestion[] {
   const server = selectedLspName ? configuredLspServers(settings).find(s => s.name === selectedLspName) : undefined;
   const result: TextInputSuggestion[] = [];
-  if (server) result.push({value: server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable, description: `${server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable} this server`, kind: 'lsp' as const});
+  if (server) result.push(toggleAction('lsp', server.enabled !== false));
   result.push({value: LSP_ACTIONS.removeServer, description: 'remove this server', kind: 'lsp' as const});
   return result;
 }
@@ -323,7 +329,7 @@ export function mcpActionSuggestions(settings: HazeSettings, selectedMcpName: st
   const server = selectedMcpName ? findMcpServer(settings, selectedMcpName) : undefined;
   const result: TextInputSuggestion[] = [];
   if (server) {
-    result.push({value: server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable, description: `${server.enabled === false ? COMMON_ACTIONS.enable : COMMON_ACTIONS.disable} this server`, kind: 'mcp' as const});
+    result.push(toggleAction('mcp', server.enabled !== false));
     if (server.transport !== 'stdio') result.push({value: MCP_ACTIONS.manageAccess, description: server.headers?.length ? 'update the saved API key' : 'add an API key', kind: 'mcp' as const});
   }
   result.push({value: MCP_ACTIONS.removeServer, description: 'remove this server', kind: 'mcp' as const});
@@ -368,8 +374,7 @@ export function skillsActionSuggestions(settings: HazeSettings, skills: LoadedSk
   const skill = findSelectedSkill(skills, selectedSkillName);
   const result: TextInputSuggestion[] = [];
   if (skill) {
-    const enabled = isSkillEnabled(settings, skill.name, skill.source);
-    result.push({value: enabled ? COMMON_ACTIONS.disable : COMMON_ACTIONS.enable, description: `${enabled ? COMMON_ACTIONS.disable : COMMON_ACTIONS.enable} this skill`, kind: 'skill' as const});
+    result.push(toggleAction('skill', isSkillEnabled(settings, skill.name, skill.source)));
     result.push({value: SKILL_ACTIONS.showInfo, description: 'show description, references, and path', kind: 'skill' as const});
     result.push({value: SKILL_ACTIONS.validate, description: 're-load and validate SKILL.md', kind: 'skill' as const});
   }

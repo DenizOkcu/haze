@@ -41,7 +41,7 @@
     "lint:fix": "eslint src/ --fix",
     "lint:knip": "knip",
     "typecheck": "tsc --noEmit",
-    "context:report": "node --import tsx src/cli/contextReport.ts",
+    "context:report": "node --import tsx src/cli/contextReportCli.ts",
     "eval": "node scripts/run-evals.mjs",
     "release:verify": "node scripts/verify-release-metadata.mjs",
     "haze": "tsx src/cli/index.ts",

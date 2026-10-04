@@ -3,7 +3,7 @@ import path from 'node:path';
 import {GLOBAL_SKILLS_DIR} from '../config/paths.js';
 import {loadSkill} from './SkillLoader.js';
 import type {LoadedSkill, SkillRegistry, SkillSource} from './types.js';
-import {assertRealPathInsideRoot} from '../utils/path.js';
+import {confinedResolve} from './confinement.js';
 
 async function loadRoot(
   root: string,
@@ -14,7 +14,7 @@ async function loadRoot(
   if (!(await fs.pathExists(root))) return [];
   if (source === 'project') {
     try {
-      await assertRealPathInsideRoot(containmentRoot, root, '.haze/skills', 'workspace');
+      await confinedResolve(containmentRoot, root, '.haze/skills', 'workspace');
     } catch (error) {
       errors.push({directory: '.haze/skills', source, message: error instanceof Error ? error.message : String(error)});
       return [];
@@ -27,7 +27,7 @@ async function loadRoot(
     try {
       // Project-controlled symlinks must remain inside the workspace, not merely
       // inside a possibly symlinked .haze/skills directory.
-      await assertRealPathInsideRoot(containmentRoot, dir, name, source === 'project' ? 'workspace' : 'skills root');
+      await confinedResolve(containmentRoot, dir, name, source === 'project' ? 'workspace' : 'skills root');
       if (!(await fs.stat(dir)).isDirectory()) continue;
       const skill = await loadSkill(dir, source);
       if (!skill) continue;

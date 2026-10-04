@@ -1,6 +1,7 @@
-import type {JSONValue, LanguageModel} from 'ai';
+import type {LanguageModel} from 'ai';
 import {z} from 'zod';
-import type {ReasoningLevel} from '../agent/reasoningPolicy.js';
+import type {ProviderCapabilities, ProviderRequestOptions} from '../providerContracts.js';
+export type {ProviderCapabilities, ProviderRequestOptions} from '../providerContracts.js';
 import {
   SUBAGENT_ACCEPTANCE_CHARS,
   SUBAGENT_ACCEPTANCE_ITEMS,
@@ -78,30 +79,6 @@ export interface SubagentExecutionResult {
   tokens: {in?: number; out?: number};
   durationMs: number;
   error?: string;
-}
-
-export interface ProviderCapabilities {
-  reportsCacheUsage: boolean;
-  supportsPromptCacheKey: boolean;
-  supportsExtendedCacheRetention: boolean;
-  supportsStickySessionId: boolean;
-  supportsServerCompaction: boolean;
-  supportsTextVerbosity: boolean;
-  /**
-   * Protocol accepts a reasoning-effort request. The AI SDK maps its top-level
-   * `reasoning` parameter per provider; endpoints without native support ignore
-   * the field. Kept as a capability so a future provider kind can opt out.
-   */
-  supportsReasoningEffort: boolean;
-}
-
-export interface ProviderRequestOptions {
-  providerOptions?: Record<string, Record<string, JSONValue | undefined>>;
-  headers?: Record<string, string>;
-  /** AI SDK top-level `reasoning` call setting; omitted when unset/unsupported. */
-  reasoning?: ReasoningLevel;
-  /** Codex subscription requests let the provider manage the output limit. */
-  omitMaxOutputTokens?: boolean;
 }
 
 export interface WorkerRuntime {

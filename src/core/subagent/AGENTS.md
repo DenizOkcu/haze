@@ -30,4 +30,4 @@ Maintainability focus:
 
 ## Tests
 
-Update `tests/core/subagent/subagentRunner.test.ts` for tool allowlist, budget, status, summary, and error behavior.
+Update `tests/llm/subagentRunner.test.ts` for tool allowlist, budget, status, summary, and error behavior.

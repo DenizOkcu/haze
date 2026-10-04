@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {DEFAULT_REASONING_LEVEL, effectiveRequestedReasoning, isReasoningLevel, parseReasoningOverride, reasoningCallSetting, REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, resolveReasoningChoice, resolveReasoningPolicy} from '../../src/core/agent/reasoningPolicy.js';
+import {DEFAULT_REASONING_LEVEL, effectiveRequestedReasoning, isReasoningLevel, parseReasoningOverride, reasoningCallSetting, REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, resolveAttemptReasoning, resolveReasoningChoice, resolveReasoningPolicy} from '../../src/core/agent/reasoningPolicy.js';
 import type {ProviderCapabilities} from '../../src/core/subagent/contracts.js';
 import {providerRequestSettings, type ModelRuntimeConfig} from '../../src/llm/client.js';
 
@@ -22,6 +22,17 @@ const baseConfig = (over: Partial<ModelRuntimeConfig> & {capabilities?: Provider
   capabilities: baseCaps({supportsReasoningEffort: true, supportsPromptCacheKey: true, supportsTextVerbosity: true}),
   reasoningPolicy: {requested: undefined, effective: 'disabled', reason: 'none'},
   ...over,
+});
+
+describe('resolveAttemptReasoning (full attempt precedence chain)', () => {
+  it('applies run override → session per-model → global setting → undefined', () => {
+    const sessionMap = {'openai:gpt-test': 'high' as const};
+    expect(resolveAttemptReasoning({modelSelector: 'openai:gpt-test', runOverride: 'low', sessionReasoningByModel: sessionMap, globalSetting: 'none'})).toBe('low');
+    expect(resolveAttemptReasoning({modelSelector: 'openai:gpt-test', sessionReasoningByModel: sessionMap, globalSetting: 'none'})).toBe('high');
+    expect(resolveAttemptReasoning({modelSelector: 'other:model', sessionReasoningByModel: sessionMap, globalSetting: 'none'})).toBe('none');
+    expect(resolveAttemptReasoning({modelSelector: 'other:model', sessionReasoningByModel: sessionMap})).toBeUndefined();
+    expect(resolveAttemptReasoning({modelSelector: 'openai:gpt-test', runOverride: REASONING_PROVIDER_DEFAULT, sessionReasoningByModel: sessionMap})).toBe(REASONING_PROVIDER_DEFAULT);
+  });
 });
 
 describe('resolveReasoningChoice (session per-model overrides)', () => {

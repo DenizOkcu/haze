@@ -6,7 +6,7 @@ import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
 import {modelWithConfig} from '../../llm/client.js';
 import {loadSkill} from '../SkillLoader.js';
 import type {SkillSource} from '../types.js';
-import {assertRealPathInsideRoot} from '../../utils/path.js';
+import {confinedResolve} from '../confinement.js';
 import {z} from 'zod';
 
 const STANDARD_SKILL_REQUIREMENTS = `
@@ -258,10 +258,10 @@ async function skillTargetRoot(input: CreateSkillInput): Promise<{root: string; 
   if (input.scope !== 'project') return {root: GLOBAL_SKILLS_DIR, source: 'global'};
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const hazeDir = path.join(cwd, '.haze');
-  if (await fs.pathExists(hazeDir)) await assertRealPathInsideRoot(cwd, hazeDir, '.haze', 'workspace');
+  if (await fs.pathExists(hazeDir)) await confinedResolve(cwd, hazeDir, '.haze', 'workspace');
   const root = path.join(hazeDir, 'skills');
   await fs.ensureDir(root);
-  await assertRealPathInsideRoot(cwd, root, '.haze/skills', 'workspace');
+  await confinedResolve(cwd, root, '.haze/skills', 'workspace');
   return {root, source: 'project'};
 }
 

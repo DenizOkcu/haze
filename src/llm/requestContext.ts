@@ -15,7 +15,7 @@ import {loadMcpTools, type LoadedMcpTools} from './mcp.js';
 import {loadSkillRegistry} from '../skills/SkillRegistry.js';
 import {buildSkillTools} from '../skills/skillTools.js';
 import {isSkillEnabled} from '../config/skillSettings.js';
-import {createSubagentTool} from '../core/subagent/subagentRunner.js';
+import {createSubagentTool} from './subagentRunner.js';
 import type {ContextFile} from '../config/contextFiles.js';
 import {addCapabilityTools} from './capabilities.js';
 import type {PostMutationDiagnostics} from './tools/toolContext.js';

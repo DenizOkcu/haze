@@ -1,4 +1,5 @@
-import type {ProviderCapabilities} from '../subagent/contracts.js';
+import type {ProviderCapabilities} from '../providerContracts.js';
+export type {ProviderCapabilities} from '../providerContracts.js';
 
 /**
  * Provider-neutral reasoning-depth levels (the AI SDK `reasoning` enum minus
@@ -92,6 +93,22 @@ export function resolveReasoningPolicy(input: {requested: ReasoningLevel | undef
 export function reasoningCallSetting(policy: ResolvedReasoningPolicy): ReasoningLevel | 'provider-default' | undefined {
   if (policy.effective === 'disabled') return undefined;
   return policy.effective;
+}
+
+/**
+ * The single pure resolver for the full reasoning precedence chain
+ * (AGENTS-documented order): run-scoped override → session per-model map
+ * (`provider:model`, in-memory only) → saved global `reasoning` setting →
+ * built-in default. `llm/client.ts` calls this; `/reasoning` and the status
+ * bar call `resolveReasoningChoice` on the same inputs.
+ */
+export function resolveAttemptReasoning(input: {
+  modelSelector: string;
+  runOverride?: StoredReasoningSetting;
+  sessionReasoningByModel?: Record<string, StoredReasoningSetting>;
+  globalSetting?: StoredReasoningSetting;
+}): StoredReasoningSetting | undefined {
+  return input.runOverride ?? input.sessionReasoningByModel?.[input.modelSelector] ?? input.globalSetting;
 }
 
 export function isReasoningLevel(value: unknown): value is ReasoningLevel {

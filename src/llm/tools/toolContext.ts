@@ -1,12 +1,16 @@
 import {z} from 'zod';
 import {changedPathsFromTool, isMutatingCapability} from '../../core/agent/toolCapabilities.js';
-import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import {readScopedContextFilesForPath, type ContextFile} from '../../config/contextFiles.js';
 import {workspacePathKey, workspaceRoot} from '../../utils/path.js';
 import {isFailedToolOutput, requiresReadFileRecovery, toolInputField} from '../../core/agent/toolResults.js';
 import {HazeToolError} from './failures.js';
-import type {BlessedPath} from '../../core/attachments/readBlessings.js';
-import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
+import {hazeContext, isHazeToolContext, type HazeToolContext, type PostMutationDiagnostics, type ToolExecutionContext} from './toolContextState.js';
+
+// The turn-scoped context type/schema/guards live in `toolContextState.ts`
+// (split so type-only importers stop pulling the dedup runtime); re-exported
+// here for the many existing importers.
+export type {HazeToolContext, PostMutationDiagnostics, ToolExecutionContext} from './toolContextState.js';
+export {hazeContext, isHazeToolContext} from './toolContextState.js';
 
 /**
  * Turn-scoped tool-call orchestration shared by every built-in tool: in-flight
@@ -19,93 +23,7 @@ import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/s
  * `experimental_context` shape. Nothing here is persisted.
  */
 
-export type ToolExecutionContext = {
-  abortSignal?: AbortSignal;
-  context?: unknown;
-  experimental_context?: unknown;
-};
-
-export type PostMutationDiagnostics = (paths: readonly string[]) => Promise<unknown | undefined>;
-
-export type HazeToolContext = {
-  inFlightToolCalls?: Map<string, Promise<unknown>>;
-  completedToolCalls?: Map<string, number>;
-  mutationEpoch?: number;
-  failedMutationPaths?: Set<string>;
-  failedMutationReasons?: Map<string, ToolFailureReasonCode | undefined>;
-  pathsReadAfterFailedMutation?: Set<string>;
-  inFlightMutationPaths?: Set<string>;
-  loadedContextFilePaths?: Set<string>;
-  loadedContextFileSignatures?: Map<string, string>;
-  pendingContextFiles?: ContextFile[];
-  scopedContextDiscovery?: Promise<void>;
-  onContextFileRead?: (path: string) => void;
-  mutationPolicy?: WorkspaceMutationPolicy;
-  mutationOwner?: WorkspaceMutationOwner;
-  /** True in disposable worker contexts; background processes are main-turn-only. */
-  isSubagent?: boolean;
-  /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
-  blessedPaths?: readonly BlessedPath[];
-  /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
-  postMutationDiagnostics?: PostMutationDiagnostics;
-};
-
-function stableJsonStringify(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
-  if (Array.isArray(value)) return `[${value.map(item => stableJsonStringify(item, seen)).join(',')}]`;
-  if (value && typeof value === 'object') {
-    if (seen.has(value as object)) throw new Error('Circular tool input');
-    seen.add(value as object);
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => entryValue !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b));
-    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJsonStringify(entryValue, seen)}`).join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'undefined';
-}
-
-function toolCallKey(toolName: string, input: unknown) {
-  return `${toolName}:${stableJsonStringify(input)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function isMutationPolicy(value: unknown): boolean {
-  return isRecord(value) && typeof value.acquire === 'function' && typeof value.createOwner === 'function';
-}
-
-function isHazeToolContext(value: unknown): value is HazeToolContext {
-  if (!isRecord(value)) return false;
-  const validOptional = (key: string, predicate: (field: unknown) => boolean) =>
-    value[key] === undefined || predicate(value[key]);
-  return validOptional('inFlightToolCalls', field => field instanceof Map)
-    && validOptional('completedToolCalls', field => field instanceof Map)
-    && validOptional('mutationEpoch', field => typeof field === 'number' && Number.isSafeInteger(field) && field >= 0)
-    && validOptional('failedMutationPaths', field => field instanceof Set)
-    && validOptional('failedMutationReasons', field => field instanceof Map)
-    && validOptional('pathsReadAfterFailedMutation', field => field instanceof Set)
-    && validOptional('inFlightMutationPaths', field => field instanceof Set)
-    && validOptional('loadedContextFilePaths', field => field instanceof Set)
-    && validOptional('loadedContextFileSignatures', field => field instanceof Map)
-    && validOptional('pendingContextFiles', field => Array.isArray(field))
-    && validOptional('scopedContextDiscovery', field => field instanceof Promise)
-    && validOptional('onContextFileRead', field => typeof field === 'function')
-    && validOptional('mutationPolicy', isMutationPolicy)
-    && validOptional('mutationOwner', field => typeof field === 'symbol')
-    && validOptional('isSubagent', field => typeof field === 'boolean')
-    && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
-    && validOptional('postMutationDiagnostics', field => typeof field === 'function');
-}
-
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');
-
-export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
-  const value = typeof context.context === 'object' && context.context != null
-    ? context.context
-    : context.experimental_context;
-  return isHazeToolContext(value) ? value : undefined;
-}
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
   const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol']);
@@ -181,7 +99,7 @@ function changedPathsForDiagnostics(toolName: string, input: unknown, result: un
 async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown, result: T, diagnostics: PostMutationDiagnostics | undefined): Promise<T> {
   if (!diagnostics) return result;
   const paths = changedPathsForDiagnostics(toolName, input, result);
-  if (paths.length === 0 || !isRecord(result)) return result;
+  if (paths.length === 0 || !isRecordValue(result)) return result;
   try {
     const lspDiagnostics = await diagnostics(paths);
     return lspDiagnostics === undefined ? result : {...result, lspDiagnostics} as T;
@@ -189,6 +107,10 @@ async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown
     const message = error instanceof Error ? error.message : String(error);
     return {...result, lspDiagnostics: {ok: false, error: `Automatic LSP diagnostics failed: ${message.split('\n')[0]}`}} as T;
   }
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isReadOnlyFileTool(toolName: string) {
@@ -200,6 +122,23 @@ function isReadOnlyFileTool(toolName: string) {
 // external state changes between identical calls (CR-007).
 function isDeduplicableReadOnlyTool(toolName: string) {
   return isReadOnlyFileTool(toolName) || toolName === 'fetch';
+}
+
+function stableJsonStringify(value: unknown, seen: WeakSet<object> = new WeakSet()): string {
+  if (Array.isArray(value)) return `[${value.map(item => stableJsonStringify(item, seen)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    if (seen.has(value as object)) throw new Error('Circular tool input');
+    seen.add(value as object);
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return `{${entries.map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJsonStringify(entryValue, seen)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'undefined';
+}
+
+function toolCallKey(toolName: string, input: unknown) {
+  return `${toolName}:${stableJsonStringify(input)}`;
 }
 
 /**
@@ -274,7 +213,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
     if (isFailedToolOutput(result)) {
       if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(result)) {
         ctx.failedMutationPaths.add(mutationPathKey);
-        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as ToolFailureReasonCode | undefined : undefined;
+        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as import('../toolResultTypes.js').ToolFailureReasonCode | undefined : undefined;
         ctx.failedMutationReasons.set(mutationPathKey, reasonCode);
         ctx.pathsReadAfterFailedMutation.delete(mutationPathKey);
       }

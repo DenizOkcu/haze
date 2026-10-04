@@ -1,6 +1,6 @@
-import {isStepCount, streamText, tool, type JSONValue, type ModelMessage, type ToolSet} from 'ai';
-import type {ContextFile} from '../../config/contextFiles.js';
-import {estimateToolSchemas, estimateValueTokens} from '../agent/contextBudget.js';
+import {isStepCount, streamText, tool, type JSONValue, type ModelMessage} from 'ai';
+import type {ContextFile} from '../config/contextFiles.js';
+import {estimateValueTokens} from '../core/agent/contextBudget.js';
 import {
   SUBAGENT_MAX_STEPS,
   SUBAGENT_MIN_STEPS,
@@ -9,16 +9,13 @@ import {
   createToolExecutionBudget,
   isToolBudgetBlocked,
   withToolExecutionBudget,
-} from '../agent/budgets.js';
-import {storeToolOutput} from '../agent/toolOutputStore.js';
-import {changedPathsFromTool} from '../agent/toolCapabilities.js';
-import {withSyntheticControl} from '../agent/requestAssembly.js';
-import {toolOnlyStepCount} from '../agent/turnPolicy.js';
-import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from '../../llm/workerContext.js';
-import type {PromptSession} from '../../llm/systemPrompt.js';
-import {buildSubagentPrompt, projectContextSection} from '../../llm/systemPrompt.js';
-import {hazeTools} from '../../llm/hazeTools.js';
-import {toolsContextFor, type HazeToolContext} from '../../llm/tools/toolContext.js';
+} from '../core/agent/budgets.js';
+import {storeToolOutput} from '../core/agent/toolOutputStore.js';
+import {changedPathsFromTool} from '../core/agent/toolCapabilities.js';
+import {withSyntheticControl} from '../core/agent/requestAssembly.js';
+import {toolOnlyStepCount} from '../core/agent/turnPolicy.js';
+import {toolsContextFor, type HazeToolContext} from './tools/toolContext.js';
+import {assembleWorkerContext, compatibilityBundle, workerTaskMessage, type WorkerContextBundle} from './workerContext.js';
 import {
   fallbackWorkerRuntime,
   normalizeSubagentInput,
@@ -31,11 +28,12 @@ import {
   type SubagentToolInput,
   type WorkerRuntime,
   type WorkerTermination,
-} from './contracts.js';
-import {COMPATIBILITY_PROFILE, MODE_TOOL_NAMES, type SubagentExecutionProfile} from './executionProfiles.js';
-import {SubagentCoordinator} from './subagentCoordinator.js';
-import {WorkspaceMutationPolicy} from './workspaceMutationPolicy.js';
-import {resolveWorkspacePath, workspaceRelativePath} from '../../utils/path.js';
+} from '../core/subagent/contracts.js';
+import {COMPATIBILITY_PROFILE, type SubagentExecutionProfile} from '../core/subagent/executionProfiles.js';
+import {SubagentCoordinator} from '../core/subagent/subagentCoordinator.js';
+import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
+import {projectContextSection, type PromptSession} from './systemPrompt.js';
+import {resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
 
 const SYNTHESIS_DIRECTIVE = 'You have reached your tool/step budget. Stop calling tools. Return the requested self-contained deliverable now, including evidence, coverage gaps, changed paths, validation, and precise remaining work. A concise partial deliverable is mandatory and better than an empty response.';
 
@@ -240,16 +238,6 @@ export async function runSubagent(
   } finally {
     release?.();
   }
-}
-
-async function compatibilityBundle(task: SubagentTaskCapsule, profile: SubagentExecutionProfile, contextFiles: ContextFile[], allowedTools?: readonly string[], session?: PromptSession): Promise<WorkerContextBundle> {
-  const instructions = contextFiles;
-  const systemPrompt = buildSubagentPrompt(instructions, session, task.mode, profile);
-  const tools: ToolSet = {};
-  for (const name of allowedTools ?? MODE_TOOL_NAMES[task.mode]) if (name in hazeTools) tools[name] = hazeTools[name as keyof typeof hazeTools];
-  const taskTokens = estimateValueTokens(workerTaskMessage(task));
-  const estimatedTokens = estimateValueTokens(systemPrompt) + taskTokens + estimateToolSchemas(tools).reduce((sum, value) => sum + value.tokens, 0);
-  return {instructions, systemPrompt, tools, taskTokens, estimatedTokens, validatedScope: [], loadedPaths: new Set(instructions.map(file => file.path)), loadedSignatures: new Map(instructions.flatMap(file => file.signature ? [[file.path, file.signature] as const] : [])), ...(estimatedTokens > profile.maxInputTokens ? {policyBlock: `Worker input estimate ${estimatedTokens} exceeds profile ${profile.name} limit ${profile.maxInputTokens}.`} : {})};
 }
 
 export function createSubagentTool(options: {

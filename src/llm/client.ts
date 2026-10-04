@@ -4,11 +4,12 @@ import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {catalogLimitsFor} from '../config/modelCatalog.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
-import type {ProviderCapabilities, ProviderRequestOptions, WorkerRuntime} from '../core/subagent/contracts.js';
-import {effectiveRequestedReasoning, isStoredReasoning, reasoningCallSetting, resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
+import type {ProviderCapabilities, ProviderRequestOptions} from '../core/providerContracts.js';
+import type {WorkerRuntime} from '../core/subagent/contracts.js';
+import {effectiveRequestedReasoning, isStoredReasoning, reasoningCallSetting, resolveAttemptReasoning, resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS, FALLBACK_LOCAL_CONTEXT_TOKENS} from '../core/agent/contextBudget.js';
 import {createChatGptCodexFetch} from './openaiCodex.js';
-export type {ProviderCapabilities, ProviderRequestOptions} from '../core/subagent/contracts.js';
+export type {ProviderCapabilities, ProviderRequestOptions} from '../core/providerContracts.js';
 
 export interface ModelRuntimeSelection {
   model: WorkerRuntime['model'];
@@ -92,14 +93,19 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
   const caps = capabilities(selection.provider.name, baseURL, providerKind);
-  // Reasoning resolution order (CLI `--reasoning` docs): run-scoped override →
-  // session per-model override (`/reasoning`, keyed `provider:model`) → global
-  // settings value → built-in default (medium). The stored or session
+  const selector = modelSelector(selection.provider, name);
+  // The full precedence chain lives in one pure resolver
+  // (`resolveAttemptReasoning`): run-scoped override → session per-model map →
+  // global settings → built-in default (medium). The stored or session
   // `provider-default` sentinel sends no parameter at all. The capability gate
   // in resolveReasoningPolicy is unchanged — nothing forces the parameter onto
   // an unsupported protocol.
-  const selector = modelSelector(selection.provider, name);
-  const storedReasoning = reasoningOverride ?? sessionReasoningByModel?.[selector] ?? (isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
+  const storedReasoning = resolveAttemptReasoning({
+    modelSelector: selector,
+    runOverride: reasoningOverride,
+    sessionReasoningByModel,
+    globalSetting: isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined,
+  });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
   const reasoningPolicy = resolveReasoningPolicy({requested: requestedReasoning, capabilities: caps});

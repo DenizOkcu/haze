@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import path from 'node:path';
 import YAML from 'yaml';
 import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter, SkillSource} from './types.js';
-import {assertRealPathInsideRoot} from '../utils/path.js';
+import {confinedResolve} from './confinement.js';
 import {SKILL_MARKDOWN_BYTES} from '../core/limits.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
 import {isProtectedSecretPath} from '../core/safety/secretPaths.js';
@@ -58,7 +58,7 @@ async function loadReference(dir: string, referencePath: string): Promise<Loaded
   // confinement alone does not; a protected name inside the skill directory is
   // refused before any filesystem access. Errors carry path metadata only.
   if (isProtectedSecretPath(absolutePath)) throw new Error(`Skill reference is a protected secret file: ${referencePath}`);
-  const realPath = await assertRealPathInsideRoot(dir, absolutePath, referencePath, 'skill directory');
+  const realPath = await confinedResolve(dir, absolutePath, referencePath, 'skill directory');
   if (isProtectedSecretPath(realPath)) throw new Error(`Skill reference is a protected secret file: ${referencePath}`);
   const stat = await fs.stat(realPath);
   if (!stat.isFile()) throw new Error(`Skill reference is not a file: ${referencePath}`);
@@ -70,7 +70,7 @@ async function loadReference(dir: string, referencePath: string): Promise<Loaded
 export async function loadSkill(dir: string, source: SkillSource = 'global'): Promise<LoadedSkill | null> {
   const skillPath = path.join(dir, 'SKILL.md');
   if (!(await fs.pathExists(skillPath))) return null;
-  const realSkillPath = await assertRealPathInsideRoot(dir, skillPath, 'SKILL.md', 'skill directory');
+  const realSkillPath = await confinedResolve(dir, skillPath, 'SKILL.md', 'skill directory');
   if (isProtectedSecretPath(realSkillPath)) throw new Error('SKILL.md is a protected secret file');
   const stat = await fs.stat(realSkillPath);
   if (!stat.isFile()) throw new Error('SKILL.md is not a file');

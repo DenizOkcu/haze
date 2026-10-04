@@ -9,7 +9,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, activeProvider} from '../../config/providers.js';
+import {activeModel} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
@@ -21,9 +21,6 @@ import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
 import {checkpointFromGoalFrontier} from './streaming/goalCheckpoint.js';
 import {type Message} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
-import {imageAttachmentLine} from './formatters.js';
-import {imageCapabilityError, IMAGE_ONLY_PROMPT_TEXT, resolveImageAttachments} from '../../core/attachments/imageAttachments.js';
-import {resolveReadBlessings} from '../../core/attachments/readBlessings.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
@@ -46,6 +43,7 @@ import {compactHomePath, statusBarMetrics} from '../chat/chatMetrics.js';
 import {formatTokenCount} from '../../utils/format.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
+import {contextFileSignatureMap, isPausedGoalRecoveryCommand, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
 import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
@@ -98,14 +96,11 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const settingsRef = useRef<HazeSettings>({});
   const defaultSelectionRef = useRef<{provider?: string; model?: string}>({});
   function setSettings(next: HazeSettings, patch?: HazeSettings) {
+    // The ref records the global default from `next` (what updateSettings
+    // returned) before the patch merge; unrelated settings writes must not
+    // replace a resumed session's model (merge policy in chat/userInput.ts).
     defaultSelectionRef.current = {provider: next.provider, model: next.model};
-    // Unrelated settings writes must not replace a resumed session's model
-    // with the global default returned by updateSettings.
-    const selection = patch ? {
-      provider: 'provider' in patch ? next.provider : settingsRef.current.provider,
-      model: 'model' in patch ? next.model : settingsRef.current.model,
-    } : defaultSelectionRef.current;
-    settingsRef.current = {...next, ...selection};
+    settingsRef.current = patch ? mergeSettingsSelection(next, settingsRef.current, patch) : next;
     setSettingsRaw(settingsRef.current);
     if (patch && ('provider' in patch || 'model' in patch)) {
       const selected = currentModelSelection();
@@ -256,7 +251,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         setSettingsError(settingsError);
         setBranchName(branch);
         setContextFiles(files);
-        contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+        contextFileSignaturesRef.current = contextFileSignatureMap(files);
       },
       initializeSession: () => sessionLifecycle.initializeSession(),
       refreshSkills,
@@ -388,6 +383,18 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     if (message) setMessages(m => [...m, {role: 'system', text: message}]);
   }
 
+  // Session per-model reasoning overrides live on the stable PromptSession
+  // object; the counter only forces a re-render so the status bar updates.
+  function setSessionReasoningOverride(modelSelector: string, setting: import('../../core/agent/reasoningPolicy.js').StoredReasoningSetting | undefined) {
+    const session = currentPromptSession();
+    if (setting === undefined) {
+      if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
+    } else {
+      session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
+    }
+    setReasoningOverrideCounter(count => count + 1);
+  }
+
   // Wizard/picker submit dispatch lives in one table-driven module with a
   // shared settings-patch applier (CR-006). Rebuilt every render so handlers
   // see current state without new React state.
@@ -403,15 +410,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     sessionReasoning: {
       modelSelector: () => { const selection = activeModel(settings); return selection ? `${selection.provider.name}:${selection.model}` : undefined; },
       get: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
-      set: (modelSelector, setting) => {
-        const session = currentPromptSession();
-        if (setting === undefined) {
-          if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
-        } else {
-          session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
-        }
-        setReasoningOverrideCounter(count => count + 1);
-      },
+      set: setSessionReasoningOverride,
     },
   });
 
@@ -440,7 +439,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     // recovery/configuration commands (compact, model, provider, settings,
     // resume…) intentionally keep it — the pause notice tells the user to run
     // exactly those and then press R (SU-04).
-    const isRecoveryCommand = mode !== 'chat' || /^(?:\/compact|\/model|\/provider|\/settings|\/themes|\/resume|\/sessions)\b/.test(value.trim());
+    const isRecoveryCommand = isPausedGoalRecoveryCommand(mode, value);
     if (pausedResume && !isRecoveryCommand) setPausedResume(undefined);
 
     if (await wizard.dispatch(mode, value)) return;
@@ -483,7 +482,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
         setContextFiles(files);
-        contextFileSignaturesRef.current = new Map(files.flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
+        contextFileSignaturesRef.current = contextFileSignatureMap(files);
         return files;
       },
       updateSettings: async patch => {
@@ -492,15 +491,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         return settingsRef.current;
       },
       getSessionReasoning: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
-      setSessionReasoning: (modelSelector, setting) => {
-        const session = currentPromptSession();
-        if (setting === undefined) {
-          if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
-        } else {
-          session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
-        }
-        setReasoningOverrideCounter(count => count + 1);
-      },
+      setSessionReasoning: setSessionReasoningOverride,
       getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
     };
     let result;
@@ -524,34 +515,16 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     await doAgentTurn(prepared.value, prepared.displayValue, prepared.options);
   }
 
-  // F03: resolve @image mentions in a prompt the user typed into attachments and
-  // gate them on the active provider's explicit capability before any model call.
-  // Applied only to genuine user input (direct chat and queued follow-ups), never
-  // to synthetic control prompts (/init, /fleet, skill invocations). Resolution
-  // errors and capability rejections surface an actionable system message and
-  // return undefined instead of starting a turn.
+  // F03: attachment gating and read blessings live in the pure helper
+  // (chat/userInput.ts); this wrapper only surfaces its errors as system
+  // messages. Applied only to genuine user input, never synthetic control prompts.
   async function prepareUserInput(value: string): Promise<{value: string; displayValue?: string; options: import('./streaming.js').TurnExecutionOptions} | undefined> {
-    let resolved;
-    try {
-      resolved = await resolveImageAttachments(value);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessages(m => [...m, {role: 'system', text}]);
+    const prepared = await prepareUserInputPolicy(value, settings);
+    if (prepared?.error) {
+      setMessages(m => [...m, {role: 'system', text: prepared.error!}]);
       return undefined;
     }
-    const blessed = await resolveReadBlessings(resolved.text);
-    if (resolved.attachments.length === 0 && blessed.blessedPaths.length === 0) return {value, options: {}};
-    const gateError = imageCapabilityError(activeProvider(settings));
-    if (resolved.attachments.length > 0 && gateError) {
-      setMessages(m => [...m, {role: 'system', text: gateError}]);
-      return undefined;
-    }
-    const displayValue = [resolved.text, ...resolved.attachments.map(imageAttachmentLine)].filter(Boolean).join('\n');
-    return {
-      value: resolved.text || IMAGE_ONLY_PROMPT_TEXT,
-      displayValue,
-      options: {attachments: resolved.attachments, blessedPaths: blessed.blessedPaths},
-    };
+    return prepared;
   }
 
   async function doAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
@@ -575,26 +548,18 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }
 
   /**
-   * Resume a paused turn against the preserved conversation (no re-added user
-   * message). An idle-stall resume continues the same logical turn's bounded
-   * retry pool; an incomplete-goal resume starts a fresh logical turn (its
-   * budget was exhausted) nudged to pick up the remaining concrete work.
-   */
-  /**
    * Explicitly resume a genuinely paused goal (automatic continuation already
    * ran): an idle-stall resume continues the bounded retry pool; an
-   * incomplete-goal resume restarts the supervisor from the stored checkpoint.
-   * Both ride the preserved conversation — no completed mutations are replayed.
+   * incomplete-goal resume restarts the supervisor from the stored checkpoint
+   * (kind selection in chat/userInput.ts). Both ride the preserved
+   * conversation — no completed mutations are replayed.
    */
   async function resumePausedTask() {
     const resume = pausedResume;
     if (!resume || busy) return;
     setPausedResume(undefined);
     setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished goal; completed work is preserved in the conversation.'}]);
-    const resumeFrom = resume.kind === 'incomplete-goal' && resume.checkpoint
-      ? {kind: 'incomplete-goal' as const, checkpoint: resume.checkpoint}
-      : {kind: 'model-stream-idle' as const, retryAttempt: resume.retryAttempt};
-    await runSingleAgentTurn(resume.request, undefined, {}, resumeFrom);
+    await runSingleAgentTurn(resume.request, undefined, {}, resumeKindFor(resume) as Parameters<typeof runSingleAgentTurn>[3]);
   }
 
   /**

@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {generateText, isStepCount, type LanguageModel} from 'ai';
 import type {LanguageModelV3, LanguageModelV3GenerateResult, LanguageModelV3StreamPart} from '@ai-sdk/provider';
-import {createSubagentTool} from '../../src/core/subagent/subagentRunner.js';
+import {createSubagentTool} from '../../src/llm/subagentRunner.js';
 
 const usage: LanguageModelV3GenerateResult['usage'] = {
   inputTokens: {total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0},
