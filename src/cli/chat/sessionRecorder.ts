@@ -1,5 +1,5 @@
 import type {ModelMessage} from 'ai';
-import {appendSessionEntry, type HazeSession, type SessionEntry} from '../../core/session/sessionStore.js';
+import {appendSessionEntry, type HazeSession, type SessionEntry, type SessionModelSelection} from '../../core/session/sessionStore.js';
 import type {GoalLedgerAppend} from '../commands/streaming/goalCheckpoint.js';
 import type {AgentEvent} from '../../core/agent/events.js';
 import type {WorkState} from '../../core/agent/workState.js';
@@ -66,7 +66,14 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
     writeWorkState(snapshot);
   };
 
+  let lastModelSelection: {session: HazeSession; provider: string; model: string} | undefined;
   return {
+    recordModelSelection(selection: SessionModelSelection) {
+      const session = getSession();
+      if (!session || (lastModelSelection?.session === session && lastModelSelection.provider === selection.provider && lastModelSelection.model === selection.model)) return;
+      lastModelSelection = {session, ...selection};
+      appendEntry({type: 'model_selection', at: new Date().toISOString(), selection});
+    },
     recordUiMessage(message: Message) {
       appendEntry({type: 'ui_message', at: new Date().toISOString(), role: message.role, text: message.text});
     },

@@ -94,7 +94,28 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     if (stoppingRef.current) return;
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
   };
-  const [settings, setSettings] = useState<HazeSettings>({});
+  const [settings, setSettingsRaw] = useState<HazeSettings>({});
+  const settingsRef = useRef<HazeSettings>({});
+  const defaultSelectionRef = useRef<{provider?: string; model?: string}>({});
+  function setSettings(next: HazeSettings, patch?: HazeSettings) {
+    defaultSelectionRef.current = {provider: next.provider, model: next.model};
+    // Unrelated settings writes must not replace a resumed session's model
+    // with the global default returned by updateSettings.
+    const selection = patch ? {
+      provider: 'provider' in patch ? next.provider : settingsRef.current.provider,
+      model: 'model' in patch ? next.model : settingsRef.current.model,
+    } : defaultSelectionRef.current;
+    settingsRef.current = {...next, ...selection};
+    setSettingsRaw(settingsRef.current);
+    if (patch && ('provider' in patch || 'model' in patch)) {
+      const selected = currentModelSelection();
+      if (selected) sessionRecorderRef.current?.recordModelSelection(selected);
+    }
+  }
+  function currentModelSelection() {
+    const {provider, model} = settingsRef.current;
+    return provider && model ? {provider, model} : undefined;
+  }
   const [settingsError, setSettingsError] = useState<string | undefined>();
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
@@ -303,6 +324,11 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     noSession,
     debug,
     contextFiles: () => contextFiles,
+    modelSelection: currentModelSelection,
+    onModelSelection: selection => {
+      settingsRef.current = {...settingsRef.current, ...(selection ?? defaultSelectionRef.current)};
+      setSettingsRaw(settingsRef.current);
+    },
     sessionRef,
     sessionRecorder: () => sessionRecorderRef.current,
     sessionStartRef,
@@ -395,7 +421,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     if (settingsError) {
       try {
         const repaired = await readSettings();
-        setSettings(repaired);
+        setSettings(repaired, {});
         setSettingsError(undefined);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -462,8 +488,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       },
       updateSettings: async patch => {
         const next = await updateSettings(patch);
-        setSettings(next);
-        return next;
+        setSettings(next, patch);
+        return settingsRef.current;
       },
       getSessionReasoning: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
       setSessionReasoning: (modelSelector, setting) => {
@@ -587,6 +613,12 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint}) {
     if (stoppingRef.current) return;
     const sessionRecorder = sessionRecorderRef.current!;
+    const selection = currentModelSelection();
+    if (!selection) {
+      setMessages(m => [...m, {role: 'system', text: 'No model selected for this session. Run /model to choose one.'}]);
+      return;
+    }
+    sessionRecorder.recordModelSelection(selection);
 
     // The logical-goal supervisor owns this submission: recoverable-incomplete
     // physical turns (including step/tool budget boundaries) continue
@@ -597,6 +629,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       displayValue,
       contextFiles,
       session: currentPromptSession(),
+      modelOverride: `${selection.provider}:${selection.model}`,
       escalationModel: settings.escalationModel,
       callbacks: {
       addMessage: msg => {
@@ -676,10 +709,14 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const {staticItems: staticTranscriptItems, streamingItems} = partitionDisplayMessages([...visible, ...activeLiveMessages]);
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
-  const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
+  const selectedModel = currentModelSelection();
+  const activeModelName = selectedModel ? `${selectedModel.provider}:${selectedModel.model}${activeSelection ? '' : ' (unavailable)'}` : 'unconfigured';
   const activeSelector = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : undefined;
+  // Synchronize session identity before rendering either the status or picker;
+  // a new/resumed/forked session must not display the previous session's map.
+  const sessionReasoning = currentPromptSession().reasoningByModel;
   const effectiveReasoning = activeSelector
-    ? resolveReasoningChoice(promptSessionRef.current.value.reasoningByModel?.[activeSelector], isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined)
+    ? resolveReasoningChoice(sessionReasoning?.[activeSelector], isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined)
     : undefined;
   // When a session override changes, the suffix below must re-render: bump a
   // cheap counter from setSessionReasoning instead of threading per-turn state.
@@ -709,7 +746,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, sessionReasoning: promptSessionRef.current.value.reasoningByModel});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, sessionReasoning});
   const staticItems: ChatStaticItem[] = [
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,

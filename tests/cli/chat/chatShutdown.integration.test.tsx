@@ -18,18 +18,19 @@ vi.mock('ink', async importOriginal => {
     return app;
   }};
 });
-vi.mock('../../../src/config/settings.js', () => ({readSettings: async () => ({})}));
+const settings = {provider: 'fixture', model: 'fixture-model', providers: [{name: 'fixture', url: 'http://localhost/v1', models: ['fixture-model']}]};
+vi.mock('../../../src/config/settings.js', () => ({readSettings: async () => settings}));
 vi.mock('../../../src/config/inputHistory.js', () => ({readInputHistory: async () => [], addInputHistoryItem: async () => []}));
 vi.mock('../../../src/core/tasks/taskStorage.js', () => ({loadTasks: async () => [], clearTasks: owners.clear}));
 vi.mock('../../../src/core/process/backgroundRegistry.js', () => ({backgroundProcessCount: () => 0, subscribeBackgroundProcesses: () => () => {}, teardownBackgroundProcesses: owners.cleanup}));
 vi.mock('../../../src/cli/chat/startupSequence.js', () => ({
   currentBranchName: async () => undefined,
   runStartupSequence: async (options: Parameters<typeof runStartupSequence>[0]) => {
-    options.onLoaded({settings: {}, contextFiles: [], branchName: undefined, settingsError: undefined});
+    options.onLoaded({settings, contextFiles: [], branchName: undefined, settingsError: undefined});
   },
 }));
 vi.mock('../../../src/cli/chat/sessionRecorder.js', () => ({createSessionRecorder: () => ({
-  recordUiMessage: owners.record, recordConversation: owners.record, recordEvent: owners.record,
+  recordModelSelection: owners.record, recordUiMessage: owners.record, recordConversation: owners.record, recordEvent: owners.record,
   recordWorkState: owners.record, recordGoalEntry: owners.record, flush: owners.flush,
 })}));
 vi.mock('../../../src/cli/commands/streaming/goalSupervisor.js', () => ({runAgentGoal: owners.goal}));

@@ -43,7 +43,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     showMessage,
     applySettings: async patch => {
       const next = await updateSettings(patch);
-      setSettings(next);
+      setSettings(next, patch);
       return next;
     },
     setSelectedSessionId: id => deps.updateWizard({type: 'set', key: 'selectedSessionId', value: id}),

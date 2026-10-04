@@ -44,6 +44,28 @@ describe('sessionStore', () => {
     expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'clear', 'conversation_snapshot', 'ui_message']);
   });
 
+  it('remembers the latest model selection and carries it into a fork', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'model_selection', at: '1', selection: {provider: 'first', model: 'shared'}});
+    expect(await fs.pathExists(session.file)).toBe(false);
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: 'hello'}]});
+    await appendSessionEntry(session, {type: 'model_selection', at: '3', selection: {provider: 'second', model: 'shared'}});
+    expect((await restoreSessionState(session)).modelSelection).toEqual({provider: 'second', model: 'shared'});
+    const fork = await forkSession(session, {sessionsDir});
+    expect((await restoreSessionState(fork.session)).modelSelection).toEqual({provider: 'second', model: 'shared'});
+    expect((await restoreSessionState(fork.session)).parseErrors).toEqual([]);
+  });
+
+  it('leaves legacy model selection unset and reports malformed selections', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'hello'});
+    expect((await restoreSessionState(session)).modelSelection).toBeUndefined();
+    await fs.appendFile(session.file, JSON.stringify({type: 'model_selection', at: '2', selection: {provider: '', model: 'model'}}) + '\n');
+    const restored = await restoreSessionState(session);
+    expect(restored.modelSelection).toBeUndefined();
+    expect(restored.parseErrors).toEqual([expect.stringContaining('invalid model_selection')]);
+  });
+
   it('records safe build provenance in the session header so failures tie to the executing build', async () => {
     const session = await createSession({cwd, sessionsDir, hazeVersion: '0.10.1', build: {commit: 'abc1230000000000000000000000000000000000', builtAt: '2026-08-13T10:00:00.000Z'}});
     await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'hello'});
@@ -601,6 +623,7 @@ describe('goal ledger (P1: durable frontier)', () => {
     const restored = await restoreSessionState(session);
     expect(restored.goalFrontier?.cycle).toBe(1);
   });
+
 
   it('clears the frontier on goal_end and lets newer goals supersede stale ones', async () => {
     const session = await createSession({cwd, sessionsDir});

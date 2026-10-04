@@ -20,7 +20,7 @@ export interface WizardDispatchDeps {
   wizard: WizardUiState;
   updateWizard: (action: WizardUiAction) => void;
   setMode: (mode: Mode) => void;
-  setSettings: (next: HazeSettings) => void;
+  setSettings: (next: HazeSettings, patch?: HazeSettings) => void;
   showMessage: (message: string | undefined) => void;
   resumeSessionById?: (id: string) => Promise<boolean>;
   forkSessionById?: (id: string) => Promise<boolean>;

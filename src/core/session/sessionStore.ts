@@ -11,11 +11,17 @@ import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFil
 import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 
+export interface SessionModelSelection {
+  provider: string;
+  model: string;
+}
+
 export type SessionEntry =
   | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string; forkedFrom?: string; build?: {commit?: string; builtAt?: string}}
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
   | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
+  | {type: 'model_selection'; at: string; selection: SessionModelSelection}
   | {type: 'event'; at: string; name: string; text?: string}
   /** First-class compaction audit entry (Pillar 1.7): conversation snapshots remain the restore source of truth; this records what was compacted, when, and how. */
   | {type: 'compact'; at: string; method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}
@@ -314,6 +320,11 @@ function parseSessionEntry(value: unknown): SessionEntry {
         && typeof message.role === 'string'
         && MODEL_MESSAGE_ROLES.has(message.role))) return invalid('conversation_snapshot contains an invalid message role');
       return value as SessionEntry;
+    case 'model_selection':
+      if (typeof value.at !== 'string' || !isRecord(value.selection)
+        || typeof value.selection.provider !== 'string' || !value.selection.provider.trim()
+        || typeof value.selection.model !== 'string' || !value.selection.model.trim()) return invalid('invalid model_selection');
+      return value as SessionEntry;
     case 'work_state_snapshot':
       if (typeof value.at !== 'string' || !isRecord(value.state)) return invalid('work_state_snapshot state must be an object');
       return value as SessionEntry;
@@ -429,6 +440,7 @@ export interface RestoreConversationResult {
 
 export interface RestoreSessionStateResult {
   messages: ModelMessage[];
+  modelSelection?: SessionModelSelection;
   workState: WorkState | undefined;
   parseErrors: string[];
   /** Unterminated goal frontier from the durable ledger, if any (P1 resume path). */
@@ -443,6 +455,7 @@ export interface RestoreSessionStateResult {
 export async function restoreSessionState(session: HazeSession): Promise<RestoreSessionStateResult> {
   let messages: ModelMessage[] = [];
   let workState: WorkState | undefined;
+  let modelSelection: SessionModelSelection | undefined;
   const tracker = new GoalLedgerFrontierTracker();
   const parseErrors = await scanSessionEntries(session, entry => {
     // Legacy slim markers (pre-envelope-fix) are re-wrapped so the restored
@@ -455,10 +468,11 @@ export async function restoreSessionState(session: HazeSession): Promise<Restore
       messages = [];
       workState = undefined;
     }
+    if (entry.type === 'model_selection') modelSelection = entry.selection;
     if (entry.type === 'work_state_snapshot') workState = entry.state;
     tracker.observe(entry);
   });
-  return {messages, workState, parseErrors, goalFrontier: tracker.result()};
+  return {messages, workState, parseErrors, goalFrontier: tracker.result(), ...(modelSelection ? {modelSelection} : {})};
 }
 
 export async function restoreConversation(session: HazeSession): Promise<RestoreConversationResult> {
@@ -592,6 +606,7 @@ export async function forkSession(source: HazeSession, options: {hazeVersion?: s
   if (restored.messages.length === 0) throw new Error(`Session ${source.id} has no conversation snapshot to fork.`);
   const session = await createSession({cwd: source.cwd, sessionsDir: options.sessionsDir, hazeVersion: options.hazeVersion, forkedFrom: source.id, ...(options.build ? {build: options.build} : {})});
   const at = new Date().toISOString();
+  if (restored.modelSelection) await appendSessionEntry(session, {type: 'model_selection', at, selection: restored.modelSelection});
   await appendSessionEntry(session, {type: 'conversation_snapshot', at, messages: restored.messages});
   if (restored.workState) await appendSessionEntry(session, {type: 'work_state_snapshot', at, state: restored.workState});
   return {session, parseErrors: restored.parseErrors};

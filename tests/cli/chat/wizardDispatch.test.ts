@@ -324,7 +324,7 @@ describe('wizardDispatch themes', () => {
 
     await wizard.dispatch('themes', 'robbyrussell');
     expect(mocks.updateSettings).toHaveBeenCalledWith({theme: 'robbyrussell'});
-    expect(deps.setSettings).toHaveBeenCalledWith({theme: 'robbyrussell'});
+    expect(deps.setSettings).toHaveBeenCalledWith({theme: 'robbyrussell'}, {theme: 'robbyrussell'});
     expect(deps.setMode).toHaveBeenLastCalledWith('chat');
     expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Theme set to robbyrussell'));
   });

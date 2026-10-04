@@ -86,6 +86,8 @@ On first run, create or choose a provider, then choose your first model:
 /model local:llama3.1
 ```
 
+Sessions remember their provider and model across resume, continue, and fork, even if the global default changes. `/model` explicitly changes the current session's selection and the default for new sessions. Headless resume uses the saved selection unless `--model` overrides it for that run. If the saved model is no longer configured, choose or re-add it rather than silently switching models. Older sessions without model metadata adopt the current default when resumed.
+
 ### MCP servers
 
 Use `/mcp` to connect [Model Context Protocol](https://modelcontextprotocol.io) servers and give the agent more tools. The interactive picker works like `/provider`: enable, disable, or remove a server; set its API key; or add one from a preset or custom configuration. The built-in Context7 preset provides current library documentation.

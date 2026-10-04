@@ -179,8 +179,7 @@ export function parseHeadlessReasoning(raw: string | undefined): {setting: Store
   return parsed.ok ? {setting: parsed.setting} : {error: parsed.error};
 }
 
-async function resolveModelOrError(modelOverride?: string): Promise<string | undefined> {
-  const settings = await readSettings();
+function resolveModelOrError(settings: Awaited<ReturnType<typeof readSettings>>, modelOverride?: string): string | undefined {
   const override = modelOverride?.trim();
   if (override) {
     const resolved = resolveModelSelector(settings, override);
@@ -216,12 +215,22 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     process.stderr.write(`${reasoning.error}\n`);
     return 2;
   }
-  const modelError = await resolveModelOrError(options.modelOverride);
+  const restored = resumed ? await restoreSessionState(resumed) : undefined;
+  const savedModel = restored?.modelSelection;
+  const runSettings = await readSettings();
+  const defaultModel = activeModel(runSettings);
+  const requestedModel = options.modelOverride?.trim()
+    || (savedModel ? `${savedModel.provider}:${savedModel.model}` : undefined)
+    || (defaultModel ? modelSelector(defaultModel.provider, defaultModel.model) : undefined);
+  const modelError = resolveModelOrError(runSettings, requestedModel);
   if (modelError) {
     process.stderr.write(`${modelError}\n`);
     return 1;
   }
-  const runSettings = await readSettings();
+  // Resolve bare --model selectors to a provider-qualified selection once,
+  // so retries cannot follow changes to the global default.
+  const resolvedModel = requestedModel ? resolveModelSelector(runSettings, requestedModel) : undefined;
+  const sessionModel = resolvedModel?.status === 'found' ? modelSelector(resolvedModel.provider, resolvedModel.model) : requestedModel;
 
   // stderr keeps stdout clean for --output json/stream-json consumers.
   const debugLog = (line: string) => {
@@ -230,12 +239,8 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
 
   const contextFiles: ContextFile[] = await readContextFiles(process.cwd());
   const session: PromptSession = {start: new Date(), cwd: process.cwd()};
-  let conversation: ModelMessage[] = [];
-  if (resumed) {
-    const restored = await restoreSessionState(resumed);
-    conversation = restored.messages;
-    for (const error of restored.parseErrors) process.stderr.write(`Session parse error: ${error}\n`);
-  }
+  let conversation: ModelMessage[] = restored?.messages ?? [];
+  for (const error of restored?.parseErrors ?? []) process.stderr.write(`Session parse error: ${error}\n`);
   // Assistant text is delivered in two stages by runAgentTurn: an initial streaming
   // `addMessage`, then a finalizing `updateMessage` with the complete text. We key
   // segments by id and patch them on update so finalized (and multi-segment) text is captured.
@@ -330,7 +335,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       contextFiles,
       callbacks,
       session,
-      modelOverride: options.modelOverride,
+      modelOverride: sessionModel,
       escalationModel: runSettings.escalationModel,
       ...(reasoning.setting !== undefined ? {reasoningOverride: reasoning.setting} : {}),
       ...(turnDeadlineMs != null ? {goalDeadlineMs: Math.max(1, deadlineAt! - Date.now())} : {}),

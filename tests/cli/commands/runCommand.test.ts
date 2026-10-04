@@ -11,7 +11,7 @@ function fullUsage(partial: {inputTokens?: number; outputTokens?: number; cacheR
   };
 }
 
-async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; evidence?: unknown; goal?: {cycles?: number; stopReason?: string}; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]}) {
+async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void | Promise<void>; status?: 'complete' | 'aborted' | 'failed'; evidence?: unknown; goal?: {cycles?: number; stopReason?: string}; settings?: unknown; sessionFound?: boolean; sessionMessages?: unknown[]; sessionParseErrors?: string[]; sessionModelSelection?: {provider: string; model: string}}) {
   const status = opts.status ?? 'complete';
   // runCommand drives the logical-goal supervisor; mock it with the same knobs
   // the old per-turn mock had (status/evidence/callbacks) plus goal metadata.
@@ -35,7 +35,7 @@ async function loadRunCommand(opts: {runAgentTurnImpl?: (callbacks: any) => void
   vi.doMock('../../../src/core/log/llmLog.js', () => ({createLog: async () => ({file: '/tmp/stub-llm.jsonl'}), endLog: async () => undefined}));
   vi.doMock('../../../src/core/session/sessionStore.js', () => ({
     findSession: async (id: string) => opts.sessionFound === false ? undefined : ({id, file: `/tmp/${id}.jsonl`, cwd: process.cwd()}),
-    restoreSessionState: async () => ({messages: opts.sessionMessages ?? [], workState: undefined, parseErrors: opts.sessionParseErrors ?? []}),
+    restoreSessionState: async () => ({messages: opts.sessionMessages ?? [], workState: undefined, parseErrors: opts.sessionParseErrors ?? [], modelSelection: opts.sessionModelSelection}),
   }));
   vi.resetModules();
   const mod = await import('../../../src/cli/commands/runCommand.js');
@@ -63,6 +63,25 @@ function captureStderr() {
 describe('runHeadless: output', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each([undefined, 'new-model'])('resumes the saved model unless --model is explicit (%s)', async override => {
+    captureStdout();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({
+      settings: {provider: 'fixture', model: 'new-model', providers: [{name: 'fixture', url: 'http://localhost/v1', models: ['old-model', 'new-model']}]},
+      sessionModelSelection: {provider: 'fixture', model: 'old-model'},
+    });
+    expect(await runHeadless({prompt: 'follow-up', output: 'text', resumeSessionId: 'saved', modelOverride: override})).toBe(0);
+    expect(runAgentGoal.mock.calls[0]?.[0]).toMatchObject({modelOverride: `fixture:${override ?? 'old-model'}`});
+  });
+
+  it('does not fall back to the global model if the saved model is unavailable', async () => {
+    captureStdout();
+    const errors = captureStderr();
+    const {runHeadless, runAgentGoal} = await loadRunCommand({sessionModelSelection: {provider: 'removed', model: 'old-model'}});
+    expect(await runHeadless({prompt: 'follow-up', output: 'text', resumeSessionId: 'saved'})).toBe(1);
+    expect(runAgentGoal).not.toHaveBeenCalled();
+    expect(errors.join('')).toContain('No configured model named removed:old-model');
   });
 
   it('joins finalized assistant segments, patching streamed text via updateMessage', async () => {

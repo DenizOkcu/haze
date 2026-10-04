@@ -7,7 +7,7 @@ import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js'
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS} from '../../core/agent/budgets.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {modelWithConfig} from '../../llm/client.js';
-import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession} from '../../core/session/sessionStore.js';
+import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession, type SessionModelSelection} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message} from '../commands/streaming.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
@@ -34,6 +34,8 @@ export interface SessionLifecycleDeps {
   noSession: boolean;
   debug: boolean;
   contextFiles: () => ContextFile[];
+  modelSelection?: () => SessionModelSelection | undefined;
+  onModelSelection?: (selection: SessionModelSelection | undefined) => void;
   sessionRef: {current: HazeSession | undefined};
   sessionRecorder: () => SessionRecorder | undefined;
   sessionStartRef: {current: Date};
@@ -84,12 +86,15 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     deps.contextFileSignaturesRef.current = new Map(deps.contextFiles().flatMap(file => file.signature ? [[file.path, file.signature] as const] : []));
     deps.workStateRef.current = undefined;
     deps.sessionStartRef.current = new Date();
+    deps.onModelSelection?.(undefined);
     if (deps.noSession) {
       deps.sessionRef.current = undefined;
       return;
     }
     const session = await createSession({hazeVersion: deps.version, ...(deps.build ? {build: deps.build} : {})});
     deps.sessionRef.current = session;
+    const selection = deps.modelSelection?.();
+    if (selection) deps.sessionRecorder()?.recordModelSelection(selection);
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
     await startNewLog();
     const status = `${message}\nSession: ${session.file}`;
@@ -103,8 +108,13 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
   }
 
   async function resumeSession(session: HazeSession, replaceTranscript: boolean) {
-    const {messages: conversation, workState, parseErrors, goalFrontier} = await restoreSessionState(session);
+    const {messages: conversation, workState, parseErrors, goalFrontier, modelSelection} = await restoreSessionState(session);
     deps.sessionRef.current = session;
+    deps.onModelSelection?.(modelSelection);
+    if (!modelSelection) {
+      const selection = deps.modelSelection?.();
+      if (selection) deps.sessionRecorder()?.recordModelSelection(selection);
+    }
     deps.conversationRef.current = conversation;
     deps.clearLiveMessages();
     const restoredMessages = displayMessagesFromConversation(conversation);
@@ -253,7 +263,8 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       // overwritten — the stale compaction is reported and discarded instead.
       const sessionAtStart = deps.sessionRef.current;
       try {
-        const runtime = await modelWithConfig();
+        const selection = deps.modelSelection?.();
+        const runtime = await modelWithConfig(selection ? {modelSelector: `${selection.provider}:${selection.model}`} : undefined);
         if (!runtime?.model) throw new Error('no model provider configured');
         const summarization = await generateText({
           model: runtime.model,
