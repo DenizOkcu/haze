@@ -1,6 +1,6 @@
 import React from 'react';
 import {Box, Text} from 'ink';
-import Spinner from 'ink-spinner';
+import {ActivitySpinner} from '../../ui/components/NativeIndicators.js';
 import type {Message} from '../commands/streaming.js';
 import type {ToolDisplayDiff, ToolDisplayDiffLine} from '../commands/streaming/toolGroupRenderer.js';
 import {formatElapsedTime, formatElapsedTimeWhole} from '../../utils/format.js';
@@ -118,9 +118,11 @@ const TOOL_ROW_PATTERN = /^(\s*)([✓✗…])\s+(\S+)(.*)$/;
  * settings, see liveRegion.ts) and continuation rows are padded to align
  * under the tool name instead of dropping back to the left edge.
  */
-function toolGroupLineRows(line: string, width: number): string[] {
+function toolGroupLineRows(line: string, width: number, spinner = false): string[] {
   const match = TOOL_ROW_PATTERN.exec(line);
-  if (!match) return wrapLine(line, width);
+  if (!match) return spinner && width > 2
+    ? wrapLine(line, width - 2).map(row => `  ${row}`)
+    : wrapLine(line, width);
   const [, indent, icon, toolName, rest] = match;
   const hang = indent.length + 2; // icon + separating space
   const rows = wrapLine(`${toolName}${rest}`, Math.max(1, width - hang));
@@ -133,13 +135,13 @@ function toolGroupLineRows(line: string, width: number): string[] {
  * top and whole diff previews from the bottom, with one indicator row each.
  * The finalized group still enters the static transcript verbatim.
  */
-function clampToolDisplay({text, width, toolDiffs, maxVisibleLines}: {text: string; width: number; toolDiffs: ToolDisplayDiff[] | undefined; maxVisibleLines: number | undefined}): {lines: string[]; hiddenTextRowCount: number; visibleDiffs: ToolDisplayDiff[]; hiddenDiffCount: number} {
+function clampToolDisplay({text, width, toolDiffs, maxVisibleLines, streaming}: {text: string; width: number; toolDiffs: ToolDisplayDiff[] | undefined; maxVisibleLines: number | undefined; streaming?: boolean}): {lines: string[]; hiddenTextRowCount: number; visibleDiffs: ToolDisplayDiff[]; hiddenDiffCount: number} {
   const allLines = text.split('\n');
   const allDiffs = toolDiffs ?? [];
   if (maxVisibleLines == null) return {lines: allLines, hiddenTextRowCount: 0, visibleDiffs: allDiffs, hiddenDiffCount: 0};
   // Row counts must mirror toolGroupLineRows so the budget matches what is
   // actually rendered (icon rows consume one extra hang indent column).
-  const rows = allLines.map(line => toolGroupLineRows(line, width).length);
+  const rows = allLines.map((line, index) => toolGroupLineRows(line, width, streaming && index === 0).length);
   const total = rows.reduce((sum, count) => sum + count, 0);
   let lines = allLines;
   let hiddenTextRowCount = 0;
@@ -172,7 +174,7 @@ function clampToolDisplay({text, width, toolDiffs, maxVisibleLines}: {text: stri
 }
 
 function ToolMessageText({text, streaming, width, toolDiffs, maxVisibleLines}: {text: string; streaming?: boolean; width: number; toolDiffs?: ToolDisplayDiff[]; maxVisibleLines?: number}) {
-  const clamped = clampToolDisplay({text, width, toolDiffs, maxVisibleLines});
+  const clamped = clampToolDisplay({text, width, toolDiffs, maxVisibleLines, streaming});
   return <Box flexDirection="column">
     {clamped.hiddenTextRowCount > 0 ? <Text color={theme.muted}>{`⋯ +${clamped.hiddenTextRowCount} line${clamped.hiddenTextRowCount === 1 ? '' : 's'} above`}</Text> : null}
     {clamped.lines.flatMap((line, index) => {
@@ -180,9 +182,13 @@ function ToolMessageText({text, streaming, width, toolDiffs, maxVisibleLines}: {
       if (!match) {
         // Summary header / caption rows: plain muted rows (spinner on the
         // first row while streaming).
-        return toolGroupLineRows(line, width).map((row, rowIndex) => <Text key={`${index}-${rowIndex}`} color={theme.muted}>
-          {index === 0 && rowIndex === 0 && streaming ? <><Spinner type="dots" /> </> : null}{row}
-        </Text>);
+        const spinner = !!streaming && index === 0 && clamped.hiddenTextRowCount === 0 && width > 2;
+        return toolGroupLineRows(line, width, spinner).map((row, rowIndex) => spinner && rowIndex === 0
+          ? <Box key={`${index}-${rowIndex}`} width={width} overflow="hidden">
+              <ActivitySpinner color={theme.muted} /><Box flexShrink={0} width={1} />
+              <Text color={theme.muted} wrap="truncate-end">{row.slice(2)}</Text>
+            </Box>
+          : <Text key={`${index}-${rowIndex}`} color={theme.muted}>{row}</Text>);
       }
       const [, indent, icon, toolName] = match;
       const iconColor = icon === '✓' ? theme.success : icon === '✗' ? theme.danger : theme.muted;

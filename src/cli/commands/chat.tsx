@@ -1,6 +1,7 @@
 import React, {useEffect, useReducer, useRef, useState} from 'react';
 import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
-import Spinner from 'ink-spinner';
+import {StatusNotice} from '../../ui/components/NativeIndicators.js';
+import {BusyBar} from '../chat/BusyBar.js';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
@@ -69,26 +70,6 @@ type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} |
 
 function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
-}
-
-/**
- * Busy indicator isolated in its own component. The Spinner animates on its own
- * internal state (~10 fps) which triggers re-renders inside this subtree; keeping
- * the spinner out of ChatScreen's render scope means those ticks don't propagate
- * to the transcript tree above (where React.memo on MessageView already prevents
- * deep re-renders, but avoiding the reconciliation walk entirely is still cheaper).
- */
-function BusyBar({label, elapsed, tip}: {label: string; elapsed: string; tip?: string}) {
-  return <Box flexDirection="column" flexShrink={0}>
-    <Box>
-      <Text><Text color={theme.command} bold><Spinner type="dots" /> {label}{elapsed ? <Text color={theme.muted}> · {elapsed}</Text> : null}</Text><Text color={theme.muted}> · type to queue follow-up · esc to interrupt</Text></Text>
-    </Box>
-    {tip && (
-      <Box>
-        <Text color={theme.muted}><Text bold>Tip:</Text> {tip}</Text>
-      </Box>
-    )}
-  </Box>;
 }
 
 function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false, onShutdownReady}: ChatOptions & {onShutdownReady?: (shutdown: () => Promise<void>) => void}) {
@@ -718,10 +699,13 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       </> : undefined,
       tasks: visibleTasks.length > 0 ? <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={Math.max(1, terminalRows - 8)} /> : undefined,
       activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />
-        : pausedResume ? <Text color={theme.command} wrap="truncate-end">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</Text> : undefined,
+        : pausedResume ? <StatusNotice variant="warning">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</StatusNotice> : undefined,
       status: <>
-        <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
-        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel} · {activeModelName}{reasoningSuffix}</Text>
+        <Box width="100%" flexDirection="row" justifyContent="space-between" flexShrink={0}>
+          <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
+          <Text color={theme.muted} wrap="truncate-start">{activeModelName}{reasoningSuffix}</Text>
+        </Box>
+        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
       </>,
     }} input={({width: inputWidth, inputRows, suggestionRows, onRowsChange}) => <TextInput
       placeholder={placeholder}

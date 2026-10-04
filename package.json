@@ -59,7 +59,6 @@
     "fs-extra": "11.4.1",
     "ignore": "^7.0.12",
     "ink": "8.0.0",
-    "ink-spinner": "5.0.0",
     "linkedom": "^0.18.13",
     "marked": "18.0.14",
     "react": "19.3.0",
