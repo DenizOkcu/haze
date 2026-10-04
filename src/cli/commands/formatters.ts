@@ -134,6 +134,22 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
 }
 
 /**
+ * The short head of a shell command for the busy label: the program plus its
+ * first non-flag argument ("git diff", "npm test") — enough to identify the
+ * action without echoing the full (possibly long or sensitive) command line.
+ */
+function commandHead(command: string) {
+  const parts = command.trim().split(/\s+/);
+  const head = [parts[0]];
+  for (const part of parts.slice(1)) {
+    if (part.startsWith('-')) continue;
+    head.push(part);
+    break;
+  }
+  return compact(head.filter(Boolean).join(' '), 80);
+}
+
+/**
  * A short, human label for the live busy indicator while a tool is running,
  * e.g. "Running npm test", "Reading src/foo.ts", "Searching".
  * Lets the developer see *what* is happening, not just that something is.
@@ -144,7 +160,7 @@ export function busyToolLabel(toolName: string, input: unknown) {
   switch (toolName) {
     case 'shell':
       if (data?.background === true) return 'Starting background process';
-      return typeof data?.command === 'string' && data.command ? `Running ${compact(data.command, 80)}` : 'Running command';
+      return typeof data?.command === 'string' && data.command ? `Running ${commandHead(data.command)}` : 'Running command';
     case 'process':
       return 'Managing background process';
     case 'grep':

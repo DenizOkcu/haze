@@ -99,8 +99,10 @@ describe('toolCallSummary', () => {
 });
 
 describe('busyToolLabel', () => {
-  it('labels shell with the command it is running', () => {
+  it('labels shell with the head of the command it is running', () => {
     expect(busyToolLabel('shell', {command: 'npm test'})).toBe('Running npm test');
+    expect(busyToolLabel('shell', {command: 'git diff tests/cli/chatMetrics.test.ts tests/cli/commands.test.ts'})).toBe('Running git diff');
+    expect(busyToolLabel('shell', {command: 'grep -r --line-number pattern src/'})).toBe('Running grep pattern');
   });
 
   it('labels shell generically when the command is not yet known', () => {
