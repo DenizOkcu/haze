@@ -50,10 +50,15 @@ describe('chat metrics', () => {
       tokenUsage: {...EMPTY_TOKEN_USAGE, inputTokens: 100, outputTokens: 50},
       enabledSkillCount: 1,
     });
-    expect(metrics.statusDetailLabel).toBe('1 haze message / 2 tool calls / LLM ↑100 ↓50 / 1 skill');
+    expect(metrics.statusDetailLabel).toBe('1 message / 2 tool calls / LLM ↑100 ↓50 / 1 skill');
     expect(metrics.inputEstimated).toBe(false);
     expect(metrics.outputEstimated).toBe(false);
     expect(metrics.hasTokenBreakdown).toBe(true);
+  });
+
+  it('shows 0 messages and plural tool calls when the transcript is empty', () => {
+    const base = {messages: [], tokenUsage: {...EMPTY_TOKEN_USAGE}, enabledSkillCount: 0};
+    expect(statusBarMetrics(base).statusDetailLabel).toBe('0 messages / 0 tool calls / LLM ~↑0 ~↓0 / 0 skills');
   });
 
   it('shows live background process count only when nonzero (F09)', () => {
