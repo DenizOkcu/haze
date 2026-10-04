@@ -1,6 +1,6 @@
 # src/core/session/AGENTS.md
 
-Last updated: 2026-09-22 for the 1.4.0 release (round-2 review fixes).
+Last updated: 2026-10-04 for the 1.5.0 release (round-2 review fixes).
 
 Durable session storage.
 
@@ -22,6 +22,8 @@ Current entry types are:
 - `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state, slimmed before write so large tool results become previews/metadata.
 - `work_state_snapshot` — structured work state.
 - `event` — lightweight structured lifecycle/tool/message events.
+- `model_selection` — the session's pinned provider/model selection (`SessionModelSelection`); recorded on selection changes and restored on resume, continue, and fork so a global default change never rewrites an active session. `restoreSessionState()` surfaces it as `modelSelection`; headless `--resume` follows it unless `--model` is explicit.
+- `compact` — durable record of a compaction (method heuristic/llm, older/kept counts, optional instructions, summary) for auditability.
 - `goal` — durable goal-ledger boundary (P1): one append per supervisor `goal_start`/`goal_continue`/`goal_end` carrying `goalId`, exact request + `requestHash`, intent, cycle, mutation/validation counts, progress signature, unresolved pre-edit failure evidence (`redEvidence`), and the carried validation's `validationKind` when one rode the checkpoint (R2-03; validated on read, absent for older files) so a crash resume preserves the pending same-check green requirement. The frontier is the last non-terminal entry of the newest goal id (`findGoalLedgerFrontier` / `readGoalLedgerFrontier` / `restoreSessionState().goalFrontier`); a truncated tail line parses as absent. `sessionSlimming.ts` caps only the request text (1024 chars + marker) and never drops frontier entries. The vacuum bounds the audit trail: only the trailing `GOAL_LEDGER_KEEP_PER_GOAL` entries per goal id survive a rewrite (the frontier and terminal entry are always kept; trims are amortized via `GOAL_LEDGER_TRIM_BYTES`). The vacuum's keep decision must stay in original `entries` index space — computing it over a pre-filtered candidate array shifts positions when snapshots precede or interleave goal entries and silently drops the live frontier (R2-01, reproduced). A goal-only session is not resumable on its own.
 
 Prefer additive changes to entry shapes. Be tolerant when reading older/corrupt files.

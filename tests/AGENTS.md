@@ -1,6 +1,6 @@
 # tests/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.4.0 release.
+Last updated: 2026-10-04 for the 1.5.0 release.
 
 Vitest test suite instructions.
 
@@ -8,7 +8,7 @@ Vitest test suite instructions.
 
 Current regression priorities:
 
-- Cover explicit provider/model selection and discovery fallback, malformed settings errors, image/path mention parsing and read-only blessings, hard secret-file protection (read and mutation refusals, symlink evasion, bless-set override, grep exclusion globs, terminal `secret_file_protected` results, blocked-summary rendering), project-skill precedence/provenance/symlink isolation, lazy session materialization and empty-session filtering, session browsing/forking, static/dynamic transcript ordering and streamed Markdown roots, ordered edit-recovery state for fast providers, normalized recovery paths, one-step repeated-tool suppression, managed background-process cleanup, subagent/fleet isolation, LSP protocol isolation and forced teardown, shell classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, and byte-accurate fetch truncation.
+- Cover explicit provider/model selection and discovery fallback, malformed settings errors, image/path mention parsing and read-only blessings, hard secret-file protection (read and mutation refusals, symlink evasion, bless-set override, grep exclusion globs, terminal `secret_file_protected` results, blocked-summary rendering), project-skill precedence/provenance/symlink isolation, lazy session materialization and empty-session filtering, session browsing/forking, session model pinning (`model_selection` restore on resume/continue/fork), per-model session reasoning (`/reasoning` precedence, `unset`/`reset`), static/dynamic transcript ordering and streamed Markdown roots (formatted-row rendering and budget clamping), ordered edit-recovery state for fast providers, normalized recovery paths, one-step repeated-tool suppression, managed background-process cleanup, subagent/fleet isolation, LSP protocol isolation and forced teardown, shell classification-as-metadata, bounded process retained-pipe cleanup, sparse line-page index invalidation, malformed IPv6 fail-closed behavior, byte-accurate fetch truncation, and compact-profile steering/escalation replay (`modelSteeringReplay`).
 
 - Tests are TypeScript and run with Vitest.
 - Keep tests deterministic, isolated, and independent of the real user home/config whenever possible.
@@ -19,13 +19,13 @@ Current regression priorities:
 
 ## Test organization
 
-- `tests/cli/**` covers slash commands, chat helpers, static/dynamic transcript partitioning, streaming helpers, formatters, wizards, and headless command behavior.
+- `tests/cli/**` covers slash commands, chat helpers, static/dynamic transcript partitioning, streaming helpers, formatters, wizards, the DynamicFrame/shutdown/terminal-control integration paths, and headless command behavior (including `haze report`).
 - `tests/config/**` covers settings, providers, context files, LSP/MCP/skill settings, input history, update checks, private storage permissions, and endpoint security.
-- `tests/core/**` covers agent compaction/request assembly/events/work state, bounded I/O and sparse line paging, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
+- `tests/core/**` covers agent compaction/request assembly/events/work state, reasoning policy, goal/intent policy and project preflight, bounded I/O and sparse line paging, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
 - `tests/hazeTools/**` covers built-in tool behavior exposed from `src/llm/hazeTools.ts` and `src/llm/tools/**`.
 - `tests/llm/**` covers client/prompt/request context/LSP/MCP/web fetch/tool helper behavior.
 - `tests/skills/**` covers skill loader/registry/tool/builder, including project-over-global precedence, candidate retention, untrusted-content framing, and real-path confinement.
-- `tests/ui/**` covers input buffer, Markdown rendering, stable root-level streamed Markdown chunks, the theme registry (folder↔registry parity, resolved `#rrggbb` palettes, fg/bg contrast, famous port colors), and the OSC terminal-default sequences.
+- `tests/ui/**` covers input buffer, Markdown rendering, stable root-level streamed Markdown chunks, native Ink indicators and wizard choice projection, the theme registry (folder↔registry parity, resolved `#rrggbb` palettes, fg/bg contrast, famous port colors), and the OSC terminal-default sequences.
 - `tests/utils/**` covers shared utilities.
 
 ## Common validation commands

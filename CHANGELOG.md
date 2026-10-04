@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 - 2026-10-04
+
+Ink 8 terminal modernization with formatted streamed Markdown, per-model session-scoped reasoning, model steering for compact models, and pinned session model selections.
+
+### Added
+
+- Streaming assistant Markdown is rendered as formatted terminal rows: the active root block is rendered through the settled Markdown renderer offscreen and shown in the dynamic tail, clamped to the live-region budget. Whole-block parsing is preserved so later text can still reclassify a block; only parser-stable preceding roots enter the static transcript, and clamped rows are never lost — they enter `<Static>` verbatim once settled.
+- `/reasoning` is now per-model and session-scoped: each `provider:model` keeps its own in-memory level for the session, with `unset` sending no parameter and `reset` dropping the override. `/thinking` is an alias. The built-in default level is now `medium` (was `high`).
+- Model steering for compact models (`steeringProfile: "compact"` setting): nearby package-script names are listed for smaller working slices, validation reminders arrive earlier, and history compacts at 70% of the usual message budget. Completion evidence is not weakened.
+- `escalationModel` setting (registered `provider:model` selector): after a goal makes no measurable progress or exhausts context recovery, haze tries this explicitly configured model exactly once, keeping the conversation and goal evidence and announcing the switch. Haze never picks a fallback model on its own.
+- `haze report [id] [--json]`: a metadata-only summary of the latest workspace session (or one by id) — model, goal outcomes, tool/validation counts, context size, and evidence mismatches — without printing prompts, commands, paths, or tool output.
+- The live busy indicator for the shell tool shows the running command (e.g. `Running npm test`), reduced to the program plus its first non-flag argument so multi-file commands do not echo whole file lists into the one-line label.
+- Session model pinning: sessions record a `model_selection` entry restored on resume, continue, and fork, so changing the global default never rewrites an active session's model. Headless `--resume` follows the saved selection unless `--model` is explicit.
 
 ### Changed
 
@@ -9,6 +21,18 @@
 - Use native bracketed paste so pasted newlines, slash commands, probe-shaped text, and control bytes remain data rather than shortcuts. Unsafe control characters are replaced only in the input display; submitted data keeps its normalized content.
 - Edit and wrap input by graphemes and terminal cells, with Unicode-aware table/code widths and background padding. Unsupported Ctrl combinations no longer insert letters; masked values are excluded from input history.
 - Route `/exit`, `/quit`, and legacy/Kitty Ctrl+C through one bounded shutdown that aborts active work, quarantines late callbacks, flushes owned persistence, and cleans resources. Terminal defaults are restored even when rendering or exit waiting fails.
+- Native Ink indicators replace the `ink-spinner` dependency: `ActivitySpinner`, `StatusNotice`, and `BusyBar` ride Ink 8's shared animation timer, busy heartbeat included, instead of `setInterval` timers; screen-reader mode gets a static spinner glyph and a paused elapsed ticker.
+- Terminal interaction is modernized on Ink 8 capabilities: `/editor` composes in `$EDITOR` and `/logs <id>` pages raw JSONL through `$PAGER` via a suspended-terminal handoff, IME composition positions the real hardware cursor at the editing point, and the shutdown path waits for a render flush so the final frame reaches the TTY before unmount and OSC 10/11 restore.
+- The absolute 30-minute per-turn cap is removed: a turn now runs until the model finishes, the user cancels, or an idle-stall / step / tool budget boundary ends it. The headless `--timeout` deadline remains the explicit opt-in whole-goal budget, and the goal supervisor clamps each physical turn to the remaining goal budget.
+- Refreshed the model catalog and provider preset limits; runtime and development dependencies upgraded.
+
+### Fixed
+
+- Completion evidence stays honest across repairs and compounding: a validation-only goal whose check failed keeps its truthful `tool_failure` classification instead of escalating into a repair continuation; a failed edit/write after a failed check no longer inherits the validation-repair affordance; `npm cd`/`--prefix` commands normalize to a shared validation identity only when they are a single foreground command, so compounds and redirects stay distinct checks; and carried failed-check identities are no longer truncated at eight — only the model-facing preview is bounded, with the true count reported.
+- Goal status reopens when the ledger restarts: a `goal_start`/`goal_continue` entry after a terminal `goal_end` reopens the goal for reporting and clears stale stop reason, gate decision, and old event evidence, so a new terminal boundary is compared only against its own evidence. The ledger validator no longer rejects more than eight unresolved failed check ids.
+- Suspended child launching is hardened: `less` values are split into executable plus quoted arguments instead of being spawned as one literal path, and a pager quitting early (EPIPE on its input pipe) no longer rejects the suspended run. `/logs <id>` shows a bounded inline preview whenever paging is unavailable (short logs or screen-reader mode) instead of only reporting the summary.
+- Wizard/settings writes carry their patch so unrelated changes keep the session model, the status bar shows the session selection, and the per-session reasoning map is read from the current session identity instead of a stale ref.
+- The IME composition cursor sits at the editing point (measured frame-origin coordinates), covered by a VT-emulator test asserting the final cursor cell from real escape output.
 
 ## 1.4.0 - 2026-09-24
 

@@ -2,19 +2,20 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.4.0
+## What's new in 1.5.0
 
-haze 1.4.0 adds per-run reasoning control (`--reasoning <level>` for headless runs and a live status-bar indicator) on top of the 1.3.0 hardening pass: consistent secret and file boundaries across every tool path, truthful validation and mutation evidence that survives failed exits and crashes, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
+haze 1.5.0 modernizes the terminal experience on Ink 8 — formatted streamed Markdown, native spinners and busy indicators, `$EDITOR`/`$PAGER` handoffs, and IME-aware cursor placement — and adds model steering for compact models, per-model session-scoped `/reasoning` (with the `/thinking` alias), pinned session model selections, and a metadata-only `haze report`.
 
-- Uniform safety boundaries: `replaceInFiles` scans, grep traversal, and skill bodies/references all share one secret-file policy; bulk-edit and LSP edits preflight every file before the first write; task storage refuses symlinked escapes.
-- Evidence that survives exits: validation evidence records in execution order, one shared mutation-effects projection feeds work state and worker capsules, and structured completion obligations ride every checkpoint — including `context_exhausted` and headless relaunches.
-- Durable sessions: a `context_exhausted` checkpoint keeps its goal frontier across a crash resume, `/clear` stays cleared after restore, and manual compaction can no longer overwrite newer conversation state.
-- Honest output: semantic reducers apply only to unambiguous single foreground commands, so mixed-command output is never misread as a clean git status or passing test run.
-- Credential-safe discovery: provider model discovery validates the endpoint transport before sending any key and re-checks redirects before credential forwarding.
-- Reasoning control: `haze -p "…" --reasoning <level>` (or `--reasoning unset|off` for the provider default) steers thinking effort per run; the chat status bar shows the active level next to the model name.
+- Formatted streaming: assistant Markdown renders as formatted terminal rows while it streams, clamped to the viewport budget; clamped rows settle into the transcript verbatim, never lost.
+- Model steering: `steeringProfile: "compact"` lists nearby package-script names, asks for smaller working slices, reminds about validation earlier, and compacts history at 70% of the usual budget — completion evidence stays just as strict. `escalationModel` hands a stuck goal to one explicitly configured model, once, with the conversation and evidence intact.
+- Reasoning control: `/reasoning` (alias `/thinking`) keeps a per-model level for the session — `unset` sends no parameter, `reset` drops the override — and the status bar shows the effective level. Headless runs keep `--reasoning <level|unset>` as a run-scoped override.
+- Session model pinning: each session remembers its model selection on resume, continue, and fork; changing the global default never rewrites an active session. Headless `--resume` follows the saved selection unless `--model` is explicit.
+- `haze report [id] [--json]`: goal outcomes, tool/validation counts, context size, and evidence mismatches from session metadata — never prompts, commands, paths, or tool output.
+- Terminal modernization: Ink 8 with native bracketed paste, grapheme/cell-aware editing, one bounded shutdown path, suspended-terminal `$EDITOR`/`$PAGER` handoffs, and screen-reader-aware indicators. The implicit 30-minute per-turn cap is gone; `--timeout` remains the explicit opt-in goal budget.
 
 Previous releases:
 
+- `1.4.0`: per-run reasoning control (`--reasoning` for headless runs and a live status-bar indicator) on top of the 1.3.0 hardening pass — uniform secret/file boundaries, evidence that survives failed exits, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
 - `1.2.1`: edit-recovery instructs instead of restricting — the model is told which path to read and why, while the execution-time gate enforces the fresh read.
 - `1.2.0`: provider-usage context accounting, recoverable compact-and-retry overflow handling, model-written split-turn-aware compaction, `pipefail` validation truthfulness, and a configurable retry pool.
 - `1.1.1`: durable goal ledgers and crash-resume frontiers; headless `--until-done` relaunches with bounded notices and a no-progress guard; proportional task/validation completion gates; and smaller orchestration internals.

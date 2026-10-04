@@ -1,6 +1,6 @@
 # src/core/io/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.4.0 release.
+Last updated: 2026-10-04 for the 1.5.0 release.
 
 Bounded UTF-8 readers that cap work performed, not just text returned.
 

@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-08-31 for the 1.4.0 release.
+Last updated: 2026-10-04 for the 1.5.0 release.
 
 Reusable Ink components, theme, and input-buffer logic.
 
@@ -20,6 +20,8 @@ Maintainability focus:
 - `Header.tsx` renders current app/session/model/status summary. Do not expose secrets.
 - `TextInput.tsx` owns typed keys via `useInput` and bracketed data via `usePaste`; disabled paste is discarded without shortcut dispatch. Its explicit input/suggestion row allowances and equality-guarded demand reporting feed the whole-frame allocator. Input display sanitization never mutates submitted data, and masked values must never enter history. The slash/`@path` suggestion layers (filtering, async mention fetch with cancellation, selection state) live in `useInputSuggestions.ts`. Preserve keyboard, Tab, arrow, and Enter completion behavior covered by tests.
 - `MarkdownText.tsx` renders Markdown-like assistant/tool text in terminal width constraints and exposes root-level chunking for streamed assistant output. `StreamingMarkdownText.tsx` uses that same renderer offscreen to produce formatted rows before live-tail clamping; run its synchronous Ink render outside React render/commit phases. Keep rendering robust for malformed/partial Markdown from streaming models.
+- `NativeIndicators.tsx` hosts the Ink-8-native activity indicators — `ActivitySpinner` (cli-spinner-compatible `dots` frames on Ink's shared animation timer), `StatusNotice` (library `StatusMessage` remapped onto the haze palette via `indicatorTheme`, never the library default colors), and the screen-reader static-glyph path. Animated components consolidate into one render cycle under `maxFps`; there are no per-spinner `setInterval` timers.
+- `WizardChoices.tsx` projects the wizard's selected suggestion window into a passive `@inkjs/ui` Select: the existing input editor keeps the single keyboard owner (free-form typing, filter, Tab completion, escape paths stay intact) and no second wizard state machine or parallel key listener is introduced.
 - Errors should be presented compactly without stack spam unless intentionally surfaced.
 
 ## Markdown rendering

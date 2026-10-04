@@ -1,12 +1,12 @@
 # src/llm/AGENTS.md
 
-Last updated: 2026-09-22 for the 1.4.0 release (round-1 review fixes).
+Last updated: 2026-10-04 for the 1.5.0 release (round-1 review fixes).
 
 Model client, prompts, built-in tools, LSP/MCP integration, and tool result types.
 
 ## Responsibilities
 
-- `client.ts` builds the active OpenAI-compatible model from configured settings. Return `undefined` when no provider/model is configured.
+- `client.ts` builds the active OpenAI-compatible model from configured settings. Return `undefined` when no provider/model is configured. It resolves reasoning effort per attempt via `core/agent/reasoningPolicy.ts`: run-scoped `--reasoning` override → session per-model map (keyed `provider:model`, in-memory only) → saved global `reasoning` setting → built-in default, traveling as the portable top-level `reasoning` parameter — never a `providerOptions` key. Session-scoped selections arrive through `modelWithConfig`'s `reasoningByModel`.
 - `systemPrompt.ts` and `initPrompt.ts` are model-facing behavior contracts; keep them concise, explicit, and synced with real tools.
 - `requestContext.ts` assembles system prompt, skills, built-ins, optional LSP tools, MCP tools, context files, and one shared turn execution scope. It applies scope-aware skill enablement before project-over-global collision resolution, so disabling a project skill can re-surface its global counterpart. Close MCP clients in callers' `finally` paths.
 - `workerContext.ts` independently resolves worker root/scoped instructions, exact signatures, mode tools, and input estimates. It must not accept parent conversation or accumulated parent subtree context.
