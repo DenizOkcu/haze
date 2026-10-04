@@ -1,9 +1,13 @@
-import {listLogs, summarizeLog} from '../../core/log/llmLog.js';
+import {listLogs, readLogEntries, summarizeLog} from '../../core/log/llmLog.js';
 import {formatBytes} from '../../utils/format.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
 export async function handleLogsCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
-  const id = args.trim();
+  const trimmed = args.trim();
+  // `/logs <id> view` pages the raw JSONL through $PAGER; the suffix is part
+  // of haze's syntax, not the log id.
+  const viewRaw = /^(\S+)\s+view$/i.exec(trimmed);
+  const id = viewRaw ? viewRaw[1]! : trimmed;
 
   if (!id) {
     const logs = await listLogs();
@@ -22,6 +26,16 @@ export async function handleLogsCommand(args: string, ctx: CommandContext): Prom
   const summary = await summarizeLog(id);
   if (!summary) {
     ctx.addSystemMessage(`No log found with id ${id}.`);
+    return 'handled';
+  }
+
+  // Long raw transcripts page through $PAGER via suspendTerminal when the
+  // interactive screen provides the affordance; the summary stays the default.
+  if (viewRaw && ctx.viewInPager) {
+    const entries = await readLogEntries(id);
+    const text = entries.map(entry => JSON.stringify(entry)).join('\n');
+    const paged = await ctx.viewInPager(text);
+    if (!paged) ctx.addSystemMessage(`Log ${id} fits on screen; nothing paged.`);
     return 'handled';
   }
 

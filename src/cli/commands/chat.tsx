@@ -51,6 +51,7 @@ import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
 import {useBusyIndicator} from '../chat/busyIndicator.js';
+import {useTerminalControl} from '../chat/terminalControl.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
 import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
@@ -67,6 +68,9 @@ interface ChatOptions {
 }
 
 type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
+
+/** Latest Ink render metrics under --debug (module-level: render options are outside React). */
+let renderMetricsReader: (() => {at: number; renderTime: number} | undefined) | undefined;
 
 function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
@@ -132,6 +136,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // the developer always sees rolling activity (elapsed turn time) even when
   // the model is thinking with no streamed output and no tool is running.
   const {busy, setBusy: setBusyWithHeartbeat, elapsed: busyElapsed} = useBusyIndicator();
+  const terminalControl = useTerminalControl();
   const [backgroundCount, setBackgroundCount] = useState(backgroundProcessCount);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
@@ -427,6 +432,12 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       compactConversation,
       compactConversationLlm: compactConversationWithModel,
       runAgentTurn: (prompt, displayValue, options) => doAgentTurn(prompt, displayValue, options),
+      composeInEditor: async () => {
+        const text = await terminalControl.composeInEditor();
+        if (text === undefined) setMessages(m => [...m, {role: 'system', text: '/editor needs $EDITOR (or $VISUAL) set to an editor command.'}]);
+        return text;
+      },
+      viewInPager: terminalControl.viewInPager,
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
         setContextFiles(files);
@@ -692,6 +703,14 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       debug: debug ? <>
         {debugLogs.map((line, index) => <Text key={index} color={theme.muted} wrap="truncate-end">• {line}</Text>)}
         {metrics.hasTokenBreakdown && <Text color={theme.muted} wrap="truncate-end">Tokens: in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)} logical={formatTokenCount(tokenUsage.logicalInputEstimate)}</Text>}
+        {renderMetricsReader && (() => {
+          const renderMetrics = renderMetricsReader();
+          if (!renderMetrics) return null;
+          const age = Date.now() - renderMetrics.at;
+          // Skip the reading once it is clearly stale; it refreshes on the
+          // next frame while anything animated keeps the debug panel alive.
+          return age < 5_000 ? <Text color={theme.muted} wrap="truncate-end">Ink render: {renderMetrics.renderTime.toFixed(1)}ms</Text> : null;
+        })()}
       </> : undefined,
       queue: followUps.queued.length > 0 ? <>
         <Text color={theme.muted} wrap="truncate-end">Queued follow-ups: {followUps.queued.length}</Text>
@@ -756,6 +775,10 @@ export async function chatCommand(options: ChatOptions = {}) {
   }
   await clearTasksFromStore().catch(() => undefined);
   let shutdown: (() => Promise<void>) | undefined;
+  // Sampled by the --debug onRender hook; read by ChatScreen's debug panel via
+  // a getter so the metric never enters React state (no extra re-renders).
+  let lastRenderMetricsMs: {at: number; renderTime: number} | undefined;
+  renderMetricsReader = () => lastRenderMetricsMs;
   await runTerminalSession({
     adopt: () => {
       if (!process.stdout.isTTY) return;
@@ -768,6 +791,11 @@ export async function chatCommand(options: ChatOptions = {}) {
       maxFps: 15,
       kittyKeyboard: {mode: 'auto', flags: ['disambiguateEscapeCodes']},
       exitOnCtrlC: false,
+      // Ink 8 render metrics: direct observability of per-frame render cost
+      // under --debug, alongside the estimator-based live-region clamp.
+      ...(options.debug ? {onRender: ({renderTime}: {renderTime: number}) => {
+        lastRenderMetricsMs = {at: Date.now(), renderTime};
+      }} : {}),
     }),
     shutdown: () => shutdown?.(),
     restore: resetTerminalColors,

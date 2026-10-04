@@ -405,4 +405,49 @@ describe('handleSlashCommand /logs', () => {
     const msg = (ctx.addSystemMessage as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(msg).toContain('/logs');
   });
+
+  it('/logs <id> view pages the raw log through viewInPager when provided', async () => {
+    const {createLog, appendLogEntry} = await import('../../src/core/log/llmLog.js');
+    const log = await createLog();
+    await appendLogEntry(log, {at: new Date().toISOString(), type: 'request', stream: 'main'});
+    const viewInPager = vi.fn(async () => true);
+    const ctx = mockContext({viewInPager});
+    expect(await handleSlashCommand(`/logs ${log.id} view`, ctx)).toBe('handled');
+    expect(viewInPager).toHaveBeenCalledTimes(1);
+    const pagedText = viewInPager.mock.calls[0][0] as string;
+    expect(pagedText).toContain('"type":"request"');
+    expect(ctx.addSystemMessage).not.toHaveBeenCalledWith(expect.stringContaining('Log:'));
+    await fs.remove(log.file);
+  });
+
+  it('/logs <id> view falls back to the summary when the pager declines', async () => {
+    const {createLog, appendLogEntry} = await import('../../src/core/log/llmLog.js');
+    const log = await createLog();
+    await appendLogEntry(log, {at: new Date().toISOString(), type: 'request', stream: 'main'});
+    const ctx = mockContext({viewInPager: vi.fn(async () => false)});
+    expect(await handleSlashCommand(`/logs ${log.id} view`, ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('fits on screen'));
+    await fs.remove(log.file);
+  });
+});
+
+describe('handleSlashCommand /editor', () => {
+  it('requires an interactive terminal affordance', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/editor', ctx)).toBe('handled');
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('interactive'));
+  });
+
+  it('submits the composed text as a turn', async () => {
+    const composeInEditor = vi.fn(async () => 'multi-line\nprompt');
+    const ctx = mockContext({composeInEditor});
+    expect(await handleSlashCommand('/editor', ctx)).toBe('handled');
+    expect(ctx.runAgentTurn).toHaveBeenCalledWith('multi-line\nprompt');
+  });
+
+  it('does not submit an empty compose', async () => {
+    const ctx = mockContext({composeInEditor: vi.fn(async () => undefined)});
+    expect(await handleSlashCommand('/editor', ctx)).toBe('handled');
+    expect(ctx.runAgentTurn).not.toHaveBeenCalled();
+  });
 });

@@ -28,6 +28,9 @@ export type CommandContext = {
   /** LLM-summarized /compact (F-09); preferred over `compactConversation` when present. */
   compactConversationLlm?: (instructions?: string) => Promise<boolean>;
   runAgentTurn: (prompt: string, displayValue?: string, options?: TurnExecutionOptions) => Promise<void>;
+  /** Ink 8 `suspendTerminal` affordances; provided by the interactive screen only. */
+  composeInEditor?: () => Promise<string | undefined>;
+  viewInPager?: (text: string) => Promise<boolean>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
   getContextReport?: () => Promise<string>;
@@ -70,6 +73,15 @@ const SLASH_COMMANDS: SlashCommand[] = [
   }},
   {match: exact('/clear'), run: async (_args, ctx) => { await ctx.clearConversation(); await clearTasks(); return HANDLED; }},
   {match: exactOrArgs('/logs'), run: async (args, ctx) => await handleLogsCommand(args, ctx)},
+  {match: exact('/editor'), run: async (_args, ctx) => {
+    if (!ctx.composeInEditor) {
+      ctx.addSystemMessage('/editor needs an interactive terminal.');
+      return HANDLED;
+    }
+    const text = await ctx.composeInEditor();
+    if (text) await ctx.runAgentTurn(text);
+    return HANDLED;
+  }},
   {match: exactOrArgs('/lsp'), run: (_args, ctx) => { ctx.setMode('lsp'); ctx.addSystemMessage('Choose an LSP server to enable, disable, or remove it. Choose "add server" to add one from presets (e.g. typescript) or enter a custom command.'); return HANDLED; }},
   {match: exactOrArgs('/mcp'), run: (_args, ctx) => { ctx.setMode('mcp'); ctx.addSystemMessage('Choose an MCP server to enable, disable, remove, or set a key for it. Choose "add server" to add one from presets (e.g. context7) or enter custom details.'); return HANDLED; }},
   {match: value => value === '/settings open' || value === '/settings edit' ? {args: ''} : false, run: async (_args, ctx) => { const file = await ensureSettingsFile(ctx.settings); await openPath(file); ctx.addSystemMessage(`Opened settings file: ${file}`); return HANDLED; }},

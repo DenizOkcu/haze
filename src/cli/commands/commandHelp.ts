@@ -28,6 +28,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/lsp', description: 'Configure Language Server Protocol navigation tools (interactive picker).'},
   {usage: '/mcp', description: 'Configure Model Context Protocol servers like Context7 (interactive picker).'},
   {usage: '/logs <id>', description: 'Show summary of a specific log: entry counts by type, total tokens, tool calls.'},
+  {usage: '/logs <id> view', description: 'Page the raw log JSONL through $PAGER in a fullscreen terminal handoff.'},
+  {usage: '/editor', description: 'Compose a prompt in $EDITOR, then submit it as the next message.'},
   {usage: '/compact [instructions]', description: 'Summarize older model context and keep recent messages.'},
   {usage: '/clear', description: 'Clear the current chat conversation history.'},
   {usage: '/exit', description: 'Exit haze.'},

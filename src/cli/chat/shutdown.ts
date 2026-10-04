@@ -50,6 +50,8 @@ export interface TerminalApp {
   waitUntilExit: () => Promise<unknown>;
   unmount: () => void;
   cleanup: () => void;
+  /** Ink 8: settles once pending render output is flushed to stdout. */
+  waitUntilRenderFlush?: () => Promise<void>;
 }
 
 /** Adoption and synchronous render failures share the same restoration boundary. */
@@ -67,6 +69,9 @@ export async function runTerminalSession(owners: {
   } finally {
     try { await owners.shutdown(); }
     finally {
+      // Flush the final frame before teardown so the last rendered state
+      // (goodbye line, final status) actually reaches the TTY.
+      try { await app?.waitUntilRenderFlush?.(); } catch { /* terminal already gone */ }
       try { app?.unmount(); }
       finally {
         try { app?.cleanup(); }

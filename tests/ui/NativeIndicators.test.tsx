@@ -16,8 +16,8 @@ it('maps spinner and every notice variant to each supplied live palette', () => 
   for (const name of ['purple', 'robbyrussell']) {
     const palette = resolveTheme(name);
     const components = indicatorTheme(palette).components;
-    expect(components.Spinner!.styles!.frame!()).toEqual({color: palette.command});
-    expect(indicatorTheme(palette, palette.muted).components.Spinner!.styles!.frame!()).toEqual({color: palette.muted});
+    // The spinner now renders via Ink's useAnimation (ActivitySpinner), so the
+    // @inkjs/ui theme only needs to carry the notice variant palette.
     for (const [variant, color] of Object.entries({success: palette.success, error: palette.danger, warning: palette.warning, info: palette.info})) {
       expect(components.StatusMessage!.styles!.icon!({variant})).toEqual({color});
     }

@@ -24,6 +24,7 @@ export const TIPS: readonly string[] = [
   '/context shows a token breakdown — system, project context, tools, and messages.',
   '/model <name> sets a model directly (e.g. /model sonnet); selecting one also sets its provider.',
   '/tips toggles this hint line off if you find it distracting.',
+  '/editor composes long prompts in your $EDITOR; /logs <id> view pages a raw log through $PAGER.',
 ];
 
 /**
