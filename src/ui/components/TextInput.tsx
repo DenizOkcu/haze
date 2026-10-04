@@ -14,6 +14,7 @@ import {
   type PasteBlock,
 } from '../inputBuffer.js';
 import {useInputSuggestions} from './useInputSuggestions.js';
+import {WizardChoices} from './WizardChoices.js';
 
 const COMPACT_PASTE_MIN_LINES = 4;
 
@@ -369,7 +370,8 @@ export function TextInput({
   }, [onRowsChange, wantedInputRows, wantedSuggestionRows]);
 
   return <Box flexDirection="column" width="100%">
-    {visibleSuggestions.length > 0 && <Box flexDirection="column">
+    {suggestionMode === 'always' ? <WizardChoices
+      suggestions={displayList} activeIndex={displayActiveIndex} rows={suggestionRows} /> : visibleSuggestions.length > 0 && <Box flexDirection="column">
       {visibleSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index + suggestionStart === displayActiveIndex ? theme.success : theme.muted} wrap="truncate-end">
         {index + suggestionStart === displayActiveIndex ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind ?? 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
       </Text>)}

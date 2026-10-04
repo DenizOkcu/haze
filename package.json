@@ -50,6 +50,7 @@
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.66",
     "@ai-sdk/openai": "4.0.83",
+    "@inkjs/ui": "2.0.0",
     "@vscode/ripgrep": "1.18.0",
     "ai": "7.0.127",
     "cli-highlight": "2.1.11",
