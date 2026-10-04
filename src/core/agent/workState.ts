@@ -58,9 +58,50 @@ export function validationCommandKey(command: string): string {
     ? `npm@${workspacePathKey(match[1]!)} ${match[2]}` : normalized;
 }
 
+/**
+ * Scope identity for failed-check pairing: the check kind plus, for package
+ * managers, the package root the check ran against. A failed check stays open
+ * until an equivalent check in the same scope passes — the observed failure
+ * mode (2026-10-04 goal `on373gg0l1e`) was a red `npm test -- tests/x | tail`
+ * and a green bare `npm test` that could never pair because the exact command
+ * text differed. Scope deliberately broad: the same suite passed from the same
+ * package root is the same check. Arguments are noise a model legitimately
+ * varies between runs (`-- tests/foo`, `| tail -25`, `2>&1`).
+ */
+function failedCheckScope(command: string): string {
+  // Run on the normalized key so `cd pkg && npm test` and `npm --prefix pkg test`
+  // already agree; only then classify the invocation itself.
+  const normalized = validationCommandKey(command);
+  const scoped = /^npm@(\S+) /.exec(normalized);
+  if (scoped) return `npm@${scoped[1]}`;
+  // Chained commands (`&&`, `;`, `||`) are a different check than their stages:
+  // a red `npm test && npm run lint` must not be cleared by a green bare
+  // `npm test`. The compound gets its own hashed (non-reversible) scope.
+  // Pipes/redirects (`| tail`, `2>&1`) are decoration, not chaining — the
+  // pipefail-injected pipeline reports the check's own exit status.
+  if (/&&|;|\|\|/.test(normalized)) return `compound@${validationCheckId(normalized)}`;
+  const manager = /^(?:npm|npx|pnpm|yarn|bun|bunx|deno)\b/.test(normalized) ? 'npm' : 'direct';
+  if (manager === 'npm') return `npm@${workspacePathKey('.')}`;
+  // Direct commands pair only within the same executable: `cargo test` red
+  // pairs with `cargo test` green, never with `pytest`.
+  const executable = normalized.split(' ')[0] ?? '';
+  return `direct@${workspacePathKey('.')}:${executable}`;
+}
+
 /** Stable, non-reversible identity safe to carry in a goal checkpoint. */
 export function validationCheckId(command: string): string {
   return crypto.createHash('sha256').update(validationCommandKey(command)).digest('hex').slice(0, 16);
+}
+
+/** Encode check identity as `scope:kind:hash`. Self-describing so a pass can pair against carried ids without keeping raw commands. */
+function scopedCheckId(command: string, kind: ValidationKind | undefined): string {
+  return `${failedCheckScope(command)}:${kind ?? 'generic'}:${validationCheckId(command)}`;
+}
+
+/** Scope portion of a check id; unknown/legacy shapes (bare hashes from older checkpoints) map to their own scope so only an exact-text rerun can clear them. */
+function scopeOfCheckId(id: string): string {
+  const at = id.indexOf(':');
+  return at > 0 ? id.slice(0, at) : id;
 }
 
 /**
@@ -199,10 +240,37 @@ function outputSummary(output: unknown) {
   return '';
 }
 
+/** Kind portion of a check id (`scope:kind:hash`). */
+function kindOfCheckId(id: string): string | undefined {
+  const parts = id.split(':');
+  return parts.length >= 3 ? parts[1] : undefined;
+}
+
+/**
+ * Equivalence rule for failed-check clearing: same package-manager scope and
+ * same confirmed kind. Kind matters — a green `npm run build` (build) cannot
+ * clear a red `npm test` (test); they are different checks that happen to share
+ * the scope. Legacy ids without a kind component only pair with themselves.
+ */
+function checkIdEquivalent(passId: string, failedId: string): boolean {
+  if (passId === failedId) return true;
+  const kind = kindOfCheckId(passId);
+  return kind != null && kind !== 'generic' && scopeOfCheckId(passId) === scopeOfCheckId(failedId) && kindOfCheckId(failedId) === kind;
+}
+
 function upsertValidation(state: WorkState, command: string, status: Exclude<WorkValidationStatus, 'pending'>, summary: string, kind: ValidationKind | undefined, revision: number) {
   // Keep both evidence and status display in execution order when a check reruns.
   const key = validationCommandKey(command);
   state.validations = state.validations.filter(validation => validationCommandKey(validation.command) !== key);
+  // Same-turn failed checks pair across argument variants just like carried ids
+  // (R2-07, observed 2026-10-04: a red `npx vitest run tests/x | tail -25` stayed
+  // open forever while three green `npm test` runs could never clear it because
+  // only the exact command text paired). An authoritative pass clears every
+  // equivalent failed entry — same package scope, same confirmed kind.
+  if (status === 'passed' && kind && kind !== 'generic') {
+    const passId = scopedCheckId(command, kind);
+    state.validations = state.validations.filter(validation => !(validation.status === 'failed' && validation.kind != null && validation.kind !== 'generic' && checkIdEquivalent(passId, scopedCheckId(validation.command, validation.kind))));
+  }
   state.validations.push({command, status, summary, revision, ...(kind ? {kind} : {})});
   state.validationCommands = state.validationCommands.filter(item => item.command !== command);
   state.validationCommands.push({command, status});
@@ -328,7 +396,16 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       const status: Exclude<WorkValidationStatus, 'pending'> = passed ? 'passed' : 'failed';
       const summaryText = summary?.summaryText ?? (passed ? `Executed changed artifact ${artifact} successfully.` : `Changed artifact ${artifact} exited unsuccessfully.`);
       upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
-      if (status === 'passed') state.carriedFailedCheckIds = state.carriedFailedCheckIds?.filter(id => id !== validationCheckId(command));
+      if (status === 'passed' && summary && summary.kind !== 'generic') {
+        // Clear the failed-check identities this authoritative pass satisfies,
+        // not just the exact same command text: a red `npm test -- tests/x | tail`
+        // must be cleared by a green bare `npm test` in the same package scope.
+        // Generic custom checks never clear — the self-certification guard holds
+        // across turn boundaries too.
+        const passId = scopedCheckId(command, summary.kind);
+        const remaining = state.carriedFailedCheckIds?.filter(id => !checkIdEquivalent(passId, id)) ?? [];
+        state.carriedFailedCheckIds = remaining.length ? remaining : undefined;
+      }
       state.validationSeq = seq;
       state.phase = 'validating';
       state.lastProgressAt = now;
@@ -418,7 +495,7 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
 }
 
 export function unresolvedFailedCheckIds(state: WorkState): string[] {
-  const local = state.validations.filter(entry => entry.kind !== 'generic' && entry.status === 'failed').map(entry => validationCheckId(entry.command));
+  const local = state.validations.filter(entry => entry.kind !== 'generic' && entry.status === 'failed').map(entry => scopedCheckId(entry.command, entry.kind));
   // Completion evidence must keep every open identity across turn boundaries.
   // Bound only the model-facing preview, not the authoritative check set.
   return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])];

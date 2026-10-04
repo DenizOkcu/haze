@@ -33,6 +33,18 @@ describe('shell tool safety', () => {
     if (parsed.success) expect(parsed.data).not.toHaveProperty('allowMutation');
   });
 
+  it('reports a missing executable as an environment blocker, not failed validation evidence', async () => {
+    // Observed 2026-10-04 (goal `on373gg0l1e`): a `npm`-shaped command that
+    // failed to spawn (exit 127) was recorded as a failed `test` validation and
+    // rode a goal checkpoint as an unresolvable red. A spawn failure must keep
+    // the validation summary absent — nothing ran, so there is no pass/fail
+    // evidence — while the structured missing-executable diagnostic stays.
+    const result = await shell('definitely-not-an-executable-xyz --version', undefined, false, 'validation');
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe('missing_executable');
+    expect(result.validationSummary).toBeUndefined();
+  });
+
   it('runs read-only commands with classification metadata', async () => {
     const result = await shell('pwd');
     expect(result.ok).toBe(true);

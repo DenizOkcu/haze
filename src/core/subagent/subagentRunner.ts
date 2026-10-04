@@ -137,6 +137,14 @@ export async function runSubagent(
 
   try {
     const {omitMaxOutputTokens, ...providerRequestOptions} = runtime.requestOptions;
+    // Workers always run with reasoning disabled. Session/main-turn reasoning
+    // effort rides the inherited request options; on reasoning models its
+    // hidden tokens count against the worker's bounded maxOutputTokens, so a
+    // `high` session could burn the whole worker budget on thinking and return
+    // `no_output` (observed live: glm-5.3 @ high reasoning, 2026-10-04).
+    // Applied only when the worker protocol supports the option; other
+    // protocols cannot express it and must keep the runtime unchanged.
+    if (runtime.capabilities.supportsReasoningEffort) providerRequestOptions.reasoning = 'none';
     // Use the streaming model path even though workers return one collected
     // capsule. ChatGPT Codex's Responses endpoint requires `stream: true`;
     // `generateText` takes the non-streaming doGenerate path and is rejected.

@@ -152,6 +152,80 @@ describe('deriveValidationOutcome', () => {
     expect(deriveValidationOutcome(next)).toBe('passed');
   });
 
+  it('clears a carried failed check when an equivalent same-scope check passes, even with different arguments', () => {
+    // The observed failure (2026-10-04 goal `on373gg0l1e`): a red
+    // `npm test -- tests/core/subagent | tail -25` rode a checkpoint as a bare
+    // command hash; a green bare `npm test` could never pair with it, so the
+    // goal stayed `failed` forever and the no-progress guard paused it. Check
+    // identity is scope-based: same package manager + package root.
+    const first = createWorkState('double subagent limits', 'implement', []);
+    observeWorkToolEvent(first, {toolName: 'editFile', input: {path: 'src/core/agent/budgets.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(first, {toolName: 'shell', input: {command: 'npm test -- tests/core/subagent tests/core/agent.test.ts 2>&1 | tail -25'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    const ids = unresolvedFailedCheckIds(first);
+    expect(ids).toHaveLength(1);
+    const next = createWorkState('double subagent limits', 'implement', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: ids});
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(next)).toEqual([]);
+    expect(deriveValidationOutcome(next)).toBe('passed');
+  });
+
+  it('keeps a carried failed check open when a different package scope passes', () => {
+    const first = createWorkState('fix tests', 'fix', []);
+    observeWorkToolEvent(first, {toolName: 'shell', input: {command: 'cd api && npm test'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    const next = createWorkState('fix tests', 'fix', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: unresolvedFailedCheckIds(first)});
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm --prefix web test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(next)).toHaveLength(1);
+    expect(deriveValidationOutcome(next)).toBe('failed');
+  });
+
+  it('does not let a generic custom check clear a carried failed check in the same scope', () => {
+    // Self-certification guard, scope variant: `npm run greenwash` shares the
+    // package scope but is a generic custom check, so it must not clear a
+    // confirmed test failure.
+    const first = createWorkState('fix tests', 'fix', []);
+    observeWorkToolEvent(first, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    const next = createWorkState('fix tests', 'fix', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: unresolvedFailedCheckIds(first)});
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'npm run greenwash'}, success: true, output: {ok: true, validationSummary: genericPassedSummary()}});
+    expect(unresolvedFailedCheckIds(next)).toHaveLength(1);
+    expect(deriveValidationOutcome(next)).toBe('failed');
+  });
+
+  it('clears a same-turn failed check when an equivalent same-scope check passes with different arguments', () => {
+    // The 2026-10-04 20:17 incident replay: a red targeted run
+    // (`npx vitest run tests/x | tail`) stayed open forever because only the
+    // exact command text paired; three green `npm test` runs could not clear
+    // it and the completion gate correctly kept rejecting the final.
+    const state = createWorkState('do 1 + 2', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'src/core/agent/workState.ts'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npx vitest run tests/core/workState.test.ts 2>&1 | tail -15'}, success: false, output: {ok: false, code: 1, validationSummary: failedSummary()}});
+    expect(deriveValidationOutcome(state)).toBe('failed');
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, code: 0, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('does not clear a failed test check with a passing build check in the same scope', () => {
+    // Kind is part of check identity: a green build cannot close a red test.
+    const state = createWorkState('fix tests', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm run build'}, success: true, output: {ok: true, validationSummary: {kind: 'build', status: 'passed', summaryText: 'built', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}});
+    expect(unresolvedFailedCheckIds(state)).toHaveLength(1);
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
+  it('does not clear a failed compound check with a passing single-stage check', () => {
+    // `npm test && npm run lint` is its own compound check; a green bare
+    // `npm test` did not run the lint stage, so the compound stays open.
+    const state = createWorkState('fix checks', 'fix', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test && npm run lint'}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(state)).toHaveLength(1);
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
   it('carries every failed check while keeping the model preview bounded', () => {
     const first = createWorkState('implement services', 'implement', []);
     const commands = Array.from({length: 12}, (_, index) => `npm --prefix package-${index} test`);
@@ -174,9 +248,14 @@ describe('deriveValidationOutcome', () => {
   it.each(['passed', 'failed'] as const)('uses execution order when an earlier check reruns %s', status => {
     const state = createWorkState('implement', 'implement', []);
     observeWorkToolEvent(state, {toolName: 'editFile', input: {path: 'a.ts'}, success: true, output: {ok: true}});
+    // Kinds mirror real inference (`npm test` → test, `npm run lint` → lint);
+    // kind is part of check identity, so a green suite can never clear a red
+    // check of a different kind.
     const check = (command: string, passed: boolean) => observeWorkToolEvent(state, {
       toolName: 'shell', input: {command}, success: passed,
-      output: {ok: passed, validationSummary: passed ? passedSummary() : failedSummary()},
+      output: {ok: passed, validationSummary: passed
+        ? {kind: command.includes('lint') ? 'lint' : 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}
+        : {kind: command.includes('lint') ? 'lint' : 'test', status: 'failed', summaryText: 'failed', failedFiles: [], failedTests: ['suite'], diagnostics: [], rawOutputTruncated: false}},
     });
     check('npm test', status !== 'passed');
     check('npm run lint', status !== 'passed');

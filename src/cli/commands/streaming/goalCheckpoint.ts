@@ -88,9 +88,9 @@ export function hashRequest(request: string): string {
   return crypto.createHash('sha256').update(request, 'utf8').digest('hex').slice(0, 16);
 }
 
-/** Cumulative outcome signature; monotonic mutation activity alone is not net progress. */
-export function goalCheckpointSignature(input: {mutationCount: number; validationOutcome: ValidationOutcome; taskCounts?: {pending: number; inProgress: number; completed: number; total: number}}): string {
-  return JSON.stringify([input.mutationCount > 0, input.validationOutcome, input.taskCounts ? [input.taskCounts.total, input.taskCounts.pending, input.taskCounts.inProgress, input.taskCounts.completed] : null]);
+/** Cumulative outcome signature; monotonic mutation activity alone is not net progress. Open failed-check count is progress too: a turn that greens one of three red checks must not look identical to a turn that greened none (observed 2026-10-04, goal `on373gg0l1e`). */
+export function goalCheckpointSignature(input: {mutationCount: number; validationOutcome: ValidationOutcome; taskCounts?: {pending: number; inProgress: number; completed: number; total: number}; openCheckCount?: number}): string {
+  return JSON.stringify([input.mutationCount > 0, input.validationOutcome, input.taskCounts ? [input.taskCounts.total, input.taskCounts.pending, input.taskCounts.inProgress, input.taskCounts.completed] : null, input.openCheckCount ?? 0]);
 }
 
 /** Goal-scoped evidence carried across a physical-turn boundary (checkpoint subset). */

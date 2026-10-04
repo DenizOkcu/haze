@@ -7,7 +7,7 @@ export const IDLE_TIMEOUT_MS = 5 * 60_000;
 /** Default per-tool execution deadline; an uncooperative tool cannot defer the turn indefinitely (RH-004). */
 export const DEFAULT_TOOL_DEADLINE_MS = 10 * 60_000;
 /** Subagents legitimately run long; give their wrapper a larger deadline. */
-export const SUBAGENT_TOOL_DEADLINE_MS = 20 * 60_000;
+export const SUBAGENT_TOOL_DEADLINE_MS = 40 * 60_000;
 /** Maximum accepted explicit `--timeout` value (24 hours). No deadline is imposed unless the user sets one. */
 export const MAX_TURN_DEADLINE_MS = 24 * 60 * 60_000;
 export const MAIN_STEP_LIMIT = 64;
@@ -31,21 +31,21 @@ export const SUBAGENT_SCOPE_CHARS = 240;
 export const SUBAGENT_ACCEPTANCE_ITEMS = 8;
 export const SUBAGENT_ACCEPTANCE_CHARS = 300;
 export const SUBAGENT_MIN_STEPS = 4;
-export const SUBAGENT_DEFAULT_STEPS = 25;
-export const SUBAGENT_MAX_STEPS = 50;
-export const SUBAGENT_DEFAULT_TOOL_CALLS = 20;
-export const SUBAGENT_MAX_TOOL_CALLS = 50;
-export const SUBAGENT_TOOL_ONLY_LIMIT = 12;
+export const SUBAGENT_DEFAULT_STEPS = 50;
+export const SUBAGENT_MAX_STEPS = 100;
+export const SUBAGENT_DEFAULT_TOOL_CALLS = 40;
+export const SUBAGENT_MAX_TOOL_CALLS = 100;
+export const SUBAGENT_TOOL_ONLY_LIMIT = 24;
 export const SUBAGENT_SYNTHESIS_RESERVE = 2;
-export const SUBAGENT_DEFAULT_OUTPUT_TOKENS = 4_096;
-export const SUBAGENT_MAX_OUTPUT_TOKENS = 16_384;
-export const SUBAGENT_DEFAULT_SUMMARY_CHARS = 4_000;
-export const SUBAGENT_MAX_SUMMARY_CHARS = 12_000;
-export const SUBAGENT_DEFAULT_INPUT_TOKENS = 40_000;
-export const SUBAGENT_MAX_INPUT_TOKENS = 200_000;
-export const SUBAGENT_DEFAULT_DEADLINE_MS = 300_000;
+export const SUBAGENT_DEFAULT_OUTPUT_TOKENS = 8_192;
+export const SUBAGENT_MAX_OUTPUT_TOKENS = 32_768;
+export const SUBAGENT_DEFAULT_SUMMARY_CHARS = 8_000;
+export const SUBAGENT_MAX_SUMMARY_CHARS = 24_000;
+export const SUBAGENT_DEFAULT_INPUT_TOKENS = 80_000;
+export const SUBAGENT_MAX_INPUT_TOKENS = 400_000;
+export const SUBAGENT_DEFAULT_DEADLINE_MS = 600_000;
 export const SUBAGENT_MIN_DEADLINE_MS = 1_000;
-export const SUBAGENT_MAX_DEADLINE_MS = 30 * 60_000;
+export const SUBAGENT_MAX_DEADLINE_MS = 60 * 60_000;
 export const SUBAGENT_MAX_CONCURRENCY = 10;
 export const SUBAGENT_MAX_RETRIES = 5;
 

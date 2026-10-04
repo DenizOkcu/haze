@@ -115,13 +115,13 @@ describe('internals.shouldForceSynthesis (subagent budget guard)', () => {
   // with tool calls AND no text). Total tool-call volume must still force a
   // synthesis turn.
   it('forces synthesis on tool-call volume even when every step has narration text (P2)', () => {
-    const narrating = Array.from({length: 20}, () => ({toolCalls: [{toolName: 'readFile', input: {}}], text: 'Let me read the next file.'}));
-    expect(internals.shouldForceSynthesis(narrating, 25)).toBe(true);
+    const narrating = Array.from({length: 40}, () => ({toolCalls: [{toolName: 'readFile', input: {}}], text: 'Let me read the next file.'}));
+    expect(internals.shouldForceSynthesis(narrating, 50)).toBe(true);
   });
 
   it('does NOT force synthesis below the tool-call budget when steps narrate (no premature cutoff)', () => {
-    const narrating = Array.from({length: 19}, () => ({toolCalls: [{}], text: 'reading…'}));
-    expect(internals.shouldForceSynthesis(narrating, 25)).toBe(false);
+    const narrating = Array.from({length: 39}, () => ({toolCalls: [{}], text: 'reading…'}));
+    expect(internals.shouldForceSynthesis(narrating, 50)).toBe(false);
   });
 
   // Reserve the tail of the step budget for synthesis so a subagent never ends
@@ -134,13 +134,13 @@ describe('internals.shouldForceSynthesis (subagent budget guard)', () => {
   });
 
   it('still forces synthesis on a long tool-only run (original guard preserved)', () => {
-    const toolOnly = Array.from({length: 12}, () => ({toolCalls: [{}], text: ''}));
-    expect(internals.shouldForceSynthesis(toolOnly, 25)).toBe(true);
+    const toolOnly = Array.from({length: 24}, () => ({toolCalls: [{}], text: ''}));
+    expect(internals.shouldForceSynthesis(toolOnly, 50)).toBe(true);
   });
 
   it('leaves quick tasks untouched (no synthesis forcing)', () => {
-    expect(internals.shouldForceSynthesis([{toolCalls: [{toolName: 'readFile', input: {}}], text: ''}], 25)).toBe(false);
-    expect(internals.shouldForceSynthesis([], 25)).toBe(false);
+    expect(internals.shouldForceSynthesis([{toolCalls: [{toolName: 'readFile', input: {}}], text: ''}], 50)).toBe(false);
+    expect(internals.shouldForceSynthesis([], 50)).toBe(false);
   });
 });
 
@@ -300,7 +300,7 @@ describe('runSubagent status mapping', () => {
   });
 
   it('truncates oversized deliverables with explicit metadata and a handle', async () => {
-    const huge = 'x'.repeat(5000);
+    const huge = 'x'.repeat(9000);
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {...actual, streamText: async () => genResult({text: huge})};
@@ -308,7 +308,7 @@ describe('runSubagent status mapping', () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
     const result = await runSubagent('huge summary', {model: noopModel, contextFiles: []});
-    expect(result.summary.startsWith('x'.repeat(4000))).toBe(true);
+    expect(result.summary.startsWith('x'.repeat(8000))).toBe(true);
     expect(result.capsule.truncated).toBe(true);
     expect(result.capsule.resultHandle).toMatch(/^output-/);
     expect(result.summary).toContain('Result truncated');
@@ -349,8 +349,8 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
     const {runSubagent, internals} = await import('../../../src/core/subagent/subagentRunner.js');
     await runSubagent('the assigned task', {model: noopModel, contextFiles: []});
 
-    // Force synthesis via tool-call volume (TOOL_CALL_BUDGET = 20).
-    const forceSteps = Array.from({length: 20}, () => ({toolCalls: [{}], text: ''}));
+    // Force synthesis via tool-call volume (TOOL_CALL_BUDGET = 40).
+    const forceSteps = Array.from({length: 40}, () => ({toolCalls: [{}], text: ''}));
     const history = [{role: 'user', content: 'the assigned task'}, {role: 'assistant', content: '[tool-call readFile]'}];
     const res = captured.prepareStep!({steps: forceSteps, messages: history}) as {toolChoice?: string; messages?: Array<{role: string; content: string}>};
 
@@ -564,5 +564,37 @@ describe('subagent V2 boundary', () => {
     const profile = {name: 'test', maxConcurrency: 1, maxSteps: 8, maxToolCalls: 6, maxOutputTokens: 2048, maxSummaryChars: 4000, maxInputTokens: 40000, deadlineMs: 1000, maxRetries: 1};
     await runSubagent('provider parity', {contextFiles: [], runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
     expect(captured).toMatchObject({providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}, maxRetries: 1, maxOutputTokens: 2048});
+  });
+
+  it('always overrides inherited reasoning with none when the worker protocol supports it', async () => {
+    let captured: Record<string, unknown> = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    await runSubagent('reasoning override', {contextFiles: [], runtime: {
+      model: noopModel, selector: 'zai:glm-5.3', providerName: 'zai',
+      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true},
+      requestOptions: {reasoning: 'high'},
+    }});
+    expect(captured.reasoning).toBe('none');
+  });
+
+  it('keeps runtime reasoning untouched when the worker protocol has no reasoning-effort option', async () => {
+    let captured: Record<string, unknown> = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/core/subagent/subagentRunner.js');
+    await runSubagent('unsupported protocol', {contextFiles: [], runtime: {
+      model: noopModel, selector: 'local:m', providerName: 'local',
+      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: false},
+      requestOptions: {},
+    }});
+    expect(captured.reasoning).toBeUndefined();
   });
 });

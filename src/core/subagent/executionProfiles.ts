@@ -50,10 +50,10 @@ export const COMPATIBILITY_PROFILE: SubagentExecutionProfile = {
 };
 
 export const BUILT_IN_SUBAGENT_PROFILES: Readonly<Record<string, SubagentExecutionProfile>> = {
-  'local-safe': {...COMPATIBILITY_PROFILE, name: 'local-safe', maxConcurrency: 1, maxSteps: 16, maxToolCalls: 12, maxOutputTokens: 2_048, maxInputTokens: 20_000, maxRetries: 0},
-  'local-throughput': {...COMPATIBILITY_PROFILE, name: 'local-throughput', maxConcurrency: 2, maxSteps: 20, maxToolCalls: 16, maxOutputTokens: 3_072, maxInputTokens: 24_000, maxRetries: 0},
-  'cloud-balanced': {...COMPATIBILITY_PROFILE, name: 'cloud-balanced', maxConcurrency: 3, deadlineMs: 180_000},
-  'cloud-fast': {...COMPATIBILITY_PROFILE, name: 'cloud-fast', maxConcurrency: 5, deadlineMs: 120_000, maxRetries: 1},
+  'local-safe': {...COMPATIBILITY_PROFILE, name: 'local-safe', maxConcurrency: 1, maxSteps: 32, maxToolCalls: 24, maxOutputTokens: 4_096, maxInputTokens: 40_000, maxRetries: 0},
+  'local-throughput': {...COMPATIBILITY_PROFILE, name: 'local-throughput', maxConcurrency: 2, maxSteps: 40, maxToolCalls: 32, maxOutputTokens: 6_144, maxInputTokens: 48_000, maxRetries: 0},
+  'cloud-balanced': {...COMPATIBILITY_PROFILE, name: 'cloud-balanced', maxConcurrency: 3, deadlineMs: 360_000},
+  'cloud-fast': {...COMPATIBILITY_PROFILE, name: 'cloud-fast', maxConcurrency: 5, deadlineMs: 240_000, maxRetries: 1},
 };
 
 export const MODE_TOOL_NAMES: Readonly<Record<WorkerMode, readonly string[]>> = {

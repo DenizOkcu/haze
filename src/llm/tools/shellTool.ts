@@ -62,7 +62,14 @@ export const shellTool = tool({
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;
-    const validationSummary = isValidationCommand
+    // A spawn failure (executable missing / not found, exit 127) is an
+    // environment blocker, not a failed check: nothing ran, so there is no
+    // pass/fail evidence to record (observed 2026-10-04: a `missing_executable`
+    // shell result was recorded as a failed `test` validation and rode a goal
+    // checkpoint as an unresolvable red). Diagnose it below and keep the
+    // validation summary absent.
+    const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;
+    const validationSummary = isValidationCommand && !missing
       ? parseValidationOutput({command, code, stdout, stderr, timedOut, stdoutTruncated: processResult.stdout.omittedBytes > 0, stderrTruncated: processResult.stderr.omittedBytes > 0, classification})
       : undefined;
     // Evidence truthfulness: a passing validation whose command shape can
@@ -79,9 +86,6 @@ export const shellTool = tool({
         : undefined;
     const validationPassed = confirmedValidationSummary?.status === 'passed';
     const output = filterShellOutput({command, code, stdout, stderr, timedOut, classification, validationSummary: confirmedValidationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
-    // Generic, dependency-agnostic diagnostic for a missing executable. Only the
-    // executable name and a generic next step are exposed (never raw stderr).
-    const missing = code !== 0 && !processResult.aborted ? detectMissingExecutable({command, code, stderr}) : undefined;
     return {
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
       code, command, purpose, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
