@@ -239,7 +239,7 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.capabilities.supportsTextVerbosity).toBe(false);
   });
 
-  it('applies the default reasoning level high when the setting is absent', async () => {
+  it('applies the default reasoning level medium when the setting is absent', async () => {
     await writeSettings({
       providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
       provider: 'openai',
@@ -247,7 +247,7 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig} = await loadClient();
     const runtime = await modelWithConfig();
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'high', effective: 'high'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
   });
 
   it('keeps the reasoning-effort capability true for every provider kind (pass-through marker)', async () => {
@@ -283,7 +283,7 @@ describe('modelWithConfig', () => {
     expect(providerRequestSettings(runtime!.config).reasoning).toBe('minimal');
   });
 
-  it('lets a run-scoped reasoningOverride win over the stored setting', async () => {
+  it('lets a run-scoped reasoningOverride win over the stored setting and session overrides', async () => {
     await writeSettings({
       providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
       provider: 'custom',
@@ -291,9 +291,38 @@ describe('modelWithConfig', () => {
       reasoning: 'minimal',
     });
     const {modelWithConfig, providerRequestSettings} = await loadClient();
-    const runtime = await modelWithConfig({reasoningOverride: 'xhigh'});
+    const runtime = await modelWithConfig({reasoningOverride: 'xhigh', reasoningByModel: {'custom:m': 'high'}});
     expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'xhigh', effective: 'xhigh'});
     expect(providerRequestSettings(runtime!.config).reasoning).toBe('xhigh');
+  });
+
+  it('lets a session per-model override win over the stored setting and default', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m', 'other']}],
+      provider: 'custom',
+      model: 'm',
+      reasoning: 'minimal',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig({reasoningByModel: {'custom:m': 'xhigh'}});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'xhigh', effective: 'xhigh'});
+    expect(providerRequestSettings(runtime!.config).reasoning).toBe('xhigh');
+    // A different model with no override falls back to the stored setting.
+    const plain = await modelWithConfig({modelSelector: 'custom:other', reasoningByModel: {'custom:m': 'xhigh'}});
+    expect(plain!.config.reasoningPolicy).toMatchObject({requested: 'minimal', effective: 'minimal'});
+  });
+
+  it('maps a session per-model unset override to no reasoning parameter', async () => {
+    await writeSettings({
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      provider: 'custom',
+      model: 'm',
+      reasoning: 'minimal',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig({reasoningByModel: {'custom:m': 'provider-default'}});
+    expect(runtime!.config.reasoningPolicy).toEqual({requested: undefined, effective: 'disabled', reason: 'no reasoning depth requested'});
+    expect('reasoning' in providerRequestSettings(runtime!.config)).toBe(false);
   });
 
   it('maps a run-scoped unset override to no reasoning parameter, overriding a stored level', async () => {
@@ -311,7 +340,7 @@ describe('modelWithConfig', () => {
     expect('reasoning' in opts).toBe(false);
   });
 
-  it('applies the default high when the reasoningOverride is absent', async () => {
+  it('applies the default medium when the reasoningOverride is absent', async () => {
     await writeSettings({
       providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
       provider: 'custom',
@@ -319,7 +348,7 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig} = await loadClient();
     const runtime = await modelWithConfig({});
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'high', effective: 'high'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
   });
 
   it('returns all-false capabilities except the reasoning pass-through for an unrelated provider', async () => {

@@ -27,6 +27,8 @@ function mockContext(overrides?: Partial<CommandContext>): CommandContext {
     runAgentTurn: vi.fn(),
     refreshContextFiles: vi.fn(() => Promise.resolve([])),
     updateSettings: vi.fn(() => Promise.resolve({model: 'new-model'})),
+    getSessionReasoning: vi.fn(() => undefined),
+    setSessionReasoning: vi.fn(),
     ...overrides,
   };
 }
@@ -146,10 +148,11 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Choose a reasoning effort level'));
   });
 
-  it('sets the reasoning level directly with /reasoning <level>', async () => {
+  it('sets the session per-model reasoning level with /reasoning <level>', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/reasoning xhigh', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith({reasoning: 'xhigh'});
+    expect(ctx.setSessionReasoning).toHaveBeenCalledWith('openrouter:test-model', 'xhigh');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort set to xhigh'));
   });
 
@@ -157,37 +160,50 @@ describe('handleSlashCommand', () => {
     for (const level of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
       const ctx = mockContext();
       expect(await handleSlashCommand(`/reasoning ${level}`, ctx)).toBe('handled');
-      expect(ctx.updateSettings, level).toHaveBeenCalledWith({reasoning: level});
+      expect(ctx.setSessionReasoning, level).toHaveBeenCalledWith('openrouter:test-model', level);
+      expect(ctx.updateSettings, level).not.toHaveBeenCalled();
     }
   });
 
-  it('clears the reasoning setting with /reasoning unset', async () => {
+  it('stores unset as the provider-default sentinel per model with /reasoning unset', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/reasoning unset', ctx)).toBe('handled');
-    expect(ctx.updateSettings).toHaveBeenCalledWith({reasoning: 'provider-default'});
+    expect(ctx.setSessionReasoning).toHaveBeenCalledWith('openrouter:test-model', 'provider-default');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort unset'));
+  });
+
+  it('removes the session override with /reasoning reset and reports the fallback', async () => {
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/reasoning reset', ctx)).toBe('handled');
+    expect(ctx.setSessionReasoning).toHaveBeenCalledWith('openrouter:test-model', undefined);
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Session reasoning override removed'));
   });
 
   it('rejects an unknown reasoning level with the valid levels listed', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/reasoning max', ctx)).toBe('handled');
+    expect(ctx.setSessionReasoning).not.toHaveBeenCalled();
     expect(ctx.updateSettings).not.toHaveBeenCalled();
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown reasoning level "max"'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('none, minimal, low, medium, high, xhigh'));
   });
 
-  it('shows the requested and effective reasoning level from /reasoning status', async () => {
-    const ctx = mockContext({settings: {reasoning: 'medium'} as Partial<CommandContext['settings']>});
+  it('shows the effective reasoning level per model from /reasoning status', async () => {
+    const ctx = mockContext({settings: {provider: 'openrouter', model: 'test-model', reasoning: 'medium'} as Partial<CommandContext['settings']>});
     expect(await handleSlashCommand('/reasoning status', ctx)).toBe('handled');
     expect(ctx.updateSettings).not.toHaveBeenCalled();
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Reasoning effort: medium'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('medium (from settings)'));
     const defaultCtx = mockContext();
     expect(await handleSlashCommand('/reasoning status', defaultCtx)).toBe('handled');
-    expect(defaultCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining(`Reasoning effort: high (default high)`));
-    const unsetCtx = mockContext({settings: {reasoning: 'provider-default'} as Partial<CommandContext['settings']>});
+    expect(defaultCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('medium (default)'));
+    const overrideCtx = mockContext({getSessionReasoning: () => 'xhigh'});
+    expect(await handleSlashCommand('/reasoning status', overrideCtx)).toBe('handled');
+    expect(overrideCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('xhigh (session override)'));
+    const unsetCtx = mockContext({settings: {provider: 'openrouter', model: 'test-model', reasoning: 'provider-default'} as Partial<CommandContext['settings']>});
     expect(await handleSlashCommand('/reasoning status', unsetCtx)).toBe('handled');
-    expect(unsetCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining(`Reasoning effort: high (default high)`));
+    expect(unsetCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('provider default (no parameter sent)'));
   });
+
 
   it('treats /create-skill as an unknown command now that skills use the picker', async () => {
     const ctx = mockContext();

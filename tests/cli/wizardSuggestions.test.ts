@@ -182,18 +182,19 @@ describe('themeSuggestions', () => {
 });
 
 describe('reasoningSuggestions', () => {
-  it('lists every level plus unset and marks the active one', () => {
+  it('lists every level plus unset/reset and marks the resolved active one', () => {
     const suggestions = reasoningSuggestions({reasoning: 'medium'});
-    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset']);
+    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset', 'reset']);
     expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'unset')?.description).toContain('provider default');
+    expect(suggestions.find(suggestion => suggestion.value === 'reset')?.description).toContain('session override');
   });
 
   it('marks the default level active when the setting is absent', () => {
     const suggestions = reasoningSuggestions({});
-    expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).toContain('active');
-    expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).not.toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
   });
 });
 

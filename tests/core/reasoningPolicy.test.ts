@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {DEFAULT_REASONING_LEVEL, effectiveRequestedReasoning, isReasoningLevel, parseReasoningOverride, reasoningCallSetting, REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, resolveReasoningPolicy} from '../../src/core/agent/reasoningPolicy.js';
+import {DEFAULT_REASONING_LEVEL, effectiveRequestedReasoning, isReasoningLevel, parseReasoningOverride, reasoningCallSetting, REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, resolveReasoningChoice, resolveReasoningPolicy} from '../../src/core/agent/reasoningPolicy.js';
 import type {ProviderCapabilities} from '../../src/core/subagent/contracts.js';
 import {providerRequestSettings, type ModelRuntimeConfig} from '../../src/llm/client.js';
 
@@ -24,12 +24,24 @@ const baseConfig = (over: Partial<ModelRuntimeConfig> & {capabilities?: Provider
   ...over,
 });
 
+describe('resolveReasoningChoice (session per-model overrides)', () => {
+  it('prefers the session override, then the stored setting, then the default', () => {
+    expect(resolveReasoningChoice('xhigh', 'low')).toEqual({setting: 'xhigh', level: 'xhigh', source: 'session'});
+    expect(resolveReasoningChoice(undefined, 'low')).toEqual({setting: 'low', level: 'low', source: 'settings'});
+    expect(resolveReasoningChoice(undefined, undefined)).toEqual({setting: undefined, level: 'medium', source: 'default'});
+  });
+  it('maps the provider-default sentinel to no level from any source', () => {
+    expect(resolveReasoningChoice('provider-default', 'low')).toEqual({setting: 'provider-default', level: undefined, source: 'session'});
+    expect(resolveReasoningChoice(undefined, 'provider-default')).toEqual({setting: 'provider-default', level: undefined, source: 'settings'});
+  });
+});
+
 describe('resolveReasoningPolicy', () => {
-  it('defaults to high when nothing is requested', () => {
-    expect(DEFAULT_REASONING_LEVEL).toBe('high');
-    expect(effectiveRequestedReasoning(undefined)).toBe('high');
+  it('defaults to medium when nothing is requested', () => {
+    expect(DEFAULT_REASONING_LEVEL).toBe('medium');
+    expect(effectiveRequestedReasoning(undefined)).toBe('medium');
     expect(effectiveRequestedReasoning('provider-default')).toBeUndefined();
-    expect(effectiveRequestedReasoning('medium')).toBe('medium');
+    expect(effectiveRequestedReasoning('high')).toBe('high');
   });
   it('is disabled when nothing is requested', () => {
     const p = resolveReasoningPolicy({requested: undefined, capabilities: baseCaps({supportsReasoningEffort: true})});

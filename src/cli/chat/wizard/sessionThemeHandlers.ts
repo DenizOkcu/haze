@@ -1,4 +1,5 @@
 import type {Mode} from '../../commands/chatModes.js';
+import {isStoredReasoning, resolveReasoningChoice} from '../../../core/agent/reasoningPolicy.js';
 import {resolveReasoningCommand} from '../../commands/reasoningCommand.js';
 import {selectThemeResult} from '../../commands/themesCommand.js';
 import {SESSION_ACTIONS} from '../../commands/sessionPicker.js';
@@ -47,15 +48,20 @@ export function createSessionThemeHandlers(deps: WizardDispatchDeps, ctx: Wizard
   }
 
   async function selectReasoning(value: string) {
-    const result = resolveReasoningCommand(value, deps.settings.reasoning);
-    if (result.action === 'set' || result.action === 'clear') {
-      await ctx.applySettings(result.settingsPatch);
+    const hook = deps.sessionReasoning;
+    const modelSelector = hook?.modelSelector();
+    if (!hook || !modelSelector) {
+      showMessage('No provider/model configured. /reasoning sets a per-model level; run /provider and /model first.');
       setMode('chat');
-      showMessage(result.message);
       return;
     }
-    // Unreachable from the picker (its values always set or clear) but narrows
-    // the remaining variants for the type checker.
+    const stored = isStoredReasoning(deps.settings.reasoning) ? deps.settings.reasoning : undefined;
+    const result = resolveReasoningCommand(value, {current: resolveReasoningChoice(hook.get(modelSelector), stored), stored, modelSelector});
+    if (result.action === 'set') hook.set(modelSelector, result.setting);
+    else if (result.action === 'reset') hook.set(modelSelector, undefined);
+    setMode('chat');
+    // Unreachable from the picker (its values always set or reset) but narrows
+    // the open-picker variant away for the type checker.
     if (result.action !== 'open-picker') showMessage(result.message);
   }
 

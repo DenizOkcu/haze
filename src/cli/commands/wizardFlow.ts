@@ -1,5 +1,5 @@
 import type {HazeMcpServer, HazeSettings} from '../../config/settings.js';
-import {configuredProviders, findProvider, modelSelector, providerImageCapable} from '../../config/providers.js';
+import {configuredProviders, findProvider, modelSelector, providerImageCapable, activeModel} from '../../config/providers.js';
 import {configuredLspServers, LSP_PRESETS} from '../../config/lspSettings.js';
 import {configuredMcpServers, findMcpServer, findMcpPreset, presetIds} from '../../config/mcpSettings.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
@@ -7,7 +7,7 @@ import {PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
-import {DEFAULT_REASONING_LEVEL, REASONING_LEVELS} from '../../core/agent/reasoningPolicy.js';
+import {isStoredReasoning, resolveReasoningChoice, REASONING_LEVELS, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {BUILT_IN_THEME_SPECS, DEFAULT_THEME_NAME, resolveTheme} from '../../ui/theme.js';
 import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
@@ -395,8 +395,8 @@ export function themeSuggestions(settings: HazeSettings): TextInputSuggestion[] 
   }));
 }
 
-/** Reasoning-effort picker values: every level plus the unset action. */
-export function reasoningSuggestions(settings: HazeSettings): TextInputSuggestion[] {
+/** Reasoning-effort picker values: every level plus the unset/reset actions. The active marker resolves the session override → saved setting → default. */
+export function reasoningSuggestions(settings: HazeSettings, sessionReasoning?: Record<string, StoredReasoningSetting>): TextInputSuggestion[] {
   const descriptions: Record<string, string> = {
     none: 'disable reasoning',
     minimal: 'least reasoning',
@@ -405,13 +405,16 @@ export function reasoningSuggestions(settings: HazeSettings): TextInputSuggestio
     high: 'deep reasoning',
     xhigh: 'maximum reasoning',
   };
+  const active = activeModel(settings);
+  const choice = resolveReasoningChoice(active ? sessionReasoning?.[modelSelector(active.provider, active.model)] : undefined, isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
   return [
     ...REASONING_LEVELS.map(level => ({
       value: level,
-      description: `${descriptions[level] ?? 'reasoning level'}${settings.reasoning === level || (settings.reasoning === undefined && level === DEFAULT_REASONING_LEVEL) ? ' · active' : ''}`,
+      description: `${descriptions[level] ?? 'reasoning level'}${choice.level === level ? ' · active' : ''}`,
       kind: 'command' as const,
     })),
     {value: 'unset', description: 'provider default — sends no reasoning parameter', kind: 'command' as const},
+    {value: 'reset', description: 'remove the session override — fall back to the saved or default level', kind: 'command' as const},
   ];
 }
 
@@ -432,6 +435,8 @@ export interface WizardSuggestionState {
   selectedSkillName?: string;
   selectedLspName?: string;
   selectedMcpName?: string;
+  /** Session per-model reasoning overrides (`/reasoning`); shown as the active level in the picker. */
+  sessionReasoning?: Record<string, StoredReasoningSetting>;
 }
 
 /**
@@ -496,7 +501,7 @@ export const WIZARD_STEPS = [
   // Themes
   {id: 'themes', kind: 'pick', placeholder: 'Choose a theme', suggestions: (s: WizardSuggestionState) => themeSuggestions(s.settings)},
   // Reasoning effort
-  {id: 'reasoning', kind: 'pick', placeholder: 'Choose a reasoning effort level', suggestions: (s: WizardSuggestionState) => reasoningSuggestions(s.settings)},
+  {id: 'reasoning', kind: 'pick', placeholder: 'Choose a reasoning effort level', suggestions: (s: WizardSuggestionState) => reasoningSuggestions(s.settings, s.sessionReasoning)},
 ] as const satisfies readonly WizardStepDef[];
 
 export type WizardStepId = (typeof WIZARD_STEPS)[number]['id'];

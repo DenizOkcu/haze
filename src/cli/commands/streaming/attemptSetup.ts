@@ -111,7 +111,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // attempt of each physical turn keeps the original read).
   const turnSettings = await readSettings();
   const steeringProfile = turnSettings.steeringProfile ?? 'standard';
-  const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride, reasoningOverride}, turnSettings);
+  const runtime = await modelWithConfig({cwd: session?.cwd, modelSelector: modelOverride, reasoningOverride, reasoningByModel: session?.reasoningByModel}, turnSettings);
   if (!runtime?.model) {
     callbacks.addMessage({role: 'assistant', text: 'No model provider configured. Run /provider to choose or add a provider. haze cannot hallucinate without a model. Progress.'});
     return undefined;

@@ -82,7 +82,7 @@ export function isLocalProviderUrl(url: string): boolean {
   }
 }
 
-function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting): ModelRuntimeSelection {
+function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting, sessionReasoningByModel?: Record<string, StoredReasoningSetting>): ModelRuntimeSelection {
   const baseURL = selection.provider.url;
   const providerKind = selection.provider.kind;
   const configuredKey = providerKind === 'chatgpt-codex' ? undefined : selection.provider.key ?? settings.apiKey;
@@ -92,12 +92,14 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
   const caps = capabilities(selection.provider.name, baseURL, providerKind);
-  // Run-scoped reasoning override (CLI `--reasoning`): an explicit level or
-  // the provider-default sentinel wins for this run; otherwise the stored
-  // settings value (default high, sentinel → no parameter) applies. The
-  // capability gate in resolveReasoningPolicy is unchanged — an override never
-  // forces the parameter onto an unsupported protocol.
-  const storedReasoning = reasoningOverride ?? (isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
+  // Reasoning resolution order (CLI `--reasoning` docs): run-scoped override →
+  // session per-model override (`/reasoning`, keyed `provider:model`) → global
+  // settings value → built-in default (medium). The stored or session
+  // `provider-default` sentinel sends no parameter at all. The capability gate
+  // in resolveReasoningPolicy is unchanged — nothing forces the parameter onto
+  // an unsupported protocol.
+  const selector = modelSelector(selection.provider, name);
+  const storedReasoning = reasoningOverride ?? sessionReasoningByModel?.[selector] ?? (isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
   const reasoningPolicy = resolveReasoningPolicy({requested: requestedReasoning, capabilities: caps});
@@ -125,7 +127,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const maxOutputTokens = limits.maxOutputTokens ?? catalog?.maxOutputTokens;
   return {
     model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
-    selector: modelSelector(selection.provider, name),
+    selector,
     config: {
       providerName: selection.provider.name,
       providerKind,
@@ -151,7 +153,7 @@ function modelLimitsFor(provider: HazeProviderSettings, modelName: string): {con
   return out;
 }
 
-export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string; reasoningOverride?: StoredReasoningSetting}, settings?: Awaited<ReturnType<typeof readSettings>>) {
+export async function modelWithConfig(session?: {cwd?: string; modelSelector?: string; reasoningOverride?: StoredReasoningSetting; reasoningByModel?: Record<string, StoredReasoningSetting>}, settings?: Awaited<ReturnType<typeof readSettings>>) {
   // Callers may pass pre-read settings so a turn performs a single settings
   // read (CR-024); otherwise read fresh.
   const resolvedSettings = settings ?? await readSettings();
@@ -161,7 +163,7 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
     const resolved = resolveModelSelector(resolvedSettings, override);
     if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
   } else selection = activeModel(resolvedSettings);
-  return selection ? runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride) : undefined;
+  return selection ? runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride, session?.reasoningByModel) : undefined;
 }
 
 export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection; settings: Awaited<ReturnType<typeof readSettings>>; selector?: string; cwd?: string}): Promise<{status: 'found'; runtime: WorkerRuntime} | {status: 'missing' | 'ambiguous'; message: string}> {

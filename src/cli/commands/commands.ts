@@ -4,6 +4,7 @@ import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/sett
 import {openPath} from '../../utils/openPath.js';
 import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
+import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
 import {handleFleetCommand} from './fleetCommand.js';
 import {handleInitCommand} from './initCommand.js';
@@ -33,6 +34,10 @@ export type CommandContext = {
   viewInPager?: (text: string) => Promise<boolean>;
   refreshContextFiles: () => Promise<ContextFile[]>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
+  /** Read the session-scoped per-model reasoning override (`provider:model` key). */
+  getSessionReasoning: (modelSelector: string) => StoredReasoningSetting | undefined;
+  /** Write (or clear, with undefined) the session-scoped per-model reasoning override. */
+  setSessionReasoning: (modelSelector: string, setting: StoredReasoningSetting | undefined) => void;
   getContextReport?: () => Promise<string>;
 };
 

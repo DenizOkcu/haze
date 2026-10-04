@@ -46,7 +46,7 @@ import {compactHomePath, statusBarMetrics} from '../chat/chatMetrics.js';
 import {formatTokenCount} from '../../utils/format.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
-import {DEFAULT_REASONING_LEVEL, isReasoningLevel} from '../../core/agent/reasoningPolicy.js';
+import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
@@ -120,6 +120,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // detected by sessionStartRef identity (the lifecycle controller replaces
   // the Date on new/resume/continue).
   const promptSessionRef = useRef<{identity: Date | undefined; value: PromptSession}>({identity: undefined, value: {cwd: process.cwd()}});
+  // Session per-model reasoning overrides live on the stable PromptSession
+  // object; this counter only forces a re-render so the status bar updates.
+  const [reasoningOverrideCounter, setReasoningOverrideCounter] = useState(0);
   const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const persistenceWarningShownRef = useRef(false);
@@ -371,6 +374,19 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     forkSessionById: sessionLifecycle.forkSessionById,
     setBusyLabel, setBusy: setBusyWithHeartbeat,
     idleBusyLabel: thinkingLabelForSettings(settings),
+    sessionReasoning: {
+      modelSelector: () => { const selection = activeModel(settings); return selection ? `${selection.provider.name}:${selection.model}` : undefined; },
+      get: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
+      set: (modelSelector, setting) => {
+        const session = currentPromptSession();
+        if (setting === undefined) {
+          if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
+        } else {
+          session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
+        }
+        setReasoningOverrideCounter(count => count + 1);
+      },
+    },
   });
 
   async function submit(value: string) {
@@ -448,6 +464,16 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         const next = await updateSettings(patch);
         setSettings(next);
         return next;
+      },
+      getSessionReasoning: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
+      setSessionReasoning: (modelSelector, setting) => {
+        const session = currentPromptSession();
+        if (setting === undefined) {
+          if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
+        } else {
+          session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
+        }
+        setReasoningOverrideCounter(count => count + 1);
       },
       getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
     };
@@ -651,8 +677,17 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
   const activeModelName = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : 'unconfigured';
-  const reasoningSuffix = isReasoningLevel(settings.reasoning) || settings.reasoning === undefined
-    ? ` (${isReasoningLevel(settings.reasoning) ? settings.reasoning : DEFAULT_REASONING_LEVEL})`
+  const activeSelector = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : undefined;
+  const effectiveReasoning = activeSelector
+    ? resolveReasoningChoice(promptSessionRef.current.value.reasoningByModel?.[activeSelector], isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined)
+    : undefined;
+  // When a session override changes, the suffix below must re-render: bump a
+  // cheap counter from setSessionReasoning instead of threading per-turn state.
+  void reasoningOverrideCounter;
+  const reasoningSuffix = effectiveReasoning
+    ? effectiveReasoning.level === undefined
+      ? ' (no reasoning parameter)'
+      : ` (${effectiveReasoning.level})`
     : '';
   const headerSubtitle = (
     <Text>
@@ -674,7 +709,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, sessionReasoning: promptSessionRef.current.value.reasoningByModel});
   const staticItems: ChatStaticItem[] = [
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,

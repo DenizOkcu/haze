@@ -2,6 +2,7 @@ import type {HazeMcpServer, HazeProviderSettings, HazeSettings} from '../../../c
 import type {HazeLspServer} from '../../../config/lspSettings.js';
 import type {LoadedSkill, SkillSource} from '../../../skills/types.js';
 import type {SessionSummary} from '../../../core/session/sessionStore.js';
+import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import type {Mode} from '../../commands/chatModes.js';
 import {isYesConfirmation} from '../../commands/wizardFlow.js';
 import type {WizardUiAction, WizardUiState} from './uiState.js';
@@ -28,6 +29,12 @@ export interface WizardDispatchDeps {
   setBusy: (busy: boolean) => void;
   /** Busy label to restore when a skill creation finishes. */
   idleBusyLabel: string;
+  /** Session-scoped per-model reasoning overrides (`/reasoning`); interactive screen only. */
+  sessionReasoning?: {
+    modelSelector: () => string | undefined;
+    get: (modelSelector: string) => StoredReasoningSetting | undefined;
+    set: (modelSelector: string, setting: StoredReasoningSetting | undefined) => void;
+  };
 }
 
 /** Setter shims over the single wizard-state reducer, shared by every handler family. */

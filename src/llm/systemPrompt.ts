@@ -1,8 +1,17 @@
 import type {ContextFile} from '../config/contextFiles.js';
+import type {StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
 
 export interface PromptSession {
   start?: Date;
   cwd?: string;
+  /**
+   * Per-model (`provider:model`) reasoning-effort overrides for the current
+   * interactive session, written by `/reasoning`. In-memory only (like
+   * `contextFallbackWarned`, never persisted to session files): a new session
+   * starts empty, and `client.ts` resolves them ahead of the global
+   * `reasoning` setting.
+   */
+  reasoningByModel?: Record<string, StoredReasoningSetting>;
   /**
    * `provider:model` key the fallback-context-budget warning was last shown
    * for (see streaming.ts). Same key across turns → silent; a different model

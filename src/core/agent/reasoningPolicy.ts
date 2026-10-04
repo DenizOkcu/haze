@@ -10,11 +10,12 @@ export type ReasoningLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'x
 export const REASONING_LEVELS: readonly ReasoningLevel[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 /**
- * Level applied when settings carry no `reasoning` key. Users opt out with an
- * explicit `none` (reasoning off) or the stored `provider-default` sentinel
- * (written by `/reasoning unset`); key-absent means this default.
+ * Level applied when nothing more specific exists: no session per-model
+ * override and no `reasoning` settings key. Users opt out with an explicit
+ * `none` (reasoning off) or the stored `provider-default` sentinel (written by
+ * `/reasoning unset`); key-absent means this default.
  */
-export const DEFAULT_REASONING_LEVEL: ReasoningLevel = 'high';
+export const DEFAULT_REASONING_LEVEL: ReasoningLevel = 'medium';
 
 /** Value the settings file may store: a level or the `provider-default` sentinel. */
 export type StoredReasoningSetting = ReasoningLevel | 'provider-default';
@@ -37,6 +38,28 @@ export function effectiveRequestedReasoning(setting: StoredReasoningSetting | un
 }
 
 export type EffectiveReasoning = ReasoningLevel | 'disabled';
+
+export type ReasoningSource = 'session' | 'settings' | 'default';
+
+export interface ResolvedReasoningChoice {
+  /** The winning stored value, if any (undefined when nothing was set). */
+  setting: StoredReasoningSetting | undefined;
+  /** The level that will be requested; undefined when the sentinel means "send no parameter". */
+  level: ReasoningLevel | undefined;
+  /** Where the winner came from. */
+  source: ReasoningSource;
+}
+
+/**
+ * Resolve the reasoning choice for one model: the session per-model override
+ * (`/reasoning`, keyed `provider:model`) wins, then the global `reasoning`
+ * setting, then the built-in default. Pure; callers pass validated values.
+ */
+export function resolveReasoningChoice(sessionOverride: StoredReasoningSetting | undefined, storedSetting: StoredReasoningSetting | undefined): ResolvedReasoningChoice {
+  if (sessionOverride !== undefined) return {setting: sessionOverride, level: effectiveRequestedReasoning(sessionOverride), source: 'session'};
+  if (storedSetting !== undefined) return {setting: storedSetting, level: effectiveRequestedReasoning(storedSetting), source: 'settings'};
+  return {setting: undefined, level: DEFAULT_REASONING_LEVEL, source: 'default'};
+}
 
 export interface ResolvedReasoningPolicy {
   /** What the user requested, if anything. */
