@@ -1,5 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Box, Text, useBoxMetrics, useCursor, useInput, useIsScreenReaderEnabled, usePaste, type DOMElement} from 'ink';
+import {Box, Text, measureElement, useCursor, useInput, useIsScreenReaderEnabled, usePaste, type DOMElement} from 'ink';
 import {cellWidth, graphemes, nextBoundary, offsetAtColumn, previousBoundary, safeInputDisplay} from '../textGeometry.js';
 import {theme} from '../theme.js';
 import {
@@ -120,8 +120,23 @@ export function TextInput({
   // point so composing text (CJK input methods) appears where the user is
   // looking instead of at the frame bottom. Measured after layout commits.
   const cursorHostRef = useRef<DOMElement>(null);
-  const hostMetrics = useBoxMetrics(cursorHostRef);
   const {setCursorPosition} = useCursor();
+  // The terminal cursor position for IME composition must use frame-origin
+  // coordinates (Ink's cursor basis). `useBoxMetrics`' left/top are
+  // parent-relative — (0,0) here, since this box sits inside DynamicFrame's
+  // bordered, padded input box — which pinned the hardware cursor one row
+  // above the input and cells behind the editing point. `measureElement()`
+  // accumulates ancestor offsets into frame coordinates; it is read after
+  // commit, when Yoga layout is final. The ref targets the input-line box (not
+  // the whole host), so suggestion rows rendered above it are already included
+  // in the measured origin.
+  const [inputOrigin, setInputOrigin] = useState<{x: number; y: number}>();
+  useEffect(() => {
+    const node = cursorHostRef.current;
+    if (!node) return;
+    const {x, y} = measureElement(node);
+    setInputOrigin(previous => previous && previous.x === x && previous.y === y ? previous : {x, y});
+  });
   const screenReaderEnabled = useIsScreenReaderEnabled();
   const history = useRef<string[]>(historyItems);
   const historyIndex = useRef<number | null>(null);
@@ -367,21 +382,20 @@ export function TextInput({
   const firstVisibleLine = Math.max(0, Math.min(currentCursorPosition.lineIndex - maxVisibleLines + 1, wrappedLines.length - maxVisibleLines));
   const visibleLines = wrappedLines.slice(firstVisibleLine, firstVisibleLine + maxVisibleLines);
 
-  // Terminal cursor coordinates inside the measured host box. `left`/`top`
-  // from useBoxMetrics are live-region coordinates, matching Ink's cursor
-  // basis; the column adds the `› ` prefix and the cell width of the text
-  // before the editing point (grapheme-safe via textGeometry).
+  // Terminal cursor coordinates at the editing point: the input-line box's
+  // frame-origin position (measureElement) plus the `› ` prefix and the cell
+  // width of the text before the cursor (grapheme-safe via textGeometry).
   let imeCursor: {x: number; y: number} | undefined;
-  if (!disabled && !screenReaderEnabled && hostMetrics.hasMeasured) {
+  if (!disabled && !screenReaderEnabled && inputOrigin) {
     const visibleRow = currentCursorPosition.lineIndex - firstVisibleLine;
     const line = wrappedLines[currentCursorPosition.lineIndex];
     if (value.length === 0) {
-      imeCursor = {x: hostMetrics.left + (width > 2 ? 2 : 0), y: hostMetrics.top};
+      imeCursor = {x: inputOrigin.x + (width > 2 ? 2 : 0), y: inputOrigin.y};
     } else if (line && visibleRow >= 0 && visibleRow < visibleLines.length) {
       const lineCursorOffset = Math.max(0, Math.min(displayCursor - line.start, line.text.length));
       imeCursor = {
-        x: hostMetrics.left + (width > 2 ? 2 : 0) + cellWidth(line.text.slice(0, lineCursorOffset)),
-        y: hostMetrics.top + visibleRow,
+        x: inputOrigin.x + (width > 2 ? 2 : 0) + cellWidth(line.text.slice(0, lineCursorOffset)),
+        y: inputOrigin.y + visibleRow,
       };
     }
   }
@@ -396,13 +410,14 @@ export function TextInput({
     onRowsChange?.({input: wantedInputRows, suggestions: wantedSuggestionRows});
   }, [onRowsChange, wantedInputRows, wantedSuggestionRows]);
 
-  return <Box flexDirection="column" width="100%" ref={cursorHostRef}>
+  return <Box flexDirection="column" width="100%">
     {suggestionMode === 'always' ? <WizardChoices
       suggestions={displayList} activeIndex={displayActiveIndex} rows={suggestionRows} /> : visibleSuggestions.length > 0 && <Box flexDirection="column">
       {visibleSuggestions.map((suggestion, index) => <Text key={suggestion.value} color={index + suggestionStart === displayActiveIndex ? theme.success : theme.muted} wrap="truncate-end">
         {index + suggestionStart === displayActiveIndex ? '› ' : '  '}{suggestion.value}<Text color={theme.muted}> {suggestion.kind ?? 'command'}{suggestion.description ? ` — ${suggestion.description}` : ''}</Text>
       </Text>)}
     </Box>}
+    <Box ref={cursorHostRef} flexDirection="column" width="100%">
     {value.length === 0 ? <Text wrap="truncate-end">
 <Text color={theme.accent}>{width > 2 ? '› ' : ''}</Text>
       <Text inverse> </Text>
@@ -424,5 +439,6 @@ export function TextInput({
         </> : cellWidth(line.text) > inputWidth ? '�' : line.text}
       </Text>;
     })}
+    </Box>
   </Box>;
 }
