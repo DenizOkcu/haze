@@ -275,7 +275,7 @@ function optionalLedgerValidationKind(value: unknown): boolean {
 }
 
 function optionalFailedCheckIds(value: unknown): boolean {
-  return value === undefined || (Array.isArray(value) && value.length <= 8 && value.every(id => typeof id === 'string' && /^[0-9a-f]{16}$/.test(id)));
+  return value === undefined || (Array.isArray(value) && value.every(id => typeof id === 'string' && /^[0-9a-f]{16}$/.test(id)));
 }
 
 function frontierFromGoalEntry(entry: GoalLedgerEntry): GoalLedgerFrontier {

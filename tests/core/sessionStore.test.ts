@@ -624,6 +624,15 @@ describe('goal ledger (P1: durable frontier)', () => {
     expect(restored.goalFrontier?.cycle).toBe(1);
   });
 
+  it('persists and restores more than eight unresolved checks', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const failedCheckIds = Array.from({length: 12}, (_, index) => index.toString(16).padStart(16, '0'));
+    await appendSessionEntry(session, {type: 'ui_message', at: '1', role: 'user', text: 'implement services'});
+    await appendSessionEntry(session, goalEntry({validationOutcome: 'failed', validationKind: 'test', failedCheckIds}));
+    expect((await readSessionEntries(session)).parseErrors).toEqual([]);
+    expect((await readGoalLedgerFrontier(session))?.failedCheckIds).toEqual(failedCheckIds);
+    expect((await restoreSessionState(session)).goalFrontier?.failedCheckIds).toEqual(failedCheckIds);
+  });
 
   it('clears the frontier on goal_end and lets newer goals supersede stale ones', async () => {
     const session = await createSession({cwd, sessionsDir});

@@ -53,6 +53,11 @@ export function summarizeSessionEntries(entries: readonly SessionEntry[]): Sessi
         goal.status = entry.status ?? 'unknown';
         goal.stopReason = entry.stopReason;
         goal.gateDecision = entry.gateDecision;
+      } else {
+        goal.status = 'active';
+        delete goal.stopReason;
+        delete goal.gateDecision;
+        finalEvidence.delete(entry.goalId);
       }
     } else if (entry.type === 'event' && entry.text) {
       let event: Record<string, unknown> | undefined;
@@ -93,7 +98,7 @@ export function summarizeSessionEntries(entries: readonly SessionEntry[]): Sessi
   }
   for (const goal of report.goals) {
     const evidence = finalEvidence.get(goal.id);
-    if (!evidence) continue;
+    if (!evidence || goal.status === 'active') continue;
     const tasks = record(evidence.taskProgress);
     const eventOpenTasks = (typeof tasks?.pending === 'number' ? tasks.pending : 0) + (typeof tasks?.inProgress === 'number' ? tasks.inProgress : 0);
     if (evidence.validationOutcome !== goal.validation || evidence.mutationCount !== goal.mutations || eventOpenTasks !== goal.openTasks) goal.evidenceMismatch = true;

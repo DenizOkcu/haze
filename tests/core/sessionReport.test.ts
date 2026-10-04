@@ -19,6 +19,27 @@ describe('session report', () => {
     expect(text).not.toMatch(/private|secret|\/private\/work/);
   });
 
+  it.each(['goal_start', 'goal_continue'] as const)('clears terminal presentation and old event evidence when %s reopens a goal', phase => {
+    const base: Extract<SessionEntry, {type: 'goal'}> = {type: 'goal', at: 'now', goalId: 'goal-1', phase: 'goal_start', request: 'synthetic', requestHash: '0123456789abcdef', intent: 'implement', cycle: 1, mutationCount: 1, validationOutcome: 'failed', progressSignature: ''};
+    const ended: SessionEntry[] = [
+      base,
+      {...base, phase: 'goal_end', status: 'failed', stopReason: 'no-progress', gateDecision: 'validation_failed'},
+      {type: 'event', at: 'now', name: 'goal_end', text: JSON.stringify({goalId: base.goalId, evidence: {mutationCount: 1, validationOutcome: 'failed'}})},
+    ];
+    const reopened = [...ended, {...base, phase, cycle: 2, mutationCount: 2, validationOutcome: 'stale'}];
+    const report = summarizeSessionEntries(reopened);
+    expect(report.goals[0]).toMatchObject({status: 'active', cycles: 2, mutations: 2, validation: 'stale'});
+    expect(report.goals[0]?.stopReason).toBeUndefined();
+    expect(report.goals[0]?.gateDecision).toBeUndefined();
+    expect(report.goals[0]?.evidenceMismatch).toBeUndefined();
+    expect(formatSessionReport(report)).not.toMatch(/no-progress|terminal evidence mismatch/);
+    // A new terminal boundary is checked against only its own event evidence.
+    const terminal = {...base, phase: 'goal_end' as const, cycle: 2, status: 'complete', gateDecision: 'ready', mutationCount: 3, validationOutcome: 'passed'};
+    expect(summarizeSessionEntries([...reopened, terminal]).goals[0]?.evidenceMismatch).toBeUndefined();
+    const event: SessionEntry = {type: 'event', at: 'now', name: 'goal_end', text: JSON.stringify({goalId: base.goalId, evidence: {mutationCount: 2, validationOutcome: 'passed'}})};
+    expect(summarizeSessionEntries([...reopened, terminal, event]).goals[0]?.evidenceMismatch).toBe(true);
+  });
+
   it('counts a failed validation when its large tool output was slimmed', () => {
     const raw: SessionEntry = {type: 'event', at: 'now', name: 'tool_end', text: JSON.stringify({name: 'shell', success: false, output: {validationSummary: {kind: 'build', status: 'failed', summaryText: 'private error'}, stdout: 'private'.repeat(10_000)}})};
     const prepared = prepareSessionEntryForWrite(raw);
