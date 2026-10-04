@@ -188,13 +188,14 @@ describe('tool diff messages', () => {
 });
 
 describe('live-region clamping', () => {
-  it('clamps a streaming assistant tail to the budget with an indicator row', () => {
+  it('clamps a streaming assistant tail to the budget with an indicator row', async () => {
     const {lastFrame} = render(<MessageView width={40} maxVisibleLines={3} message={{
       id: 'a1',
       role: 'assistant',
       text: 'line one\nline two\nline three\nline four\nline five',
       streaming: true,
     }} />);
+    await vi.waitFor(() => expect(stripAnsi(lastFrame() ?? '')).toContain('line five'));
     const frame = stripAnsi(lastFrame() ?? '');
     expect(frame).toContain('⋯ +3 lines above');
     expect(frame).toContain('line five');
@@ -202,13 +203,14 @@ describe('live-region clamping', () => {
     expect(frame).not.toContain('line two');
   });
 
-  it('leaves short streaming tails untouched', () => {
+  it('leaves short streaming tails untouched', async () => {
     const {lastFrame} = render(<MessageView width={40} maxVisibleLines={10} message={{
       id: 'a1',
       role: 'assistant',
       text: 'short tail',
       streaming: true,
     }} />);
+    await vi.waitFor(() => expect(stripAnsi(lastFrame() ?? '')).toContain('short tail'));
     const frame = stripAnsi(lastFrame() ?? '');
     expect(frame).toContain('short tail');
     expect(frame).not.toContain('⋯');
