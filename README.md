@@ -218,6 +218,57 @@ They are also available through one `skill` catalog tool. haze loads one workflo
 
 When you catch yourself repeating the same instructions, put them in a skill. The workflow stays in a Markdown file that you can read and edit.
 
+## Shared plugins and marketplaces
+
+Haze accepts local [Agent Plugins 1.0.0](https://agent-plugins.org/specification)
+packages (`plugin.json` plus `skills/`) and existing Claude Code/Codex legacy
+manifests (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`). The canonical
+root manifest takes precedence. Claude and OpenAI collections can reference the
+same plugin directories through their respective marketplace catalogs.
+
+```sh
+haze plugin inspect ../haze-kits
+haze plugin inspect ../haze-kits speckit
+haze plugin install ../haze-kits speckit
+haze plugin list
+haze plugin remove speckit
+```
+
+The same operations are available as `/plugin …` in chat; `kit` and `/kit` are aliases.
+Quote local paths containing spaces. Install from a plugin directory directly or
+select a named plugin from a local `.claude-plugin/marketplace.json` or
+`.agents/plugins/marketplace.json` collection. Remote entries require cloning locally
+first; Haze does not download marketplace repositories or honor their installation policies.
+
+Packages install globally into `~/.haze/plugins/<name>` with ownership receipts in
+`~/.haze/plugin-receipts`; installation never writes workspace content. Only
+receipt-listed packages activate; copying a collection or Claude cache into a
+directory does not enable it. Plugin skills are globally installed, stay
+untrusted third-party content, and are invoked as `/<plugin>:<skill>`, such as
+`/speckit:speckit-plan`. Use `/skills` to enable/disable them, and `/plugin remove`
+to uninstall the package. Legacy Claude custom skill paths are supported when
+contained in the package.
+
+**Compatibility is skills-focused, not a universal plugin runtime.** Hooks, MCP
+servers, agents, legacy command files, LSP and unknown extensions are reported but
+not activated. Host-specific frontmatter, argument expansion, dynamic shell
+preprocessing and tool restrictions are not emulated. Do not rely on those features
+for workflow correctness or safety. Bundled scripts can be run by the agent through
+normal tools when a skill requests it; installation itself executes no package code.
+
+The optional `extensions.dev.haze.workspaceFiles` mapping is no longer supported:
+plugins install globally and never write workspace content. Such extensions are
+reported and ignored like other unknown extensions. Bundled workflow assets stay
+inside `~/.haze/plugins/<name>`; the Spec Kit plugin's setup skill copies what a
+project needs from there using normal agent tools. Reinstalling identical content
+is idempotent; remove before changing versions. Protected secrets and package
+symlinks are refused. Interrupted operations can leave partial files and
+`~/.haze/plugin-receipts/.lock`; inspect before manually clearing a stale lock.
+This is not a filesystem sandbox or crash-safe transaction journal.
+
+See the collection's README and [plugin interoperability notes](docs/plugin-compatibility.md)
+for official sources, layouts, support limits and cross-agent setup.
+
 ## Commands
 
 ```txt

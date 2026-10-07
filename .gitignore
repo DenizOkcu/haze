@@ -6,6 +6,9 @@ dist/
 *.log
 .haze/memory.json
 .haze/tasks.json
+# Installed kits/plugins live globally in ~/.haze; local .haze/plugin state is never committed
+.haze/plugins/
+.haze/plugin-receipts/
 .pi-sessions/
 
 # Model-backed eval artifacts (npm run eval); disposable

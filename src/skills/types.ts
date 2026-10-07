@@ -19,6 +19,10 @@ export interface LoadedSkill {
   body: string;
   references: LoadedSkillReference[];
   source: SkillSource;
+  /** Receipt-installed plugin identity; name is namespaced as plugin:skill. */
+  pluginName?: string;
+  /** Absolute installed package root for locating bundled assets. */
+  pluginRoot?: string;
 }
 
 interface SkillRegistryError {

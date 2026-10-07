@@ -6,6 +6,9 @@ describe('chatModes', () => {
     expect(PICKER_MODES.has('provider')).toBe(true);
     expect(PICKER_MODES.has('mcpAddTransport')).toBe(true);
     expect(PICKER_MODES.has('themes')).toBe(true);
+    expect(PICKER_MODES.has('plugins')).toBe(true);
+    expect(PICKER_MODES.has('pluginInstallName')).toBe(true);
+    expect(PICKER_MODES.has('pluginInspectName')).toBe(true);
     expect(MASKED_MODES.has('providerSetKey')).toBe(true);
     expect(SUBMIT_EMPTY_MODES.has('mcpAddKey')).toBe(true);
   });

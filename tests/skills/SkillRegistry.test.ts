@@ -9,6 +9,7 @@ const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-skill-registry-'));
 vi.mock('../../src/config/paths.js', () => ({
   GLOBAL_SKILLS_DIR: tmp,
   HAZE_DIR: tmp,
+  GLOBAL_PLUGINS_DIR: path.join(tmp, 'plugins'),
 }));
 
 const {loadSkillRegistry, resolveSkillCandidates} = await import('../../src/skills/SkillRegistry.js');

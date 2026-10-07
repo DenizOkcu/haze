@@ -55,6 +55,7 @@ import {modelThinkingLabel} from '../../utils/modelName.js';
 import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
+import {listInstalledPlugins} from './pluginCommand.js';
 
 interface ChatOptions {
   debug?: boolean;
@@ -201,7 +202,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // Wizard flow state (selection, drafts, model discovery) in one reducer;
   // this replaced twelve individual useState hooks.
   const [wizardState, updateWizard] = useReducer(wizardUiReducer, undefined, initialWizardUiState);
-  const {modelProviderFilter, discoveredModels, suggestedModels, selectedProviderName, providerDraft, selectedSkillName, selectedLspName, selectedMcpName} = wizardState;
+  const {modelProviderFilter, discoveredModels, suggestedModels, selectedProviderName, providerDraft, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries} = wizardState;
 
   useEffect(() => subscribeBackgroundProcesses(() => setBackgroundCount(backgroundProcessCount())), []);
 
@@ -365,6 +366,17 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     setMessages(m => [...m, {role: 'system', text: `Choose a saved session (newest first)${hidden ? `. Showing ${MAX_SESSION_PICKER_RESULTS} of ${next.length}; ${hidden} older sessions are hidden.` : '.'}`}]);
   }
 
+  async function openPluginPicker() {
+    try {
+      updateWizard({type: 'plugins', value: await listInstalledPlugins()});
+    } catch (error) {
+      setMessages(m => [...m, {role: 'system', text: `Could not list installed plugins: ${error instanceof Error ? error.message : String(error)}`}]);
+      return;
+    }
+    setMode('plugins');
+    setMessages(m => [...m, {role: 'system', text: 'Choose install plugin, inspect plugin, or an installed plugin to manage. Only skills activate; no scripts, hooks, or MCP servers run.'}]);
+  }
+
   function cancelThinking() {
     if (!busy) return;
     abortControllerRef.current?.abort('User pressed Esc.');
@@ -480,6 +492,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         return text;
       },
       viewInPager: terminalControl.viewInPager,
+      refreshSkills,
+      openPluginPicker,
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
         setContextFiles(files);
@@ -712,7 +726,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
   const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
   const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, sessionReasoning});
+  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning});
   const staticItems: ChatStaticItem[] = [
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,

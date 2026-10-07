@@ -10,6 +10,7 @@ import {STDIN_PROMPT_BYTES} from '../core/limits.js';
 import {readPackageVersion} from '../utils/version.js';
 import {formatVersionVerbose, readBuildInfo} from '../utils/buildInfo.js';
 import {runDoctor} from './commands/doctor.js';
+import {runPluginCommand} from './commands/pluginCommand.js';
 
 installBackgroundProcessSignalHandlers();
 const version = readPackageVersion() ?? '0.0.0';
@@ -105,6 +106,21 @@ program.command('doctor')
   .action(async () => {
     process.exitCode = await runDoctor();
   });
+
+const plugins = program.command('plugin').alias('kit')
+  .description('inspect and install local Claude/Agent Plugins packages and collections (skills only)');
+plugins.command('inspect <directory> [name]').action(async (directory: string, name?: string) => {
+  process.stdout.write(`${await runPluginCommand(['inspect', directory, ...(name ? [name] : [])])}\n`);
+});
+plugins.command('install <directory> [name]').action(async (directory: string, name?: string) => {
+  process.stdout.write(`${await runPluginCommand(['install', directory, ...(name ? [name] : [])])}\n`);
+});
+plugins.command('list').action(async () => {
+  process.stdout.write(`${await runPluginCommand(['list'])}\n`);
+});
+plugins.command('remove <name>').action(async (name: string) => {
+  process.stdout.write(`${await runPluginCommand(['remove', name])}\n`);
+});
 
 program.command('report [id]')
   .description('summarize a saved session without exposing prompts or tool output (defaults to the latest session in this workspace)')

@@ -51,6 +51,7 @@
               <a href="#invoke">Invoking skills</a>
               <a href="#recipes">Starter recipes</a>
               <a href="#manage">Manage skills</a>
+              <a href="#plugins">Shared plugins</a>
             </nav>
           </div>
           <div class="doc-nav-ext">
@@ -158,6 +159,19 @@ Workflow:
                 <div class="recipe-row"><span class="k">description</span><span class="v">Implement the requested feature with tests and no speculative abstraction. Run typecheck, tests, and lint; end with a concise summary of changed files.</span></div>
               </article>
             </div>
+          </section>
+
+          <section id="plugins">
+            <h2>Shared <span class="em">plugins</span></h2>
+            <p>Haze loads skills from local Agent Plugins 1.0.0 packages with root <code>plugin.json</code>, or legacy Claude/Codex manifests. Collections use <code>.claude-plugin/marketplace.json</code> or <code>.agents/plugins/marketplace.json</code>, pointing at shared plugin directories.</p>
+            <div class="codeblock"><pre>haze plugin inspect ../haze-kits
+haze plugin install ../haze-kits speckit
+haze plugin list
+haze plugin remove speckit</pre></div>
+            <p>In chat use <code>/plugin</code>; <code>/kit</code> is an alias. Quote paths with spaces. Plugins install globally under <code>~/.haze/plugins/&lt;name&gt;</code> and activate only when listed by an installation receipt. Invoke a skill as <code>/&lt;plugin&gt;:&lt;skill&gt;</code>, for example <code>/speckit:speckit-plan</code>. Enable/disable it with <code>/skills</code>; remove its package with <code>/plugin remove</code>.</p>
+            <div class="callout"><strong>Skills-focused compatibility.</strong> Hooks, MCP, agents, command files, LSP, host-specific frontmatter and shell preprocessing are not activated or emulated. Clone remote entries locally first. Installation executes no package code; scripts requested by a workflow still use normal agent tools.</div>
+            <p>Installation is global and never writes workspace content; the former <code>extensions.dev.haze.workspaceFiles</code> mapping is reported and ignored. Kits that need project assets ship an explicit setup skill copying from <code>~/.haze/plugins/&lt;name&gt;</code> with normal agent tools. Removal preserves modified and unowned files. Review unfamiliar plugin instructions as untrusted content.</p>
+            <p>Formats: <a href="https://agent-plugins.org/specification">Agent Plugins</a>, <a href="https://code.claude.com/docs/en/plugins-reference">Claude Code</a>, and <a href="https://developers.openai.com/plugins/build/plugins">OpenAI packaging</a>.</p>
           </section>
 
           <section id="manage">

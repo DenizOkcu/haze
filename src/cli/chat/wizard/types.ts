@@ -16,6 +16,13 @@ export interface WizardDispatchDeps {
   settings: HazeSettings;
   skills: LoadedSkill[];
   sessions?: SessionSummary[];
+  /** Plugin install/inspect/remove/collection actions for the `/plugin` picker; defaults to the pluginCommand implementations. */
+  pluginRunner?: {
+    install: (source: string, name: string | undefined) => Promise<string>;
+    inspect: (source: string, name: string | undefined) => Promise<string>;
+    remove: (name: string) => Promise<string>;
+    collection: (source: string) => Promise<{name: string; description?: string}[]>;
+  };
   /** Wizard flow UI state (selection, drafts, model discovery). */
   wizard: WizardUiState;
   updateWizard: (action: WizardUiAction) => void;
@@ -53,6 +60,10 @@ export interface WizardSetterContext {
   setLspDraft: (value: Partial<HazeLspServer>) => void;
   setSelectedMcpName: (value: string | undefined) => void;
   setMcpDraft: (value: Partial<HazeMcpServer>) => void;
+  setSelectedPluginName: (value: string | undefined) => void;
+  setPluginSourceDir: (value: string | undefined) => void;
+  setPlugins: (value: {name: string; version?: string}[]) => void;
+  setPluginCollectionEntries: (value: {name: string; description?: string}[]) => void;
   setDiscoveredModels: (value: string[]) => void;
   setSuggestedModels: (value: string[]) => void;
 }

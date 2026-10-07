@@ -4,6 +4,7 @@ import {GLOBAL_SKILLS_DIR} from '../config/paths.js';
 import {loadSkill} from './SkillLoader.js';
 import type {LoadedSkill, SkillRegistry, SkillSource} from './types.js';
 import {confinedResolve} from './confinement.js';
+import {loadPluginSkills} from './plugins/runtime.js';
 
 async function loadRoot(
   root: string,
@@ -59,7 +60,9 @@ export async function loadSkillRegistry(cwd = process.cwd()): Promise<SkillRegis
   const global = await loadRoot(GLOBAL_SKILLS_DIR, GLOBAL_SKILLS_DIR, 'global', errors);
   const projectRoot = path.join(cwd, '.haze', 'skills');
   const project = await loadRoot(projectRoot, cwd, 'project', errors);
-  const candidates = [...project, ...global];
+  const plugins = await loadPluginSkills(errors);
+  const candidates = [...project, ...plugins, ...global];
+
   const skills = resolveSkillCandidates(candidates);
   return {skills, candidates, errors};
 }

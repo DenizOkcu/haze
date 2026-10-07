@@ -1,8 +1,20 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type {HazeSettings} from '../../../src/config/settings.js';
 import {findPreset} from '../../../src/config/providerPresets.js';
 import type {WizardDispatchDeps, WizardUiAction, WizardUiState} from '../../../src/cli/chat/wizardDispatch.js';
 import type {Mode} from '../../../src/cli/commands/chatModes.js';
+
+// Plugin wizard steps reload installed plugins from the global ~/.haze; point
+// that at a temp home so tests never touch the real one.
+const pluginHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-wizard-home-'));
+vi.mock('../../../src/config/paths.js', () => ({
+  HAZE_DIR: pluginHome,
+  GLOBAL_SKILLS_DIR: path.join(pluginHome, 'skills'),
+  GLOBAL_PLUGINS_DIR: path.join(pluginHome, 'plugins'),
+}));
 
 // Keep settings writes in-memory: wizardDispatch calls updateSettings on
 // successful steps, and tests must not touch ~/.haze/settings.json.
@@ -337,6 +349,84 @@ describe('wizardDispatch themes', () => {
     expect(mocks.updateSettings).not.toHaveBeenCalled();
     expect(deps.setMode).not.toHaveBeenCalledWith('chat');
     expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Unknown theme name'));
+  });
+});
+
+describe('wizardDispatch plugins', () => {
+  function pluginDeps() {
+    const calls: string[] = [];
+    const deps = makeDeps({
+      wizard: {...initialWizardUiState(), plugins: [{name: 'example', version: '1.0.0'}]},
+      pluginRunner: {
+        install: async (source: string, name) => { calls.push(`install:${source}:${name ?? ''}`); return 'Installed example@1.0.0.'; },
+        inspect: async (source: string, name) => { calls.push(`inspect:${source}:${name ?? ''}`); return '1 standard skills; 2 package files.'; },
+        remove: async (name: string) => { calls.push(`remove:${name}`); return 'Removed plugin example.'; },
+        collection: async (source: string) => { calls.push(`collection:${source}`); return source === '../kits' ? [{name: 'review', description: 'Review workflows'}] : Promise.reject(new Error('Not a plugin collection.')); },
+      },
+    });
+    return {deps, calls};
+  }
+
+  it('routes the picker through install with collection branching', async () => {
+    const {deps, calls} = pluginDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('plugins', 'install plugin');
+    expect(deps.setMode).toHaveBeenLastCalledWith('pluginInstallSource');
+
+    await wizard.dispatch('pluginInstallSource', '../kits');
+    expect(calls).toEqual(['collection:../kits']);
+    expect(deps.wizard.pluginSourceDir).toBe('../kits');
+    expect(deps.wizard.pluginCollectionEntries).toEqual([{name: 'review', description: 'Review workflows'}]);
+    expect(deps.setMode).toHaveBeenLastCalledWith('pluginInstallName');
+
+    await wizard.dispatch('pluginInstallName', 'review');
+    expect(calls.at(-1)).toBe('install:../kits:review');
+    expect(deps.showMessage).toHaveBeenLastCalledWith('Installed example@1.0.0.');
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+  });
+
+  it('installs a plain package directory directly when it is not a collection', async () => {
+    const {deps, calls} = pluginDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('plugins', 'install plugin');
+    await wizard.dispatch('pluginInstallSource', '../single-plugin');
+    expect(calls).toEqual(['collection:../single-plugin', 'install:../single-plugin:']);
+    expect(deps.showMessage).toHaveBeenLastCalledWith('Installed example@1.0.0.');
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+  });
+
+  it('surfaces plugin action failures instead of crashing, then removes after confirm', async () => {
+    const {deps, calls} = pluginDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('plugins', 'inspect plugin');
+    expect(deps.setMode).toHaveBeenLastCalledWith('pluginInspectSource');
+    await wizard.dispatch('pluginInspectSource', '/nope');
+    expect(calls.at(-1)).toBe('inspect:/nope:');
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+
+    await wizard.dispatch('plugins', 'example');
+    expect(deps.wizard.selectedPluginName).toBe('example');
+    expect(deps.setMode).toHaveBeenLastCalledWith('pluginAction');
+
+    await wizard.dispatch('pluginAction', 'remove plugin');
+    expect(deps.setMode).toHaveBeenLastCalledWith('pluginConfirmRemove');
+
+    await wizard.dispatch('pluginConfirmRemove', 'yes');
+    expect(calls.at(-1)).toBe('remove:example');
+    expect(deps.showMessage).toHaveBeenLastCalledWith('Removed plugin example.');
+    expect(deps.setMode).toHaveBeenLastCalledWith('chat');
+    expect(deps.refreshSkills).toHaveBeenCalled();
+  });
+
+  it('rejects unknown plugin names without leaving the picker', async () => {
+    const {deps} = pluginDeps();
+    const wizard = createWizardDispatch(deps);
+    await wizard.dispatch('plugins', 'ghost');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('No installed plugin named ghost'));
+    expect(deps.setMode).not.toHaveBeenCalledWith('chat');
   });
 });
 

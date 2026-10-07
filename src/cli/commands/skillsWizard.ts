@@ -46,6 +46,7 @@ export function selectSkillActionResult(settings: HazeSettings, skills: LoadedSk
   }
   if (action === SKILL_ACTIONS.showInfo) return {message: skillInfoMessage(settings, skill), skill};
   if (action === SKILL_ACTIONS.validate) return {validate: true, skill};
+  if (action === SKILL_ACTIONS.removeSkill && skill.pluginName) return {mode: 'chat', selectedName: undefined, message: `Use /plugin remove ${skill.pluginName} or disable this skill`, skill};
   if (action === SKILL_ACTIONS.removeSkill) return {mode: 'skillsConfirmRemove', message: `Remove ${skill.source} skill ${skill.name}? This deletes ${skill.dir}. Type "yes" to confirm. Esc to cancel.`, skill};
   return {message: `Unknown skill action: ${action}`, skill};
 }
@@ -88,6 +89,7 @@ export function skillConfirmRemoveResult(settings: HazeSettings, skills: LoadedS
   if (!isYesConfirmation(value)) return {mode: 'chat', selectedName: undefined, message: 'Cancelled. Skill not removed.'};
   const skill = findSelectedSkill(skills, selectedName);
   if (!skill) return {mode: 'chat', selectedName: undefined, message: `Skill ${selectedName} not found.`};
+  if (skill.pluginName) return {mode: 'chat', selectedName: undefined, message: `Use /plugin remove ${skill.pluginName} or disable this skill`, skill};
   return {
     mode: 'chat',
     selectedName: undefined,

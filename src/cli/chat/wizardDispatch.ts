@@ -7,6 +7,7 @@ import {createProviderWizardHandlers} from './wizard/providerHandlers.js';
 import {createSkillsWizardHandlers} from './wizard/skillsHandlers.js';
 import {createLspWizardHandlers} from './wizard/lspHandlers.js';
 import {createMcpWizardHandlers} from './wizard/mcpHandlers.js';
+import {createPluginWizardHandlers} from './wizard/pluginHandlers.js';
 import {createSessionThemeHandlers} from './wizard/sessionThemeHandlers.js';
 
 export type {WizardDispatchDeps} from './wizard/types.js';
@@ -56,6 +57,10 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     setLspDraft: value => deps.updateWizard({type: 'lspDraft', value}),
     setSelectedMcpName: value => deps.updateWizard({type: 'set', key: 'selectedMcpName', value}),
     setMcpDraft: value => deps.updateWizard({type: 'mcpDraft', value}),
+    setSelectedPluginName: value => deps.updateWizard({type: 'set', key: 'selectedPluginName', value}),
+    setPluginSourceDir: value => deps.updateWizard({type: 'set', key: 'pluginSourceDir', value}),
+    setPlugins: value => deps.updateWizard({type: 'plugins', value}),
+    setPluginCollectionEntries: value => deps.updateWizard({type: 'pluginCollectionEntries', value}),
     setDiscoveredModels: value => deps.updateWizard({type: 'discoveredModels', value}),
     setSuggestedModels: value => deps.updateWizard({type: 'suggestedModels', value}),
   };
@@ -68,6 +73,7 @@ export function createWizardDispatch(deps: WizardDispatchDeps): WizardDispatch {
     ...provider.handlers,
     ...createLspWizardHandlers(deps, ctx),
     ...mcp.handlers,
+    ...createPluginWizardHandlers(deps, ctx),
   };
 
   /** Apply one field-transition effect at the submit boundary (was chat.tsx inline branching). */

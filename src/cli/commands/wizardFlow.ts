@@ -77,6 +77,16 @@ export const SKILL_CHOICES = {
   addSkill: 'add skill',
 } as const;
 
+export const PLUGIN_CHOICES = {
+  installPlugin: 'install plugin',
+  inspectPlugin: 'inspect plugin',
+} as const;
+
+export const PLUGIN_ACTIONS = {
+  showInfo: 'show info',
+  removePlugin: 'remove plugin',
+} as const;
+
 export const SKILL_ACTIONS = {
   showInfo: 'show info',
   validate: 'validate',
@@ -382,6 +392,46 @@ export function skillsActionSuggestions(settings: HazeSettings, skills: LoadedSk
   return result;
 }
 
+// ── Plugin picker (shapes mirror `InstalledPlugin` and collection entries; kept
+// structural so this leaf module never imports the plugin command/installer) ──
+
+export interface PluginPickerPlugin {
+  name: string;
+  version?: string;
+}
+
+export interface PluginPickerEntry {
+  name: string;
+  description?: string;
+}
+
+export function pluginSuggestions(plugins: PluginPickerPlugin[]): TextInputSuggestion[] {
+  return [
+    {value: PLUGIN_CHOICES.installPlugin, description: 'install a local plugin package or collection', kind: 'plugin' as const},
+    {value: PLUGIN_CHOICES.inspectPlugin, description: 'inspect a local plugin package or collection first', kind: 'plugin' as const},
+    ...plugins.map(plugin => ({
+      value: plugin.name,
+      description: plugin.version ? `installed · ${plugin.version}` : 'installed',
+      kind: 'plugin' as const,
+    })),
+  ];
+}
+
+export function pluginActionSuggestions(): TextInputSuggestion[] {
+  return [
+    {value: PLUGIN_ACTIONS.showInfo, description: 'show description, skills, and file count', kind: 'plugin' as const},
+    {value: PLUGIN_ACTIONS.removePlugin, description: 'remove this plugin, preserving modified and seed files', kind: 'plugin' as const},
+  ];
+}
+
+export function pluginCollectionSuggestions(entries: PluginPickerEntry[]): TextInputSuggestion[] {
+  return entries.map(entry => ({
+    value: entry.name,
+    description: entry.description ?? 'collection plugin',
+    kind: 'plugin' as const,
+  }));
+}
+
 /** Perceptual-luminance check on a `#rrggbb` background so the theme picker can label light vs dark palettes. */
 function isLightBackground(hex: string): boolean {
   const channels = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
@@ -440,6 +490,11 @@ export interface WizardSuggestionState {
   selectedSkillName?: string;
   selectedLspName?: string;
   selectedMcpName?: string;
+  /** Installed project plugins (`/plugin` picker), loaded when the picker opens. */
+  plugins?: PluginPickerPlugin[];
+  selectedPluginName?: string;
+  /** Collection entries offered after pointing install/inspect at a collection. */
+  pluginCollectionEntries?: PluginPickerEntry[];
   /** Session per-model reasoning overrides (`/reasoning`); shown as the active level in the picker. */
   sessionReasoning?: Record<string, StoredReasoningSetting>;
 }
@@ -503,6 +558,14 @@ export const WIZARD_STEPS = [
   {id: 'mcpAddKey', kind: 'masked-input', placeholder: 'API key, or blank to skip', optional: true, suggestions: () => []},
   {id: 'mcpSetKey', kind: 'masked-input', placeholder: 'API key', suggestions: () => []},
   {id: 'mcpConfirmRemove', kind: 'confirm', placeholder: 'Type "yes" to confirm', suggestions: () => []},
+  // Plugins
+  {id: 'plugins', kind: 'pick', placeholder: 'Choose install, inspect, or an installed plugin', suggestions: (s: WizardSuggestionState) => pluginSuggestions(s.plugins ?? [])},
+  {id: 'pluginAction', kind: 'pick', placeholder: 'show info or remove plugin', suggestions: () => pluginActionSuggestions()},
+  {id: 'pluginInstallSource', kind: 'input', placeholder: 'Local plugin directory (e.g. ../haze-kits)', suggestions: () => []},
+  {id: 'pluginInstallName', kind: 'pick', placeholder: 'Choose a plugin from the collection', suggestions: (s: WizardSuggestionState) => pluginCollectionSuggestions(s.pluginCollectionEntries ?? [])},
+  {id: 'pluginInspectSource', kind: 'input', placeholder: 'Local plugin directory (e.g. ../haze-kits)', suggestions: () => []},
+  {id: 'pluginInspectName', kind: 'pick', placeholder: 'Choose a plugin from the collection', suggestions: (s: WizardSuggestionState) => pluginCollectionSuggestions(s.pluginCollectionEntries ?? [])},
+  {id: 'pluginConfirmRemove', kind: 'confirm', placeholder: 'Type "yes" to confirm', suggestions: () => []},
   // Themes
   {id: 'themes', kind: 'pick', placeholder: 'Choose a theme', suggestions: (s: WizardSuggestionState) => themeSuggestions(s.settings)},
   // Reasoning effort

@@ -52,6 +52,19 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
   });
 
+  it('opens the plugin picker from bare /plugin and /kit, or prints usage headless', async () => {
+    for (const command of ['/plugin', '/kit']) {
+      const interactive = mockContext({openPluginPicker: vi.fn(async () => undefined)});
+      expect(await handleSlashCommand(command, interactive)).toBe('handled');
+      expect(interactive.openPluginPicker).toHaveBeenCalledTimes(1);
+      expect(interactive.addSystemMessage).not.toHaveBeenCalled();
+      expect(interactive.runAgentTurn).not.toHaveBeenCalled();
+    }
+    const headless = mockContext();
+    expect(await handleSlashCommand('/plugin', headless)).toBe('handled');
+    expect(headless.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('plugin install <local-directory>'));
+  });
+
   it('opens the skills picker from /skills', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/skills', ctx)).toBe('handled');

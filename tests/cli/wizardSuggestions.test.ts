@@ -17,6 +17,9 @@ import {
   skillsSuggestions,
   skillsActionSuggestions,
   skillScopeSuggestions,
+  pluginSuggestions,
+  pluginActionSuggestions,
+  pluginCollectionSuggestions,
   themeSuggestions,
   reasoningSuggestions,
 } from '../../src/cli/commands/wizardFlow.js';
@@ -218,5 +221,26 @@ describe('skillsSuggestions / skillsActionSuggestions', () => {
     expect(skillsActionSuggestions(enabled, skills, 'review').map(r => r.value)).toContain('disable');
     expect(skillsActionSuggestions(disabled, skills, 'review').map(r => r.value)).toContain('enable');
     expect(skillsActionSuggestions(enabled, skills, 'review').map(r => r.value)).toContain('remove skill');
+  });
+});
+
+describe('pluginSuggestions / pluginActionSuggestions / pluginCollectionSuggestions', () => {
+  it('lists install/inspect plus installed plugins with versions', () => {
+    const result = pluginSuggestions([{name: 'example', version: '1.0.0'}, {name: 'bare'}]);
+    expect(result.map(r => r.value)).toEqual(['install plugin', 'inspect plugin', 'example', 'bare']);
+    expect(result[2]?.description).toBe('installed · 1.0.0');
+    expect(result[3]?.description).toBe('installed');
+    expect(result[0]?.kind).toBe('plugin');
+  });
+
+  it('always offers show info and remove plugin actions', () => {
+    expect(pluginActionSuggestions().map(r => r.value)).toEqual(['show info', 'remove plugin']);
+  });
+
+  it('projects collection entries with their descriptions', () => {
+    const result = pluginCollectionSuggestions([{name: 'review', description: 'Code review kit'}, {name: 'docs'}]);
+    expect(result.map(r => r.value)).toEqual(['review', 'docs']);
+    expect(result[0]?.description).toBe('Code review kit');
+    expect(result[1]?.description).toBe('collection plugin');
   });
 });

@@ -110,6 +110,9 @@
             <table class="cmd-table" aria-label="Skill commands">
               <tbody>
                 <tr><td class="cmd-c"><code>/skills</code></td><td class="cmd-d">Create and manage global or project Markdown skills. The picker shows each skill's source and lets you enable, disable, validate, or remove it.</td></tr>
+                <tr><td class="cmd-c"><code>/plugin</code></td><td class="cmd-d">Open the plugin picker: install or inspect a local plugin or collection (picking an entry when the directory is a marketplace), or manage installed project plugins. Only skills activate. <code>kit</code> is an alias.</td></tr>
+                <tr><td class="cmd-c"><code>/plugin inspect|install &lt;directory&gt; [name]</code></td><td class="cmd-d">Inspect or install a local plugin or selected collection entry. Only skills activate. Also available as <code>haze plugin</code> in a terminal; <code>kit</code> is an alias.</td></tr>
+                <tr><td class="cmd-c"><code>/plugin list</code>, <code>/plugin remove &lt;name&gt;</code></td><td class="cmd-d">List project-installed plugins or remove unchanged owned files, preserving modified and seed content. Plugin skills use <code>/&lt;plugin&gt;:&lt;skill&gt;</code>; enable/disable them in <code>/skills</code>.</td></tr>
                 <tr><td class="cmd-c"><code>/&lt;skill-name&gt;</code></td><td class="cmd-d">Invoke any installed skill directly, such as <code>/code-review</code>. The model can also load skills on its own when they match a request.</td></tr>
               </tbody>
             </table>

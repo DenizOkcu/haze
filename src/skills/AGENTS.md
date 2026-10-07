@@ -18,7 +18,10 @@ Markdown skill loading, registry, model-facing skill tool, and skill builder.
 - `SkillLoader.ts` parses frontmatter, validates names/descriptions, discovers references, and loads referenced content.
 - `SkillRegistry.ts` loads global skills from `~/.haze/skills` and project skills from `<workspace>/.haze/skills`. It returns active project-over-global `skills`, all valid `candidates`, and isolated `errors`. Project directories are real-path-confined to the workspace; same-scope duplicates keep the first sorted valid skill.
 - `skillTools.ts` exposes a single model-facing `skill` catalog tool. Its catalog includes provenance. It returns instructions and available reference paths first, then one referenced file only when requested; project bodies/references are wrapped as untrusted repository content and escaped against closing-tag injection.
-- `types.ts` defines loaded skill and registry shapes. Treat these as public within the codebase and tests.
+- `types.ts` defines loaded skill and registry shapes. Treat these as public within the codebase and tests. Plugin skills additionally carry `pluginName` and a namespaced `<plugin>:<skill>` runtime name with `global` source (kits install globally; content stays untrusted third-party).
+- `plugins/package.ts` reads Agent Plugins 1.0.0 root manifests before Claude/Codex fallbacks and resolves local collection entries. Unknown portable fields are ignored with warnings; unsupported components never activate.
+- `plugins/installer.ts` installs bounded, secret-free, non-symlinked local packages globally into `~/.haze/plugins` with hash ownership receipts/locking in `~/.haze/plugin-receipts`; installation never writes workspace content. Preserve modified/unowned content on rollback/removal. `extensions` namespaces (including the legacy `dev.haze.workspaceFiles`) are reported and ignored.
+- `plugins/runtime.ts` activates only receipt-listed global plugins as untrusted third-party skills (global provenance); isolate invalid receipts/manifests/skills. Default and legacy custom skill paths remain package-confined. Never discover other agents' caches automatically. `/plugin` (`/kit` alias) refreshes interactive skills after install/remove; `/skills` must not directly delete plugin-owned skill directories.
 
 ## Builder behavior
 

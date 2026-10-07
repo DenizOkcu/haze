@@ -19,7 +19,7 @@ fixture.home = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-session-model-'));
 let streams: {stdin: FixtureInput; stdout: FixtureOutput; stderr: FixtureOutput};
 let app: Instance | undefined;
 let running: Promise<void> | undefined;
-vi.mock('../../../src/config/paths.js', () => ({HAZE_DIR: fixture.home, GLOBAL_SKILLS_DIR: path.join(fixture.home, 'skills')}));
+vi.mock('../../../src/config/paths.js', () => ({HAZE_DIR: fixture.home, GLOBAL_SKILLS_DIR: path.join(fixture.home, 'skills'), GLOBAL_PLUGINS_DIR: path.join(fixture.home, 'plugins')}));
 vi.mock('ink', async importOriginal => {
   const ink = await importOriginal<typeof import('ink')>();
   return {...ink, render: (node: ReactNode, options: RenderOptions) => {

@@ -21,20 +21,28 @@ export interface WizardUiState {
   lspDraft: Partial<HazeLspServer>;
   selectedMcpName?: string;
   mcpDraft: Partial<HazeMcpServer>;
+  /** Installed project plugins (`/plugin` picker); loaded when the picker opens. */
+  plugins: {name: string; version?: string}[];
+  selectedPluginName?: string;
+  /** Directory last pointed at by install/inspect; collection entries found there. */
+  pluginSourceDir?: string;
+  pluginCollectionEntries: {name: string; description?: string}[];
 }
 
 export type WizardUiAction =
-  | {type: 'set'; key: 'selectedSessionId' | 'modelProviderFilter' | 'selectedProviderName' | 'selectedSkillName' | 'selectedLspName' | 'selectedMcpName'; value: string | undefined}
+  | {type: 'set'; key: 'selectedSessionId' | 'modelProviderFilter' | 'selectedProviderName' | 'selectedSkillName' | 'selectedLspName' | 'selectedMcpName' | 'selectedPluginName' | 'pluginSourceDir'; value: string | undefined}
   | {type: 'providerDraft'; value: Partial<HazeProviderSettings>}
   | {type: 'skillDraft'; value: {name?: string; scope?: SkillSource}}
   | {type: 'lspDraft'; value: Partial<HazeLspServer>}
   | {type: 'mcpDraft'; value: Partial<HazeMcpServer>}
   | {type: 'discoveredModels'; value: string[]}
   | {type: 'suggestedModels'; value: string[]}
+  | {type: 'plugins'; value: {name: string; version?: string}[]}
+  | {type: 'pluginCollectionEntries'; value: {name: string; description?: string}[]}
   | {type: 'reset'};
 
 export function initialWizardUiState(): WizardUiState {
-  return {discoveredModels: [], suggestedModels: [], providerDraft: {}, skillDraft: {}, lspDraft: {}, mcpDraft: {}};
+  return {discoveredModels: [], suggestedModels: [], providerDraft: {}, skillDraft: {}, lspDraft: {}, mcpDraft: {}, plugins: [], pluginCollectionEntries: []};
 }
 
 export function wizardUiReducer(state: WizardUiState, action: WizardUiAction): WizardUiState {
@@ -46,6 +54,8 @@ export function wizardUiReducer(state: WizardUiState, action: WizardUiAction): W
     case 'mcpDraft': return {...state, mcpDraft: action.value};
     case 'discoveredModels': return {...state, discoveredModels: action.value};
     case 'suggestedModels': return {...state, suggestedModels: action.value};
+    case 'plugins': return {...state, plugins: action.value};
+    case 'pluginCollectionEntries': return {...state, pluginCollectionEntries: action.value};
     case 'reset': return initialWizardUiState();
   }
 }
