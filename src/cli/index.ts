@@ -10,6 +10,7 @@ import {STDIN_PROMPT_BYTES} from '../core/limits.js';
 import {readPackageVersion} from '../utils/version.js';
 import {formatVersionVerbose, readBuildInfo} from '../utils/buildInfo.js';
 import {runDoctor} from './commands/doctor.js';
+import {runKitAction} from './commands/kitCommand.js';
 
 installBackgroundProcessSignalHandlers();
 const version = readPackageVersion() ?? '0.0.0';
@@ -99,6 +100,16 @@ async function readStdinPrompt(): Promise<string | undefined> {
   }
   return undefined;
 }
+
+program.command('kit [action] [target]')
+  .description('manage local, project-scoped skill kits: list, inspect, install, remove')
+  .action(async (action: string | undefined, target: string | undefined) => {
+    try { process.stdout.write(`${await runKitAction(action, target)}\n`); }
+    catch (error) {
+      process.stderr.write(`Kit command failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
 
 program.command('doctor')
   .description('print runtime provenance (version, commit, executable/runtime paths), verify build integrity, and show the capability registry')

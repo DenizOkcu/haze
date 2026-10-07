@@ -208,6 +208,45 @@ They are also available through one `skill` catalog tool. haze loads one workflo
 
 When you catch yourself repeating the same instructions, put them in a skill. The workflow stays in a Markdown file that you can read and edit.
 
+## Installable skill kits
+
+Kits group normal skills and supporting project assets without adding workflows to
+Haze core. Inspect a trusted local kit directory, then install it in the current project:
+
+```txt
+/kit inspect ../haze-kits/kits/speckit
+/kit install ../haze-kits/kits/speckit
+/kit list
+/speckit-constitution
+/speckit-specify Build a quiet Reddit reader
+```
+
+The terminal equivalents are `haze kit inspect <directory>`, `haze kit install
+<directory>`, `haze kit list`, and `haze kit remove <id>`. Quote paths containing
+spaces. Interactive installation refreshes the skill catalog immediately.
+
+Installation validates manifest paths and SHA-256 payload hashes, rejects symlinks,
+and refuses to overwrite differing files. It copies project skills into `.haze/skills`
+and declared assets into `.specify`, recording the exact version, manifest hash,
+and owned files under `.haze/kits`. Constitution seed files are create-only.
+Checksums establish integrity, not publisher trust: inspect source content before
+installing. No package setup scripts execute during installation; an invoked skill
+can subsequently request tools under the normal Haze rules.
+
+`/kit remove speckit` removes only unchanged files created by the installer. It
+preserves seed files, existing files, modified files, and user specs/reports. Retained
+modified skills remain discoverable; disable or remove them through `/skills` if
+needed. To change versions, remove the old kit and install the new local directory;
+conflicting modified files still require manual reconciliation. This initial release
+has no remote fetching, global installation, automatic update, or crash-recovery
+journal. An interrupted operation can leave files and a lock; inspect them before
+removing `.haze/kits/install.lock` and retrying.
+
+Kit content lives in the separate `haze-kits` repository. Its initial Spec Kit package
+contains all eighteen core, bug-fixing, and assessment skills from pinned v1.1.0.
+The Bash variant supports macOS/Linux; workflows require Bash and Git. Existing
+projects with older `.specify` files may report conflicts rather than being overwritten.
+
 ## Commands
 
 ```txt
@@ -234,6 +273,7 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /exit
 
 /skills
+/kit [list|inspect <path>|install <path>|remove <id>]
 /tips
 /fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] <prompt>
 ```

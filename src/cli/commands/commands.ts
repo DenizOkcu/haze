@@ -8,6 +8,7 @@ import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
 import {handleFleetCommand} from './fleetCommand.js';
 import {handleInitCommand} from './initCommand.js';
+import {handleKitCommand} from './kitCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
 import {handleReasoningCommand} from './reasoningCommand.js';
@@ -33,6 +34,7 @@ export type CommandContext = {
   composeInEditor?: () => Promise<string | undefined>;
   viewInPager?: (text: string) => Promise<boolean>;
   refreshContextFiles: () => Promise<ContextFile[]>;
+  refreshSkills?: () => Promise<unknown>;
   updateSettings: (patch: Partial<HazeSettings>) => Promise<HazeSettings>;
   /** Read the session-scoped per-model reasoning override (`provider:model` key). */
   getSessionReasoning: (modelSelector: string) => StoredReasoningSetting | undefined;
@@ -93,6 +95,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exact('/settings'), run: async (_args, ctx) => { ctx.addSystemMessage(await formatSettingsSummary(ctx.settings, ctx.contextFiles)); return HANDLED; }},
   {match: exact('/provider'), run: (_args, ctx) => { ctx.setModelProviderFilter?.(undefined); ctx.setMode('provider'); ctx.addSystemMessage('Choose a provider. Selecting one opens provider actions. Choose "add provider" to pick from presets or enter custom details.'); return HANDLED; }},
   {match: exact('/init'), run: async (_args, ctx) => await handleInitCommand(ctx)},
+  {match: exactOrArgs('/kit'), run: (args, ctx) => handleKitCommand(args, ctx)},
   {match: exact('/skills'), run: (_args, ctx) => { ctx.setMode('skills'); ctx.addSystemMessage('Choose a skill to show info, enable/disable, or remove it. Choose "add skill" to generate a new one from a description.'); return HANDLED; }},
   {match: exact('/tips'), run: async (_args, ctx) => {
     const currentlyEnabled = ctx.settings.tips?.enabled !== false;

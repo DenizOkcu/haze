@@ -480,6 +480,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         return text;
       },
       viewInPager: terminalControl.viewInPager,
+      refreshSkills,
       refreshContextFiles: async () => {
         const files = await readContextFiles().catch(() => contextFiles);
         setContextFiles(files);

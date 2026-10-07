@@ -14,6 +14,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/reasoning', description: 'Set reasoning effort for the active model, this session (none…xhigh), unset, or reset', kind: 'command'},
   {value: '/thinking', description: 'Alias for /reasoning. Set reasoning effort for the active model, this session', kind: 'command'},
   {value: '/context', description: 'Show token breakdown of system, tools, MCP, and messages', kind: 'command'},
+  {value: '/kit ', description: 'Install, inspect, list or remove a local project skill kit', kind: 'command'},
   {value: '/skills', description: 'Manage Markdown skills (add, enable/disable, validate, remove)', kind: 'command'},
   {value: '/tips', description: 'Toggle the rotating tips shown while the model is thinking', kind: 'command'},
   {value: '/fleet ', description: 'Parallelize independent work in disposable contexts (flags: --review/--profile/--workers/--concurrency)', kind: 'command'},
