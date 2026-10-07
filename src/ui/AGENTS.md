@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-10-04 for the 1.5.0 release.
+Last updated: 2026-10-07 for the 1.5.1 release.
 
 Reusable Ink components, theme, and input-buffer logic.
 
@@ -23,6 +23,8 @@ Maintainability focus:
 - `NativeIndicators.tsx` hosts the Ink-8-native activity indicators — `ActivitySpinner` (cli-spinner-compatible `dots` frames on Ink's shared animation timer), `StatusNotice` (library `StatusMessage` remapped onto the haze palette via `indicatorTheme`, never the library default colors), and the screen-reader static-glyph path. Animated components consolidate into one render cycle under `maxFps`; there are no per-spinner `setInterval` timers.
 - `WizardChoices.tsx` projects the wizard's selected suggestion window into a passive `@inkjs/ui` Select: the existing input editor keeps the single keyboard owner (free-form typing, filter, Tab completion, escape paths stay intact) and no second wizard state machine or parallel key listener is introduced.
 - Errors should be presented compactly without stack spam unless intentionally surfaced.
+
+- Width-change transcript replay belongs to the CLI: only its width-keyed `<Static>` remounts. Re-render settled Markdown at the new width without resetting `TextInput` drafts or active turn state. `tests/cli/chat/resizeBoundary.test.tsx` covers replay and draft preservation.
 
 ## Markdown rendering
 

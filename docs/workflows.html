@@ -25,7 +25,7 @@
       </nav>
       <nav class="head-nav" aria-label="Primary">
         <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
-        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.5.0</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.5.1</a>
       </nav>
     </div>
   </header>
@@ -65,13 +65,14 @@
         <div class="doc-main">
           <section id="sessions">
             <h2>Durable <span class="em">sessions</span></h2>
-            <p>Every interactive conversation is saved as compact JSONL under <code>~/.haze/sessions</code>. Streaming chatter is skipped and bulky tool output is slimmed, so files stay small.</p>
+            <p>Interactive sessions stay memory-only until the first resumable message, then persist as compact JSONL under <code>~/.haze/sessions</code> unless started with <code>--no-session</code>. Streaming chatter is skipped and bulky tool output is slimmed, so files stay small.</p>
             <ul>
               <li><code>/resume</code> — browse this workspace's sessions, continue one, or <strong>fork</strong> a copy to explore an alternate approach without touching the original.</li>
               <li><code>haze --continue</code> — pick up the latest workspace session immediately.</li>
               <li><code>/compact [instructions]</code> — condense older context into a size-limited continuity summary instead of starting over. Automatic large-history compaction is split-turn aware, and every compaction is recorded in stream events and the session log.</li>
               <li><code>/session</code> — show the current session file; <code>/new</code> starts fresh.</li>
             </ul>
+            <p><strong>Resizing the terminal.</strong> Settled messages and formatted Markdown normally render once in static history. On a width change, haze clears the viewport and replays the full settled transcript at the new width. The input draft and active turn retain their state; only live content, input, and changing status panels remain dynamic. Scrollback is preserved and may contain earlier transcript copies after replay.</p>
             <div class="callout"><strong>Aborting is safe.</strong> <strong>Esc</strong> stops the current turn without losing the session; registered background processes keep running until the session ends or you kill them.</div>
           </section>
 

@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-10-04 for the 1.5.0 release (round-1 review fixes).
+Last updated: 2026-10-07 for the 1.5.1 release (round-1 review fixes).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -24,7 +24,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - Provider key order is saved provider key, then legacy OpenRouter `apiKey`, then local-provider placeholder behavior where the client layer expects it.
 - Custom/local OpenAI-compatible providers may intentionally use placeholder keys.
 - Model selectors use `provider:model` in haze settings/UI, not slash-separated provider IDs.
-- Providers carry an optional `capabilities` object. Only `images` is read today: it is explicit-only (default off, never inferred from URL or model name) and gates whether attached images are sent to that provider (F03). Unknown capability keys round-trip through settings and provider upserts.
+- Providers carry an optional `capabilities` object. `images` is explicit-only (default off) and gates attachments (F03). `reasoningEffort` explicitly enables or disables sending effort; absent it, recognized local inference endpoints omit effort and hosted OpenAI-compatible endpoints retain pass-through. Omission leaves the server default in control. Unknown capability keys round-trip through settings and provider upserts.
 
 ## Context file contract
 

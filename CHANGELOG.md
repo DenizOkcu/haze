@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.1 - 2026-10-07
+
+Terminal transcript replay on resize and capability-aware reasoning effort.
+
+### Fixed
+
+- On terminal width changes, clear the viewport and replay the full settled transcript, including formatted Markdown, at the new width. Only `<Static>` remounts: input drafts and active turns retain their state. Scrollback is not erased, so earlier transcript copies can remain there after replay.
+- Size the dynamic frame against the live Yoga root during Ink's synchronous resize pass, avoiding stale numeric widths before React commits the new terminal dimensions.
+- Gate reasoning effort by endpoint capability. Explicit provider `capabilities.reasoningEffort` overrides win; otherwise local inference endpoints omit the parameter and hosted OpenAI-compatible endpoints retain SDK pass-through. Omission avoids local servers coercing unsupported levels into an enabled reasoning switch; their own default still applies.
+- Match the pinned OpenAI SDK's GPT-6+ restrictions: omit `minimal`, and omit `none` except for exactly `gpt-6-sol` and `gpt-6-luna`. Unsupported choices use the provider default rather than being promoted to another effort; reasoning-policy events explain the omission.
+
+### Documentation
+
+- Refresh release metadata, README, public documentation, and scoped AGENTS guidance for 1.5.1; correct session-only reasoning semantics, the `medium` default, and formatted streaming/resize behavior.
+
 ## 1.5.0 - 2026-10-04
 
 Ink 8 terminal modernization with formatted streamed Markdown, per-model session-scoped reasoning, model steering for compact models, and pinned session model selections.

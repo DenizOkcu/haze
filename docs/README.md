@@ -18,6 +18,10 @@ corresponding docs page in the same PR.
 | `skills.html` | `src/skills/**` and `src/llm/systemPrompt.ts` skill guidance |
 | `workflows.html` | `README.md` examples and `AGENTS.md` runtime contracts |
 
+## Current release: 1.5.1
+
+The public HTML pages document 1.5.1. Keep their npm version stamps and quickstart version example aligned with package metadata. Reasoning compatibility is described in `commands.html`; full transcript replay on width changes is described in `workflows.html` and the README. Historical migration plans, validation reports, and architecture reviews retain their original versions and dates.
+
 ## Regeneration
 
 Long-term, `docs/*.html` should be generated from the source files (or from a

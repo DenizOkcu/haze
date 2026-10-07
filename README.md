@@ -2,7 +2,15 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.5.0
+## What's new in 1.5.1
+
+haze 1.5.1 improves terminal resizing and reasoning-effort compatibility:
+
+- On terminal width changes, haze replays the full settled transcript, including formatted Markdown, at the new width. The input draft and active turn stay mounted. Terminal scrollback is preserved, so older transcript copies can remain there after a replay.
+- Local inference endpoints omit reasoning effort by default; providers can explicitly enable or disable it with `capabilities.reasoningEffort`. Hosted OpenAI-compatible endpoints retain pass-through behavior.
+- Unsupported `none`/`minimal` choices for GPT-6+ model names are omitted rather than promoted to a different effort; the provider default applies.
+
+### Highlights from 1.5.0
 
 haze 1.5.0 modernizes the terminal experience on Ink 8 — formatted streamed Markdown, native spinners and busy indicators, `$EDITOR`/`$PAGER` handoffs, and IME-aware cursor placement — and adds model steering for compact models, per-model session-scoped `/reasoning` (with the `/thinking` alias), pinned session model selections, and a metadata-only `haze report`.
 
@@ -106,7 +114,9 @@ Saved settings live in `~/.haze/settings.json`. ChatGPT OAuth credentials live s
 
 Switch the interface palette with `/themes`. The picker lists every built-in theme — light palettes and oh-my-zsh ports like `robbyrussell`, `af-magic`, and `solarized-dark` — and applies the choice immediately; `/themes <name>` sets one directly. The selection persists as `theme` in `~/.haze/settings.json`, and text already on screen keeps its old colors.
 
-Control reasoning effort with `/reasoning`. The picker (or `/reasoning <level>`) sets one of `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`; the default is `high` when nothing is saved. `/reasoning unset` returns to the provider default (no reasoning parameter is sent) and `/reasoning status` shows the current level. The level is sent as the AI SDK's portable reasoning parameter (the standard `reasoning_effort` field on OpenAI-compatible endpoints) and applies from the next turn. Endpoints without native support ignore it. The selection persists as `reasoning` in `~/.haze/settings.json`; the current level is shown in the bottom status bar next to the model name.
+Control reasoning effort with `/reasoning` (alias `/thinking`). The picker or `/reasoning <level>` sets `none`, `minimal`, `low`, `medium`, `high`, or `xhigh` for the active model in this session; it never writes settings. `/reasoning unset` omits the parameter, `/reasoning reset` drops the session override, and `/reasoning status` explains the current choice. Resolution follows run-scoped `--reasoning` → per-model session override → saved global `reasoning` setting → built-in default `medium`. The level travels as the AI SDK's portable `reasoning` parameter from the next turn and appears beside the model in the status bar.
+
+Reasoning effort is capability-gated: `capabilities.reasoningEffort: true|false` on a provider explicitly enables or disables sending it. Without an override, local inference endpoints recognized by haze (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, and `.local` hosts) omit it; hosted endpoints retain pass-through behavior. This avoids local servers interpreting unsupported levels as reasoning being enabled. Omission leaves the server's own default in control; it does not guarantee reasoning is off. For bare GPT-6+ model names, `minimal` is omitted, and `none` is omitted except for exactly `gpt-6-sol` and `gpt-6-luna`; unsupported choices are never silently promoted. The `reasoning_policy` stream event reports the effective policy.
 
 haze focuses on chat, local tools, context files, sessions, and Markdown skills. Use `/skills` for workflows outside that core. Its interactive picker can generate a skill from a description, then enable, disable, validate, or remove it. For reviews, release prep, deploy checks, debugging routines, or a team-specific checklist, ask haze to create a skill and edit the resulting Markdown as needed.
 
@@ -118,7 +128,7 @@ Open a project and ask for work:
 create a calculator in calc-app in ruby with add subtract multiply divide
 ```
 
-haze can inspect and edit files, fetch public URLs, and run commands. Tool activity stays compact in the transcript. Completed transcript entries render once as static terminal output, which keeps live model and spinner updates from repainting the full history. During a streamed answer, completed root-level Markdown blocks move into that static history while the unfinished block stays plain and live. Small edits show a colorized diff with one line of context on either side; large diffs get a short summary instead. Shell output is capped while the command runs, then filtered according to the command type. Validation failures keep the useful diagnostics. Raw output handles have per-entry and total memory limits, and tell you how many bytes were dropped. Sessions are saved after their first resumable message, so you can pick up the latest workspace conversation with `haze --continue` or `/resume` without accumulating empty session files.
+haze can inspect and edit files, fetch public URLs, and run commands. Tool activity stays compact in the transcript. Settled transcript entries normally render once as static terminal output, keeping typing, live model output, and spinner updates from repainting the full history. Streaming Markdown remains formatted: parser-stable root blocks move into static history while the final, still-changing block stays in the bounded dynamic tail. On a terminal width change, haze clears the viewport and replays the full static transcript with fresh Markdown layout; the draft and running turn keep their state. This does not erase scrollback, which may retain earlier transcript copies. Small edits show a colorized diff with one line of context on either side; large diffs get a short summary instead. Shell output is capped while the command runs, then filtered according to the command type. Validation failures keep the useful diagnostics. Raw output handles have per-entry and total memory limits, and tell you how many bytes were dropped. Sessions are saved after their first resumable message, so you can pick up the latest workspace conversation with `haze --continue` or `/resume` without accumulating empty session files.
 
 The agent can start up to five dev servers or watchers as registered background processes. Their rolling output is capped at 256 KB and remains available through `readToolOutput`; the `process` tool lists, reads, and kills them. The status bar shows the live count. Starting a new session or exiting haze terminates every registered process tree, while aborting an individual turn leaves background work running. Background processes are unavailable inside fleet workers and never survive haze itself.
 
@@ -220,7 +230,7 @@ When you catch yourself repeating the same instructions, put them in a skill. Th
 /settings open
 /themes
 /themes <name>
-/reasoning [level|unset|status]
+/reasoning [level|unset|reset|status]
 /logs [id]
 /lsp
 /mcp
@@ -405,7 +415,8 @@ Most haze behaviour needs no configuration; a few optional keys in `~/.haze/sett
 - `contextWindowFallbackTokens` / `localContextWindowFallbackTokens` (default 128K hosted / 32K local): context-window guess for models without limits metadata or a curated catalog entry. Every turn emits a `context_budget` event naming the window and its source, and the interactive warning fires once per model per session when the built-in default was used.
 - `manualCompaction` (`"llm-summary"` default, or `"heuristic"`): whether manual `/compact` asks the active model for a continuity summary or keeps the model-free bounded excerpt.
 - `theme` (string, default `purple`): name of a built-in palette (`/themes` lists and sets them, with `light` and oh-my-zsh ports like `robbyrussell` included). Unknown names fail loudly at startup with the valid names listed.
-- `reasoning` (`"none"` | `"minimal"` | `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"provider-default"`, default `high`): reasoning-effort level sent as the portable reasoning parameter. An absent key means `high`; the `provider-default` sentinel means no parameter is sent. `/reasoning` lists, sets, and clears it.
+- `reasoning` (`"none"` | `"minimal"` | `"low"` | `"medium"` | `"high"` | `"xhigh"` | `"provider-default"`, default `medium`): saved global fallback for the portable reasoning parameter. Run-scoped and per-model session choices take precedence. The `provider-default` sentinel omits the parameter; `/reasoning` changes only the in-memory session choice.
+- `providers[].capabilities.reasoningEffort` (optional boolean): explicitly allow or omit reasoning effort for that provider. Without it, local inference endpoints omit the parameter and hosted OpenAI-compatible endpoints pass it through, subject to model-specific restrictions.
 
 ## Safety model
 
