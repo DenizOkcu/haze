@@ -24,9 +24,11 @@ export interface HazeProviderSettings {
   kind?: 'openai-compatible' | 'chatgpt-codex';
   /**
    * Explicit endpoint capabilities. Never inferred: images are only sent to
-   * providers the user marked image-capable (F03).
+   * providers the user marked image-capable (F03); `reasoningEffort: false`
+   * stops the reasoning-effort parameter from being sent at all (for
+   * endpoints whose own reasoning switch coerces unknown levels).
    */
-  capabilities?: {images?: boolean};
+  capabilities?: {images?: boolean; reasoningEffort?: boolean};
   /**
    * Optional per-model capacity metadata used for request budgeting (RH-005).
    * Absent entries fall back to a conservative default window. Preserved as
@@ -140,6 +142,7 @@ export const SETTINGS_FILE = path.join(HAZE_DIR, 'settings.json');
 
 const providerCapabilitiesSchema = z.object({
   images: z.boolean().optional(),
+  reasoningEffort: z.boolean().optional(),
 }).passthrough();
 
 const providerSchema = z.object({

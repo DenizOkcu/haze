@@ -250,15 +250,22 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
   });
 
-  it('keeps the reasoning-effort capability true for every provider kind (pass-through marker)', async () => {
-    const fixtures: Array<{name: string; url: string; kind?: string}> = [
-      {name: 'openrouter', url: 'https://openrouter.ai/api/v1'},
-      {name: 'custom', url: 'https://example.com/v1'},
-      {name: 'ollama', url: 'http://localhost:11434/v1'},
-      {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex'},
+  it('gates reasoning-effort by endpoint class with an explicit override winning either way', async () => {
+    const fixtures: Array<{name: string; url: string; kind?: string; capabilities?: {reasoningEffort?: boolean}; expected: boolean}> = [
+      {name: 'openrouter', url: 'https://openrouter.ai/api/v1', expected: true},
+      {name: 'custom', url: 'https://example.com/v1', expected: true},
+      {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', expected: true},
+      // Loopback inference servers (LM Studio, Ollama) default off: their own
+      // reasoning switches coerce unsupported levels — LM Studio maps any
+      // non-'on'/'off' value (including 'none') to 'on'.
+      {name: 'lmstudio', url: 'http://localhost:1234/v1', expected: false},
+      {name: 'ollama', url: 'http://127.0.0.1:11434/v1', expected: false},
+      // An explicit capabilities.reasoningEffort override wins in both directions.
+      {name: 'local-on', url: 'http://localhost:1234/v1', capabilities: {reasoningEffort: true}, expected: true},
+      {name: 'cloud-off', url: 'https://example.com/v1', capabilities: {reasoningEffort: false}, expected: false},
     ];
     await writeSettings({
-      providers: fixtures.map(provider => ({key: 'k', models: ['m'], ...provider})),
+      providers: fixtures.map(({expected: _expected, ...provider}) => ({key: 'k', models: ['m'], ...provider})),
       provider: 'openrouter',
       model: 'm',
     });
@@ -266,8 +273,36 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient(() => ({chat: () => undefined, responses: () => undefined}));
     for (const fixture of fixtures) {
       const runtime = await modelWithConfig({modelSelector: `${fixture.name}:m`});
-      expect(runtime!.config.capabilities.supportsReasoningEffort, fixture.name).toBe(true);
+      expect(runtime!.config.capabilities.supportsReasoningEffort, fixture.name).toBe(fixture.expected);
     }
+  });
+
+  it('omits the reasoning parameter for local inference servers by default (LM Studio on/off coercion)', async () => {
+    await writeSettings({
+      providers: [{name: 'lmstudio', url: 'http://localhost:1234/v1', models: ['qwen/qwen3.6-35b-a3b']}],
+      provider: 'lmstudio',
+      model: 'qwen/qwen3.6-35b-a3b',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig();
+    // The default medium level resolves to a disabled policy: the parameter is
+    // omitted entirely instead of arriving as a coerced 'on'.
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'disabled'});
+    const opts = providerRequestSettings(runtime!.config);
+    expect(opts.reasoning).toBeUndefined();
+    expect('reasoning' in opts).toBe(false);
+  });
+
+  it('sends reasoning to a local server when explicitly re-enabled via capabilities', async () => {
+    await writeSettings({
+      providers: [{name: 'lmstudio', url: 'http://localhost:1234/v1', models: ['m'], capabilities: {reasoningEffort: true}}],
+      provider: 'lmstudio',
+      model: 'm',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
+    expect(providerRequestSettings(runtime!.config).reasoning).toBe('medium');
   });
 
   it('resolves the requested reasoning level into an effective policy and the transport setting', async () => {

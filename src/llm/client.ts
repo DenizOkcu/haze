@@ -57,9 +57,16 @@ function openRouterHeaders(providerName: string, baseURL: string): Record<string
   };
 }
 
-function capabilities(providerName: string, baseURL: string, providerKind?: HazeProviderSettings['kind']): ProviderCapabilities {
+function capabilities(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind'], explicit?: HazeProviderSettings['capabilities']): ProviderCapabilities {
   const directOpenAI = providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
   const openRouter = isOpenRouter(providerName, baseURL);
+  // Reasoning-effort support is explicit-first: a user override wins either
+  // way. Otherwise loopback/local inference servers (LM Studio, Ollama,
+  // llama.cpp) default to `false`: their own reasoning switches coerce
+  // unsupported levels — even `none` — to `on` (LM Studio), inverting the
+  // request, and subagent workers rely on `none` meaning off. Hosted
+  // OpenAI-compatible endpoints keep the SDK pass-through (`true`).
+  const supportsReasoningEffort = explicit?.reasoningEffort ?? !isLocalProviderUrl(baseURL);
   return {
     reportsCacheUsage: directOpenAI || openRouter,
     supportsPromptCacheKey: directOpenAI,
@@ -67,10 +74,24 @@ function capabilities(providerName: string, baseURL: string, providerKind?: Haze
     supportsStickySessionId: openRouter,
     supportsServerCompaction: false,
     supportsTextVerbosity: directOpenAI,
-    // Pass-through marker: the SDK maps the top-level `reasoning` parameter
-    // per provider and endpoints without native support ignore the field.
-    supportsReasoningEffort: true,
+    supportsReasoningEffort,
   };
+}
+
+/**
+ * Match the pinned OpenAI SDK's GPT-6+ effort restrictions before transport.
+ * Unsupported choices are omitted, not promoted to a different effort; the
+ * policy retains the request and explains why the provider default will apply.
+ */
+function reasoningPolicyForModel(modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities): ResolvedReasoningPolicy {
+  const policy = resolveReasoningPolicy({requested, capabilities: caps});
+  if (policy.effective === 'disabled') return policy;
+  const version = /^gpt-(\d+)(?:\.\d+)?(?:-.+)?$/.exec(modelName);
+  const supportsNone = modelName === 'gpt-6-sol' || modelName === 'gpt-6-luna';
+  if (version && Number(version[1]) >= 6 && (requested === 'minimal' || (requested === 'none' && !supportsNone))) {
+    return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose low, medium, high, xhigh, or unset.`};
+  }
+  return policy;
 }
 
 /** True for loopback/local inference servers, whose effective window is server-configured (often far below the model's). */
@@ -92,7 +113,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const name = selection.model;
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
-  const caps = capabilities(selection.provider.name, baseURL, providerKind);
+  const caps = capabilities(selection.provider.name, baseURL, providerKind, selection.provider.capabilities);
   const selector = modelSelector(selection.provider, name);
   // The full precedence chain lives in one pure resolver
   // (`resolveAttemptReasoning`): run-scoped override → session per-model map →
@@ -108,7 +129,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
-  const reasoningPolicy = resolveReasoningPolicy({requested: requestedReasoning, capabilities: caps});
+  const reasoningPolicy = reasoningPolicyForModel(name, requestedReasoning, caps);
   const openai = providerKind === 'chatgpt-codex'
     ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
     : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
