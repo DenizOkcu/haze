@@ -59,7 +59,12 @@ export function DynamicFrame({rows, columns, sections, input}: {
   const inputWidth = metrics.hasMeasured && metrics.clientWidth > 0 ? Math.min(safeWidth, metrics.clientWidth) : safeWidth;
   const onRowsChange = (next: InputDemand) => setDemand(previous =>
     previous.input === next.input && previous.suggestions === next.suggestions ? previous : next);
-  return <Box flexDirection="column" width={Math.max(1, columns)} flexShrink={0}>
+  // Percentage width resolves against the Yoga root at layout time, so the
+  // frame follows the live terminal width even in Ink v8's synchronous
+  // resize render of the stale React tree, where an explicit numeric width
+  // stays stale-wide and soft-wraps (see tests/cli/chat/resizeBoundary.test.tsx).
+  // maxWidth keeps the columns prop authoritative for standalone embeds.
+  return <Box flexDirection="column" width="100%" maxWidth={Math.max(1, columns)} flexShrink={0}>
     <Panel rows={budget.live}>{typeof sections.live === 'function' ? sections.live(budget.live) : sections.live}</Panel>
     <Panel rows={budget.debug}>{sections.debug}</Panel>
     <Panel rows={budget.queue}>{sections.queue}</Panel>

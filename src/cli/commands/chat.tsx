@@ -29,6 +29,7 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
 import {DynamicFrame} from '../chat/DynamicFrame.js';
 import {createChatShutdown, runTerminalSession} from '../chat/shutdown.js';
+import {installViewportResizeGuard} from '../chat/resizeGuard.js';
 import {createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
 import {AssistantMarkdownChunkView, MessageView} from '../chat/messages.js';
 import {partitionDisplayMessages, type TranscriptStaticItem} from '../chat/transcriptPartition.js';
@@ -720,7 +721,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const contentWidth = Math.max(1, width - horizontalPadding * 2);
 
   return <Box flexDirection="column" paddingX={horizontalPadding}>
-    <Static items={staticItems}>
+    {/* Replay settled history with fresh Markdown layout after the resize clear.
+        Only Static remounts: input drafts and active turns keep their state. */}
+    <Static key={width} items={staticItems}>
       {item => item.kind === 'header'
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
         : item.kind === 'assistant-markdown'
@@ -816,6 +819,9 @@ export async function chatCommand(options: ChatOptions = {}) {
   // a getter so the metric never enters React state (no extra re-renders).
   let lastRenderMetricsMs: {at: number; renderTime: number} | undefined;
   renderMetricsReader = () => lastRenderMetricsMs;
+  // Clear on width changes ahead of Ink's repaint; ChatScreen then replays
+  // its width-keyed Static transcript instead of leaving a blank viewport.
+  const removeResizeGuard = installViewportResizeGuard();
   await runTerminalSession({
     adopt: () => {
       if (!process.stdout.isTTY) return;
@@ -835,6 +841,9 @@ export async function chatCommand(options: ChatOptions = {}) {
       }} : {}),
     }),
     shutdown: () => shutdown?.(),
-    restore: resetTerminalColors,
+    restore: () => {
+      removeResizeGuard();
+      resetTerminalColors();
+    },
   });
 }
