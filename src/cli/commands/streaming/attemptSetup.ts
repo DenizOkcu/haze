@@ -1,4 +1,5 @@
 import type {ModelMessage, ToolSet} from 'ai';
+import path from 'node:path';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
 import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
@@ -262,10 +263,13 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
       if (!session || session.sandboxDenialNotified?.has(key)) return;
       (session.sandboxDenialNotified ??= new Set()).add(key);
       const where = denial.pathHint ?? 'a path outside the sandbox boundary';
-      const remedy = denial.pathHint
-        ? `/sandbox grant ${denial.pathHint}${denial.kind === 'write' ? ' --rw' : ''} (persistent) or /add-dir <parent directory> (session)`
+      // Grants operate on directories (config dirs, module caches) — suggest
+      // the containing directory of a denied file, the unit the user wants.
+      const grantTarget = denial.pathHint ? path.dirname(denial.pathHint) : undefined;
+      const remedy = grantTarget && grantTarget !== '/'
+        ? `/sandbox grant ${grantTarget}${denial.kind === 'write' ? ' --rw' : ''} (persistent) or /add-dir ${grantTarget} (session)`
         : '/sandbox off (this session)';
-      callbacks.addMessage({role: 'system', text: `Sandbox blocked a ${denial.kind} at ${where} (command: ${command.slice(0, 80)}). Fix with ${remedy}. All denials: /sandbox denials.`});
+      callbacks.addMessage({role: 'system', text: `Sandbox denied ${denial.kind} access at ${where} (command: ${command.slice(0, 80)}). Fix with ${remedy}. All denials: /sandbox denials.`});
     },
     postMutationDiagnostics: assembled.postMutationDiagnostics,
   };

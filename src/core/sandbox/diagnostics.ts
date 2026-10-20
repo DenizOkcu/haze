@@ -26,7 +26,10 @@ export interface SandboxDenial {
 
 const SCAN_LIMIT = 8_192;
 
-const PATH_IN_MESSAGE = /([^\s:'"]+[^\s:'"]*): (?:Operation not permitted|Read-only file system|Permission denied|No such file or directory)/g;
+// `path: errno` shapes from both shell utilities ("cat: /x: Operation not
+// permitted", capital-O errno) and Go/Rust/Python programs ("open /x:
+// operation not permitted", lowercase errno) — case-insensitive on purpose.
+const PATH_IN_MESSAGE = /([^\s:'"]+[^\s:'"]*): (operation not permitted|read-only file system|permission denied|no such file or directory)/gi;
 
 function boundaryCovers(boundary: SandboxBoundary, candidate: string): boolean {
   for (const root of boundary.roots) {
@@ -39,7 +42,6 @@ function kindFromMessage(message: string): SandboxDenial['kind'] {
   if (/read-only file system/i.test(message)) return 'write';
   if (/network|socket|connection refused|could not resolve/i.test(message)) return 'network';
   if (/exec|spawn|cannot execute|not executable/i.test(message)) return 'exec';
-  if (/permission|denied|not permitted/i.test(message)) return 'unknown';
   return 'unknown';
 }
 
@@ -85,7 +87,15 @@ export async function classifySandboxDenial(input: {
       continue;
     }
     if (/operation not permitted|read-only file system|permission denied/i.test(message)) {
-      return {kind: kindFromMessage(message), pathHint: boundaryCovers(boundary, rawPath) ? undefined : rawPath};
+      let kind = kindFromMessage(message);
+      if (kind === 'unknown') {
+        // Go/Rust/Python print the failing verb before the path ("open /x:
+        // operation not permitted"); the captured match only holds
+        // "path: errno", so infer reads from the surrounding line.
+        const escaped = rawPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (new RegExp(`\\b(?:open|stat|read|readfile|readfileasync)\\b[^\\n]*${escaped}`, 'i').test(text)) kind = 'read';
+      }
+      return {kind, pathHint: boundaryCovers(boundary, rawPath) ? undefined : rawPath};
     }
   }
 

@@ -66,6 +66,21 @@ describe('classifySandboxDenial', () => {
     expect(await classifySandboxDenial({code: 127, stderr: 'command not found: frobnicate', boundary})).toBeUndefined();
   });
 
+  it('classifies Go-style lowercase errno messages with the failing verb (gh-shaped regression)', async () => {
+    // Observed live: gh (Go) prints "open /path: operation not permitted"
+    // with a lowercase errno and the verb before the path — the first release
+    // matched only capital-O shell shapes and degraded to kind "unknown"
+    // with no path, which then offered only /sandbox off as the remedy.
+    const stderr = `warning: failed to load config: open /Users/u/.config/gh/config.yml: operation not permitted\nfailed to create root command: failed to read configuration: open /Users/u/.config/gh/config.yml: operation not permitted`;
+    const denial = await classifySandboxDenial({code: 1, stderr, boundary});
+    expect(denial).toEqual({kind: 'read', pathHint: '/Users/u/.config/gh/config.yml'});
+  });
+
+  it('capital-O shell-tool shapes keep working', async () => {
+    const denial = await classifySandboxDenial({code: 1, stderr: `cat: ${path.join(outsideDir, 'file.txt')}: Operation not permitted`, boundary});
+    expect(denial).toMatchObject({pathHint: path.join(outsideDir, 'file.txt')});
+  });
+
   it('message-less EPERM still classifies conservatively', async () => {
     const denial = await classifySandboxDenial({code: 1, stderr: 'OSError: [Errno 1] Operation not permitted', boundary});
     expect(denial?.kind).toBe('unknown');
