@@ -81,6 +81,41 @@ describe('classifySandboxDenial', () => {
     expect(denial).toMatchObject({pathHint: path.join(outsideDir, 'file.txt')});
   });
 
+  it('classifies each ecosystem errno shape with kind and path', async () => {
+    const cases: Array<[label: string, stderr: string, expected: SandboxDenial]> = [
+      ['macOS dlopen marker', "xcrun: error: unable to load libxcrun: tried: '/opt/lib/libxcrun.dylib' (file system sandbox blocked open())", {kind: 'read', pathHint: '/opt/lib/libxcrun.dylib'}],
+      ['python Errno', "Traceback…\nPermissionError: [Errno 1] Operation not permitted: '/home/u/.config/tool/cfg.toml'", {kind: 'read', pathHint: '/home/u/.config/tool/cfg.toml'}],
+      ['node/libuv', "Error: EPERM: operation not permitted, open '/home/u/.npm/cache'\n    at readFileSync", {kind: 'read', pathHint: '/home/u/.npm/cache'}],
+      ['git quoted', "fatal: could not open '/home/u/repo/.git/config.lock': Permission denied", {kind: 'read', pathHint: '/home/u/repo/.git/config.lock'}],
+      ['zsh reversed', 'zsh: permission denied: /opt/tool/bin/app', {kind: 'read', pathHint: '/opt/tool/bin/app'}],
+      ['java NIO', 'java.nio.file.AccessDeniedException: /home/u/gradle/cache', {kind: 'read', pathHint: '/home/u/gradle/cache'}],
+      ['write verb', "touch: cannot touch '/home/u/scratch/new': Permission denied", {kind: 'write', pathHint: '/home/u/scratch/new'}],
+    ];
+    for (const [label, stderr, expected] of cases) {
+      const denial = await classifySandboxDenial({code: 1, stderr, boundary});
+      expect(denial, label).toEqual(expected);
+    }
+  });
+
+  it('execvp failures classify as exec with the binary path', async () => {
+    const denial = await classifySandboxDenial({code: 71, stderr: "sandbox-exec: execvp() of '/Users/u/tools/rg' failed: Operation not permitted", boundary});
+    expect(denial).toEqual({kind: 'exec', pathHint: '/Users/u/tools/rg'});
+  });
+
+  it('network failures classify only when the profile denies the network', async () => {
+    const stderr = 'curl: (6) Could not resolve host: example.com';
+    const strict: SandboxBoundary = {...boundary, network: 'deny'};
+    expect(await classifySandboxDenial({code: 6, stderr, boundary: strict})).toEqual({kind: 'network'});
+    // Workspace profile: an unreachable host is never the sandbox's fault.
+    expect(await classifySandboxDenial({code: 6, stderr, boundary})).toBeUndefined();
+  });
+
+  it('pathless Rust/anyhow errno still yields a kind without a hint', async () => {
+    const denial = await classifySandboxDenial({code: 1, stderr: 'Error: Permission denied (os error 13)', boundary});
+    expect(denial).toEqual({kind: 'unknown'});
+    expect(await classifySandboxDenial({code: 1, stderr: 'Error: Read-only file system (os error 30)', boundary})).toEqual({kind: 'write'});
+  });
+
   it('message-less EPERM still classifies conservatively', async () => {
     const denial = await classifySandboxDenial({code: 1, stderr: 'OSError: [Errno 1] Operation not permitted', boundary});
     expect(denial?.kind).toBe('unknown');

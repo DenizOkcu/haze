@@ -5,18 +5,29 @@ import type {SandboxBoundary} from './boundary.js';
  * Post-hoc sandbox-denial classification for shell results.
  *
  * Neither backend emits a distinct, reliable denial marker on stderr:
- * Seatbelt fails operations with EPERM ("Operation not permitted"), and
- * bubblewrap's absent paths surface as ENOENT. This heuristic therefore only
- * fires when the evidence is boundary-shaped:
+ * Seatbelt fails operations with EPERM ("operation not permitted", plus its
+ * own dlopen/execvp markers), and bubblewrap's absent paths surface as
+ * ENOENT. Tools then format the errno a dozen different ways, so this
+ * classifier walks an ordered list of message-shape families:
  *
- * - EPERM/EROFS-class messages while the sandbox is active, or
- * - "No such file or directory" for a path that exists on the host but sits
- *   outside the boundary (an unmounted path — Linux/bwrap), or
- * - an explicit sandbox refusal string from either backend.
+ *   macOS marker      '/path' (file system sandbox blocked open())
+ *   sandbox-exec      execvp() of '/path' failed: Operation not permitted
+ *   python            [Errno 13] Permission denied: '/path'
+ *   node/libuv        EPERM: operation not permitted, open '/path'
+ *   posix (plain)     cat: /path: Operation not permitted
+ *   posix (quoted)    could not open '/path': Permission denied   (git, bash)
+ *   zsh               permission denied: /path
+ *   java              AccessDeniedException: /path
+ *   rust/anyhow       Permission denied (os error 13)             (no path)
+ *   network (strict)  Could not resolve host / Connection refused (hosts,
+ *                     gated on the strict profile so ordinary internet
+ *                     failures are never blamed on the sandbox)
  *
- * It must stay conservative: an unrelated failure (missing binary, syntax
- * error, genuine absent file inside the workspace) never gets sandbox
- * blame. Verified in both directions by tests.
+ * ENOENT matches are only boundary-shaped when the path (or its nearest
+ * existing ancestor) exists on the host outside the boundary. The classifier
+ * must stay conservative: unrelated failures never get sandbox blame, and a
+ * path inside the boundary keeps the kind but loses the hint. Verified in
+ * both directions by tests.
  */
 
 export interface SandboxDenial {
@@ -26,23 +37,41 @@ export interface SandboxDenial {
 
 const SCAN_LIMIT = 8_192;
 
-// `path: errno` shapes from both shell utilities ("cat: /x: Operation not
-// permitted", capital-O errno) and Go/Rust/Python programs ("open /x:
-// operation not permitted", lowercase errno) — case-insensitive on purpose.
-const PATH_IN_MESSAGE = /([^\s:'"]+[^\s:'"]*): (operation not permitted|read-only file system|permission denied|no such file or directory)/gi;
+const ERRNO_TEXT = 'operation not permitted|permission denied|read-only file system|no such file or directory';
+
+type ErrnoKind = 'eperm' | 'eacces' | 'erofs' | 'enoent';
+
+function errnoKind(errnoText: string): ErrnoKind {
+  if (/read-only file system/i.test(errnoText)) return 'erofs';
+  if (/permission denied|accessdenied/i.test(errnoText)) return 'eacces';
+  if (/no such file|nosuchfile/i.test(errnoText)) return 'enoent';
+  return 'eperm';
+}
+
+/** Ordered message-shape families; group 1 is always the path, the errno is inferred from the whole match. */
+const EXTRACTORS: RegExp[] = [
+  // macOS's own unambiguous seatbelt marker (dlopen and friends).
+  new RegExp(`'(/[^'()\\n]+)'\\s*\\(file system sandbox blocked open\\(\\)\\)`, 'gi'),
+  // POSIX plain: "cat: /path: Operation not permitted" (shell tools, Go).
+  new RegExp(`([^\\s:'"]+): (${ERRNO_TEXT})`, 'gi'),
+  // POSIX quoted: "could not open '/path': Permission denied" (git, bash).
+  new RegExp(`'(/[^'\\n]+)': (${ERRNO_TEXT})`, 'gi'),
+  new RegExp(`"(/[^"\\n]+)": (${ERRNO_TEXT})`, 'gi'),
+  // Python: "[Errno 13] Permission denied: '/path'".
+  new RegExp(`\\[Errno \\d+\\] (?:${ERRNO_TEXT}): '(/[^'\\n]+)'`, 'gi'),
+  // Node/libuv (and Deno/Bun): "EPERM: operation not permitted, open '/path'".
+  new RegExp(`\\b(?:EACCES|EPERM|EROFS|ENOENT): [^,\\n]*, [a-zA-Z]+ '(/[^'\\n]+)'`, 'gi'),
+  // zsh: "permission denied: /path".
+  new RegExp(`permission denied: (/[^:\\s]+)`, 'gi'),
+  // Java NIO: "AccessDeniedException: /path".
+  new RegExp(`(?:AccessDeniedException|FileSystemException|NoSuchFileException): (/[^:\\s]+)`, 'gi'),
+];
 
 function boundaryCovers(boundary: SandboxBoundary, candidate: string): boolean {
   for (const root of boundary.roots) {
     if (candidate === root.realPath || candidate.startsWith(`${root.realPath}/`)) return true;
   }
   return false;
-}
-
-function kindFromMessage(message: string): SandboxDenial['kind'] {
-  if (/read-only file system/i.test(message)) return 'write';
-  if (/network|socket|connection refused|could not resolve/i.test(message)) return 'network';
-  if (/exec|spawn|cannot execute|not executable/i.test(message)) return 'exec';
-  return 'unknown';
 }
 
 function nearestExisting(candidate: string): Promise<string | undefined> {
@@ -61,6 +90,20 @@ function nearestExisting(candidate: string): Promise<string | undefined> {
   })();
 }
 
+/**
+ * Infer the operation kind from the failing verb adjacent to the path
+ * ("open /x", "mkdir: /x"). Verbless shapes (Python's final line, zsh, Java)
+ * default to read: read-only grants also enable exec, and a mistaken guess
+ * self-corrects through the --rw hint in the remedy.
+ */
+function kindFromVerbs(text: string, path: string): SandboxDenial['kind'] {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const write = new RegExp(`\\b(?:create|mkdir|write|append|touch|unlink|remove|rm|rename|move|copy|truncate)[^\\n]{0,32}['"]?${escaped}`);
+  return write.test(text) ? 'write' : 'read';
+}
+
+const NETWORK_FAILURE = /failed to connect|couldn't connect|could not connect|connection refused|could not resolve|name or service not known|network is unreachable|ENETUNREACH|ECONNREFUSED|EAI_AGAIN/i;
+
 export async function classifySandboxDenial(input: {
   code: number | null;
   stderr: string;
@@ -70,38 +113,50 @@ export async function classifySandboxDenial(input: {
   if (!boundary) return undefined;
   const text = input.stderr.slice(0, SCAN_LIMIT);
   if (!text) return undefined;
+
+  // sandbox-exec's own diagnostics: exec failures carry the binary path.
+  const execvp = /execvp\(\) of '?([^':\n]+)'? failed: Operation not permitted/i.exec(text);
+  if (execvp?.[1] && execvp[1].startsWith('/')) {
+    return {kind: 'exec', pathHint: boundaryCovers(boundary, execvp[1]) ? undefined : execvp[1]};
+  }
   if (/sandbox-exec:|sandbox profile/i.test(text)) {
-    return {kind: 'unknown', pathHint: undefined};
+    return {kind: 'unknown'};
   }
 
-  const matches = [...text.matchAll(PATH_IN_MESSAGE)];
-  for (const match of matches) {
-    const rawPath = match[1];
-    if (!rawPath || !rawPath.startsWith('/')) continue;
-    const message = match[0];
-    if (/no such file or directory/i.test(message)) {
-      // ENOENT is sandbox-shaped only when the path (or its nearest existing
-      // ancestor) exists on the host but is outside the boundary.
-      const existing = await nearestExisting(rawPath);
-      if (existing && !boundaryCovers(boundary, existing)) return {kind: 'read', pathHint: existing};
-      continue;
-    }
-    if (/operation not permitted|read-only file system|permission denied/i.test(message)) {
-      let kind = kindFromMessage(message);
-      if (kind === 'unknown') {
-        // Go/Rust/Python print the failing verb before the path ("open /x:
-        // operation not permitted"); the captured match only holds
-        // "path: errno", so infer reads from the surrounding line.
-        const escaped = rawPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        if (new RegExp(`\\b(?:open|stat|read|readfile|readfileasync)\\b[^\\n]*${escaped}`, 'i').test(text)) kind = 'read';
+  // macOS's own unambiguous seatbelt marker: the operation is always an open
+  // (dlopen and friends) — the strongest signal the boundary gives.
+  const marker = /'([^'()\n]+)'\s*\(file system sandbox blocked open\(\)\)/.exec(text);
+  if (marker?.[1] && marker[1].startsWith('/')) {
+    return {kind: 'read', pathHint: boundaryCovers(boundary, marker[1]) ? undefined : marker[1]};
+  }
+
+  for (const extractor of EXTRACTORS) {
+    for (const match of text.matchAll(extractor)) {
+      const path = match[1];
+      if (!path || !path.startsWith('/')) continue;
+      const kind0 = errnoKind(match[0]);
+      if (kind0 === 'enoent') {
+        const existing = await nearestExisting(path);
+        if (existing && !boundaryCovers(boundary, existing)) return {kind: 'read', pathHint: existing};
+        continue;
       }
-      return {kind, pathHint: boundaryCovers(boundary, rawPath) ? undefined : rawPath};
+      const kind = kind0 === 'erofs' ? 'write' : kindFromVerbs(text, path);
+      return {kind, pathHint: boundaryCovers(boundary, path) ? undefined : path};
     }
   }
 
-  // Message without a parseable "path: errno" shape (e.g. python's OSError).
-  if (/operation not permitted|read-only file system/i.test(text)) {
-    return {kind: /read-only file system/i.test(text) ? 'write' : 'unknown'};
+  // Hosts are not paths: network denials only exist when the profile denies
+  // the network, and matching on connect/resolve failures there is precise
+  // (in the workspace profile, an unreachable host is never the sandbox).
+  if (boundary.network === 'deny' && NETWORK_FAILURE.test(text)) {
+    return {kind: 'network'};
+  }
+
+  // Message-less errno (Rust/anyhow): classify the kind, no path available.
+  // ENOENT is excluded — a missing path alone is not sandbox evidence.
+  if (/operation not permitted|permission denied|accessdenied|read-only file system/i.test(text)) {
+    const kind = /read-only file system/i.test(text) ? 'write' : 'unknown';
+    return {kind};
   }
   return undefined;
 }

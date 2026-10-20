@@ -267,7 +267,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
       // the containing directory of a denied file, the unit the user wants.
       const grantTarget = denial.pathHint ? path.dirname(denial.pathHint) : undefined;
       const remedy = grantTarget && grantTarget !== '/'
-        ? `/sandbox grant ${grantTarget}${denial.kind === 'write' ? ' --rw' : ''} (persistent) or /add-dir ${grantTarget} (session)`
+        ? `/sandbox grant ${grantTarget}${denial.kind === 'write' ? ' --rw' : ' (--rw if it was a write)'} (persistent) or /add-dir ${grantTarget} (session)`
         : '/sandbox off (this session)';
       callbacks.addMessage({role: 'system', text: `Sandbox denied ${denial.kind} access at ${where} (command: ${command.slice(0, 80)}). Fix with ${remedy}. All denials: /sandbox denials.`});
     },
