@@ -6,6 +6,8 @@ import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits.js';
 import {signalProcessTree} from './runBoundedProcess.js';
 import {shellInvocation} from './userShell.js';
 import {wrapInvocation, type SandboxRuntimeState} from '../sandbox/runner.js';
+import {classifySandboxDenial} from '../sandbox/diagnostics.js';
+import {recordSandboxDenial} from '../sandbox/denialLog.js';
 import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
 type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
@@ -160,6 +162,17 @@ export function startBackgroundProcess(input: {command: string; cwd: string; san
     summary.code = code;
     summary.signal = signal;
     if (summary.status === 'running') summary.status = 'exited';
+    // Post-hoc sandbox-denial audit for background processes: classify the
+    // retained output tail when a sandboxed process fails, so denied reads/
+    // writes land in the same audit log as foreground commands. The notice
+    // channel is turn-scoped, so recording alone is the right depth here.
+    if (code !== 0 && code !== null && input.sandboxRuntime?.boundary) {
+      void classifySandboxDenial({code, stderr: ring.snapshot().content, boundary: input.sandboxRuntime.boundary})
+        .then(denial => {
+          if (denial) recordSandboxDenial({command: input.command, kind: denial.kind, ...(denial.pathHint ? {pathHint: denial.pathHint} : {})});
+        })
+        .catch(() => undefined);
+    }
     child.stdout?.destroy();
     child.stderr?.destroy();
     pruneCompletedRecords();

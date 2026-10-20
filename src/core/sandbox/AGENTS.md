@@ -31,6 +31,10 @@ OS-level filesystem boundaries for model-initiated child processes: Seatbelt
 - `diagnostics.ts` — conservative post-hoc denial classification (EPERM/EROFS
   classes; ENOENT only for host-existing paths outside the boundary). Must
   never blame the sandbox for unrelated failures.
+- `denialLog.ts` — bounded (50) in-memory audit log of classified denials;
+  every foreground/background denial is recorded, the first per path becomes a
+  once-per-session system message via the tool-context callback, and
+  `/sandbox denials` renders it. Reset seam: `resetSandboxDenialLog()`.
 
 ## Contracts
 

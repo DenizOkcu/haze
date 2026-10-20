@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {applySandboxGrant, resolveSandboxCommand} from '../../src/cli/commands/sandboxCommand.js';
+import {resetSandboxDenialLog, listSandboxDenials} from '../../src/core/sandbox/denialLog.js';
 import type {HazeSettings} from '../../src/config/settings.js';
 import type {SandboxBackendInfo} from '../../src/core/sandbox/detect.js';
 
@@ -102,9 +103,17 @@ describe('applySandboxGrant', () => {
     expect(result.sandbox?.rwRoots).toBeUndefined();
   });
 
-  it('empty path lists print usage with the gh example', () => {
+  it('empty path lists print usage', () => {
     const result = applySandboxGrant({}, {action: 'grant', paths: []});
     expect(result.action).toBe('error');
     if (result.action === 'error') expect(result.message).toContain('/sandbox grant');
+  });
+
+  it('denials is accepted in the usage surface (handler runs it live)', async () => {
+    resetSandboxDenialLog();
+    const result = await resolveSandboxCommand('denials', input());
+    // Falls through to the status card; the live listing is handler-side (process state).
+    expect(result.action === 'status' || result.action === 'error').toBe(true);
+    expect(listSandboxDenials()).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 import type {SandboxRuntimeState} from '../../core/sandbox/runner.js';
+import type {SandboxDenial} from '../../core/sandbox/diagnostics.js';
 
 /**
  * The turn-scoped tool execution state schema and guards, split from
@@ -42,6 +43,8 @@ export type HazeToolContext = {
   sessionDirs?: readonly BlessedPath[];
   /** Immutable per-attempt OS sandbox state for child processes (seatbelt/bubblewrap; see core/sandbox). */
   sandboxRuntime?: SandboxRuntimeState;
+  /** Fires for every classified sandbox denial (audit log + one-time user notice; see core/sandbox/denialLog.ts). */
+  onSandboxDenial?: (denial: SandboxDenial, command: string) => void;
   /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
   postMutationDiagnostics?: PostMutationDiagnostics;
 };
@@ -76,6 +79,7 @@ export function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
     && validOptional('sessionDirs', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
     && validOptional('sandboxRuntime', field => isRecord(field) && isRecord(field.resolved) && typeof field.resolved.active === 'boolean' && typeof field.resolved.mode === 'string' && (field.boundary === undefined || isRecord(field.boundary)))
+    && validOptional('onSandboxDenial', field => typeof field === 'function')
     && validOptional('postMutationDiagnostics', field => typeof field === 'function');
 }
 

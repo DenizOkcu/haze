@@ -28,6 +28,8 @@ export interface PromptSession {
   sandboxOverride?: {mode?: 'auto' | 'on' | 'off'; profile?: 'workspace' | 'strict'};
   /** True once the sandbox-unavailable notice was shown for this session (see attemptSetup). */
   sandboxUnavailableWarned?: boolean;
+  /** Denial keys (path or kind) already surfaced as a system message this session; prevents repeat notices. */
+  sandboxDenialNotified?: Set<string>;
   /**
    * Session-scoped extended workspace directories added via `/add-dir`
    * (canonical real paths). In-memory only, like `reasoningByModel`: file

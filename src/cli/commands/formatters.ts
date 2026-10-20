@@ -77,10 +77,10 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     const risk = typeof (output.classification as {riskLevel?: unknown} | undefined)?.riskLevel === 'string'
       ? ` (${(output.classification as {riskLevel: string}).riskLevel})`
       : '';
-    const sandbox = typeof (output.sandbox as {enabled?: boolean; backend?: string; denial?: {kind?: string}} | undefined)?.enabled === 'boolean'
-      ? (output.sandbox as {enabled: boolean; backend: string; denial?: {kind: string}})
+    const sandbox = typeof (output.sandbox as {enabled?: boolean; backend?: string; denial?: {kind?: string; pathHint?: string}} | undefined)?.enabled === 'boolean'
+      ? (output.sandbox as {enabled: boolean; backend: string; denial?: {kind: string; pathHint?: string}})
       : undefined;
-    const denial = sandbox?.denial ? ` [sandbox: ${sandbox.denial.kind} denied]` : '';
+    const denial = sandbox?.denial ? ` [sandbox: ${sandbox.denial.kind} denied${sandbox.denial.pathHint ? ` ${sandbox.denial.pathHint}` : ''}]` : '';
     return `exited with code ${output.code}${risk}${denial}`;
   }
   const resultOutput = output ?? {};

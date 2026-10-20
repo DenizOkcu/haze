@@ -11,6 +11,7 @@ import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
 import {wrapInvocation, type SandboxRuntimeState, type ShellSandboxMetadata} from '../../core/sandbox/runner.js';
 import {classifySandboxDenial} from '../../core/sandbox/diagnostics.js';
+import {recordSandboxDenial} from '../../core/sandbox/denialLog.js';
 import {SHELL_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
 import {resolveUserShell, shellDialect, shellInvocation, shellSyntaxGuidance} from '../../core/process/userShell.js';
@@ -110,6 +111,14 @@ export const shellTool = tool({
     const denial = code !== 0 && !timedOut && !processResult.aborted && !missing && sandboxState?.boundary
       ? await classifySandboxDenial({code, stderr, boundary: sandboxState.boundary})
       : undefined;
+    if (denial) {
+      // Deterministic surfacing: the audit log always records it, and the
+      // context callback lets the UI post a once-per-path notice during the
+      // turn — the user learns about the boundary without relying on the
+      // model relaying the failure.
+      recordSandboxDenial({command, kind: denial.kind, ...(denial.pathHint ? {pathHint: denial.pathHint} : {})});
+      hazeContext(context)?.onSandboxDenial?.(denial, command);
+    }
     const sandbox: ShellSandboxMetadata = denial ? {...wrapped.sandbox, denial} : wrapped.sandbox;
     return {
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,

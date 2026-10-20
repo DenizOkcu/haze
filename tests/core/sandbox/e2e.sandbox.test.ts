@@ -7,6 +7,7 @@ import {buildSandboxBoundary, defaultSandboxRuntimeFacts} from '../../../src/cor
 import {wrapInvocation, resolveSandboxRuntime} from '../../../src/core/sandbox/runner.js';
 import {runBoundedProcess} from '../../../src/core/process/runBoundedProcess.js';
 import {shellInvocation} from '../../../src/core/process/userShell.js';
+import {listSandboxDenials, resetSandboxDenialLog} from '../../../src/core/sandbox/denialLog.js';
 
 /**
  * Live OS-sandbox matrix (specs/os-sandbox plan §9). Opt-in via
@@ -143,6 +144,25 @@ describe.skipIf(!live)('sandbox e2e (live backend)', () => {
     } finally {
       await new Promise<void>(resolve => server.close(() => resolve()));
     }
+  });
+
+  it('denials are classified, audited, and surfaced through the context callback (tool-level)', async () => {
+    resetSandboxDenialLog();
+    await fs.mkdir(outsideDir, {recursive: true});
+    await fs.writeFile(path.join(outsideDir, 'marker.txt'), 'denied', 'utf8');
+    const {hazeTools} = await import('../../../src/llm/hazeTools.js');
+    const notices: string[] = [];
+    const result = await hazeTools.shell.execute(
+      {command: `cat ${JSON.stringify(path.join(outsideDir, 'marker.txt'))}`, purpose: 'auto', background: false},
+      {context: {sandboxRuntime: runtime, onSandboxDenial: (denial, command) => notices.push(`${denial.kind}:${denial.pathHint ?? ''}:${command.slice(0, 20)}`)}},
+    );
+    expect(result.ok).toBe(false);
+    expect(result.sandbox?.denial).toBeDefined();
+    expect(result.reasonCode).toBe('sandbox_boundary');
+    expect(listSandboxDenials().length).toBeGreaterThan(0);
+    expect(listSandboxDenials()[0]).toMatchObject({kind: expect.any(String)});
+    expect(notices).toHaveLength(1);
+    resetSandboxDenialLog();
   });
 
   it('boundary covers the workspace canonically', async () => {

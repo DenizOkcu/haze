@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {detectSandboxBackend, sandboxUnavailableRemedy} from '../../core/sandbox/detect.js';
 import {resolveSandboxRuntime, type SandboxSessionOverride} from '../../core/sandbox/runner.js';
+import {formatSandboxDenials, listSandboxDenials} from '../../core/sandbox/denialLog.js';
 import {isProtectedSecretPath} from '../../core/safety/secretPaths.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import type {HazeSettings, HazeSandboxSettings} from '../../config/settings.js';
@@ -56,10 +57,10 @@ export async function resolveSandboxCommand(args: string, input: {
   if (value === 'reset') {
     return {action: 'set', override: {}, message: 'Session sandbox override removed; the saved sandbox settings (or built-in defaults) apply from the next turn.'};
   }
-  if (value === 'test' || value === 'status') {
-    // `test` runs live probes in the handler; fall through to the status card.
-  } else if (value) {
-    return {action: 'error', message: `Unknown /sandbox argument "${args.trim()}". Usage: /sandbox [auto|on|off|workspace|strict|reset|test|status|grant [--rw] <path>|revoke <path>].`};
+  if (!value || value === 'denials' || value === 'test' || value === 'status') {
+    // `denials`/`test` run live in the handler; everything else falls through to the status card.
+  } else {
+    return {action: 'error', message: `Unknown /sandbox argument "${args.trim()}". Usage: /sandbox [auto|on|off|workspace|strict|reset|test|denials|status|grant [--rw] <path>|revoke <path>].`};
   }
 
   const runtime = await resolveSandboxRuntime({workspaceRoot: input.workspaceRoot, settings: input.settings.sandbox, backendInfo: input.backendInfo, sessionOverride: input.sessionOverride, runtime: input.runtime});
@@ -145,6 +146,10 @@ export function applySandboxGrant(current: HazeSettings, input: {action: 'grant'
 
 export async function handleSandboxCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
   const normalized = args.trim().toLowerCase();
+  if (normalized === 'denials') {
+    ctx.addSystemMessage(formatSandboxDenials(listSandboxDenials()));
+    return 'handled';
+  }
   if (normalized === 'grant' || normalized.startsWith('grant ')) {
     const rest = args.trim().slice('grant'.length).trim();
     const access: 'ro' | 'rw' = rest.startsWith('--rw ') ? 'rw' : 'ro';

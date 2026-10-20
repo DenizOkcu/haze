@@ -253,6 +253,20 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     blessedPaths: turnOptions.blessedPaths == null && sessionDirs.length === 0 ? undefined : [...(turnOptions.blessedPaths ?? []), ...sessionDirs],
     ...(sessionDirs.length > 0 ? {sessionDirs} : {}),
     sandboxRuntime,
+    // Deterministic user visibility for sandbox denials: every classified
+    // denial is audited (denialLog) and the first one per path this session
+    // becomes a system message, so the human learns about the boundary even
+    // if the model under-reports the failure.
+    onSandboxDenial: (denial, command) => {
+      const key = denial.pathHint ?? denial.kind;
+      if (!session || session.sandboxDenialNotified?.has(key)) return;
+      (session.sandboxDenialNotified ??= new Set()).add(key);
+      const where = denial.pathHint ?? 'a path outside the sandbox boundary';
+      const remedy = denial.pathHint
+        ? `/sandbox grant ${denial.pathHint}${denial.kind === 'write' ? ' --rw' : ''} (persistent) or /add-dir <parent directory> (session)`
+        : '/sandbox off (this session)';
+      callbacks.addMessage({role: 'system', text: `Sandbox blocked a ${denial.kind} at ${where} (command: ${command.slice(0, 80)}). Fix with ${remedy}. All denials: /sandbox denials.`});
+    },
     postMutationDiagnostics: assembled.postMutationDiagnostics,
   };
 
