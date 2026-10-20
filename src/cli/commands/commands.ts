@@ -11,6 +11,7 @@ import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
 import {handleReasoningCommand} from './reasoningCommand.js';
+import {handleSandboxCommand} from './sandboxCommand.js';
 import {handleThemesCommand} from './themesCommand.js';
 import {handlePluginCommand} from './pluginCommand.js';
 import {formatSettingsSummary} from './settingsSummary.js';
@@ -42,6 +43,10 @@ export type CommandContext = {
   getSessionReasoning: (modelSelector: string) => StoredReasoningSetting | undefined;
   /** Write (or clear, with undefined) the session-scoped per-model reasoning override. */
   setSessionReasoning: (modelSelector: string, setting: StoredReasoningSetting | undefined) => void;
+  /** Read the session-scoped OS sandbox override written by `/sandbox` (in-memory only). */
+  getSandboxOverride?: () => import('../../llm/systemPrompt.js').PromptSession['sandboxOverride'];
+  /** Merge/clear the session-scoped OS sandbox override (in-memory only, like /reasoning). */
+  setSandboxOverride?: (override: import('../../llm/systemPrompt.js').PromptSession['sandboxOverride']) => void;
   getContextReport?: () => Promise<string>;
 };
 
@@ -109,6 +114,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exactOrArgs('/themes'), run: async (args, ctx) => await handleThemesCommand(args, ctx)},
   {match: exactOrArgs('/reasoning'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/thinking'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
+  {match: exactOrArgs('/sandbox'), run: async (args, ctx) => await handleSandboxCommand(args, ctx)},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
 ];
 

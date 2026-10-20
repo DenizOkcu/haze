@@ -77,7 +77,11 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
     const risk = typeof (output.classification as {riskLevel?: unknown} | undefined)?.riskLevel === 'string'
       ? ` (${(output.classification as {riskLevel: string}).riskLevel})`
       : '';
-    return `exited with code ${output.code}${risk}`;
+    const sandbox = typeof (output.sandbox as {enabled?: boolean; backend?: string; denial?: {kind?: string}} | undefined)?.enabled === 'boolean'
+      ? (output.sandbox as {enabled: boolean; backend: string; denial?: {kind: string}})
+      : undefined;
+    const denial = sandbox?.denial ? ` [sandbox: ${sandbox.denial.kind} denied]` : '';
+    return `exited with code ${output.code}${risk}${denial}`;
   }
   const resultOutput = output ?? {};
   const capsule = typeof resultOutput.capsule === 'object' && resultOutput.capsule != null ? resultOutput.capsule as Record<string, unknown> : undefined;

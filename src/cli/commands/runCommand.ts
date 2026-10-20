@@ -25,6 +25,8 @@ export interface HeadlessOptions {
   modelOverride?: string;
   /** Raw `--reasoning` value (level or unset alias); validated in `runHeadless` so the error path is testable. */
   reasoning?: string;
+  /** Raw `--sandbox` value (mode or profile word); validated in `runHeadless`, run-scoped like `--reasoning` (never a settings write). */
+  sandbox?: string;
   resumeSessionId?: string;
   output: HeadlessOutput;
   debug?: boolean;
@@ -215,6 +217,12 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
     process.stderr.write(`${reasoning.error}\n`);
     return 2;
   }
+  const sandboxValue = options.sandbox?.trim().toLowerCase();
+  if (sandboxValue && !['auto', 'on', 'off', 'workspace', 'strict'].includes(sandboxValue)) {
+    process.stderr.write(`Invalid --sandbox value "${options.sandbox}". Valid values: auto, on, off, workspace, strict.\n`);
+    return 2;
+  }
+  const sandboxOverride = sandboxValue as 'auto' | 'on' | 'off' | 'workspace' | 'strict' | undefined;
   const restored = resumed ? await restoreSessionState(resumed) : undefined;
   const savedModel = restored?.modelSelection;
   const runSettings = await readSettings();
@@ -338,6 +346,7 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       modelOverride: sessionModel,
       escalationModel: runSettings.escalationModel,
       ...(reasoning.setting !== undefined ? {reasoningOverride: reasoning.setting} : {}),
+      ...(sandboxOverride ? {turnOptions: {sandboxOverride}} : {}),
       ...(turnDeadlineMs != null ? {goalDeadlineMs: Math.max(1, deadlineAt! - Date.now())} : {}),
       ...(relaunchOptions.resumeFrom ? {resumeFrom: relaunchOptions.resumeFrom} : {}),
       ...(relaunchOptions.conversationCarriesRequest ? {conversationCarriesRequest: true} : {}),

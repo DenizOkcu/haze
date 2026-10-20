@@ -21,6 +21,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/plugin inspect|install <local-directory> [plugin-name]', description: 'Inspect or install a Claude/Agent Plugins package or a selected local marketplace plugin. Only skills are activated; review source first.'},
   {usage: '/plugin list|remove <name>', description: 'List project-installed plugins or remove one, preserving modified and seed files. /kit is an alias.'},
   {usage: '/tips', description: 'Toggle the rotating tips shown under the busy label while the model is thinking.'},
+  {usage: '/sandbox', description: 'Show the OS sandbox state: backend (seatbelt on macOS, bubblewrap on Linux), mode, profile, and the exact read-write/read-only roots.'},
+  {usage: '/sandbox <auto|on|off|workspace|strict|reset|test>', description: 'Control the OS sandbox for this session (in-memory, like /reasoning): auto sandboxes when a backend exists, on requires one, off disables; workspace allows network and cache writes, strict denies network. test runs live boundary probes. Persistent config: sandbox settings in ~/.haze/settings.json.'},
   {usage: '/fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] [--] <prompt>', description: 'Run genuinely independent tasks through disposable contexts. Runtime enforces profile concurrency, deadlines, and mutation serialization; control guidance is not persisted. Declines non-parallel work.'},
   {usage: '/init', description: 'Inspect the current workspace and create or update AGENTS.md project instructions.'},
   {usage: '/context', description: 'Show a token breakdown of the current request: system prompt, project context, tools (incl. MCP), and chat messages.'},

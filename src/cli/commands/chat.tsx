@@ -65,9 +65,19 @@ interface ChatOptions {
   continueSession?: boolean;
   resumeSessionId?: string;
   noSession?: boolean;
+  /** Validated `--sandbox` CLI value (mode or profile word); seeds the session override like `/sandbox` would. */
+  sandbox?: string;
 }
 
 type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
+
+/** Seed the PromptSession override from a validated `--sandbox` CLI value (mode or profile word). */
+function initialSandboxOverride(sandbox: string | undefined): {sandboxOverride?: PromptSession['sandboxOverride']} {
+  const value = sandbox?.trim().toLowerCase();
+  if (value === 'auto' || value === 'on' || value === 'off') return {sandboxOverride: {mode: value}};
+  if (value === 'workspace' || value === 'strict') return {sandboxOverride: {profile: value}};
+  return {};
+}
 
 /** Latest Ink render metrics under --debug (module-level: render options are outside React). */
 let renderMetricsReader: (() => {at: number; renderTime: number} | undefined) | undefined;
@@ -76,7 +86,7 @@ function thinkingLabelForSettings(settings: HazeSettings) {
   return modelThinkingLabel(activeModel(settings)?.model);
 }
 
-function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false, onShutdownReady}: ChatOptions & {onShutdownReady?: (shutdown: () => Promise<void>) => void}) {
+function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false, sandbox, onShutdownReady}: ChatOptions & {onShutdownReady?: (shutdown: () => Promise<void>) => void}) {
   const {exit} = useApp();
   const {columns: width, rows: terminalRows} = useWindowSize();
   const stoppingRef = useRef(false);
@@ -137,7 +147,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // context-fallback warning key) persist; rebuilt when a new session starts,
   // detected by sessionStartRef identity (the lifecycle controller replaces
   // the Date on new/resume/continue).
-  const promptSessionRef = useRef<{identity: Date | undefined; value: PromptSession}>({identity: undefined, value: {cwd: process.cwd()}});
+  const promptSessionRef = useRef<{identity: Date | undefined; value: PromptSession}>({identity: undefined, value: {cwd: process.cwd(), ...initialSandboxOverride(sandbox)}});
   // Session per-model reasoning overrides live on the stable PromptSession
   // object; this counter only forces a re-render so the status bar updates.
   const [reasoningOverrideCounter, setReasoningOverrideCounter] = useState(0);
@@ -507,6 +517,17 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       },
       getSessionReasoning: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
       setSessionReasoning: setSessionReasoningOverride,
+      getSandboxOverride: () => currentPromptSession().sandboxOverride,
+      setSandboxOverride: override => {
+        // Merge semantics: a /sandbox mode write keeps an existing session
+        // profile override and vice versa; the reset sentinel (empty object
+        // or undefined) clears both.
+        const session = currentPromptSession();
+        const current = session.sandboxOverride;
+        const merged = !override || Object.keys(override).length === 0 ? undefined : {...current, ...override};
+        if (merged) session.sandboxOverride = merged;
+        else delete session.sandboxOverride;
+      },
       getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
     };
     let result;

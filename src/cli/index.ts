@@ -27,6 +27,7 @@ program
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
   .addOption(new Option('--reasoning <level>', 'print-mode reasoning effort for this run only — none, minimal, low, medium, high, xhigh, or unset (no parameter sent; provider default)').choices(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset', 'off']))
+  .addOption(new Option('--sandbox <mode>', 'OS sandbox for shell commands this run only — auto (sandbox when seatbelt/bubblewrap is available), on (require it, fail closed), off, workspace (network allowed), or strict (network denied)').choices(['auto', 'on', 'off', 'workspace', 'strict']))
   .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'))
   .option('--timeout <duration>', 'print-mode absolute turn deadline (e.g. 30s, 10m, 2h); bounds total elapsed time so a busy tool cannot run indefinitely')
   .option('--until-done', 'print mode: relaunch the goal after transient model failures (with backoff) until it structurally completes, the --timeout deadline hits, or repeated relaunches make no progress');
@@ -138,7 +139,7 @@ program.command('report [id]')
   });
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; reasoning?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; reasoning?: string; sandbox?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
   if (opts.version) {
     // Handled here (not via commander's built-in .version()) so --verbose can
     // enrich it and the bin launcher can answer without loading dist.
@@ -158,6 +159,7 @@ program.action(async () => {
       prompt,
       modelOverride: opts.model,
       reasoning: opts.reasoning,
+      sandbox: opts.sandbox,
       resumeSessionId: opts.resume,
       // commander validates --output against the choices above, so opts.output is one of
       // 'text' | 'json' | 'stream-json'; default to text for piped/stdin runs without the flag.
@@ -171,7 +173,7 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
-  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version, build: sessionBuildProvenance()});
+  await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, sandbox: opts.sandbox, version, build: sessionBuildProvenance()});
 });
 
 /** Safe build provenance recorded into session headers (commit + build time only). */

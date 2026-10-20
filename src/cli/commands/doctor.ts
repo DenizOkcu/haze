@@ -14,6 +14,9 @@ import {
   runtimeCapabilities,
   type RuntimeCapabilities,
 } from '../../utils/buildInfo.js';
+import {readSettings} from '../../config/settings.js';
+import {detectSandboxBackend, sandboxUnavailableRemedy} from '../../core/sandbox/detect.js';
+import {resolveSandboxRuntime} from '../../core/sandbox/runner.js';
 
 /**
  * `haze doctor`: runtime provenance and integrity diagnostics. Reports the
@@ -69,8 +72,7 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<number> {
   }
   write();
 
-  const checks: DoctorCheck[] = [];
-  for (const artifact of ['dist/cli/index.js', GOAL_SUPERVISOR_ARTIFACT, 'dist/buildInfo.json']) {
+  const checks: DoctorCheck[] = [];  for (const artifact of ['dist/cli/index.js', GOAL_SUPERVISOR_ARTIFACT, 'dist/buildInfo.json']) {
     const present = runtimeRoot ? existsSync(join(runtimeRoot, artifact)) : false;
     checks.push({label: `artifact ${artifact}`, state: present ? 'ok' : 'fail', detail: present ? 'present' : 'missing'});
   }
@@ -95,6 +97,28 @@ export async function runDoctor(deps: DoctorDeps = {}): Promise<number> {
     write(`  [${marker}] ${check.label}: ${check.detail}`);
   }
   write();
+
+  // OS sandbox for model-initiated child processes (seatbelt/bubblewrap):
+  // backend availability + the effective boundary for this checkout.
+  try {
+    const backendInfo = await detectSandboxBackend();
+    const settings = await readSettings().catch(() => undefined);
+    const sandbox = await resolveSandboxRuntime({workspaceRoot: cwd, settings: settings?.sandbox, backendInfo});
+    write('Sandbox');
+    write(`  backend: ${backendInfo.backend}${backendInfo.reason ? ` (${backendInfo.reason}: ${backendInfo.detail ?? 'no detail'})` : ''}`);
+    write(`  mode: ${sandbox.resolved.mode} · profile: ${sandbox.resolved.profile} · active: ${sandbox.resolved.active ? 'yes' : `no (${sandbox.resolved.reason ?? 'unknown'})`}`);
+    if (sandbox.boundary) {
+      const rw = sandbox.boundary.roots.filter(root => root.access === 'rw').length;
+      const ro = sandbox.boundary.roots.filter(root => root.access === 'ro').length;
+      write(`  roots: ${rw} read-write, ${ro} read-only · masked credential paths: ${sandbox.boundary.masks.length}`);
+    } else if (sandbox.resolved.reason === 'no_backend') {
+      write(`  remedy: ${sandboxUnavailableRemedy(backendInfo)}`);
+    }
+    write();
+  } catch (error) {
+    write(`Sandbox: probe failed (${error instanceof Error ? error.message : String(error)})`);
+    write();
+  }
 
   const mismatch = detectCheckoutMismatch({executingRoot: runtimeRoot, cwd});
   if (mismatch) {
