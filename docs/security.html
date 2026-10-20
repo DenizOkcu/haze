@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandboxing &amp; security — haze docs</title>
+  <meta name="description" content="The haze OS-level sandbox: Seatbelt on macOS and bubblewrap on Linux, the default workspace boundary, blessed paths, credential masks, profiles, and controls.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class="head-link">Quickstart</a>
+        <a href="commands.html" class="head-link">Commands</a>
+        <a href="tools.html" class="head-link">Tools</a>
+        <a href="skills.html" class="head-link">Skills</a>
+        <a href="workflows.html" class="head-link">Workflows</a>
+        <a href="security.html" class="head-link active">Security</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.5.1</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">Docs / Security</div>
+        <h1 class="doc-h1">Sandboxing <span class="em">&amp; boundaries.</span></h1>
+        <p class="doc-lede">Model-initiated shell commands run inside an OS-level filesystem sandbox: Seatbelt on macOS, bubblewrap on Linux. The default boundary is the project you opened — not your home directory, not your secrets.</p>
+      </div>
+    </div>
+
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>
+              <a href="#boundary">The boundary</a>
+              <a href="#blessed">Blessed paths</a>
+              <a href="#masks">Credential masks</a>
+              <a href="#profiles">Profiles &amp; modes</a>
+              <a href="#control">Controlling it</a>
+              <a href="#platforms">Platform support</a>
+              <a href="#limits">What it is not</a>
+            </nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            <a href="quickstart.html">Quickstart</a>
+            <a href="commands.html">Command reference</a>
+            <a href="tools.html">Tool reference</a>
+            <a href="skills.html">Skills guide</a>
+            <a href="workflows.html">Workflows</a>
+          </div>
+        </aside>
+
+        <div class="doc-body">
+          <section id="boundary">
+            <h2>The <span class="em">boundary</span></h2>
+            <p>Every command the <code>shell</code> tool runs — foreground or registered background — is spawned through the OS sandbox when a backend is available. The grep runner uses the same boundary as defense in depth. The boundary is a plain allowlist:</p>
+            <table class="cmd-table" aria-label="Sandbox boundary">
+              <tbody>
+                <tr><td class="cmd-c">read-write</td><td class="cmd-d">The workspace (the directory you launched haze in), the temp directory, and tool caches (<code>~/Library/Caches</code> on macOS; <code>~/.cache</code> and <code>~/.npm</code> on Linux) plus any <code>rwRoots</code> you configure.</td></tr>
+                <tr><td class="cmd-c">read-only</td><td class="cmd-d">System tool directories (<code>/usr</code>, <code>/bin</code>, <code>/opt</code>, <code>/Library</code>, <code>/System</code>, …), your node and shell install trees (nvm/volta included), <code>~/.gitconfig</code>, the <code>~/.haze</code> and <code>~/.claude</code> config dirs (credentials masked — see below), and every path you blessed that turn.</td></tr>
+                <tr><td class="cmd-c">denied</td><td class="cmd-d">Everything else: <code>~/.ssh</code>, <code>~/.aws</code>, shell histories, other projects, <code>/etc</code> writes. On macOS violations fail with <code>EPERM</code>; on Linux the paths simply do not exist.</td></tr>
+              </tbody>
+            </table>
+            <p>Both backends evaluate canonical paths, so a symlink inside the workspace pointing at <code>~/.ssh</code> does not smuggle reads — the resolved target is outside every allow. Re-invoking <code>sandbox-exec</code> or <code>bwrap</code> from inside can only tighten, never loosen.</p>
+          </section>
+
+          <section id="blessed">
+            <h2>Blessed <span class="em">paths</span></h2>
+            <p>When you type <code>@../shared-libs</code> or any path containing a slash, the existing read-bless system grants the file tools a read for that turn. The sandbox honours the same user intent: blessed paths become <strong>read-only</strong> roots for sandboxed commands during that turn. Blessing never grants writes — the same rule the file tools follow, now enforced by the operating system. The model cannot bless anything itself; only your keystrokes grow the boundary.</p>
+          </section>
+
+          <section id="masks">
+            <h2>Credential <span class="em">masks</span></h2>
+            <p>Mounting <code>~/.haze</code> and <code>~/.claude</code> read-only is haze's choice, so their credential-bearing files are masked inside the mount: <code>settings.json</code>/<code>settings.local.json</code> (provider API keys), <code>~/.haze/sessions</code> and <code>~/.claude/projects</code> (transcripts), <code>~/.haze/logs</code>, <code>~/.haze/history</code>, and <code>~/.claude/.credentials.json</code>. On macOS an explicit profile deny wins; on Linux those files are bound to <code>/dev/null</code>. A sandboxed <code>cat ~/.haze/settings.json</code> reads an empty file — keys never reach command output.</p>
+            <p>Workspace-internal secret files such as <code>.env</code> stay readable from sandboxed shells on purpose: <code>source .env && npm test</code> is a legitimate workflow. The file tools' hard secret refusal and the system-prompt rule own that layer.</p>
+          </section>
+
+          <section id="profiles">
+            <h2>Profiles <span class="em">&amp; modes</span></h2>
+            <table class="cmd-table" aria-label="Profiles and modes">
+              <tbody>
+                <tr><td class="cmd-c"><code>workspace</code></td><td class="cmd-d">Default profile. Network allowed (npm/pip/cargo need it), caches writable.</td></tr>
+                <tr><td class="cmd-c"><code>strict</code></td><td class="cmd-d">Network denied entirely (bwrap unshares the network stack; Seatbelt denies <code>network*</code>), no cache writes. For offline audits.</td></tr>
+                <tr><td class="cmd-c"><code>auto</code></td><td class="cmd-d">Default mode. Sandbox when a backend is available; degrade visibly (one notice per session) when not.</td></tr>
+                <tr><td class="cmd-c"><code>on</code></td><td class="cmd-d">Require a backend. Commands refuse to run unsandboxed (<code>sandbox_unavailable</code>) with a platform remedy.</td></tr>
+                <tr><td class="cmd-c"><code>off</code></td><td class="cmd-d">Never sandbox. File-tool confinement still applies.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="control">
+            <h2>Controlling <span class="em">it</span></h2>
+            <p><code>/sandbox</code> prints the backend, mode, profile, and every root; <code>/sandbox auto|on|off|workspace|strict|reset</code> overrides the session (in-memory only, like <code>/reasoning</code>); <code>/sandbox test</code> runs live boundary probes. <code>--sandbox &lt;value&gt;</code> applies to a single interactive or print-mode run. Persistent configuration is the <code>sandbox</code> block in <code>~/.haze/settings.json</code>:</p>
+            <p><code class="cmd">{"sandbox": {"mode": "auto", "profile": "workspace", "roRoots": ["~/dev/docs"], "rwRoots": ["~/scratch"]}}</code></p>
+            <p>Secret paths in <code>roRoots</code>/<code>rwRoots</code> are rejected loudly. When a command fails at the boundary, the result carries a <code>sandbox_boundary</code> reason with the next steps: <code>@mention</code> the path for a read, extend the settings roots, or <code>/sandbox off</code>.</p>
+          </section>
+
+          <section id="platforms">
+            <h2>Platform <span class="em">support</span></h2>
+            <p><strong>macOS</strong> uses Seatbelt (<code>sandbox-exec</code>) with a generated deny-by-default profile. Apple deprecates the tool but still ships it; haze probes availability and degrades visibly if it disappears. <strong>Linux</strong> uses bubblewrap with an explicit mount tree: a private empty <code>$HOME</code> (npm writes its dotfiles there), config dirs re-mounted read-only on top, <code>/tmp</code> as a per-command tmpfs. bwrap requires unprivileged user namespaces or a setuid install; Ubuntu 23.10+ restricts the former, and the diagnostics explain the remedy. <strong>Windows</strong> has no backend: <code>auto</code> degrades to off with a notice, <code>on</code> fails closed.</p>
+          </section>
+
+          <section id="limits">
+            <h2>What it <span class="em">is not</span></h2>
+            <p>The sandbox confines filesystem reach of model-initiated child processes. It does not confine the haze process itself (provider calls, <code>~/.haze</code> writes), LSP or MCP servers (user-configured infrastructure), CPU/memory resources, or network egress in the default profile. It is not a permission gate — there are no approval dialogs; the boundary either allows, or fails with an actionable error you can override as the user. Attended expert use remains the operating model; treat it as a blast-radius reduction, not an isolation guarantee.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

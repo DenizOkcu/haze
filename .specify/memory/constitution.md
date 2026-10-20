@@ -2,11 +2,43 @@
 ==============================================================================
   Sync Impact Report
 ==============================================================================
-  Version change: 1.4.0 → 1.5.0 (MINOR: durable-session and interactive
-  transcript governance now covers lazy materialization, empty-session
-  filtering, append-only static output, and stable streamed Markdown roots).
-  Context: Aligned governance with the terminal stability and empty-session
-           behavior added on 2026-08-05.
+  Version change: 1.5.1 → next minor (OS-level child-process sandboxing via
+  Seatbelt/bubblewrap added to the boundary model; no template or principle
+  structure changes).
+  Context: Aligned governance with the OS sandbox feature (specs/os-sandbox).
+
+  Amendment (2026-10-16):
+    - Principle IV gains an OS-level child-process boundary clause: where a
+      backend exists, model-initiated shell/grep child processes MUST run
+      inside the sandbox boundary; the boundary MUST default to the workspace
+      + temp/caches read-write, config dirs read-only with credentials
+      masked, and user-typed @path blessings read-only and turn-scoped. The
+      model MUST NOT be able to grow its own boundary. Degradation MUST be
+      visible (auto) or fail closed (mode on); the bounded-process primitive
+      stays policy-free.
+    - Technology Stack: no new runtime dependencies (sandbox-exec/bwrap are
+      probed system tools, absent from package.json).
+
+  Modified principles: IV, Technology Stack.
+  Added principles: none.
+  Removed sections: none.
+
+  Templates requiring updates (propagation checklist):
+    - .specify/templates/plan-template.md   — ✅ compatible. The Constitution
+      Check remains generic; OS-boundary work fits existing gates.
+    - .specify/templates/spec-template.md   — ✅ compatible. Sandbox user
+      stories fit the existing scenario format.
+    - .specify/templates/tasks-template.md  — ✅ compatible. Existing test and
+      quality-gate phases carry the e2e matrix.
+    - .specify/templates/commands/*.md      — N/A. No commands/ directory exists.
+    - README.md / CHANGELOG.md              — ✅ updated with the sandbox
+      section, /sandbox + --sandbox surface, and settings block.
+    - Relevant AGENTS.md files              — ✅ root runtime contract added;
+      new src/core/sandbox/AGENTS.md; process/tools contracts extended.
+
+  Follow-up TODOs: none.
+==============================================================================
+-->
 
   Amendment 1.5.0 (2026-08-05):
     - Principle VI distinguishes durable resumable state from an empty session
@@ -152,6 +184,17 @@ exfiltration, traversal, and local-network reach.
   by the user as `@path` or a slash-containing bare path MAY bless that file or
   directory for read-only tools during the turn, including outside the
   workspace. Mutating tools MUST never honor this exception.
+- Where an OS sandbox backend exists (Seatbelt on macOS, bubblewrap on Linux;
+  `src/core/sandbox/`), model-initiated child processes (shell, background
+  processes, grep) MUST run inside the sandbox boundary: read-write exactly for
+  the workspace, temp, and caches; read-only for system tool dirs and the
+  `~/.haze`/`~/.claude` config dirs with credential files masked. The same
+  user-typed `@path` blessing MUST grant read-only, turn-scoped roots at the OS
+  level, and nothing else — the model MUST NOT be able to grow its own
+  boundary, and protected-secret paths MUST be dropped from every root source.
+  Missing backends MUST degrade visibly (`mode: auto`, one notice per session)
+  or fail closed (`mode: on`). The bounded-process primitive MUST stay
+  policy-free: sandbox wrapping composes spawn targets at the tool layer.
 - Real-path confinement (`assertRealPathInsideRoot`/`assertPathInsideRoot`)
   MUST be reused across mutation tools, ordinary workspace reads,
   workspace-owned context files, workspace runtime state, project skills, LSP,

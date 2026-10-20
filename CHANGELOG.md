@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+OS-level sandboxing for model-initiated shell commands (Seatbelt on macOS, bubblewrap on Linux).
+
+### Added
+
+- Shell and background-process commands now run inside an OS-level filesystem sandbox where a backend is available: Seatbelt (`sandbox-exec`) on macOS and bubblewrap (`bwrap`) on Linux. The default `workspace` boundary allows reads/writes inside the project directory, temp, and caches; mounts `~/.haze` and `~/.claude` read-only with credential files masked; keeps system tool dirs read-only; and turns each `@path` mention from the prompt into a read-only root for that turn. Everything else is denied at the OS level (canonical-path evaluation blocks symlink escapes).
+- `/sandbox` shows the backend, mode, profile, and every boundary root; `/sandbox auto|on|off|workspace|strict|reset` overrides mode/profile for the session (in-memory, like `/reasoning`); `/sandbox test` runs live boundary probes. `--sandbox <auto|on|off|workspace|strict>` is the run-scoped CLI override for interactive and print mode. Persistent configuration lives in the new `sandbox` settings block (`mode`, `profile`, `roRoots`, `rwRoots`); secret roots are rejected loudly at load and write time.
+- Shell results carry truthful `sandbox` metadata, and boundary failures surface as `sandbox_boundary` results with actionable next steps (bless the path, extend settings roots, or disable). `mode: "on"` without a backend fails closed with `sandbox_unavailable` and a platform remedy; `auto` degrades visibly with one notice per session. `haze doctor` reports the backend probe and effective boundary. Workers inherit the main-turn boundary; LSP/MCP servers stay unsandboxed (v1 decision).
+
 ## 1.5.1 - 2026-10-07
 
 Terminal transcript replay on resize and capability-aware reasoning effort.
