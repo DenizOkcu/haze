@@ -115,6 +115,22 @@ describe('bubblewrap argv generation', () => {
     expect(args.filter(arg => arg === '/usr').length).toBe(2); // source + target of the fixed bind only
   });
 
+  it('PATH/runtime roots under $HOME re-bind read-only AFTER the home tmpfs (Linux layout)', () => {
+    const boundary = fixedBoundary({
+      roots: [
+        ...fixedBoundary().roots,
+        root('/home/u/.cargo', 'ro', 'runtime'),
+      ],
+    });
+    const args = bubblewrapArgs(boundary, {uid: 1000, gid: 1000});
+    const homeTmpfs = args.indexOf('/home/u');
+    const cargoBind = args.indexOf('/home/u/.cargo');
+    const cargoFlag = cargoBind > 0 ? args[cargoBind - 1] : undefined;
+    expect(args[homeTmpfs - 1]).toBe('--tmpfs');
+    expect(cargoFlag).toBe('--ro-bind-try');
+    expect(cargoBind).toBeGreaterThan(homeTmpfs);
+  });
+
   it('masks bind /dev/null over files and tmpfs over dirs AFTER the owning dir bind', () => {
     const wrapped = bubblewrapInvocation({command: '/bin/bash', args: ['-lc', 'true']}, fixedBoundary(), {uid: 1000, gid: 1000});
     const args = wrapped.args;
