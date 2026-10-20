@@ -117,11 +117,12 @@ describe('buildSandboxBoundary', () => {
     expect(standard.roots.some(root => root.origin === 'cache')).toBe(true);
   });
 
-  it('darwin roots include /private/tmp writable and system read set', async () => {
+  it('darwin roots include /private/tmp writable, Xcode via /Applications, and the system read set', async () => {
     const darwinRuntime = facts({platform: 'darwin', tmpdir: '/var/folders/ab/c123/T/'});
     const boundary = await buildSandboxBoundary({workspaceRoot: workspace, runtime: darwinRuntime});
     expect(boundary.roots.some(root => root.realPath === '/private/tmp' && root.access === 'rw')).toBe(true);
     expect(boundary.roots.some(root => root.realPath === '/private/var/select' && root.access === 'ro')).toBe(true);
+    expect(boundary.roots.some(root => root.realPath === '/Applications' && root.access === 'ro')).toBe(true);
     expect(boundary.roots.some(root => root.realPath.includes('Library/Caches') && root.access === 'rw')).toBe(true);
   });
 

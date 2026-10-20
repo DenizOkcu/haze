@@ -1,5 +1,7 @@
+import os from 'node:os';
+import path from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {resolveSandboxCommand} from '../../src/cli/commands/sandboxCommand.js';
+import {applySandboxGrant, resolveSandboxCommand} from '../../src/cli/commands/sandboxCommand.js';
 import type {HazeSettings} from '../../src/config/settings.js';
 import type {SandboxBackendInfo} from '../../src/core/sandbox/detect.js';
 
@@ -62,5 +64,47 @@ describe('resolveSandboxCommand', () => {
     if (result.action !== 'status') throw new Error('expected status');
     expect(result.message).toContain('inactive');
     expect(result.message).toContain('bubblewrap');
+  });
+});
+
+describe('applySandboxGrant', () => {
+  it('grants read-only roots idempotently and preserves mode/profile', () => {
+    const base: HazeSettings = {sandbox: {mode: 'on', profile: 'strict', roRoots: ['~/dev/docs']}};
+    const first = applySandboxGrant(base, {action: 'grant', paths: ['~/.config/gh']});
+    expect(first.action).toBe('granted');
+    expect(first.sandbox).toMatchObject({mode: 'on', profile: 'strict', roRoots: ['~/dev/docs', '~/.config/gh']});
+    expect(first.message).toContain('credentials inside the path become readable');
+    const again = applySandboxGrant({...base, sandbox: first.sandbox}, {action: 'grant', paths: ['~/.config/gh']});
+    expect(again.action).toBe('noop');
+  });
+
+  it('--rw grants land in rwRoots and disclose write access', () => {
+    const result = applySandboxGrant({}, {action: 'grant', paths: ['~/go'], access: 'rw'});
+    expect(result.action).toBe('granted');
+    expect(result.sandbox?.rwRoots).toEqual(['~/go']);
+    expect(result.message).toContain('read-write');
+    expect(result.message).not.toContain('credentials inside');
+  });
+
+  it('refuses protected secret paths loudly', () => {
+    for (const secret of ['~/.ssh', '~/.aws', '~/.env']) {
+      const result = applySandboxGrant({}, {action: 'grant', paths: [secret]});
+      expect(result.action).toBe('error');
+      if (result.action === 'error') expect(result.message).toContain('protected secret');
+    }
+  });
+
+  it('revoke removes matching roots from both lists', () => {
+    const base: HazeSettings = {sandbox: {roRoots: ['~/.config/gh', '~/dev/docs'], rwRoots: ['~/go']}};
+    const result = applySandboxGrant(base, {action: 'revoke', paths: ['~/.config/gh', '~/go']});
+    expect(result.action).toBe('revoked');
+    expect(result.sandbox?.roRoots).toEqual(['~/dev/docs']);
+    expect(result.sandbox?.rwRoots).toBeUndefined();
+  });
+
+  it('empty path lists print usage with the gh example', () => {
+    const result = applySandboxGrant({}, {action: 'grant', paths: []});
+    expect(result.action).toBe('error');
+    if (result.action === 'error') expect(result.message).toContain('/sandbox grant');
   });
 });

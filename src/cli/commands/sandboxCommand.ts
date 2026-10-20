@@ -1,16 +1,21 @@
 import os from 'node:os';
+import path from 'node:path';
 import {detectSandboxBackend, sandboxUnavailableRemedy} from '../../core/sandbox/detect.js';
 import {resolveSandboxRuntime, type SandboxSessionOverride} from '../../core/sandbox/runner.js';
+import {isProtectedSecretPath} from '../../core/safety/secretPaths.js';
 import type {PromptSession} from '../../llm/systemPrompt.js';
-import type {HazeSettings} from '../../config/settings.js';
+import type {HazeSettings, HazeSandboxSettings} from '../../config/settings.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
 /**
  * `/sandbox` — OS sandbox status and session-scoped control (mode/profile),
  * modeled on `/reasoning`: overrides live on the `PromptSession` in memory,
- * never in `~/.haze/settings.json`; persistent changes go through the
- * settings file (the status card explains how). Applies from the next turn —
- * the boundary is built once per attempt in `attemptSetup`.
+ * never in `~/.haze/settings.json`. Persistent root grants (`/sandbox grant`)
+ * are the exception: they are the documented write path for
+ * `sandbox.roRoots`/`rwRoots` because credential-bearing tool config (gh,
+ * cloud CLIs) must be granted explicitly by the user, once, instead of being
+ * default-mounted. Applies from the next turn — the boundary is built once
+ * per attempt in `attemptSetup`.
  */
 
 export type SandboxCommandResult =
@@ -54,7 +59,7 @@ export async function resolveSandboxCommand(args: string, input: {
   if (value === 'test' || value === 'status') {
     // `test` runs live probes in the handler; fall through to the status card.
   } else if (value) {
-    return {action: 'error', message: `Unknown /sandbox argument "${args.trim()}". Usage: /sandbox [auto|on|off|workspace|strict|reset|test|status].`};
+    return {action: 'error', message: `Unknown /sandbox argument "${args.trim()}". Usage: /sandbox [auto|on|off|workspace|strict|reset|test|status|grant [--rw] <path>|revoke <path>].`};
   }
 
   const runtime = await resolveSandboxRuntime({workspaceRoot: input.workspaceRoot, settings: input.settings.sandbox, backendInfo: input.backendInfo, sessionOverride: input.sessionOverride, runtime: input.runtime});
@@ -74,12 +79,88 @@ export async function resolveSandboxCommand(args: string, input: {
   } else if (resolved.reason === 'no_backend') {
     lines.push(sandboxUnavailableRemedy(input.backendInfo));
   } else {
-    lines.push('Set a mode with /sandbox auto|on|off. Persistent defaults: sandbox.mode/profile/roRoots/rwRoots in ~/.haze/settings.json. @mentioning a path grants it a read for that turn.');
+    lines.push('Set a mode with /sandbox auto|on|off. Grant tool config access persistently with /sandbox grant [--rw] <path> (e.g. /sandbox grant ~/.config/gh for GitHub CLI auth); @mentioning a path grants it a read for one turn. Raw defaults: sandbox.* in ~/.haze/settings.json.');
   }
   return {action: 'status', message: lines.join('\n')};
 }
 
+export type SandboxGrantResult =
+  | {action: 'granted' | 'revoked' | 'noop' | 'error'; message: string; sandbox?: HazeSandboxSettings};
+
+function expandRoot(root: string, homedir: string): string {
+  if (root === '~') return homedir;
+  if (root.startsWith('~/')) return path.join(homedir, root.slice(2));
+  return path.resolve(root);
+}
+
+/**
+ * Pure grant/revoke computation for `/sandbox grant [--rw] <path>…` and
+ * `/sandbox revoke <path>…`. Grants persist via `sandbox.roRoots`/`rwRoots`;
+ * protected-secret paths are refused loudly (same trust rule as settings
+ * validation). Duplicate grants are idempotent no-ops.
+ */
+export function applySandboxGrant(current: HazeSettings, input: {action: 'grant' | 'revoke'; paths: string[]; access?: 'ro' | 'rw'}): SandboxGrantResult {
+  const homedir = os.homedir();
+  const sandbox: HazeSandboxSettings = current.sandbox ? {...current.sandbox} : {};
+  if (input.paths.length === 0) {
+    return {action: 'error', message: `Usage: /sandbox ${input.action}${input.action === 'grant' ? ' [--rw]' : ''} <path> [path…] — e.g. /sandbox grant ~/.config/gh for GitHub CLI auth.`};
+  }
+  if (input.action === 'grant') {
+    const access = input.access ?? 'ro';
+    const listKey = access === 'rw' ? 'rwRoots' : 'roRoots';
+    const list = [...(sandbox[listKey] ?? [])];
+    const granted: string[] = [];
+    for (const raw of input.paths) {
+      const expanded = expandRoot(raw, homedir);
+      if (isProtectedSecretPath(expanded, homedir) || isProtectedSecretPath(path.resolve(expanded), homedir)) {
+        return {action: 'error', message: `Refusing to grant "${raw}": it resolves to a protected secret path (SSH keys, shell histories, .env, credential stores). Secret files can never be granted to the sandbox; grant the specific non-secret directory instead.`};
+      }
+      if (list.some(existing => expandRoot(existing, homedir) === expanded)) continue;
+      list.push(raw);
+      granted.push(raw);
+    }
+    if (granted.length === 0) return {action: 'noop', message: 'Already granted — nothing to add.'};
+    sandbox[listKey] = list;
+    return {
+      action: 'granted',
+      sandbox,
+      message: `Granted ${access === 'rw' ? 'read-write' : 'read-only'} access${access === 'ro' ? ' (credentials inside the path become readable by sandboxed commands)' : ''}: ${granted.join(', ')}. Saved to sandbox.${listKey} in ~/.haze/settings.json; applies from the next turn. Revoke with /sandbox revoke <path>.`,
+    };
+  }
+  const revoked: string[] = [];
+  for (const key of ['roRoots', 'rwRoots'] as const) {
+    const list = sandbox[key] ?? [];
+    const kept = list.filter(existing => {
+      const expanded = expandRoot(existing, homedir);
+      const matched = input.paths.some(raw => expandRoot(raw, homedir) === expanded);
+      if (matched) revoked.push(existing);
+      return !matched;
+    });
+    if (kept.length > 0) sandbox[key] = kept;
+    else delete sandbox[key];
+  }
+  if (revoked.length === 0) return {action: 'noop', message: 'No matching grant found. /sandbox lists all effective roots.'};
+  return {action: 'revoked', sandbox, message: `Revoked: ${revoked.join(', ')}. Applies from the next turn.`};
+}
+
 export async function handleSandboxCommand(args: string, ctx: CommandContext): Promise<CommandResult> {
+  const normalized = args.trim().toLowerCase();
+  if (normalized === 'grant' || normalized.startsWith('grant ')) {
+    const rest = args.trim().slice('grant'.length).trim();
+    const access: 'ro' | 'rw' = rest.startsWith('--rw ') ? 'rw' : 'ro';
+    const paths = (access === 'rw' ? rest.slice(4) : rest).split(/\s+/).filter(Boolean);
+    const result = applySandboxGrant(ctx.settings, {action: 'grant', paths, access});
+    if (result.sandbox) await ctx.updateSettings({sandbox: result.sandbox});
+    ctx.addSystemMessage(result.message);
+    return 'handled';
+  }
+  if (normalized === 'revoke' || normalized.startsWith('revoke ')) {
+    const paths = args.trim().slice('revoke'.length).trim().split(/\s+/).filter(Boolean);
+    const result = applySandboxGrant(ctx.settings, {action: 'revoke', paths});
+    if (result.sandbox) await ctx.updateSettings({sandbox: result.sandbox});
+    ctx.addSystemMessage(result.message);
+    return 'handled';
+  }
   const backendInfo = await detectSandboxBackend();
   if (args.trim().toLowerCase() === 'test') {
     ctx.addSystemMessage(await sandboxSelfTest(backendInfo));

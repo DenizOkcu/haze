@@ -118,7 +118,7 @@ export const shellTool = tool({
       stdout: output.stdout, stderr: output.stderr, validationSummary: confirmedValidationSummary,
       stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),
       sandbox,
-      ...(denial ? {reasonCode: 'sandbox_boundary' as const, recoverable: true, suggestedNextStep: `Sandbox boundary: the command could not ${denial.kind === 'write' ? 'write' : 'access'} ${denial.pathHint ?? 'a path outside the sandbox'}. Ask the user to @mention the path (grants a read), extend sandbox.roRoots/rwRoots in ~/.haze/settings.json, or run /sandbox off.`} : {}),
+      ...(denial ? {reasonCode: 'sandbox_boundary' as const, recoverable: true, suggestedNextStep: `Sandbox boundary: the command could not ${denial.kind === 'write' ? 'write' : 'access'} ${denial.pathHint ?? 'a path outside the sandbox'}. Ask the user to run /sandbox grant ${denial.pathHint ?? '<path>'}${denial.kind === 'write' ? ' --rw' : ''} (persistent grant), @mention the path in the prompt (read for this turn), or run /sandbox off.`} : {}),
       ...(missing ? {...missingExecutableFields(missing), missingExecutableStep: missing.suggestedNextStep} : {}),
       ...(processResult.error ? {error: processResult.error} : {}),
     };

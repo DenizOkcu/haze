@@ -105,7 +105,8 @@ export function systemReadRoots(platform: NodeJS.Platform): string[] {
   if (platform === 'darwin') {
     return [
       '/bin', '/sbin', '/usr/bin', '/usr/lib', '/usr/libexec', '/usr/share', '/usr/local',
-      '/opt', '/System', '/Library', '/etc', '/private/etc', '/private/var/db', '/private/var/select',
+      '/opt', '/System', '/Library', '/Applications',
+      '/etc', '/private/etc', '/private/var/db', '/private/var/select',
     ];
   }
   if (platform === 'linux') {
