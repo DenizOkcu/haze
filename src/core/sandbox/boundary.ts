@@ -71,6 +71,8 @@ export interface SandboxRuntimeFacts {
   nodeExecPath: string;
   hazeDir: string;
   claudeDir: string;
+  /** Directories on the user's $PATH (login-environment toolchains become read-only roots generically). */
+  pathDirs?: readonly string[];
 }
 
 /** The `sandbox` settings block shape (validated upstream in `config/settings.ts`). */
@@ -97,6 +99,7 @@ export function defaultSandboxRuntimeFacts(): SandboxRuntimeFacts {
     nodeExecPath: process.execPath,
     hazeDir: path.join(homedir, '.haze'),
     claudeDir: path.join(homedir, '.claude'),
+    pathDirs: (process.env.PATH ?? '').split(path.delimiter).filter(Boolean),
   };
 }
 
@@ -221,6 +224,20 @@ export async function buildSandboxBoundary(input: {
   // directories must stay executable and readable.
   for (const helper of input.helperExecutables ?? []) {
     if (await exists(helper)) pending.push({path: path.dirname(helper), access: 'ro', origin: 'runtime'});
+  }
+  // The user's $PATH is their declared toolchain environment — environment-
+  // derived, program-agnostic: every existing PATH directory (and its parent
+  // when it is a bin/sbin subtree, which is how nvm/volta/cargo/sdkman layout
+  // their libexec/share trees) becomes read-only. Nothing here knows about
+  // specific tools; the login shell's environment is the source of truth.
+  for (const dir of runtime.pathDirs ?? []) {
+    if (!await exists(dir)) continue;
+    pending.push({path: dir, access: 'ro', origin: 'runtime'});
+    const base = path.basename(path.resolve(dir));
+    if (base === 'bin' || base === 'sbin') {
+      const parent = path.dirname(path.resolve(dir));
+      if (parent !== path.parse(parent).root) pending.push({path: parent, access: 'ro', origin: 'runtime'});
+    }
   }
 
   for (const root of systemReadRoots(runtime.platform)) pending.push({path: root, access: 'ro', origin: 'system'});

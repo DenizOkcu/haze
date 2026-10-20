@@ -12,10 +12,10 @@ import type {CommandContext, CommandResult} from './commands.js';
  * modeled on `/reasoning`: overrides live on the `PromptSession` in memory,
  * never in `~/.haze/settings.json`. Persistent root grants (`/sandbox grant`)
  * are the exception: they are the documented write path for
- * `sandbox.roRoots`/`rwRoots` because credential-bearing tool config (gh,
- * cloud CLIs) must be granted explicitly by the user, once, instead of being
- * default-mounted. Applies from the next turn — the boundary is built once
- * per attempt in `attemptSetup`.
+ * `sandbox.roRoots`/`rwRoots` because paths outside the boundary (often
+ * credential-bearing tool config) must be granted explicitly by the user,
+ * once, instead of being default-mounted. Applies from the next turn — the
+ * boundary is built once per attempt in `attemptSetup`.
  */
 
 export type SandboxCommandResult =
@@ -79,7 +79,7 @@ export async function resolveSandboxCommand(args: string, input: {
   } else if (resolved.reason === 'no_backend') {
     lines.push(sandboxUnavailableRemedy(input.backendInfo));
   } else {
-    lines.push('Set a mode with /sandbox auto|on|off. Grant tool config access persistently with /sandbox grant [--rw] <path> (e.g. /sandbox grant ~/.config/gh for GitHub CLI auth); @mentioning a path grants it a read for one turn. Raw defaults: sandbox.* in ~/.haze/settings.json.');
+    lines.push('Set a mode with /sandbox auto|on|off. Grant filesystem access outside the boundary persistently with /sandbox grant [--rw] <path> (e.g. a tool config or module-cache directory); @mentioning a path grants it a read for one turn. Raw defaults: sandbox.* in ~/.haze/settings.json.');
   }
   return {action: 'status', message: lines.join('\n')};
 }
@@ -103,7 +103,7 @@ export function applySandboxGrant(current: HazeSettings, input: {action: 'grant'
   const homedir = os.homedir();
   const sandbox: HazeSandboxSettings = current.sandbox ? {...current.sandbox} : {};
   if (input.paths.length === 0) {
-    return {action: 'error', message: `Usage: /sandbox ${input.action}${input.action === 'grant' ? ' [--rw]' : ''} <path> [path…] — e.g. /sandbox grant ~/.config/gh for GitHub CLI auth.`};
+    return {action: 'error', message: `Usage: /sandbox ${input.action}${input.action === 'grant' ? ' [--rw]' : ''} <path> [path…] — the path to grant outside the sandbox boundary, ~ expanded.`};
   }
   if (input.action === 'grant') {
     const access = input.access ?? 'ro';

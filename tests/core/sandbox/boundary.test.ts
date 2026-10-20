@@ -117,7 +117,28 @@ describe('buildSandboxBoundary', () => {
     expect(standard.roots.some(root => root.origin === 'cache')).toBe(true);
   });
 
-  it('darwin roots include /private/tmp writable, Xcode via /Applications, and the system read set', async () => {
+  it('derives read-only roots from $PATH directories, including bin-parent toolchain trees', async () => {
+    const toolchainBin = path.join(homeDir, '.toolchain', 'current', 'bin');
+    await fs.mkdir(toolchainBin, {recursive: true});
+    const looseDir = path.join(fakeRoot, 'loose-bin');
+    await fs.mkdir(looseDir, {recursive: true});
+    const boundary = await buildSandboxBoundary({
+      workspaceRoot: workspace,
+      runtime: {...runtime, pathDirs: [toolchainBin, looseDir, path.join(fakeRoot, 'missing-dir')]},
+    });
+    const realToolchainBin = await fs.realpath(toolchainBin);
+    const runtimeRoots = boundary.roots.filter(root => root.origin === 'runtime');
+    // The bin dir's parent (toolchain libexec/share layout) is mounted and covers the bin dir itself (dedup absorbs it).
+    const toolchainParent = path.dirname(realToolchainBin);
+    expect(runtimeRoots.some(root => root.realPath === toolchainParent && root.access === 'ro')).toBe(true);
+    expect(boundary.roots.some(root => root.access === 'ro' && (root.realPath === realToolchainBin || realToolchainBin.startsWith(`${root.realPath}/`)))).toBe(true);
+    // A non-bin PATH entry mounts only itself; missing dirs are skipped.
+    const realLooseDir = await fs.realpath(looseDir);
+    expect(runtimeRoots.some(root => root.realPath === realLooseDir)).toBe(true);
+    expect(runtimeRoots.every(root => !root.path.includes('missing-dir'))).toBe(true);
+  });
+
+  it('darwin roots include /private/tmp writable, platform-standard application dirs, and the system read set', async () => {
     const darwinRuntime = facts({platform: 'darwin', tmpdir: '/var/folders/ab/c123/T/'});
     const boundary = await buildSandboxBoundary({workspaceRoot: workspace, runtime: darwinRuntime});
     expect(boundary.roots.some(root => root.realPath === '/private/tmp' && root.access === 'rw')).toBe(true);

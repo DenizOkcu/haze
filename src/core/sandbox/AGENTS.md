@@ -10,11 +10,13 @@ OS-level filesystem boundaries for model-initiated child processes: Seatbelt
 - `boundary.ts` — pure policy: which absolute paths are read-write /
   read-only for sandboxed children. Roots come ONLY from user intent: the
   workspace root, temp/cache dirs, `~/.haze` + `~/.claude` config dirs
-  (read-only, credential files masked), system tool dirs, the turn's
-  user-typed `@path` blessings, and `sandbox.roRoots`/`rwRoots` settings.
-  Never from tool input — the model cannot grow its own boundary. All roots
-  are canonicalized (nearest existing ancestor for not-yet-created paths);
-  seatbelt matches canonically (`/tmp` → `/private/tmp`).
+  (read-only, credential files masked), platform-standard system directories,
+  the user's `$PATH` directories and their bin-parent toolchain trees
+  (environment-derived — never a per-tool list), the turn's user-typed `@path`
+  blessings, and `sandbox.roRoots`/`rwRoots` settings. Never from tool input —
+  the model cannot grow its own boundary. All roots are canonicalized
+  (nearest existing ancestor for not-yet-created paths); seatbelt matches
+  canonically (`/tmp` → `/private/tmp`).
 - `seatbelt.ts` / `bubblewrap.ts` — pure generators (SBPL profile text /
   bwrap argv). Deterministic ordering; snapshot tests pin it. bwrap mask
   ordering is contractual: `--tmpfs $HOME` → dir binds → `/dev/null` file
