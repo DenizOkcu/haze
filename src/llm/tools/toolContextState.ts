@@ -38,6 +38,8 @@ export type HazeToolContext = {
   isSubagent?: boolean;
   /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
   blessedPaths?: readonly BlessedPath[];
+  /** Session-scoped `/add-dir` roots; file tools may read and mutate inside them (unlike turn blessings). */
+  sessionDirs?: readonly BlessedPath[];
   /** Immutable per-attempt OS sandbox state for child processes (seatbelt/bubblewrap; see core/sandbox). */
   sandboxRuntime?: SandboxRuntimeState;
   /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
@@ -72,6 +74,7 @@ export function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('mutationOwner', field => typeof field === 'symbol')
     && validOptional('isSubagent', field => typeof field === 'boolean')
     && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
+    && validOptional('sessionDirs', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
     && validOptional('sandboxRuntime', field => isRecord(field) && isRecord(field.resolved) && typeof field.resolved.active === 'boolean' && typeof field.resolved.mode === 'string' && (field.boundary === undefined || isRecord(field.boundary)))
     && validOptional('postMutationDiagnostics', field => typeof field === 'function');
 }

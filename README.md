@@ -283,6 +283,7 @@ for official sources, layouts, support limits and cross-agent setup.
 /themes <name>
 /reasoning [level|unset|reset|status]
 /sandbox [auto|on|off|workspace|strict|reset|test|status]
+/add-dir [directory|reset]
 /logs [id]
 /lsp
 /mcp
@@ -481,7 +482,8 @@ Shell classification is informational. haze does not ask for confirmation before
 
 - Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
 - Secret files are hard-blocked in every file tool, always: SSH keys (`~/.ssh/**` and `id_*` private keys), shell history files, `.env`/`.envrc` files, `*.pem`/`*.key`, and common home credential stores. Reads, edits, and writes are refused before any filesystem access with a terminal `secret_file_protected` result — no user-granted read exception, ignore override, or symlink form bypasses it — and grep traversal skips those names. Documentation variants (`.env.example`, `.env.sample`, `.env.template`, `id_*.pub`) stay readable. The transcript marks these attempts as `blocked: protected secret file`. The `shell` tool is not command-filtered; secret avoidance there is instructed through the system prompt and reinforced by the OS sandbox (home secret paths are outside its boundary; credential files inside the mounted config dirs are masked).
-- A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access.
+- Model-selected file tools are restricted to the current workspace and follow `.gitignore` by default.
+- A path explicitly typed by the user with `@path` or as a slash-containing bare path may grant read-only access for that turn, including outside the workspace. It never grants mutation access. `/add-dir <directory>` is the stronger, session-scoped sibling: directories the user adds explicitly become readable AND editable by file tools, and read-write sandbox roots for shell, until the session ends (`/add-dir reset`, never persisted; secret paths refused).
 - Ignored workspace files require an explicit override unless covered by that user-granted read exception. If Git cannot run at all, mutation tools refuse with `ignore_check_unavailable` (the safe direction for writes) — reads still proceed.
 - The `fetch` tool only reads public `http(s)` URLs. It rejects other schemes along with private, loopback, link-local, cloud-metadata, and malformed IPv6-like hosts. On every redirect, haze connects to the public IP it already validated, which closes the DNS-rebinding gap.
 - Project skills under `.haze/skills` are real-path-confined to the workspace and visibly labeled as untrusted repository content. Review them before using an unfamiliar repository.

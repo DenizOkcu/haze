@@ -12,6 +12,7 @@ import {handleLogsCommand} from './logsCommand.js';
 import {handleModelCommand} from './modelCommand.js';
 import {handleReasoningCommand} from './reasoningCommand.js';
 import {handleSandboxCommand} from './sandboxCommand.js';
+import {handleAddDirCommand} from './addDirCommand.js';
 import {handleThemesCommand} from './themesCommand.js';
 import {handlePluginCommand} from './pluginCommand.js';
 import {formatSettingsSummary} from './settingsSummary.js';
@@ -47,6 +48,10 @@ export type CommandContext = {
   getSandboxOverride?: () => import('../../llm/systemPrompt.js').PromptSession['sandboxOverride'];
   /** Merge/clear the session-scoped OS sandbox override (in-memory only, like /reasoning). */
   setSandboxOverride?: (override: import('../../llm/systemPrompt.js').PromptSession['sandboxOverride']) => void;
+  /** Read the session-scoped `/add-dir` directories (in-memory only). */
+  getAddedDirs?: () => import('../../llm/systemPrompt.js').PromptSession['addedDirs'];
+  /** Replace the session-scoped `/add-dir` directory list (empty array clears). */
+  setAddedDirs?: (dirs: NonNullable<import('../../llm/systemPrompt.js').PromptSession['addedDirs']>) => void;
   getContextReport?: () => Promise<string>;
 };
 
@@ -115,6 +120,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exactOrArgs('/reasoning'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/thinking'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/sandbox'), run: async (args, ctx) => await handleSandboxCommand(args, ctx)},
+  {match: exactOrArgs('/add-dir'), run: async (args, ctx) => await handleAddDirCommand(args, ctx)},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
 ];
 

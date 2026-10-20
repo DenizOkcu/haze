@@ -110,6 +110,21 @@ describe.skipIf(!live)('sandbox e2e (live backend)', () => {
     expect(write.code).not.toBe(0);
   });
 
+  it('/add-dir session dirs become read-write roots (attemptSetup wiring shape)', async () => {
+    const added = path.join(baseDir, 'added-dir');
+    await fs.mkdir(added, {recursive: true});
+    // attemptSetup passes session dirs as rwRoots (same trust level as settings grants).
+    const addedRuntime = await resolveSandboxRuntime({
+      workspaceRoot: workspace,
+      backendInfo: backendInfo!,
+      settings: {rwRoots: [added]},
+      runtime: sandboxFacts(),
+    });
+    const write = await run(`echo ok > ${JSON.stringify(path.join(added, 'probe.txt'))} && cat ${JSON.stringify(path.join(added, 'probe.txt'))}`, addedRuntime);
+    expect(write.code).toBe(0);
+    expect(write.stdout).toContain('ok');
+  });
+
   it('workspace symlink escape is refused', async () => {
     await fs.symlink(path.join(os.homedir(), '.ssh'), path.join(workspace, 'link-ssh'));
     const result = await run('cat link-ssh/id_rsa 2>&1 || cat link-ssh 2>&1 || true');

@@ -54,21 +54,48 @@ async function requestedRealPath(absolutePath: string): Promise<string> {
   }
 }
 
+/**
+ * The `/add-dir` session root containing `absolutePath`, if any. Unlike the
+ * turn-scoped read bless set, session dirs also admit mutations — the user
+ * added them explicitly, the same trust level as `sandbox.rwRoots`. Matching
+ * is by real path, so symlinks inside a session dir that resolve elsewhere
+ * fall back to ordinary workspace confinement.
+ */
+async function matchSessionDir(absolutePath: string, context?: ToolExecutionContext): Promise<string | undefined> {
+  const dirs = context ? hazeContext(context)?.sessionDirs : undefined;
+  if (!dirs || dirs.length === 0) return undefined;
+  const real = await requestedRealPath(absolutePath);
+  for (const dir of dirs) {
+    if (dir.isDirectory && (real === dir.realPath || real.startsWith(`${dir.realPath}/`))) return dir.realPath;
+  }
+  return undefined;
+}
+
 export async function prepareWorkspaceMutation(toolName: string, filePath: string, allowIgnored: boolean | undefined, context: ToolExecutionContext) {
-  const absolutePath = resolveWorkspacePath(filePath);
+  const sessionDir = await matchSessionDir(path.resolve(workspaceRoot(), filePath), context);
+  // Outside every session dir, mutations keep strict lexical + real-path
+  // workspace confinement. Inside a session dir the user explicitly added,
+  // the path resolves against the workspace root and skips the workspace
+  // boundary check (gitignore status for outside-workspace paths is
+  // `not-ignored` by definition — the workspace's rules do not govern them).
+  const absolutePath = sessionDir ? path.resolve(workspaceRoot(), filePath) : resolveWorkspacePath(filePath);
   await assertNotSecretPath(absolutePath, await requestedRealPath(absolutePath), filePath, 'mutation');
   await assertNotIgnored(absolutePath, filePath, allowIgnored);
-  await assertRealPathInsideWorkspace(absolutePath, filePath);
+  if (!sessionDir) await assertRealPathInsideWorkspace(absolutePath, filePath);
   const scopedContext = await discoverScopedContext(filePath, context);
   const scopedStop = scopedContextMutationStop(toolName, filePath, scopedContext);
   return {absolutePath, scopedContext, scopedStop};
 }
 
 export async function prepareWorkspaceWritePath(toolName: string, filePath: string, allowIgnored: boolean | undefined, context: ToolExecutionContext) {
-  const absolutePath = resolveWorkspacePath(filePath);
+  const sessionDir = await matchSessionDir(path.resolve(workspaceRoot(), filePath), context);
+  const absolutePath = sessionDir ? path.resolve(workspaceRoot(), filePath) : resolveWorkspacePath(filePath);
   await assertNotSecretPath(absolutePath, await requestedRealPath(absolutePath), filePath, 'mutation');
   await assertNotIgnored(absolutePath, filePath, allowIgnored);
   const scopedContext = await discoverScopedContext(filePath, context);
   const scopedStop = scopedContextMutationStop(toolName, filePath, scopedContext);
+  if (sessionDir) {
+    return {absolutePath, scopedContext, scopedStop, assertExistingInsideWorkspace: async () => undefined, assertWritableInsideWorkspace: async () => undefined};
+  }
   return {absolutePath, scopedContext, scopedStop, assertExistingInsideWorkspace: async () => await assertRealPathInsideWorkspace(absolutePath, filePath), assertWritableInsideWorkspace: async () => await assertWritablePathInsideWorkspace(absolutePath, filePath)};
 }

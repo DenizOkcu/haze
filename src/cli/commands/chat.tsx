@@ -528,6 +528,12 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         if (merged) session.sandboxOverride = merged;
         else delete session.sandboxOverride;
       },
+      getAddedDirs: () => currentPromptSession().addedDirs,
+      setAddedDirs: dirs => {
+        const session = currentPromptSession();
+        if (dirs.length > 0) session.addedDirs = dirs;
+        else delete session.addedDirs;
+      },
       getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
     };
     let result;

@@ -156,10 +156,17 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
       abortController.signal.addEventListener('abort', () => resolve(undefined), {once: true});
     }),
   ])) ?? {backend: 'none' as const, reason: 'probe_failed' as const, detail: 'detection skipped: turn aborted'};
+  const sessionDirs = session?.addedDirs ?? [];
   const sandboxRuntime = await resolveSandboxRuntime({
     workspaceRoot: session?.cwd ?? process.cwd(),
     blessedPaths: turnOptions.blessedPaths,
-    settings: turnSettings.sandbox,
+    // `/add-dir` session dirs are explicit user grants at the same trust
+    // level as settings rwRoots: read-write for sandboxed commands, not the
+    // read-only turn blessing.
+    settings: {
+      ...turnSettings.sandbox,
+      rwRoots: [...(turnSettings.sandbox?.rwRoots ?? []), ...sessionDirs.map(dir => dir.realPath)],
+    },
     backendInfo,
     cliOverride: turnOptions.sandboxOverride,
     sessionOverride: session?.sandboxOverride,
@@ -243,7 +250,8 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     loadedContextFileSignatures: contextFileSignatures,
     onContextFileRead,
     mutationPolicy,
-    blessedPaths: turnOptions.blessedPaths,
+    blessedPaths: turnOptions.blessedPaths == null && sessionDirs.length === 0 ? undefined : [...(turnOptions.blessedPaths ?? []), ...sessionDirs],
+    ...(sessionDirs.length > 0 ? {sessionDirs} : {}),
     sandboxRuntime,
     postMutationDiagnostics: assembled.postMutationDiagnostics,
   };
