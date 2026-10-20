@@ -9,6 +9,8 @@ import {workspaceRoot} from '../../utils/path.js';
 import {compactStoredOutput, COMPACT_COMMAND_CHARS} from './outputCap.js';
 import {hazeContext, hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 import {runBoundedProcess, type BoundedStream} from '../../core/process/runBoundedProcess.js';
+import {wrapInvocation, type SandboxRuntimeState, type ShellSandboxMetadata} from '../../core/sandbox/runner.js';
+import {classifySandboxDenial} from '../../core/sandbox/diagnostics.js';
 import {SHELL_STREAM_BYTES, SHORT_VALIDATION_CHARS} from '../../core/limits.js';
 import {startBackgroundProcess} from '../../core/process/backgroundRegistry.js';
 import {resolveUserShell, shellDialect, shellInvocation, shellSyntaxGuidance} from '../../core/process/userShell.js';
@@ -21,7 +23,7 @@ function streamByteStats(stream: BoundedStream) {
 const userShell = resolveUserShell();
 
 export const shellTool = tool({
-  description: 'Run workspace inspection or validation. Set purpose=validation for custom checks that should count as completion evidence; risk classification is informational.',
+  description: 'Run workspace inspection or validation. Set purpose=validation for custom checks that should count as completion evidence; risk classification is informational. Commands may run inside an OS sandbox (see /sandbox): reads/writes are confined to the project, temp, and caches; when a sandbox boundary hint appears in a failed result, tell the user which path is needed instead of working around it.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     command: z.string().min(1).describe(`Command to execute with ${userShell} ${shellInvocation('', userShell).args.join(' ')}. ${shellSyntaxGuidance(userShell)}`.trim()),
@@ -32,6 +34,18 @@ export const shellTool = tool({
   execute: async ({command, purpose, timeoutSeconds, background}, context) => runDedupedTool('shell', {command, purpose, timeoutSeconds, background}, context, async () => {
     const cwd = workspaceRoot();
     const classification = classifyShellCommand(command);
+    // OS sandbox (seatbelt/bubblewrap) for this attempt, if active. Fail
+    // closed when mode is "on" but no backend exists: never run model
+    // commands unsandboxed under an explicit requirement.
+    const sandboxState = hazeContext(context)?.sandboxRuntime;
+    if (sandboxState?.resolved.mode === 'on' && !sandboxState.resolved.active) {
+      return {
+        ok: false, command, reasonCode: 'sandbox_unavailable', recoverable: false,
+        error: `Sandbox mode is "on" but the OS sandbox backend is unavailable (${sandboxState.resolved.detail ?? 'unknown reason'}).`,
+        suggestedNextStep: sandboxState.remedy ?? 'Set sandbox.mode "auto" or "off" in ~/.haze/settings.json to run without the OS sandbox.',
+        sandbox: {enabled: false, backend: 'none', profile: sandboxState.resolved.profile, reason: 'no_backend'},
+      };
+    }
     // Note: secret-file protection is NOT hard-enforced here by decision — it
     // lives in the file tools (workspaceFile.ts / grep globs). For shell, the
     // behavior is instructed via the system prompt (SECRET_FILE_RULE).
@@ -43,8 +57,8 @@ export const shellTool = tool({
         return {ok: false, command, reasonCode: 'aborted', recoverable: true, error: 'Background process was not started because the turn is already aborted.', suggestedNextStep: 'Retry when the turn is active.'};
       }
       try {
-        const started = startBackgroundProcess({command, cwd});
-        return {ok: true, background: true, ...started, classification, hint: `Use readToolOutput with handle ${started.outputHandle} for logs, or process action=kill backgroundId=${started.backgroundId} when done.`};
+        const started = startBackgroundProcess({command, cwd, sandboxRuntime: sandboxState});
+        return {ok: true, background: true, ...started, classification, sandbox: backgroundSandboxMetadata(sandboxState), hint: `Use readToolOutput with handle ${started.outputHandle} for logs, or process action=kill backgroundId=${started.backgroundId} when done.`};
       } catch (error) {
         return {ok: false, background: true, command, reasonCode: 'background_limit', recoverable: true, error: error instanceof Error ? error.message : String(error), suggestedNextStep: 'List background processes and kill one before retrying.'};
       }
@@ -58,7 +72,11 @@ export const shellTool = tool({
     // default pipeline semantics through the guarded `set` (POSIX shells only).
     const isValidationCommand = purpose === 'validation' || isValidationClassification(classification);
     const executionCommand = isValidationCommand && shellDialect(userShell) === 'posix' ? `set -o pipefail 2>/dev/null || true; ${command}` : command;
-    const processResult = await runBoundedProcess({...shellInvocation(executionCommand), cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES});
+    const wrapped = wrapInvocation(shellInvocation(executionCommand), sandboxState);
+    if ('unavailable' in wrapped) {
+      return {ok: false, command, reasonCode: 'sandbox_unavailable', recoverable: false, error: wrapped.error, suggestedNextStep: sandboxState?.remedy ?? 'Set sandbox.mode "auto" or "off" in ~/.haze/settings.json to run without the OS sandbox.', sandbox: wrapped.sandbox};
+    }
+    const processResult = await runBoundedProcess({...wrapped.invocation, cwd, timeoutMs, signal: context.abortSignal, maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES});
     const {code, timedOut} = processResult;
     const stdout = processResult.stdout.text;
     const stderr = processResult.stderr.text;
@@ -86,14 +104,34 @@ export const shellTool = tool({
         : undefined;
     const validationPassed = confirmedValidationSummary?.status === 'passed';
     const output = filterShellOutput({command, code, stdout, stderr, timedOut, classification, validationSummary: confirmedValidationSummary, storeRawOutput: storeToolOutput, fallbackCompact: compactStoredOutput, compactMaxChars: validationPassed ? SHORT_VALIDATION_CHARS : COMPACT_COMMAND_CHARS});
+    // Post-hoc boundary diagnostics: classify conservatively so unrelated
+    // failures keep their ordinary meaning (missing executable diagnosis
+    // above keeps priority when both apply).
+    const denial = code !== 0 && !timedOut && !processResult.aborted && !missing && sandboxState?.boundary
+      ? await classifySandboxDenial({code, stderr, boundary: sandboxState.boundary})
+      : undefined;
+    const sandbox: ShellSandboxMetadata = denial ? {...wrapped.sandbox, denial} : wrapped.sandbox;
     return {
       ok: code === 0 && !timedOut && !processResult.aborted && !processResult.error,
       code, command, purpose, cwd, classification, durationMs: Date.now() - startedAt, timedOut,
       aborted: processResult.aborted, signal: processResult.signal, forcedTermination: processResult.forced,
       stdout: output.stdout, stderr: output.stderr, validationSummary: confirmedValidationSummary,
       stdoutBytes: streamByteStats(processResult.stdout), stderrBytes: streamByteStats(processResult.stderr),
+      sandbox,
+      ...(denial ? {reasonCode: 'sandbox_boundary' as const, recoverable: true, suggestedNextStep: `Sandbox boundary: the command could not ${denial.kind === 'write' ? 'write' : 'access'} ${denial.pathHint ?? 'a path outside the sandbox'}. Ask the user to @mention the path (grants a read), extend sandbox.roRoots/rwRoots in ~/.haze/settings.json, or run /sandbox off.`} : {}),
       ...(missing ? {...missingExecutableFields(missing), missingExecutableStep: missing.suggestedNextStep} : {}),
       ...(processResult.error ? {error: processResult.error} : {}),
     };
   }),
 });
+
+/** Truthful sandbox metadata for background starts (denials surface through process output reads). */
+function backgroundSandboxMetadata(state: SandboxRuntimeState | undefined): ShellSandboxMetadata {
+  if (!state) return {enabled: false, backend: 'none', profile: 'workspace'};
+  return {
+    enabled: state.resolved.active,
+    backend: state.resolved.backend,
+    profile: state.resolved.profile,
+    ...(state.resolved.active ? {} : {reason: state.resolved.reason}),
+  };
+}

@@ -13,6 +13,9 @@ import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
 import {WorkspaceMutationPolicy} from '../../../core/subagent/workspaceMutationPolicy.js';
+import {rgPath} from '@vscode/ripgrep';
+import {detectSandboxBackend} from '../../../core/sandbox/detect.js';
+import {resolveSandboxRuntime} from '../../../core/sandbox/runner.js';
 import {modelWithConfig, providerRequestSettings, type ModelRuntimeSelection} from '../../../llm/client.js';
 import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import {assembleRequestContext, type ToolCategory, type TurnExecutionScope} from '../../../llm/requestContext.js';
@@ -139,7 +142,40 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   const activeContextFiles = contextFiles;
   const activeModel = runtime.model;
   const {omitMaxOutputTokens, ...providerSettings} = providerRequestSettings(runtime.config);
-  const assembled = await assembleRequestContext({request: value, contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
+  // Per-attempt OS sandbox state (seatbelt/bubblewrap): resolved once here so
+  // the system prompt knows whether the rule applies and the shell/process
+  // tools share one immutable boundary. Roots come from the workspace, this
+  // turn's user-typed path blessings, and sandbox settings — never tool input.
+  // Detection must never delay an aborted turn: race the probe against the
+  // abort signal and fall back to a none-backend placeholder when abort wins
+  // (the probe itself keeps running and populates the process-wide cache).
+  const backendInfo = (await Promise.race([
+    detectSandboxBackend(),
+    new Promise<undefined>(resolve => {
+      if (abortController.signal.aborted) return resolve(undefined);
+      abortController.signal.addEventListener('abort', () => resolve(undefined), {once: true});
+    }),
+  ])) ?? {backend: 'none' as const, reason: 'probe_failed' as const, detail: 'detection skipped: turn aborted'};
+  const sandboxRuntime = await resolveSandboxRuntime({
+    workspaceRoot: session?.cwd ?? process.cwd(),
+    blessedPaths: turnOptions.blessedPaths,
+    settings: turnSettings.sandbox,
+    backendInfo,
+    cliOverride: turnOptions.sandboxOverride,
+    sessionOverride: session?.sandboxOverride,
+    // The bundled ripgrep ships under haze's own node_modules, outside the
+    // workspace when running from an installed checkout — it needs an
+    // explicit read/exec root.
+    helperExecutables: [rgPath],
+  });
+  // Once per session (mirrors contextFallbackWarned): retries and recovery
+  // slices reuse the same PromptSession and must not repeat the notice.
+  // Aborted turns skip it — the detection placeholder is not a real outcome.
+  if (!sandboxRuntime.resolved.active && sandboxRuntime.resolved.reason === 'no_backend' && !abortController.signal.aborted && session && !session.sandboxUnavailableWarned) {
+    session.sandboxUnavailableWarned = true;
+    callbacks.addMessage({role: 'system', text: `Sandboxing unavailable: ${sandboxRuntime.resolved.detail ?? 'no OS sandbox backend'}. Commands run unsandboxed; file-tool confinement still applies. See /sandbox.`});
+  }
+  const assembled = await assembleRequestContext({request: value, contextFiles: activeContextFiles, session, model: activeModel, modelRuntime: runtime, subagentOverrides: turnOptions.subagentOverrides, abortSignal: abortController.signal, executionScope: turnScope.executionScope, settings: turnSettings, sandboxActive: sandboxRuntime.resolved.active, onSubagentEvent: event => callbacks.onEvent?.(agentEvent(event.type === 'queued'
     ? {type: 'subagent_state', id: event.id, state: 'queued', mode: event.mode, queued: event.queued, running: event.running}
     : event.type === 'started'
       ? {type: 'subagent_state', id: event.id, state: 'started', mode: event.mode, queueMs: event.queueMs, running: event.running}
@@ -208,6 +244,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     onContextFileRead,
     mutationPolicy,
     blessedPaths: turnOptions.blessedPaths,
+    sandboxRuntime,
     postMutationDiagnostics: assembled.postMutationDiagnostics,
   };
 

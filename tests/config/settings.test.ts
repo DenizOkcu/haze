@@ -252,4 +252,24 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
+  it('parses the sandbox block, rejects unknown fields and secret roots loudly', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({sandbox: {mode: 'on', profile: 'strict', roRoots: ['~/dev/other'], rwRoots: ['~/scratch']}});
+    expect(await readSettings()).toMatchObject({sandbox: {mode: 'on', profile: 'strict', roRoots: ['~/dev/other'], rwRoots: ['~/scratch']}});
+    // Unset by default; a settings write without the block keeps it absent.
+    await writeSettings({model: 'm'});
+    expect((await readSettings()).sandbox).toBeUndefined();
+    // Unknown modes/profiles and unknown extra keys in the block fail loudly (strict schema).
+    await fs.writeJson(settingsFile, {sandbox: {mode: 'sometimes'}});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {sandbox: {network: 'deny'}});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    // Secret roots are refused at load and at write time (fail loudly, actionable message).
+    await fs.writeJson(settingsFile, {sandbox: {roRoots: ['~/.ssh']}});
+    await expect(readSettings()).rejects.toThrow('protected secret path');
+    await fs.writeJson(settingsFile, {sandbox: {rwRoots: ['~/.env']}});
+    await expect(readSettings()).rejects.toThrow('protected secret path');
+    await expect(writeSettings({sandbox: {roRoots: ['~/.aws']}})).rejects.toThrow('Refusing to write Haze settings');
+  });
+
 });

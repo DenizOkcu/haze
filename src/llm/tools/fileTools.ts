@@ -13,7 +13,7 @@ import {HazeToolError, structuredToolFailure} from './failures.js';
 import {compactGrepMatches, renderGrepMatches} from './outputCap.js';
 import {parseRipgrepJsonStream} from './grepParse.js';
 import {boundedDiff, fileDiff, findEditRange, splitDiffLines, lineNumberAtOffset, renderToolDiff, replacementDiff} from './editMatch.js';
-import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './toolContext.js';
+import {runDedupedTool, discoverScopedContext, withScopedContext, hazeContext, hazeToolContextSchema} from './toolContext.js';
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './workspaceFile.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './fileToolShared.js';
 import {createIgnoreClassifier} from './gitIgnore.js';
@@ -221,7 +221,7 @@ export const fileTools = {
         args.push('--glob', '!**/.git/**', '--glob', '!**/node_modules/**');
         args.push('--', pattern, absolutePath);
 
-        const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});
+        const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal, sandboxRuntime: hazeContext(context)?.sandboxRuntime});
         const stdout = result.stdout;
         if (result.aborted) throw new Error('ripgrep aborted');
         if (result.timedOut) throw new Error('ripgrep timed out');

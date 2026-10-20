@@ -50,6 +50,20 @@ describe('shell tool safety', () => {
     expect(result.ok).toBe(true);
     await expect(fs.realpath(result.cwd)).resolves.toBe(await fs.realpath(tmp));
     expect(result.classification.riskLevel).toBe('read_only');
+    // Sandbox metadata is always truthful: without an attempt-provided state
+    // (direct tool invocation) it reports disabled rather than pretending.
+    expect(result.sandbox).toEqual({enabled: false, backend: 'none', profile: 'workspace'});
+  });
+
+  it('refuses to run when sandbox mode is on but no backend exists (fail closed)', async () => {
+    const result = await hazeTools.shell.execute({command: 'pwd', purpose: 'auto', background: false}, {
+      context: {sandboxRuntime: {resolved: {active: false, mode: 'on', profile: 'workspace', backend: 'none', reason: 'no_backend', detail: 'bwrap not found'}, remedy: 'Install bubblewrap or set sandbox.mode "off".'}},
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reasonCode).toBe('sandbox_unavailable');
+    expect(result.recoverable).toBe(false);
+    expect(result.suggestedNextStep).toContain('bubblewrap');
+    expect(result.sandbox).toMatchObject({enabled: false, reason: 'no_backend'});
   });
 
   it('runs destructive commands without confirmation', async () => {

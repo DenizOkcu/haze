@@ -79,6 +79,8 @@ export interface TurnExecutionOptions {
   attachments?: readonly ImageAttachment[];
   /** User-mentioned paths whose reads may escape workspace confinement this turn. */
   blessedPaths?: readonly BlessedPath[];
+  /** Run-scoped `--sandbox` override (mode or profile word); never a settings write. */
+  sandboxOverride?: 'auto' | 'on' | 'off' | 'workspace' | 'strict';
   /** When set, this attempt is a bounded recovery slice (length-continuation, rescue, or goal continuation). */
   recoverySlice?: {kind: 'length' | 'rescue' | 'goal'; maxSteps: number; maxToolCalls: number};
   /** Absolute turn deadline in milliseconds (headless `--timeout` / goal budget); absent means no time bound. */

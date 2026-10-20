@@ -1,9 +1,11 @@
 import fs from 'fs-extra';
+import os from 'node:os';
 import path from 'node:path';
 import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 import {customProfileSchema} from '../core/subagent/executionProfiles.js';
+import {isProtectedSecretPath} from '../core/safety/secretPaths.js';
 import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, type ReasoningLevel, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
 
 export type {ReasoningLevel, StoredReasoningSetting};
@@ -81,6 +83,24 @@ export interface HazeSubagentSettings {
   [key: string]: unknown;
 }
 
+/**
+ * OS-level sandbox for model-initiated child processes (seatbelt on macOS,
+ * bubblewrap on Linux). The default boundary is the workspace plus temp/cache
+ * dirs read-write, `~/.haze`/`~/.claude` config read-only (credentials
+ * masked), system tool dirs read-only, and the turn's `@path`-blessed paths
+ * read-only. See `src/core/sandbox/`.
+ */
+export interface HazeSandboxSettings {
+  /** 'auto' (default): sandbox when a backend is available, degrade visibly when not. 'on': require a backend (fail closed). 'off': never sandbox. */
+  mode?: 'auto' | 'on' | 'off';
+  /** 'workspace' (default): network allowed, caches writable. 'strict': network denied, no cache writes. */
+  profile?: 'workspace' | 'strict';
+  /** Extra user-granted read-only roots; `~` expands to the home directory at use time. */
+  roRoots?: string[];
+  /** Extra user-granted read-write roots. Same validation as roRoots. */
+  rwRoots?: string[];
+}
+
 export interface HazeSettings {
   provider?: string;
   model?: string;
@@ -129,6 +149,8 @@ export interface HazeSettings {
   tips?: {enabled?: boolean};
   /** Built-in theme name; unset means `purple`. Other options: `light`, oh-my-zsh ports like `robbyrussell`, palette ports like `solarized-dark`. Validated by `resolveTheme`. */
   theme?: string;
+  /** OS-level sandbox for model-initiated child processes (seatbelt/bubblewrap). Default `auto` with the `workspace` profile. */
+  sandbox?: HazeSandboxSettings;
 
   // Legacy OpenRouter-only settings. Still read for compatibility.
   apiKey?: string;
@@ -182,6 +204,13 @@ const subagentSettingsSchema = z.object({
   profiles: z.record(z.string().min(1), customProfileSchema).optional(),
 }).passthrough();
 
+const sandboxSettingsSchema = z.object({
+  mode: z.enum(['auto', 'on', 'off']).optional(),
+  profile: z.enum(['workspace', 'strict']).optional(),
+  roRoots: z.array(z.string().min(1)).optional(),
+  rwRoots: z.array(z.string().min(1)).optional(),
+}).strict();
+
 /** Fallback windows must be plausible positive token counts (not fractions/junk). */
 const contextWindowFallbackSchema = z.number().int().min(1_000).max(10_000_000);
 
@@ -216,6 +245,7 @@ const settingsSchema = z.object({
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   theme: z.string().optional(),
+  sandbox: sandboxSettingsSchema.optional(),
   apiKey: z.string().optional(),
   baseURL: z.string().optional(),
 }).passthrough();
@@ -225,11 +255,31 @@ function settingsReadError(error: unknown): Error {
   return new Error(`Failed to read Haze settings at ${SETTINGS_FILE}: ${message}. Fix or remove the settings file, then retry.`);
 }
 
+/**
+ * Sandbox roots are user-granted filesystem reach; secret paths must fail
+ * loudly at load time instead of silently widening the sandbox. Lexical
+ * check here; the boundary builder re-checks real paths as a backstop.
+ */
+function validateSandboxRoots(sandbox: HazeSandboxSettings | undefined, source: string): void {
+  if (!sandbox) return;
+  const home = os.homedir();
+  for (const key of ['roRoots', 'rwRoots'] as const) {
+    for (const root of sandbox[key] ?? []) {
+      const expanded = root === '~' ? home : root.startsWith('~/') ? path.join(home, root.slice(2)) : path.resolve(root);
+      if (isProtectedSecretPath(expanded, home)) {
+        throw new Error(`${source}: sandbox.${key} entry "${root}" resolves to a protected secret path. Secret files (SSH keys, shell histories, .env files, credentials) can never be granted to the sandbox; remove the entry.`);
+      }
+    }
+  }
+}
+
 export async function readSettings(): Promise<HazeSettings> {
   try {
     if (await fs.pathExists(SETTINGS_FILE)) await tightenPrivateFile(SETTINGS_FILE);
     const raw = await fs.readJson(SETTINGS_FILE);
-    return settingsSchema.parse(raw) as HazeSettings;
+    const parsed = settingsSchema.parse(raw) as HazeSettings;
+    validateSandboxRoots(parsed.sandbox, `Failed to read Haze settings at ${SETTINGS_FILE}`);
+    return parsed;
   } catch (error) {
     const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
     if (code === 'ENOENT') return {};
@@ -239,6 +289,7 @@ export async function readSettings(): Promise<HazeSettings> {
 
 export async function writeSettings(settings: HazeSettings): Promise<void> {
   const parsed = settingsSchema.parse(settings) as HazeSettings;
+  validateSandboxRoots(parsed.sandbox, 'Refusing to write Haze settings');
   await writePrivateJsonAtomic(SETTINGS_FILE, parsed);
 }
 

@@ -2,6 +2,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
+import type {SandboxRuntimeState} from '../../core/sandbox/runner.js';
 
 /**
  * The turn-scoped tool execution state schema and guards, split from
@@ -37,6 +38,8 @@ export type HazeToolContext = {
   isSubagent?: boolean;
   /** Real paths the user mentioned this turn; read tools may escape workspace for them. */
   blessedPaths?: readonly BlessedPath[];
+  /** Immutable per-attempt OS sandbox state for child processes (seatbelt/bubblewrap; see core/sandbox). */
+  sandboxRuntime?: SandboxRuntimeState;
   /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
   postMutationDiagnostics?: PostMutationDiagnostics;
 };
@@ -69,6 +72,7 @@ export function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('mutationOwner', field => typeof field === 'symbol')
     && validOptional('isSubagent', field => typeof field === 'boolean')
     && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
+    && validOptional('sandboxRuntime', field => isRecord(field) && isRecord(field.resolved) && typeof field.resolved.active === 'boolean' && typeof field.resolved.mode === 'string' && (field.boundary === undefined || isRecord(field.boundary)))
     && validOptional('postMutationDiagnostics', field => typeof field === 'function');
 }
 

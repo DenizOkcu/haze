@@ -14,7 +14,7 @@ import {storeToolOutput} from '../core/agent/toolOutputStore.js';
 import {changedPathsFromTool} from '../core/agent/toolCapabilities.js';
 import {withSyntheticControl} from '../core/agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../core/agent/turnPolicy.js';
-import {toolsContextFor, type HazeToolContext} from './tools/toolContext.js';
+import {toolsContextFor, hazeContext, type HazeToolContext} from './tools/toolContext.js';
 import {assembleWorkerContext, compatibilityBundle, workerTaskMessage, type WorkerContextBundle} from './workerContext.js';
 import {
   fallbackWorkerRuntime,
@@ -97,6 +97,8 @@ export async function runSubagent(
     queueMs?: number;
     session?: PromptSession;
     mutationPolicy?: WorkspaceMutationPolicy;
+    /** Main-turn OS sandbox state; workers inherit the same boundary (never weaker). */
+    sandboxRuntime?: HazeToolContext['sandboxRuntime'];
   },
 ): Promise<SubagentExecutionResult> {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
@@ -126,6 +128,7 @@ export async function runSubagent(
     isSubagent: true,
     inFlightToolCalls: new Map(), loadedContextFilePaths: new Set(bundle.loadedPaths),
     loadedContextFileSignatures: new Map(bundle.loadedSignatures),
+    ...(options.sandboxRuntime ? {sandboxRuntime: options.sandboxRuntime} : {}),
     ...(mutationPolicy && mutationOwner ? {mutationPolicy, mutationOwner} : {}),
   };
   const release = mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate')
@@ -265,7 +268,7 @@ export function createSubagentTool(options: {
       if (options.blockedReason) return terminalResult(task, runtime, profile, 'policy_blocked', options.blockedReason);
       return await coordinator.submit({
         id, mode: task.mode, signal: context.abortSignal,
-        run: ({signal, queueMs, deadlineExpired}) => runSubagent(task, {runtime, profile, abortSignal: signal, deadlineExpired, queueMs, session: options.session, mutationPolicy: options.mutationPolicy, ...(options.contextFiles ? {contextFiles: options.contextFiles} : {})}),
+        run: ({signal, queueMs, deadlineExpired}) => runSubagent(task, {runtime, profile, abortSignal: signal, deadlineExpired, queueMs, session: options.session, mutationPolicy: options.mutationPolicy, sandboxRuntime: hazeContext(context)?.sandboxRuntime, ...(options.contextFiles ? {contextFiles: options.contextFiles} : {})}),
         terminal: (termination, queueMs) => terminalResult(task, runtime, profile, termination, termination === 'cancelled'
           ? 'Worker cancelled before completion.'
           : termination === 'deadline_exceeded'

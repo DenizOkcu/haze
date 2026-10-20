@@ -42,6 +42,7 @@ Current settings behavior:
 - Settings writes should validate the public shape, preserve unknown fields, use temp-file-plus-rename style writes, and create/tighten files to `0600` under `0700` dirs via `privateStorage.ts`.
 - Skill settings remain override-only. Enabling removes the matching name/scope override; disabling one scope must not affect a same-named skill in the other scope.
 - `subagents` settings are passthrough-validated; `updateSubagentSettings` must preserve unknown root, subagent, and per-profile fields. Profiles and worker models are explicit—never inferred or silently replaced.
+- The `sandbox` block (`mode`/`profile`/`roRoots`/`rwRoots`) is strict-validated (unknown keys fail loudly) and secret-path roots are refused at read and write time; the boundary builder re-checks real paths as a runtime backstop (`core/sandbox/boundary.ts`).
 - Credentialed endpoints (provider keys, MCP Authorization headers) must pass `assertCredentialedEndpointSecure` before persisting or sending; reject non-loopback `http:` with credentials.
 
 - Settings may contain API keys. Never log full settings or print secret fields unless the user explicitly asks and understands the risk.

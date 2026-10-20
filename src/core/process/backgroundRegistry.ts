@@ -5,6 +5,7 @@ import {registerDynamicToolOutput, unregisterDynamicToolOutput} from '../agent/t
 import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits.js';
 import {signalProcessTree} from './runBoundedProcess.js';
 import {shellInvocation} from './userShell.js';
+import {wrapInvocation, type SandboxRuntimeState} from '../sandbox/runner.js';
 import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
 type BackgroundProcessStatus = 'running' | 'exited' | 'failed' | 'killed';
@@ -109,13 +110,18 @@ export function getBackgroundProcess(backgroundId: string): BackgroundProcessSum
   return record ? publicSummary(record) : undefined;
 }
 
-export function startBackgroundProcess(input: {command: string; cwd: string}): BackgroundProcessSummary {
+export function startBackgroundProcess(input: {command: string; cwd: string; sandboxRuntime?: SandboxRuntimeState}): BackgroundProcessSummary {
   if (activeRecords().length >= BACKGROUND_PROCESS_MAX_CONCURRENCY) {
     throw new Error(`Background process limit reached (${BACKGROUND_PROCESS_MAX_CONCURRENCY}). Kill an existing process with process action=kill, then retry.`);
   }
   installExitHook();
   const backgroundId = `background-${nextId++}`;
-  const invocation = shellInvocation(input.command);
+  // Same OS-sandbox boundary as foreground shell commands (seatbelt/bwrap).
+  // Teardown semantics are unchanged: the wrapper pid leads the process
+  // group and bwrap children carry --die-with-parent.
+  const wrapped = wrapInvocation(shellInvocation(input.command), input.sandboxRuntime);
+  if ('unavailable' in wrapped) throw new Error(wrapped.error);
+  const invocation = wrapped.invocation;
   const child = spawn(invocation.command, invocation.args, {
     cwd: input.cwd,
     detached: process.platform !== 'win32',

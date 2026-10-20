@@ -117,6 +117,15 @@ async function loadStreaming(config: MocksConfig) {
     },
   }));
 
+  // The OS sandbox backend probe is real I/O (spawn + deadline); unit tests
+  // need a deterministic, instant answer (live behavior is covered by the
+  // HAZE_SANDBOX_E2E=1 suite).
+  vi.doMock('../../../src/core/sandbox/detect.js', () => ({
+    detectSandboxBackend: async () => ({backend: 'none', reason: 'unsupported_platform', detail: 'mocked for unit tests'}),
+    resetSandboxDetection: () => undefined,
+    sandboxUnavailableRemedy: () => 'mocked remedy',
+  }));
+
   // The turn reads settings once at start (CR-024); keep tests home-isolated.
   vi.doMock('../../../src/config/settings.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../../../src/config/settings.js')>();

@@ -1,5 +1,6 @@
 import {StringDecoder} from 'node:string_decoder';
 import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
+import {wrapInvocation, type SandboxRuntimeState} from '../../core/sandbox/runner.js';
 import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../core/limits.js';
 
 /**
@@ -7,7 +8,7 @@ import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../co
  * primitive, so spawn/timeout/abort/process-group teardown behavior is
  * identical to shell execution (CR-004). Match counting and early-stop stay here.
  */
-export async function runRipgrepBounded(input: {executable: string; args: string[]; cwd: string; maxMatches: number; timeoutMs?: number; signal?: AbortSignal}): Promise<{stdout: string; stderr: string; code: number | null; capped: boolean; timedOut: boolean; aborted: boolean}> {
+export async function runRipgrepBounded(input: {executable: string; args: string[]; cwd: string; maxMatches: number; timeoutMs?: number; signal?: AbortSignal; sandboxRuntime?: SandboxRuntimeState}): Promise<{stdout: string; stderr: string; code: number | null; capped: boolean; timedOut: boolean; aborted: boolean}> {
   const decoder = new StringDecoder('utf8');
   let pending = '';
   const lines: string[] = [];
@@ -16,9 +17,15 @@ export async function runRipgrepBounded(input: {executable: string; args: string
   let capped = false;
   let protocolError: string | undefined;
 
+  // Defense-in-depth: rg already runs workspace-confined at the tool layer;
+  // when the OS sandbox is active it also runs inside the same boundary
+  // (blessed read-only roots included). Mode "on" without a backend refuses.
+  const wrapped = input.sandboxRuntime ? wrapInvocation({command: input.executable, args: input.args}, input.sandboxRuntime) : undefined;
+  if (wrapped && 'unavailable' in wrapped) throw new Error(wrapped.error);
+  const invocation = wrapped && !('unavailable' in wrapped) ? wrapped.invocation : {command: input.executable, args: input.args};
+
   const result = await runBoundedProcess({
-    command: input.executable,
-    args: input.args,
+    ...invocation,
     cwd: input.cwd,
     timeoutMs: input.timeoutMs ?? 30_000,
     signal: input.signal,

@@ -90,6 +90,8 @@ export async function assembleRequestContext(input: {
   request?: string;
   /** Pre-read settings so a turn performs a single settings read (CR-024). */
   settings?: Awaited<ReturnType<typeof readSettings>>;
+  /** Whether the OS sandbox applies to this attempt's child processes (drives the system-prompt sandbox rule). */
+  sandboxActive?: boolean;
 }): Promise<AssembledRequestContext> {
   const settings = input.settings ?? await readSettings();
   const skillRegistry = await loadSkillRegistry();
@@ -153,7 +155,7 @@ export async function assembleRequestContext(input: {
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
   const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`);
   const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
-  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
+  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools)), sandboxActive: input.sandboxActive})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {
     systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope,
