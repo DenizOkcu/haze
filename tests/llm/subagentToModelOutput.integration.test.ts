@@ -51,7 +51,7 @@ describe('installed AI SDK subagent model-output boundary', () => {
 
     const generated = await generateText({
       model: mainModel,
-      tools: {subagent: createSubagentTool({model: workerModel, contextFiles: []})},
+      tools: {subagent: createSubagentTool({model: workerModel})},
       // Mirrors the real main turn: toolsContext is provided only for built-in
       // Haze file/shell tools, not for the orchestration-only subagent tool.
       messages: [{role: 'user', content: 'delegate'}],

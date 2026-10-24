@@ -1,6 +1,6 @@
 # src/core/subagent/AGENTS.md
 
-Last updated: 2026-10-07 for the 1.5.1 release.
+Last updated: 2026-10-24: V1 result projection and legacy string/maxSteps call shapes removed.
 
 Subagent runner and model-facing subagent tool.
 
@@ -21,7 +21,7 @@ Maintainability focus:
 - Project context is independently assembled with shared root/scoped/signature logic; never copy the parent's accumulated subtree context.
 - Keep hard caps on input, deadline, max steps, tool-only loops, summary length, tool calls, retries, and concurrency. Enforce tool caps at each actual execution, not only between model steps.
 - Deadline/cancellation returns logical control immediately, but abort-ignoring execution is quarantined and must retain its physical concurrency/mutation slot until it settles; events must distinguish terminal delivery from physical settlement.
-- V2 termination is authoritative (`completed`, `no_output`, limits, deadline, cancellation, provider error, policy block); retain the V1 raw projection only for compatibility.
+- V2 termination is authoritative (`completed`, `no_output`, limits, deadline, cancellation, provider error, policy block). The result is `{capsule, telemetry, error?}`; do not reintroduce a V1 flattened projection (status/summary/tokens mirrors) or string-objective/maxSteps call shapes.
 - Only the result capsule enters parent model context. Telemetry is bounded/out-of-band, and result handles are process-local.
 -
 - Mutation-capable workers share a turn-scoped reentrant workspace policy and are serialized.
@@ -30,4 +30,4 @@ Maintainability focus:
 
 ## Tests
 
-Update `tests/llm/subagentRunner.test.ts` for tool allowlist, budget, status, summary, and error behavior.
+Update `tests/core/subagent/subagentRunner.test.ts` for mode tool maps, budgets, termination/deliverable, and error behavior.

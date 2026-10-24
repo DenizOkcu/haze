@@ -109,11 +109,11 @@ describe('turnRuntime', () => {
   });
 
   it('extracts subagent token estimates from structured outputs', () => {
-    expect(subagentTokenEstimate({tokens: {in: 12, out: 3}})).toEqual({input: 12, output: 3});
-    expect(subagentTokenEstimate({tokens: {in: 0, out: 0}})).toBeUndefined();
+    expect(subagentTokenEstimate({telemetry: {usage: {inputTokens: 12, outputTokens: 3}}})).toEqual({input: 12, output: 3});
+    expect(subagentTokenEstimate({telemetry: {usage: {inputTokens: 0, outputTokens: 0}}})).toBeUndefined();
   });
 
-  it('subagentTokenEstimate returns undefined when no tokens object is present', () => {
+  it('subagentTokenEstimate returns undefined when no telemetry usage is present', () => {
     expect(subagentTokenEstimate({foo: 'bar'})).toBeUndefined();
     expect(subagentTokenEstimate(null)).toBeUndefined();
   });

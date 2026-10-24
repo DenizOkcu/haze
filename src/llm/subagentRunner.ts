@@ -1,9 +1,6 @@
 import {isStepCount, streamText, tool, type JSONValue, type ModelMessage} from 'ai';
-import type {ContextFile} from '../config/contextFiles.js';
 import {estimateValueTokens} from '../core/agent/contextBudget.js';
 import {
-  SUBAGENT_MAX_STEPS,
-  SUBAGENT_MIN_STEPS,
   SUBAGENT_SYNTHESIS_RESERVE,
   SUBAGENT_TOOL_ONLY_LIMIT,
   createToolExecutionBudget,
@@ -15,12 +12,11 @@ import {changedPathsFromTool} from '../core/agent/toolCapabilities.js';
 import {withSyntheticControl} from '../core/agent/requestAssembly.js';
 import {toolOnlyStepCount} from '../core/agent/turnPolicy.js';
 import {toolsContextFor, type HazeToolContext} from './tools/toolContext.js';
-import {assembleWorkerContext, compatibilityBundle, workerTaskMessage, type WorkerContextBundle} from './workerContext.js';
+import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from './workerContext.js';
 import {
   fallbackWorkerRuntime,
   normalizeSubagentInput,
   subagentInputSchema,
-  withLegacyProjection,
   type SubagentExecutionResult,
   type SubagentResultCapsule,
   type SubagentTaskCapsule,
@@ -77,21 +73,18 @@ function terminalResult(task: SubagentTaskCapsule, runtime: WorkerRuntime, profi
   const capsule: SubagentResultCapsule = {id: task.id, termination, usable: false, deliverable: message, changedPaths: [], validation: [], coverageGaps: [message], truncated: false};
   const telemetry = telemetryBase(runtime, profile, estimateValueTokens(workerTaskMessage(task)), 0, queueMs);
   telemetry.estimates.resultCapsuleTokens = estimateValueTokens(capsule);
-  return withLegacyProjection(capsule, telemetry, termination === 'provider_error' || termination === 'policy_blocked' ? message : undefined);
+  return {capsule, telemetry, ...(termination === 'provider_error' || termination === 'policy_blocked' ? {error: message} : {})};
 }
 
 export type SubagentResult = SubagentExecutionResult;
 
 export async function runSubagent(
-  taskInput: string | SubagentTaskCapsule,
+  task: SubagentTaskCapsule,
   options: {
     model?: WorkerRuntime['model'];
     runtime?: WorkerRuntime;
     profile?: SubagentExecutionProfile;
-    contextFiles?: ContextFile[];
     contextBundle?: WorkerContextBundle;
-    allowedTools?: readonly string[];
-    maxSteps?: number;
     abortSignal?: AbortSignal;
     deadlineExpired?: () => boolean;
     queueMs?: number;
@@ -101,16 +94,9 @@ export async function runSubagent(
 ): Promise<SubagentExecutionResult> {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
   const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
-  const task: SubagentTaskCapsule = typeof taskInput === 'string'
-    ? {id: 'worker', objective: taskInput, deliverable: 'Return a concise self-contained result.', mode: options.allowedTools ? (options.allowedTools.some(name => ['editFile', 'replaceLines', 'writeFile'].includes(name)) ? 'implement' : options.allowedTools.includes('shell') ? 'validate' : options.allowedTools.includes('fetch') ? 'research' : 'inspect') : 'implement', scope: [], acceptanceCriteria: [], legacyMaxSteps: options.maxSteps}
-    : taskInput;
-  const requestedSteps = task.legacyMaxSteps ?? options.maxSteps;
-  if (requestedSteps != null && (requestedSteps < SUBAGENT_MIN_STEPS || requestedSteps > SUBAGENT_MAX_STEPS)) return terminalResult(task, runtime, profile, 'policy_blocked', `maxSteps must be from ${SUBAGENT_MIN_STEPS} to ${SUBAGENT_MAX_STEPS}.`);
-  const maxSteps = Math.min(requestedSteps ?? profile.maxSteps, profile.maxSteps);
+  const maxSteps = profile.maxSteps;
   const startedAt = performance.now();
-  const bundle = options.contextBundle ?? (options.contextFiles
-    ? await compatibilityBundle(task, profile, options.contextFiles, options.allowedTools, options.session)
-    : await assembleWorkerContext(task, profile, options.session));
+  const bundle = options.contextBundle ?? await assembleWorkerContext(task, profile, options.session);
   if (bundle.policyBlock) return terminalResult(task, runtime, profile, 'policy_blocked', bundle.policyBlock, options.queueMs);
 
   const toolCallLog: SubagentTelemetry['toolCalls'] = [];
@@ -208,7 +194,7 @@ export async function runSubagent(
     telemetry.estimates.privateContextTokens = (usageIn ?? bundle.estimatedTokens) + (usageOut ?? 0);
     telemetry.estimates.resultCapsuleTokens = estimateValueTokens(capsule);
     telemetry.estimates.mainContextTokensAvoided = Math.max(0, telemetry.estimates.privateContextTokens - telemetry.estimates.taskCapsuleTokens - telemetry.estimates.resultCapsuleTokens);
-    return withLegacyProjection(capsule, telemetry);
+    return {capsule, telemetry};
   } catch (error) {
     // Bounded, actionable provider-failure capsule (RT-03): a worker that dies
     // before producing output must tell the parent model what happened and what
@@ -220,20 +206,16 @@ export async function runSubagent(
     const capsuleMessage = `${boundedMessage}. No usable worker output was produced; retry this subagent once with the same task, or do the work directly in the main conversation.`;
     const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded' : options.abortSignal?.aborted ? 'cancelled' : 'provider_error';
     const result = terminalResult(task, runtime, profile, termination, capsuleMessage, options.queueMs);
-    // Keep the raw provider message on the legacy `error` field so machine
-    // consumers see exactly what the provider said (unchanged contract).
+    // Keep the raw provider message on `error` so machine consumers see exactly
+    // what the provider said (unchanged contract).
     result.error = rawMessage;
     result.capsule.changedPaths = [...changedPaths].sort();
     result.capsule.validation = [...validation];
     result.telemetry.estimates.resultCapsuleTokens = estimateValueTokens(result.capsule);
     result.telemetry.durationMs = performance.now() - startedAt;
-    result.durationMs = result.telemetry.durationMs;
     result.telemetry.toolCalls = toolCallLog;
-    result.toolCalls = toolCallLog;
     result.telemetry.toolCallCount = toolBudget.started;
-    result.toolCallCount = toolBudget.started;
     result.telemetry.usage = {inputTokens: usageIn, outputTokens: usageOut};
-    result.tokens = {in: usageIn, out: usageOut};
     return result;
   } finally {
     release?.();
@@ -248,7 +230,6 @@ export function createSubagentTool(options: {
   mutationPolicy?: WorkspaceMutationPolicy;
   blockedReason?: string;
   forceMode?: 'inspect';
-  contextFiles?: ContextFile[];
   session?: PromptSession;
 }) {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
@@ -265,7 +246,7 @@ export function createSubagentTool(options: {
       if (options.blockedReason) return terminalResult(task, runtime, profile, 'policy_blocked', options.blockedReason);
       return await coordinator.submit({
         id, mode: task.mode, signal: context.abortSignal,
-        run: ({signal, queueMs, deadlineExpired}) => runSubagent(task, {runtime, profile, abortSignal: signal, deadlineExpired, queueMs, session: options.session, mutationPolicy: options.mutationPolicy, ...(options.contextFiles ? {contextFiles: options.contextFiles} : {})}),
+        run: ({signal, queueMs, deadlineExpired}) => runSubagent(task, {runtime, profile, abortSignal: signal, deadlineExpired, queueMs, session: options.session, mutationPolicy: options.mutationPolicy}),
         terminal: (termination, queueMs) => terminalResult(task, runtime, profile, termination, termination === 'cancelled'
           ? 'Worker cancelled before completion.'
           : termination === 'deadline_exceeded'

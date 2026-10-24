@@ -35,7 +35,6 @@ export interface SubagentTaskCapsule {
   mode: WorkerMode;
   scope: string[];
   acceptanceCriteria: string[];
-  legacyMaxSteps?: number;
 }
 
 export type WorkerTermination = 'completed' | 'no_output' | 'step_limit' | 'tool_limit' | 'deadline_exceeded' | 'cancelled' | 'provider_error' | 'policy_blocked';
@@ -72,12 +71,7 @@ export interface SubagentTelemetry {
 export interface SubagentExecutionResult {
   capsule: SubagentResultCapsule;
   telemetry: SubagentTelemetry;
-  status: 'ok' | 'error' | 'timeout' | 'cancelled';
-  summary: string;
-  toolCalls: SubagentTelemetry['toolCalls'];
-  toolCallCount: number;
-  tokens: {in?: number; out?: number};
-  durationMs: number;
+  /** Raw provider message on provider errors; kept for machine consumers (RT-03). */
   error?: string;
 }
 
@@ -109,25 +103,4 @@ export function fallbackWorkerRuntime(model: WorkerRuntime['model'], selector = 
 
 export function normalizeSubagentInput(input: SubagentToolInput, id: string): SubagentTaskCapsule {
   return {id, objective: input.objective, deliverable: input.deliverable, mode: input.mode, scope: input.scope ?? [], acceptanceCriteria: input.acceptanceCriteria ?? []};
-}
-
-function legacyStatus(termination: WorkerTermination): SubagentExecutionResult['status'] {
-  if (termination === 'completed' || termination === 'no_output') return 'ok';
-  if (termination === 'cancelled') return 'cancelled';
-  if (termination === 'step_limit' || termination === 'tool_limit' || termination === 'deadline_exceeded') return 'timeout';
-  return 'error';
-}
-
-export function withLegacyProjection(capsule: SubagentResultCapsule, telemetry: SubagentTelemetry, error?: string): SubagentExecutionResult {
-  return {
-    capsule,
-    telemetry,
-    status: legacyStatus(capsule.termination),
-    summary: capsule.deliverable,
-    toolCalls: telemetry.toolCalls,
-    toolCallCount: telemetry.toolCallCount,
-    tokens: {in: telemetry.usage.inputTokens, out: telemetry.usage.outputTokens},
-    durationMs: telemetry.durationMs,
-    ...(error ? {error} : {}),
-  };
 }

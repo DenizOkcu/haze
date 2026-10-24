@@ -1,8 +1,21 @@
 import {describe, expect, it, vi} from 'vitest';
 import {z} from 'zod';
 import {createSubagentTool, internals, runSubagent, type SubagentResult} from '../../../src/llm/subagentRunner.js';
+import type {SubagentTaskCapsule, WorkerMode} from '../../../src/core/subagent/contracts.js';
+import type {WorkerContextBundle} from '../../../src/llm/workerContext.js';
+import {COMPATIBILITY_PROFILE} from '../../../src/core/subagent/executionProfiles.js';
 
-const noopModel = {} as Parameters<typeof runSubagent>[0]['model'];
+const noopModel = {} as Parameters<typeof runSubagent>[1]['model'];
+
+// The string-objective call shape was removed; tests build capsules directly.
+// 'implement' was the old string-shape default mode.
+function capsule(objective: string, mode: WorkerMode = 'implement'): SubagentTaskCapsule {
+  return {id: 'worker', objective, deliverable: 'Return a concise self-contained result.', mode, scope: [], acceptanceCriteria: []};
+}
+
+// Hermetic bundle injection: runner unit tests never read real context files
+// (the production assembly path is covered by tests/llm/workerContext.test.ts).
+const emptyBundle: WorkerContextBundle = {instructions: [], systemPrompt: '', tools: {}, taskTokens: 1, estimatedTokens: 1, validatedScope: [], loadedPaths: new Set(), loadedSignatures: new Map()};
 
 // Subagents use streamText (non-streaming). Mocks return a fully-resolved
 // result whose `text` is the final step's text and `steps`/`usage` are read
@@ -144,31 +157,31 @@ describe('internals.shouldForceSynthesis (subagent budget guard)', () => {
   });
 });
 
-describe('runSubagent status mapping', () => {
-  it('returns ok status when the model finishes within the step budget', async () => {
+describe('runSubagent termination mapping', () => {
+  it('returns completed termination when the model finishes within the step budget', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {...actual, streamText: async () => genResult({text: 'done'})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result: SubagentResult = await runSubagent('inspect', {model: noopModel, contextFiles: []});
-    expect(result.status).toBe('ok');
-    expect(result.summary).toBe('done');
-    expect(result.tokens.in).toBe(0);
-    expect(result.tokens.out).toBe(0);
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    const result: SubagentResult = await runSubagent(capsule('inspect'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.capsule.termination).toBe('completed');
+    expect(result.capsule.deliverable).toBe('done');
+    expect(result.telemetry.usage.inputTokens).toBe(0);
+    expect(result.telemetry.usage.outputTokens).toBe(0);
+    expect(result.telemetry.durationMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('returns timeout status when the model hits the step limit (steps.length >= maxSteps)', async () => {
+  it('returns step_limit termination when the model hits the profile step budget (steps.length >= maxSteps)', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {...actual, streamText: async () => genResult({text: '', steps: steps(25)})};
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('long task', {model: noopModel, contextFiles: [], maxSteps: 25});
-    expect(result.status).toBe('timeout');
+    const result = await runSubagent(capsule('long task'), {model: noopModel, contextBundle: emptyBundle, profile: {...COMPATIBILITY_PROFILE, maxSteps: 25}});
+    expect(result.capsule.termination).toBe('step_limit');
   });
 
   it('blocks excess executions from a single emitted tool-call burst', async () => {
@@ -182,8 +195,8 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const profile = {...(await import('../../../src/core/subagent/executionProfiles.js')).COMPATIBILITY_PROFILE, maxToolCalls: 3};
-    const result = await runSubagent('burst', {model: noopModel, profile, contextBundle: {
+    const profile = {...COMPATIBILITY_PROFILE, maxToolCalls: 3};
+    const result = await runSubagent(capsule('burst'), {model: noopModel, profile, contextBundle: {
       instructions: [], systemPrompt: '', tools: {probe: {execute: async () => { actualExecutions++; return {ok: true}; }} as never}, taskTokens: 1, estimatedTokens: 1, validatedScope: [], loadedPaths: new Set(), loadedSignatures: new Map(),
     }});
     expect(actualExecutions).toBe(3);
@@ -192,7 +205,7 @@ describe('runSubagent status mapping', () => {
     expect(result.telemetry.toolCalls.length).toBeLessThanOrEqual(3);
   });
 
-  it('returns cancelled status when the abort signal is already aborted', async () => {
+  it('returns cancelled termination when the abort signal is already aborted', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {...actual, streamText: async () => genResult({text: 'partial'})};
@@ -201,11 +214,11 @@ describe('runSubagent status mapping', () => {
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const controller = new AbortController();
     controller.abort();
-    const result = await runSubagent('aborted task', {model: noopModel, contextFiles: [], abortSignal: controller.signal});
-    expect(result.status).toBe('cancelled');
+    const result = await runSubagent(capsule('aborted task'), {model: noopModel, contextBundle: emptyBundle, abortSignal: controller.signal});
+    expect(result.capsule.termination).toBe('cancelled');
   });
 
-  it('returns error status when the model throws', async () => {
+  it('returns provider_error termination when the model throws', async () => {
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {
@@ -217,8 +230,8 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('explodes', {model: noopModel, contextFiles: []});
-    expect(result.status).toBe('error');
+    const result = await runSubagent(capsule('explodes'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.capsule.termination).toBe('provider_error');
     expect(result.error).toBe('boom');
   });
 
@@ -235,7 +248,7 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('edit then fail', {model: noopModel, contextFiles: [], abortSignal: controller.signal, deadlineExpired: () => termination === 'deadline_exceeded'});
+    const result = await runSubagent(capsule('edit then fail'), {model: noopModel, contextBundle: emptyBundle, abortSignal: controller.signal, deadlineExpired: () => termination === 'deadline_exceeded'});
     expect(result.capsule).toMatchObject({termination, usable: false, changedPaths: ['a.ts'], validation: [{command: 'npm test', ok: true}]});
   });
 
@@ -251,7 +264,7 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('fails loudly', {model: noopModel, contextFiles: []});
+    const result = await runSubagent(capsule('fails loudly'), {model: noopModel, contextBundle: emptyBundle});
     expect(result.capsule.termination).toBe('provider_error');
     expect(result.capsule.usable).toBe(false);
     // Bounded provider message + explicit fallback guidance, never empty.
@@ -274,18 +287,10 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('opaque failure', {model: noopModel, contextFiles: []});
+    const result = await runSubagent(capsule('opaque failure'), {model: noopModel, contextBundle: emptyBundle});
     expect(result.capsule.termination).toBe('provider_error');
     expect(result.capsule.deliverable).toContain('the provider call failed before any output');
     expect(result.capsule.deliverable).toContain('retry this subagent once');
-  });
-
-  it('policy-blocks an out-of-range maxSteps instead of silently clamping it', async () => {
-    vi.resetModules();
-    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('huge', {model: noopModel, contextFiles: [], maxSteps: 999});
-    expect(result.status).toBe('error');
-    expect(result.capsule.termination).toBe('policy_blocked');
   });
 
   it('uses a no-text fallback summary when the model produces no text', async () => {
@@ -295,8 +300,8 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('silent', {model: noopModel, contextFiles: []});
-    expect(result.summary).toBe('Subagent completed without text output.');
+    const result = await runSubagent(capsule('silent'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.capsule.deliverable).toBe('Subagent completed without text output.');
   });
 
   it('truncates oversized deliverables with explicit metadata and a handle', async () => {
@@ -307,11 +312,11 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('huge summary', {model: noopModel, contextFiles: []});
-    expect(result.summary.startsWith('x'.repeat(8000))).toBe(true);
+    const result = await runSubagent(capsule('huge summary'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.capsule.deliverable.startsWith('x'.repeat(8000))).toBe(true);
     expect(result.capsule.truncated).toBe(true);
     expect(result.capsule.resultHandle).toMatch(/^output-/);
-    expect(result.summary).toContain('Result truncated');
+    expect(result.capsule.deliverable).toContain('Result truncated');
   });
 
   it('reports token usage from the resolved result', async () => {
@@ -321,8 +326,8 @@ describe('runSubagent status mapping', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result = await runSubagent('metered', {model: noopModel, contextFiles: []});
-    expect(result.tokens).toEqual({in: 42, out: 7});
+    const result = await runSubagent(capsule('metered'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.telemetry.usage).toEqual({inputTokens: 42, outputTokens: 7});
   });
 });
 
@@ -347,7 +352,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
     });
     vi.resetModules();
     const {runSubagent, internals} = await import('../../../src/llm/subagentRunner.js');
-    await runSubagent('the assigned task', {model: noopModel, contextFiles: []});
+    await runSubagent(capsule('the assigned task'), {model: noopModel, contextBundle: emptyBundle});
 
     // Force synthesis via tool-call volume (TOOL_CALL_BUDGET = 40).
     const forceSteps = Array.from({length: 40}, () => ({toolCalls: [{}], text: ''}));
@@ -380,7 +385,7 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    await runSubagent('quick task', {model: noopModel, contextFiles: []});
+    await runSubagent(capsule('quick task'), {model: noopModel, contextBundle: emptyBundle});
     expect(captured.prepareStep!({steps: [{toolCalls: [{}], text: ''}], messages: [{role: 'user', content: 'quick task'}]})).toBeUndefined();
   });
 
@@ -402,22 +407,22 @@ describe('runSubagent synthesis capture & prepareStep history preservation', () 
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    const result: SubagentResult = await runSubagent('security review', {model: noopModel, contextFiles: []});
-    expect(result.summary).toBe('# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts');
-    expect(result.summary.startsWith('Now let me')).toBe(false);
+    const result: SubagentResult = await runSubagent(capsule('security review'), {model: noopModel, contextBundle: emptyBundle});
+    expect(result.capsule.deliverable).toBe('# Findings\n- shell tool lacks timeout\n- fetch SSRF in webFetch.ts');
+    expect(result.capsule.deliverable.startsWith('Now let me')).toBe(false);
   });
 });
 
 describe('createSubagentTool', () => {
   it('describes disposable context isolation and permits one substantial task', () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     expect(toolObj.description).toContain('fresh disposable context');
     expect(toolObj.description).toContain('one substantial task');
     expect(toolObj.description).toContain('multiple calls');
   });
 
   it('requires the flat objective, deliverable, and mode capsule', () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     expect(toolObj.inputSchema.safeParse({}).success).toBe(false);
     expect(toolObj.inputSchema.safeParse({objective: 'Inspect auth'}).success).toBe(false);
     expect(toolObj.inputSchema.safeParse({objective: 'Inspect auth', deliverable: 'Findings', mode: 'invalid'}).success).toBe(false);
@@ -425,7 +430,7 @@ describe('createSubagentTool', () => {
   });
 
   it('exposes one flat JSON schema without union branches for local model compatibility', () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     const schema = z.toJSONSchema(toolObj.inputSchema) as {required?: string[]; anyOf?: unknown; oneOf?: unknown};
     expect(schema.required).toEqual(expect.arrayContaining(['objective', 'deliverable', 'mode']));
     expect(schema.anyOf).toBeUndefined();
@@ -433,7 +438,7 @@ describe('createSubagentTool', () => {
   });
 
   it('does not expose the ambiguous legacy task/tools/maxSteps shape', () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     expect(toolObj.inputSchema.safeParse({task: 'do something', tools: ['shell', 'grep'], maxSteps: 10}).success).toBe(false);
   });
 });
@@ -458,10 +463,9 @@ describe('createSubagentTool abort propagation (FR-008, /fleet US3)', () => {
     const {createSubagentTool} = await import('../../../src/llm/subagentRunner.js');
     const controller = new AbortController();
     controller.abort();
-    const subagentTool = createSubagentTool({model: noopModel, contextFiles: []});
+    const subagentTool = createSubagentTool({model: noopModel});
     const result = await subagentTool.execute({objective: 'Abort me', deliverable: 'Return cancellation status', mode: 'inspect'}, {abortSignal: controller.signal} as never);
     expect(captured.abortSignal).toBeUndefined();
-    expect(result.status).toBe('cancelled');
     expect(result.capsule.termination).toBe('cancelled');
   });
 });
@@ -486,20 +490,20 @@ describe('runSubagent parallel isolation (FR-009, /fleet US4)', () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const results = await Promise.all([
-      runSubagent('audit', {model: noopModel, contextFiles: []}),
-      runSubagent('fail', {model: noopModel, contextFiles: []}),
-      runSubagent('research', {model: noopModel, contextFiles: []}),
+      runSubagent(capsule('audit'), {model: noopModel, contextBundle: emptyBundle}),
+      runSubagent(capsule('fail'), {model: noopModel, contextBundle: emptyBundle}),
+      runSubagent(capsule('research'), {model: noopModel, contextBundle: emptyBundle}),
     ]);
     expect(results).toHaveLength(3);
-    // None of the three collapsed the parallel group; statuses are per subtask.
-    expect(results.map(r => r.status)).toEqual(['ok', 'error', 'ok']);
-    // The healthy subtasks still produced their own summaries.
-    expect(results[0]?.summary).toBe('ok: audit');
-    expect(results[2]?.summary).toBe('ok: research');
+    // None of the three collapsed the parallel group; terminations are per subtask.
+    expect(results.map(r => r.capsule.termination)).toEqual(['completed', 'provider_error', 'completed']);
+    // The healthy subtasks still produced their own deliverables.
+    expect(results[0]?.capsule.deliverable).toBe('ok: audit');
+    expect(results[2]?.capsule.deliverable).toBe('ok: research');
     // The failing subtask is reported, not swallowed.
-    expect(results[1]?.status).toBe('error');
+    expect(results[1]?.capsule.termination).toBe('provider_error');
     expect(results[1]?.error).toBe('boom');
-    // Timeout-status mapping for a single subagent is covered by the suite above.
+    // Timeout termination for a single subagent is covered by the suite above.
   });
 });
 
@@ -522,8 +526,8 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await Promise.all([
-      runSubagent('task-a', {model: noopModel, contextFiles: []}),
-      runSubagent('task-b', {model: noopModel, contextFiles: []}),
+      runSubagent(capsule('task-a'), {model: noopModel, contextBundle: emptyBundle}),
+      runSubagent(capsule('task-b'), {model: noopModel, contextBundle: emptyBundle}),
     ]);
     expect(captured).toHaveLength(2);
     // Each call sees one bounded JSON capsule—never sibling or parent history.
@@ -536,7 +540,7 @@ describe('runSubagent independent context (FR-010, /fleet)', () => {
 
 describe('subagent V2 boundary', () => {
   it('accepts the preferred flat bounded capsule and rejects oversized fields', () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     expect(toolObj.inputSchema.safeParse({objective: 'Inspect logs', deliverable: 'Root cause with evidence', mode: 'inspect', scope: ['src'], acceptanceCriteria: ['cite files']}).success).toBe(true);
     expect(toolObj.inputSchema.safeParse({objective: 'Inspect mapped files', deliverable: 'Findings', mode: 'inspect', scope: Array.from({length: 13}, (_, i) => `src/file-${i}.ts`)}).success).toBe(true);
     expect(toolObj.inputSchema.safeParse({objective: 'Too many paths', deliverable: 'Findings', mode: 'inspect', scope: Array.from({length: 33}, (_, i) => `src/file-${i}.ts`)}).success).toBe(false);
@@ -545,7 +549,7 @@ describe('subagent V2 boundary', () => {
   });
 
   it('serializes only the compact capsule to parent model context', async () => {
-    const toolObj = createSubagentTool({model: noopModel, contextFiles: []});
+    const toolObj = createSubagentTool({model: noopModel});
     const capsule = {id: 'w', termination: 'completed' as const, usable: true, deliverable: 'done', changedPaths: [], validation: [], coverageGaps: [], truncated: false};
     const raw = {capsule, telemetry: {private: 'not model visible'}};
     const modelOutput = await toolObj.toModelOutput!({toolCallId: 'call', input: {objective: 'x', deliverable: 'y', mode: 'inspect'}, output: raw as never});
@@ -562,7 +566,7 @@ describe('subagent V2 boundary', () => {
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     const profile = {name: 'test', maxConcurrency: 1, maxSteps: 8, maxToolCalls: 6, maxOutputTokens: 2048, maxSummaryChars: 4000, maxInputTokens: 40000, deadlineMs: 1000, maxRetries: 1};
-    await runSubagent('provider parity', {contextFiles: [], runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
+    await runSubagent(capsule('provider parity'), {contextBundle: emptyBundle, runtime: {model: noopModel, selector: 'openai:worker', providerName: 'openai', capabilities: {reportsCacheUsage: true, supportsPromptCacheKey: true, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: true}, requestOptions: {providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}}}, profile});
     expect(captured).toMatchObject({providerOptions: {openai: {promptCacheKey: 'key'}}, headers: {'x-test': 'yes'}, maxRetries: 1, maxOutputTokens: 2048});
   });
 
@@ -574,7 +578,7 @@ describe('subagent V2 boundary', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    await runSubagent('reasoning override', {contextFiles: [], runtime: {
+    await runSubagent(capsule('reasoning override'), {contextBundle: emptyBundle, runtime: {
       model: noopModel, selector: 'zai:glm-5.3', providerName: 'zai',
       capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true},
       requestOptions: {reasoning: 'high'},
@@ -590,7 +594,7 @@ describe('subagent V2 boundary', () => {
     });
     vi.resetModules();
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
-    await runSubagent('unsupported protocol', {contextFiles: [], runtime: {
+    await runSubagent(capsule('unsupported protocol'), {contextBundle: emptyBundle, runtime: {
       model: noopModel, selector: 'local:m', providerName: 'local',
       capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: false},
       requestOptions: {},
