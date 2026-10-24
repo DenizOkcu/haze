@@ -1,6 +1,6 @@
 # src/cli/commands/streaming/AGENTS.md
 
-Last updated: 2026-10-24 (class-aware streamIdleTimeoutMs idle-stall window).
+Last updated: 2026-10-24 for the 1.6.0 release (class-aware streamIdleTimeoutMs idle-stall window).
 
 Helpers for `src/cli/commands/streaming.ts`.
 

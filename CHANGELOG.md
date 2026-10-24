@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 - 2026-10-24
+
+Class-aware idle-stream stall windows so patient local models are not mistaken for dead streams.
+
+### Added
+
+- `streamIdleTimeoutMs` setting (integer milliseconds, 1s–24h, loud parse validation): how long the model stream may emit nothing before the attempt aborts and retries from the salvaged step while the shared model-retry pool lasts. Unset resolves per provider class in `prepareAttempt` — 5 minutes for hosted endpoints, 30 minutes for loopback/local inference servers (LM Studio, Ollama), whose prompt ingestion and hidden reasoning emit no stream parts at all: local servers send no SSE keepalives, so a healthy busy model is byte-identical to a dead stream, and re-sending the identical request would discard the prefill work only to stall again. The `timeout` and `retry` events plus the retry/pause system messages report the effective window instead of a hardcoded constant.
+
 ## 1.5.1 - 2026-10-07
 
 Terminal transcript replay on resize and capability-aware reasoning effort.

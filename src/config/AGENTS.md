@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-10-24 (streamIdleTimeoutMs tunable).
+Last updated: 2026-10-24 for the 1.6.0 release (streamIdleTimeoutMs tunable).
 
 Runtime configuration, paths, context files, and provider/server settings.
 

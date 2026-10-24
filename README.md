@@ -2,7 +2,14 @@
 
 A minimal LLM harness for your terminal.
 
-## What's new in 1.5.1
+## What's new in 1.6.0
+
+haze 1.6.0 stops mistaking patient local models for dead streams:
+
+- Idle-stream stall windows are now class-aware: hosted endpoints keep the 5-minute window, while loopback/local inference servers (LM Studio, Ollama) get 30 minutes — their prompt ingestion and hidden reasoning emit no stream output at all, so the old fixed window aborted healthy models mid-work and burned the retry pool re-doing prefill.
+- The new `streamIdleTimeoutMs` setting overrides the window explicitly (integer milliseconds, 1s–24h). The `timeout`/`retry` events and the stall system messages report the effective window.
+
+### Highlights from 1.5.1
 
 haze 1.5.1 improves terminal resizing and reasoning-effort compatibility:
 

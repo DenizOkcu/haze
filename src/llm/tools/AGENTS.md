@@ -1,6 +1,6 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-10-24 (grep bundled-binary fallback note).
+Last updated: 2026-10-24 for the 1.6.0 release (grep bundled-binary fallback note).
 
 Implementation helpers for haze built-in tools.
 
