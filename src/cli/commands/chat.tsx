@@ -439,7 +439,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         const message = error instanceof Error ? error.message : String(error);
         setSettingsError(message);
         if (!/^\/(?:settings\s+(?:open|edit)|help|exit|quit)\b/i.test(value.trim())) {
-          setMessages(messages => [...messages, {role: 'system', text: `${message}\nRepair settings, then retry. /settings open, /help, and /exit remain available.`}]);
+          setMessages(messages => [...messages, {role: 'system', text: `${message}\nRepair settings, then retry. /settings edit (or /settings open), /help, and /exit remain available.`}]);
           return;
         }
       }
@@ -492,6 +492,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         return text;
       },
       viewInPager: terminalControl.viewInPager,
+      editFileInEditor: terminalControl.editFileInEditor,
       refreshSkills,
       openPluginPicker,
       refreshContextFiles: async () => {

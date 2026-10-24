@@ -50,6 +50,8 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/logs'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/lsp'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/model list'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/settings edit'));
   });
 
   it('opens the plugin picker from bare /plugin and /kit, or prints usage headless', async () => {
@@ -112,6 +114,33 @@ describe('handleSlashCommand', () => {
     expect(openPathSpy).toHaveBeenCalledTimes(1);
     expect(openPathSpy.mock.calls[0]?.[0]).toContain('settings.json');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Opened settings file'));
+  });
+
+  it('edits the settings file in the terminal editor for /settings edit', async () => {
+    openPathSpy.mockClear();
+    const editFileInEditor = vi.fn(async () => true);
+    const ctx = mockContext({editFileInEditor});
+    expect(await handleSlashCommand('/settings edit', ctx)).toBe('handled');
+    expect(editFileInEditor).toHaveBeenCalledTimes(1);
+    expect(editFileInEditor.mock.calls[0]?.[0]).toContain('settings.json');
+    expect(openPathSpy).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Edited settings file'));
+  });
+
+  it('falls back to the OS default app for /settings edit without a configured editor', async () => {
+    openPathSpy.mockClear();
+    const ctx = mockContext({editFileInEditor: vi.fn(async () => false)});
+    expect(await handleSlashCommand('/settings edit', ctx)).toBe('handled');
+    expect(openPathSpy).toHaveBeenCalledTimes(1);
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('No $VISUAL/$EDITOR configured'));
+  });
+
+  it('falls back to the OS default app for /settings edit without the editor handoff', async () => {
+    openPathSpy.mockClear();
+    const ctx = mockContext();
+    expect(await handleSlashCommand('/settings edit', ctx)).toBe('handled');
+    expect(openPathSpy).toHaveBeenCalledTimes(1);
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Editor handoff unavailable'));
   });
 
   it('enters model mode for /model', async () => {

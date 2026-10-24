@@ -45,7 +45,7 @@ describe('handleSlashCommand /settings open', () => {
   it('does not rewrite the settings file when it already exists', async () => {
     await fs.writeJson(tmpSettings, {provider: 'openrouter'});
     mocks.writeSettings.mockClear();
-    const ctx = mockContext();
+    const ctx = mockContext({editFileInEditor: vi.fn(async () => true)});
     expect(await handleSlashCommand('/settings edit', ctx)).toBe('handled');
     expect(mocks.writeSettings).not.toHaveBeenCalled();
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining(tmpSettings));

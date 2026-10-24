@@ -84,8 +84,9 @@ import {randomUUID} from 'node:crypto';
  * `suspendTerminal` affordances for ChatScreen: run a fullscreen child
  * ($EDITOR, pager) with the terminal handed over, then restore Ink state and
  * force a full redraw. `composeInEditor` returns the composed text (or
- * undefined when no editor is configured / nothing was typed); `viewInPager`
- * returns whether a pager actually ran.
+ * undefined when no editor is configured / nothing was typed); `editFileInEditor`
+ * opens an existing file and returns false when no editor is configured;
+ * `viewInPager` returns whether a pager actually ran.
  */
 export function useTerminalControl() {
   const {suspendTerminal} = useApp();
@@ -108,6 +109,15 @@ export function useTerminalControl() {
     }
   }, [suspendTerminal]);
 
+  const editFileInEditor = useCallback(async (file: string): Promise<boolean> => {
+    const editor = resolveEditorCommand();
+    if (editor === false) return false;
+    await suspendTerminal(async () => {
+      await runSuspendedChild({command: editor.command, args: [...editor.args, file]});
+    });
+    return true;
+  }, [suspendTerminal]);
+
   const viewInPager = useCallback(async (text: string): Promise<boolean> => {
     if (screenReader) return false;
     const pager = resolvePager(text, rows);
@@ -118,5 +128,5 @@ export function useTerminalControl() {
     return true;
   }, [rows, screenReader, suspendTerminal]);
 
-  return {composeInEditor, viewInPager};
+  return {composeInEditor, editFileInEditor, viewInPager};
 }
