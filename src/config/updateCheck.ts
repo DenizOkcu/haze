@@ -1,6 +1,6 @@
 import {execFile as execFileCallback} from 'node:child_process';
 import {promisify} from 'node:util';
-import fs from 'fs-extra';
+import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {HAZE_DIR} from './paths.js';
 import {isNewer} from '../utils/version.js';
@@ -36,8 +36,8 @@ async function defaultExecVersion(packageName: string, options: {timeout: number
 }
 
 async function defaultReadStore(file: string): Promise<UpdateCheckStore> {
-  if (await fs.pathExists(file)) await tightenPrivateFile(file);
-  return fs.readJson(file).catch(() => ({}));
+  if (await pathExists(file)) await tightenPrivateFile(file);
+  return readJson(file).catch(() => ({})) as Promise<UpdateCheckStore>;
 }
 
 async function defaultWriteStore(file: string, store: UpdateCheckStore): Promise<void> {

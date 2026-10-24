@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import {pathExists} from '../../utils/fs.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {SETTINGS_FILE, writeSettings, type HazeSettings} from '../../config/settings.js';
 import {openPath} from '../../utils/openPath.js';
@@ -53,7 +53,7 @@ type SlashCommand = {
 };
 
 async function ensureSettingsFile(settings: HazeSettings) {
-  if (!await fs.pathExists(SETTINGS_FILE)) await writeSettings(settings);
+  if (!await pathExists(SETTINGS_FILE)) await writeSettings(settings);
   return SETTINGS_FILE;
 }
 

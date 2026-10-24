@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
@@ -227,8 +227,8 @@ function settingsReadError(error: unknown): Error {
 
 export async function readSettings(): Promise<HazeSettings> {
   try {
-    if (await fs.pathExists(SETTINGS_FILE)) await tightenPrivateFile(SETTINGS_FILE);
-    const raw = await fs.readJson(SETTINGS_FILE);
+    if (await pathExists(SETTINGS_FILE)) await tightenPrivateFile(SETTINGS_FILE);
+    const raw = await readJson(SETTINGS_FILE);
     return settingsSchema.parse(raw) as HazeSettings;
   } catch (error) {
     const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;

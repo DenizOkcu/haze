@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {clearTasks, generateTaskId, getTasksFilePath, loadTasks, saveTasks} from '../../src/core/tasks/taskStorage.js';

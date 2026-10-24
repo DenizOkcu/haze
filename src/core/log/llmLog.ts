@@ -1,5 +1,5 @@
 import path from 'node:path';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {ModelMessage} from 'ai';
 import type {ContextBreakdown} from '../agent/contextBudget.js';

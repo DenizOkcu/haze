@@ -1,5 +1,6 @@
 import {generateObject} from 'ai';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {ensureDir, move, pathExists} from '../../utils/fs.js';
 import path from 'node:path';
 import YAML from 'yaml';
 import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
@@ -258,9 +259,9 @@ async function skillTargetRoot(input: CreateSkillInput): Promise<{root: string; 
   if (input.scope !== 'project') return {root: GLOBAL_SKILLS_DIR, source: 'global'};
   const cwd = path.resolve(input.cwd ?? process.cwd());
   const hazeDir = path.join(cwd, '.haze');
-  if (await fs.pathExists(hazeDir)) await confinedResolve(cwd, hazeDir, '.haze', 'workspace');
+  if (await pathExists(hazeDir)) await confinedResolve(cwd, hazeDir, '.haze', 'workspace');
   const root = path.join(hazeDir, 'skills');
-  await fs.ensureDir(root);
+  await ensureDir(root);
   await confinedResolve(cwd, root, '.haze/skills', 'workspace');
   return {root, source: 'project'};
 }
@@ -280,19 +281,19 @@ export async function createSkill(input: CreateSkillInput) {
   const skillFile = path.join(dir, 'SKILL.md');
   // Never populate a pre-existing directory: it may contain symlinks planted by
   // repository content, and creation is expected to be new and atomic in scope.
-  if (await fs.pathExists(dir)) throw new Error(`Skill already exists: ${finalName}`);
-  await fs.ensureDir(dir);
-  if (await fs.pathExists(skillFile)) throw new Error(`Skill already exists: ${finalName}`);
+  if (await pathExists(dir)) throw new Error(`Skill already exists: ${finalName}`);
+  await ensureDir(dir);
+  if (await pathExists(skillFile)) throw new Error(`Skill already exists: ${finalName}`);
 
   for (const generatedFile of generated.files) {
     const safePath = assertSafeGeneratedFile(generatedFile.path);
     const absolutePath = path.join(dir, safePath);
-    await fs.ensureDir(path.dirname(absolutePath));
+    await ensureDir(path.dirname(absolutePath));
     const content = safePath === 'SKILL.md' ? withSkillName(withStandardRequirements(generatedFile.content), finalName) : generatedFile.content;
     await fs.writeFile(absolutePath, content, 'utf8');
   }
 
-  if (!(await fs.pathExists(skillFile))) {
+  if (!(await pathExists(skillFile))) {
     const fallback = fallbackSkill(normalizedInput);
     await fs.writeFile(skillFile, fallback.files[0]!.content, 'utf8');
   }
@@ -301,8 +302,8 @@ export async function createSkill(input: CreateSkillInput) {
   if (!loaded) throw new Error('Generated skill is missing SKILL.md');
   if (loaded.name !== finalName) {
     const nextDir = path.join(root, loaded.name);
-    if (await fs.pathExists(nextDir)) throw new Error(`Skill already exists: ${loaded.name}`);
-    await fs.move(dir, nextDir);
+    if (await pathExists(nextDir)) throw new Error(`Skill already exists: ${loaded.name}`);
+    await move(dir, nextDir);
     return {name: loaded.name, dir: nextDir, file: path.join(nextDir, 'SKILL.md')};
   }
   return {name: finalName, dir, file: skillFile};

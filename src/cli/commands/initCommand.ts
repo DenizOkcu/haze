@@ -1,4 +1,5 @@
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {pathExists} from '../../utils/fs.js';
 import path from 'node:path';
 import {MAX_CONTEXT_FILE_CHARS} from '../../config/contextFiles.js';
 import {buildInitPrompt} from '../../llm/initPrompt.js';
@@ -8,7 +9,7 @@ export async function handleInitCommand(ctx: CommandContext): Promise<CommandRes
   await ctx.runAgentTurn(buildInitPrompt(), '/init');
   await ctx.refreshContextFiles();
   const agentsMdPath = path.join(process.cwd(), 'AGENTS.md');
-  if (await fs.pathExists(agentsMdPath)) {
+  if (await pathExists(agentsMdPath)) {
     const content = await fs.readFile(agentsMdPath, 'utf8');
     const chars = content.length;
     const lines = content.split('\n').length;

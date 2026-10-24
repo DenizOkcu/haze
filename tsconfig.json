@@ -10,6 +10,10 @@
     // preserveSymlinks every inferred export type referencing a dependency
     // becomes "not portable" against the store path and typecheck fails.
     "preserveSymlinks": true,
+    // Node globals (process, Buffer, NodeJS namespace) are declared by
+    // @types/node; include it explicitly rather than relying on another
+    // package's types pulling it in transitively.
+    "types": ["node"],
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",

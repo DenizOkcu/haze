@@ -1,4 +1,5 @@
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {pathExists} from '../utils/fs.js';
 import path from 'node:path';
 import YAML from 'yaml';
 import type {LoadedSkill, LoadedSkillReference, SkillFrontmatter, SkillSource} from './types.js';
@@ -69,7 +70,7 @@ async function loadReference(dir: string, referencePath: string): Promise<Loaded
 
 export async function loadSkill(dir: string, source: SkillSource = 'global'): Promise<LoadedSkill | null> {
   const skillPath = path.join(dir, 'SKILL.md');
-  if (!(await fs.pathExists(skillPath))) return null;
+  if (!(await pathExists(skillPath))) return null;
   const realSkillPath = await confinedResolve(dir, skillPath, 'SKILL.md', 'skill directory');
   if (isProtectedSecretPath(realSkillPath)) throw new Error('SKILL.md is a protected secret file');
   const stat = await fs.stat(realSkillPath);

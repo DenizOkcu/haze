@@ -1,4 +1,5 @@
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {pathExists, ensureDir} from '../utils/fs.js';
 import path from 'node:path';
 import {GLOBAL_SKILLS_DIR} from '../config/paths.js';
 import {loadSkill} from './SkillLoader.js';
@@ -12,7 +13,7 @@ async function loadRoot(
   source: SkillSource,
   errors: SkillRegistry['errors'],
 ): Promise<LoadedSkill[]> {
-  if (!(await fs.pathExists(root))) return [];
+  if (!(await pathExists(root))) return [];
   if (source === 'project') {
     try {
       await confinedResolve(containmentRoot, root, '.haze/skills', 'workspace');
@@ -56,7 +57,7 @@ export function resolveSkillCandidates(
 
 export async function loadSkillRegistry(cwd = process.cwd()): Promise<SkillRegistry> {
   const errors: SkillRegistry['errors'] = [];
-  await fs.ensureDir(GLOBAL_SKILLS_DIR);
+  await ensureDir(GLOBAL_SKILLS_DIR);
   const global = await loadRoot(GLOBAL_SKILLS_DIR, GLOBAL_SKILLS_DIR, 'global', errors);
   const projectRoot = path.join(cwd, '.haze', 'skills');
   const project = await loadRoot(projectRoot, cwd, 'project', errors);

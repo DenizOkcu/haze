@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import {remove} from '../../../utils/fs.js';
 import {loadSkillRegistry} from '../../../skills/SkillRegistry.js';
 import {createSkill, toSkillDirName} from '../../../skills/builder/SkillBuilder.js';
 import type {SkillSource} from '../../../skills/types.js';
@@ -102,7 +102,7 @@ export function createSkillsWizardHandlers(deps: WizardDispatchDeps, ctx: Wizard
     if (result.message) showMessage(result.message);
     if (result.selectedName === undefined) setSelectedSkillName(undefined);
     if (result.mode === 'chat') setMode('chat');
-    if (result.removedDir) await fs.remove(result.removedDir);
+    if (result.removedDir) await remove(result.removedDir);
     if (result.settingsPatch) await ctx.applySettings(result.settingsPatch);
     if (result.removedDir) await deps.refreshSkills();
   }

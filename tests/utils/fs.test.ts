@@ -1,8 +1,8 @@
 import {afterEach, beforeEach, describe, it, expect} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
-import {walkDir} from '../../src/utils/fs.js';
+import {ensureDir, move, pathExists, readJson, remove, walkDir} from '../../src/utils/fs.js';
 
 describe('walkDir', () => {
   let tmp: string;
@@ -128,5 +128,64 @@ describe('walkDir', () => {
     // entry itself but includes its children plus later top-level siblings.
     const pageTwo = await walkDir(tmp, {recursive: true, cursor: 'src'});
     expect(pageTwo.map(entry => entry.path)).toEqual([path.join('src', 'a.ts'), path.join('src', 'b.ts'), 'z.txt']);
+  });
+});
+
+describe('fs helpers', () => {
+  let tmp: string;
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-fs-helpers-'));
+  });
+
+  afterEach(async () => {
+    await fs.remove(tmp);
+  });
+
+  it('pathExists is false for missing paths and true for existing ones', async () => {
+    const file = path.join(tmp, 'settings.json');
+    expect(await pathExists(file)).toBe(false);
+    await fs.writeFile(file, '{}');
+    expect(await pathExists(file)).toBe(true);
+  });
+
+  it('readJson parses content and tolerates a UTF-8 BOM', async () => {
+    const file = path.join(tmp, 'data.json');
+    await fs.writeFile(file, JSON.stringify({answer: 42}));
+    expect(await readJson(file)).toEqual({answer: 42});
+    await fs.writeFile(file, `\uFEFF${JSON.stringify({bom: true})}`);
+    expect(await readJson(file)).toEqual({bom: true});
+  });
+
+  it('readJson throws loudly on malformed JSON', async () => {
+    const file = path.join(tmp, 'broken.json');
+    await fs.writeFile(file, '{not json');
+    await expect(readJson(file)).rejects.toThrow();
+  });
+
+  it('ensureDir creates parents and tolerates existing directories', async () => {
+    const dir = path.join(tmp, 'a', 'b');
+    await ensureDir(dir);
+    await ensureDir(dir);
+    expect(await pathExists(dir)).toBe(true);
+  });
+
+  it('remove deletes trees and ignores missing paths', async () => {
+    const tree = path.join(tmp, 'tree');
+    await fs.ensureDir(tree);
+    await fs.writeFile(path.join(tree, 'leaf.txt'), 'x');
+    await remove(tree);
+    await remove(tree);
+    expect(await pathExists(tree)).toBe(false);
+  });
+
+  it('move renames into place', async () => {
+    const src = path.join(tmp, 'src');
+    const dest = path.join(tmp, 'dest');
+    await fs.ensureDir(src);
+    await fs.writeFile(path.join(src, 'SKILL.md'), 'x');
+    await move(src, dest);
+    expect(await pathExists(src)).toBe(false);
+    expect(await pathExists(path.join(dest, 'SKILL.md'))).toBe(true);
   });
 });

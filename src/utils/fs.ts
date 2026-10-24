@@ -1,5 +1,43 @@
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
 import path from 'node:path';
+import type {Dirent} from 'node:fs';
+
+/** True when the path exists; false for any error (missing path, permissions, bad root). */
+export async function pathExists(file: string): Promise<boolean> {
+  try {
+    await fs.access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Parse a JSON file, tolerating a UTF-8 BOM; malformed JSON still throws loudly. */
+export async function readJson(file: string): Promise<unknown> {
+  const raw = await fs.readFile(file, 'utf8');
+  return JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
+}
+
+/** Create a directory (and parents) if missing; never throws when it already exists. */
+export async function ensureDir(dir: string): Promise<void> {
+  await fs.mkdir(dir, {recursive: true});
+}
+
+/** Remove a file or directory tree; a missing path is not an error. */
+export function remove(target: string): Promise<void> {
+  return fs.rm(target, {recursive: true, force: true});
+}
+
+/** Rename, falling back to copy+delete across filesystems. Callers guard destination collisions. */
+export async function move(src: string, dest: string): Promise<void> {
+  try {
+    await fs.rename(src, dest);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+    await fs.cp(src, dest, {recursive: true});
+    await fs.rm(src, {recursive: true, force: true});
+  }
+}
 
 // Repository metadata and dependency trees are never useful discovery targets.
 // Skip both even when a project has no `.gitignore`: this keeps traversal bounded
@@ -45,14 +83,14 @@ export async function walkDir(root: string, options: WalkOptions = {}): Promise<
   const cursorSegments = cursor ? cursor.split(/[\\/]/).filter(Boolean) : [];
   let collecting = cursor == null;
 
-  if (!(await fs.pathExists(root))) return result;
+  if (!(await pathExists(root))) return result;
 
   async function readSortedChildren(dir: string) {
     const entries = await fs.readdir(dir, {withFileTypes: true});
     return entries.filter(entry => !SKIP_ENTRIES.has(entry.name)).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function toWalkEntry(dir: string, dirent: fs.Dirent): WalkEntry {
+  function toWalkEntry(dir: string, dirent: Dirent): WalkEntry {
     const absolutePath = path.join(dir, dirent.name);
     return {
       path: path.relative(root, absolutePath),

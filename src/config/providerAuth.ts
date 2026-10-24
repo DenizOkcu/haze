@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {z} from 'zod';
 import {HAZE_DIR} from './paths.js';
@@ -34,8 +34,8 @@ function authReadError(error: unknown): Error {
 
 export async function readProviderAuthStore(): Promise<ProviderAuthStore> {
   try {
-    if (await fs.pathExists(PROVIDER_AUTH_FILE)) await tightenPrivateFile(PROVIDER_AUTH_FILE);
-    const raw = await fs.readJson(PROVIDER_AUTH_FILE);
+    if (await pathExists(PROVIDER_AUTH_FILE)) await tightenPrivateFile(PROVIDER_AUTH_FILE);
+    const raw = await readJson(PROVIDER_AUTH_FILE);
     return providerAuthStoreSchema.parse(raw) as ProviderAuthStore;
   } catch (error) {
     const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;

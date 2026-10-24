@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, abortableDelay} from '../../src/cli/commands/streaming/turnRuntime.js';

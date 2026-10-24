@@ -76,7 +76,8 @@ import {useCallback} from 'react';
 import {useApp, useIsScreenReaderEnabled, useWindowSize} from 'ink';
 import os from 'node:os';
 import path from 'node:path';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {remove} from '../../utils/fs.js';
 import {randomUUID} from 'node:crypto';
 
 /**
@@ -103,7 +104,7 @@ export function useTerminalControl() {
       const text = (await fs.readFile(file, 'utf8')).trim();
       return text || undefined;
     } finally {
-      await fs.remove(file).catch(() => undefined);
+      await remove(file).catch(() => undefined);
     }
   }, [suspendTerminal]);
 

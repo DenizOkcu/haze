@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, it, expect} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {readInputHistory, writeInputHistory, addInputHistoryItem} from '../../src/config/inputHistory.js';

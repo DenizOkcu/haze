@@ -1,4 +1,5 @@
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {pathExists} from '../utils/fs.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -80,7 +81,7 @@ async function readContextCandidates(candidates: string[], seen = new Set<string
     const absolute = path.resolve(candidate);
     if (seen.has(absolute)) continue;
     seen.add(absolute);
-    if (!await fs.pathExists(absolute)) continue;
+    if (!await pathExists(absolute)) continue;
     const stat = await fs.stat(absolute).catch(() => null);
     if (!stat?.isFile()) continue;
     const readablePath = allowedRoot

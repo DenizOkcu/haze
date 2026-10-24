@@ -1,7 +1,7 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 
 vi.mock('../../src/llm/webFetch.js', () => ({
   fetchUrlContent: vi.fn(),

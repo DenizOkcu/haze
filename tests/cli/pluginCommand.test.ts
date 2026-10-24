@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {execFile} from 'node:child_process';

@@ -1,7 +1,7 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import * as grepRunner from '../../src/llm/tools/grepRunner.js';
 import {secretSearchExcludeGlobs} from '../../src/core/safety/secretPaths.js';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';

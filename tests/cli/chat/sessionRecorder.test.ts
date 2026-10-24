@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it} from 'vitest';
-import fs from 'fs-extra';
+import fs from '../../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {createSessionRecorder} from '../../../src/cli/chat/sessionRecorder.js';

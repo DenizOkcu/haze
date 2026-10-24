@@ -1,4 +1,4 @@
-import fs from 'fs-extra';
+import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {HAZE_DIR} from './paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
@@ -15,8 +15,8 @@ function normalizeHistory(value: unknown): string[] {
 // The storage path is injectable so tests isolate via temp files instead of
 // production switches on test-env globals (CR-011).
 export async function readInputHistory(file = INPUT_HISTORY_FILE): Promise<string[]> {
-  if (await fs.pathExists(file)) await tightenPrivateFile(file);
-  const data = await fs.readJson(file).catch(() => []);
+  if (await pathExists(file)) await tightenPrivateFile(file);
+  const data = await readJson(file).catch(() => []);
   return normalizeHistory(data).slice(-MAX_HISTORY_ITEMS);
 }
 

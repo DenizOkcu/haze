@@ -2,7 +2,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import nativeFs from 'node:fs/promises';
 import * as walker from '../../src/utils/fs.js';
 import * as boundedRead from '../../src/core/io/boundedRead.js';
-import fs from 'fs-extra';
+import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';

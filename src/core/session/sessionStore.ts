@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import type {Stats} from 'node:fs';
-import fs from 'fs-extra';
+import fs from 'node:fs/promises';
+import {pathExists} from '../../utils/fs.js';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
@@ -128,7 +129,7 @@ export async function findSession(id: string, cwd = process.cwd(), sessionsDir =
   // single filenames if a session is moved between operating systems.
   if (!normalizedId || normalizedId !== id || normalizedId === '.' || normalizedId === '..' || normalizedId.includes('/') || normalizedId.includes('\\') || path.isAbsolute(normalizedId)) return undefined;
   const file = sessionFile(normalizedId, cwd, sessionsDir);
-  if (!await fs.pathExists(file)) return undefined;
+  if (!await pathExists(file)) return undefined;
   return {id: normalizedId, file, cwd: path.resolve(cwd), sessionsDir: path.resolve(sessionsDir)};
 }
 
@@ -355,7 +356,7 @@ function parseSessionEntry(value: unknown): SessionEntry {
 
 async function scanSessionEntries(session: HazeSession, onEntry: (entry: SessionEntry) => void): Promise<string[]> {
   const file = validatedSessionFile(session);
-  if (session.deferredWrite && !await fs.pathExists(file)) return [];
+  if (session.deferredWrite && !await pathExists(file)) return [];
   await tightenPrivateFile(file);
   const parseErrors: string[] = [];
   let omittedErrors = 0;
