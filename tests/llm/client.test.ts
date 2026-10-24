@@ -181,7 +181,7 @@ describe('modelWithConfig', () => {
     const runtime = await modelWithConfig();
     const modelArg = runtime!.model as unknown as {headers?: Record<string, string>};
     expect(modelArg.headers).toEqual({
-      'HTTP-Referer': 'https://denizokcu.github.io/haze/',
+      'HTTP-Referer': 'https://github.com/DenizOkcu/haze',
       'X-Title': 'Haze',
     });
   });

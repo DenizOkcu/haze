@@ -38,7 +38,7 @@ export interface ModelRuntimeConfig {
   maxOutputTokens?: number;
 }
 
-const HAZE_SITE_URL = 'https://denizokcu.github.io/haze/';
+const HAZE_SITE_URL = 'https://github.com/DenizOkcu/haze';
 const HAZE_TITLE = 'Haze';
 // The SDK requires a non-empty apiKey even though the OAuth fetch adapter
 // replaces authentication. Generate a non-credential sentinel at runtime so
