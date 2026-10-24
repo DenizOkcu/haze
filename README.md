@@ -2,6 +2,8 @@
 
 A minimal LLM harness for your terminal.
 
+[![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
+
 ## What's new in 1.6.0
 
 haze 1.6.0 stops mistaking patient local models for dead streams:
