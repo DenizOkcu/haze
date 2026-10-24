@@ -16,7 +16,7 @@ export const REASONING_LEVELS: readonly ReasoningLevel[] = ['none', 'minimal', '
  * `none` (reasoning off) or the stored `provider-default` sentinel (written by
  * `/reasoning unset`); key-absent means this default.
  */
-export const DEFAULT_REASONING_LEVEL: ReasoningLevel = 'medium';
+export const DEFAULT_REASONING_LEVEL: ReasoningLevel = 'low';
 
 /** Value the settings file may store: a level or the `provider-default` sentinel. */
 export type StoredReasoningSetting = ReasoningLevel | 'provider-default';

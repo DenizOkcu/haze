@@ -196,7 +196,7 @@ describe('reasoningSuggestions', () => {
 
   it('marks the default level active when the setting is absent', () => {
     const suggestions = reasoningSuggestions({});
-    expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
+    expect(suggestions.find(suggestion => suggestion.value === 'low')?.description).toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
   });
 });

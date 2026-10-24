@@ -208,7 +208,7 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('medium (from settings)'));
     const defaultCtx = mockContext();
     expect(await handleSlashCommand('/reasoning status', defaultCtx)).toBe('handled');
-    expect(defaultCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('medium (default)'));
+    expect(defaultCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('low (default)'));
     const overrideCtx = mockContext({getSessionReasoning: () => 'xhigh'});
     expect(await handleSlashCommand('/reasoning status', overrideCtx)).toBe('handled');
     expect(overrideCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('xhigh (session override)'));

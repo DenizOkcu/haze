@@ -9,7 +9,7 @@ import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, type ReasoningLevel, type 
 export type {ReasoningLevel, StoredReasoningSetting};
 /**
  * Optional, explicitly user-controlled reasoning depth (provider/protocol
- * gated). Absent means the built-in default (`high`); the `provider-default`
+ * gated). Absent means the built-in default (`low`); the `provider-default`
  * sentinel stores an explicit "send no parameter" opt-out.
  */
 const storedReasoningValues: StoredReasoningSetting[] = [...REASONING_LEVELS, REASONING_PROVIDER_DEFAULT];
@@ -89,7 +89,7 @@ export interface HazeSettings {
   mcpServers?: HazeMcpServer[];
   skills?: HazeSkillSetting[];
   subagents?: HazeSubagentSettings;
-  /** Optional reasoning depth; absent means the built-in default (`high`), the `provider-default` sentinel sends no parameter. */
+  /** Optional reasoning depth; absent means the built-in default (`low`), the `provider-default` sentinel sends no parameter. */
   reasoning?: StoredReasoningSetting;
   /** `compact` keeps working context small for models with limited reliable context/tool calling. Default: `standard`. */
   steeringProfile?: 'standard' | 'compact';

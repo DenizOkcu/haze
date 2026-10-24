@@ -78,7 +78,7 @@ it.each(['new', 'resume', 'fork'])('synchronizes reasoning status, picker, and n
   streams = {stdin: new FixtureInput(), stdout: new FixtureOutput(), stderr: new FixtureOutput()};
   fixture.goal.mockResolvedValue({status: 'complete', stopReason: 'completed', cycles: 1, escalations: 0});
   running = chatCommand();
-  await expect.poll(frame).toContain('fixture:fixture-model (medium)');
+  await expect.poll(frame).toContain('fixture:fixture-model (low)');
   await submit('/reasoning xhigh');
   await expect.poll(frame).toContain('fixture:fixture-model (xhigh)');
   expect(fixture.suggestions.mock.calls.at(-1)?.[0].sessionReasoning).toEqual({'fixture:fixture-model': 'xhigh'});
@@ -91,11 +91,11 @@ it.each(['new', 'resume', 'fork'])('synchronizes reasoning status, picker, and n
   } else {
     await submit(kind === 'new' ? '/new' : `/resume ${source.id}`);
   }
-  await expect.poll(frame).toContain('fixture:fixture-model (medium)');
+  await expect.poll(frame).toContain('fixture:fixture-model (low)');
   expect(fixture.suggestions.mock.calls.at(-1)?.[0].sessionReasoning).toBeUndefined();
   await submit('/reasoning');
   await expect.poll(() => fixture.suggestions.mock.calls.at(-1)?.[0].mode).toBe('reasoning');
-  expect(fixture.suggestions.mock.results.at(-1)?.value).toContainEqual(expect.objectContaining({value: 'medium', description: 'moderate reasoning · active'}));
+  expect(fixture.suggestions.mock.results.at(-1)?.value).toContainEqual(expect.objectContaining({value: 'low', description: 'light reasoning · active'}));
   streams.stdin.write('\x1b');
   await expect.poll(() => fixture.suggestions.mock.calls.at(-1)?.[0].mode).toBe('chat');
   await submit('synthetic follow-up');

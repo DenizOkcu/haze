@@ -239,7 +239,7 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.capabilities.supportsTextVerbosity).toBe(false);
   });
 
-  it('applies the default reasoning level medium when the setting is absent', async () => {
+  it('applies the default reasoning level low when the setting is absent', async () => {
     await writeSettings({
       providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
       provider: 'openai',
@@ -247,7 +247,7 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig} = await loadClient();
     const runtime = await modelWithConfig();
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'low'});
   });
 
   it('gates reasoning-effort by endpoint class with an explicit override winning either way', async () => {
@@ -285,9 +285,9 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig, providerRequestSettings} = await loadClient();
     const runtime = await modelWithConfig();
-    // The default medium level resolves to a disabled policy: the parameter is
+    // The default low level resolves to a disabled policy: the parameter is
     // omitted entirely instead of arriving as a coerced 'on'.
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'disabled'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'disabled'});
     const opts = providerRequestSettings(runtime!.config);
     expect(opts.reasoning).toBeUndefined();
     expect('reasoning' in opts).toBe(false);
@@ -301,8 +301,8 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig, providerRequestSettings} = await loadClient();
     const runtime = await modelWithConfig();
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
-    expect(providerRequestSettings(runtime!.config).reasoning).toBe('medium');
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'low'});
+    expect(providerRequestSettings(runtime!.config).reasoning).toBe('low');
   });
 
   it('resolves the requested reasoning level into an effective policy and the transport setting', async () => {
@@ -375,7 +375,7 @@ describe('modelWithConfig', () => {
     expect('reasoning' in opts).toBe(false);
   });
 
-  it('applies the default medium when the reasoningOverride is absent', async () => {
+  it('applies the default low when the reasoningOverride is absent', async () => {
     await writeSettings({
       providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
       provider: 'custom',
@@ -383,7 +383,7 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig} = await loadClient();
     const runtime = await modelWithConfig({});
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'medium', effective: 'medium'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'low'});
   });
 
   it('returns all-false capabilities except the reasoning pass-through for an unrelated provider', async () => {

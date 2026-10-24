@@ -31,9 +31,9 @@ describe('OpenAI model reasoning restrictions', () => {
     expect(providerRequestSettings(runtime.config).reasoning).toBe(reasoning);
   });
 
-  it('preserves the medium default and explicit unset', async () => {
+  it('preserves the low default and explicit unset', async () => {
     const defaultRuntime = await runtimeFor('gpt-6.1-sol');
-    expect(providerRequestSettings(defaultRuntime.config).reasoning).toBe('medium');
+    expect(providerRequestSettings(defaultRuntime.config).reasoning).toBe('low');
     const unsetRuntime = await runtimeFor('gpt-6.1-sol', 'provider-default');
     expect(unsetRuntime.config.reasoningPolicy).toMatchObject({requested: undefined, effective: 'disabled'});
     expect(providerRequestSettings(unsetRuntime.config)).not.toHaveProperty('reasoning');

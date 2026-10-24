@@ -117,7 +117,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const selector = modelSelector(selection.provider, name);
   // The full precedence chain lives in one pure resolver
   // (`resolveAttemptReasoning`): run-scoped override → session per-model map →
-  // global settings → built-in default (medium). The stored or session
+  // global settings → built-in default (low). The stored or session
   // `provider-default` sentinel sends no parameter at all. The capability gate
   // in resolveReasoningPolicy is unchanged — nothing forces the parameter onto
   // an unsupported protocol.

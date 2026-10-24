@@ -39,7 +39,7 @@ describe('resolveReasoningChoice (session per-model overrides)', () => {
   it('prefers the session override, then the stored setting, then the default', () => {
     expect(resolveReasoningChoice('xhigh', 'low')).toEqual({setting: 'xhigh', level: 'xhigh', source: 'session'});
     expect(resolveReasoningChoice(undefined, 'low')).toEqual({setting: 'low', level: 'low', source: 'settings'});
-    expect(resolveReasoningChoice(undefined, undefined)).toEqual({setting: undefined, level: 'medium', source: 'default'});
+    expect(resolveReasoningChoice(undefined, undefined)).toEqual({setting: undefined, level: 'low', source: 'default'});
   });
   it('maps the provider-default sentinel to no level from any source', () => {
     expect(resolveReasoningChoice('provider-default', 'low')).toEqual({setting: 'provider-default', level: undefined, source: 'session'});
@@ -48,9 +48,9 @@ describe('resolveReasoningChoice (session per-model overrides)', () => {
 });
 
 describe('resolveReasoningPolicy', () => {
-  it('defaults to medium when nothing is requested', () => {
-    expect(DEFAULT_REASONING_LEVEL).toBe('medium');
-    expect(effectiveRequestedReasoning(undefined)).toBe('medium');
+  it('defaults to low when nothing is requested', () => {
+    expect(DEFAULT_REASONING_LEVEL).toBe('low');
+    expect(effectiveRequestedReasoning(undefined)).toBe('low');
     expect(effectiveRequestedReasoning('provider-default')).toBeUndefined();
     expect(effectiveRequestedReasoning('high')).toBe('high');
   });
