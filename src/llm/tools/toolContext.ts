@@ -10,7 +10,7 @@ import {hazeContext, isHazeToolContext, type HazeToolContext, type PostMutationD
 // (split so type-only importers stop pulling the dedup runtime); re-exported
 // here for the many existing importers.
 export type {HazeToolContext, PostMutationDiagnostics, ToolExecutionContext} from './toolContextState.js';
-export {hazeContext, isHazeToolContext} from './toolContextState.js';
+export {hazeContext} from './toolContextState.js';
 
 /**
  * Turn-scoped tool-call orchestration shared by every built-in tool: in-flight

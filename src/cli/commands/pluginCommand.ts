@@ -4,7 +4,7 @@ import {inspectPlugin, PLUGIN_LIMITS, readJson, safePath} from '../../skills/plu
 import {installPlugin, listPlugins, removePlugin} from '../../skills/plugins/installer.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
-export const PLUGIN_HELP = 'plugin inspect <local-directory> [plugin-name]\nplugin install <local-directory> [plugin-name]\nplugin list\nplugin remove <name>\nPlugins install globally under ~/.haze/plugins and never write workspace content. Installation trusts local instruction content; no scripts, hooks or MCP servers are activated. Clone remote collections locally first. kit is an alias for plugin.';
+const PLUGIN_HELP = 'plugin inspect <local-directory> [plugin-name]\nplugin install <local-directory> [plugin-name]\nplugin list\nplugin remove <name>\nPlugins install globally under ~/.haze/plugins and never write workspace content. Installation trusts local instruction content; no scripts, hooks or MCP servers are activated. Clone remote collections locally first. kit is an alias for plugin.';
 
 async function exists(file: string): Promise<boolean> {
   try { await fs.lstat(file); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }

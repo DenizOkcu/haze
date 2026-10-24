@@ -123,7 +123,7 @@ function failedCheckScope(command: string): string {
 }
 
 /** Stable, non-reversible identity safe to carry in a goal checkpoint. */
-export function validationCheckId(command: string): string {
+function validationCheckId(command: string): string {
   return crypto.createHash('sha256').update(validationCommandKey(command)).digest('hex').slice(0, 16);
 }
 

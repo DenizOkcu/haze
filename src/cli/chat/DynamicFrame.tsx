@@ -14,7 +14,7 @@ export interface FrameSections {
 export interface InputDemand {input: number; suggestions: number}
 
 /** Allocate the entire normal-screen dynamic frame, never Static history. */
-export function allocateFrame(rows: number, columns: number, sections: FrameSections, demand: InputDemand = {input: 1, suggestions: 0}) {
+function allocateFrame(rows: number, columns: number, sections: FrameSections, demand: InputDemand = {input: 1, suggestions: 0}) {
   // Keep normal-screen output below Ink's fullscreen threshold, including long
   // live previews. One-cell terminals still get an editable input row.
   let remaining = Math.max(1, Math.floor(rows) - 1);

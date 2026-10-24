@@ -43,6 +43,7 @@
     "typecheck": "tsc --noEmit",
     "context:report": "node --import tsx src/cli/contextReportCli.ts",
     "eval": "node scripts/run-evals.mjs",
+    "bench:render": "node --expose-gc scripts/ink-render-benchmark.mjs .",
     "release:verify": "node scripts/verify-release-metadata.mjs",
     "haze": "tsx src/cli/index.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high && npm run release:verify"

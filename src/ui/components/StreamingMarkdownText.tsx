@@ -4,7 +4,7 @@ import {MarkdownText} from './MarkdownText.js';
 import {theme} from '../theme.js';
 
 /** Parse the whole active block before splitting its formatted terminal output into rows. */
-export function renderMarkdownRows(content: string, width: number): string[] {
+function renderMarkdownRows(content: string, width: number): string[] {
   if (!content) return [];
   const output = renderToString(<MarkdownText content={content} width={width} />, {columns: Math.max(1, width)});
   // Block margins belong to the settled transcript, not the bottom of a live

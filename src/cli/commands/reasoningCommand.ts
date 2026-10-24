@@ -13,11 +13,8 @@ import type {CommandContext, CommandResult} from './commands.js';
  * global `reasoning` setting, then the built-in default.
  */
 
-/** Picker value that stops sending a reasoning parameter (also accepted as `off` on the slash path). */
-export const REASONING_UNSET = 'unset';
-
 /** Picker/slash value that removes the session override and inherits the saved/default level. */
-export const REASONING_RESET = 'reset';
+const REASONING_RESET = 'reset';
 
 const LEVELS_LIST = REASONING_LEVELS.join(', ');
 
