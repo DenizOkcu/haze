@@ -93,7 +93,10 @@ async function loadStreaming(config: MocksConfig) {
   const responseMessages = config.responseMessages ?? [];
   let agentCallCount = 0;
 
-  vi.doMock('../../../src/llm/client.js', () => ({
+  vi.doMock('../../../src/llm/client.js', async (importOriginal) => ({
+    // Spread the actual module so non-mocked exports (e.g. isLocalProviderUrl,
+    // used by attemptSetup for the local idle-window default) stay real.
+    ...(await importOriginal<typeof import('../../../src/llm/client.js')>()),
     modelWithConfig: async () => config.modelHandle ?? undefined,
     providerRequestSettings: () => ({}),
   }));
@@ -1130,6 +1133,38 @@ describe('runAgentTurn: model-stream idle timeout', () => {
     expect(retryMessages.some(message => message.role === 'tool')).toBe(true);
     expect(outcome).toMatchObject({status: 'complete'});
     expect(outcome.resume).toBeUndefined();
+  });
+
+  it('gives loopback/local providers the patient 30-minute idle window by default', async () => {
+    vi.useFakeTimers();
+    const salvagedStep = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'shell', output: {ok: true, stdout: 'src'}}]},
+    ];
+    // Local inference servers emit no bytes during prompt ingestion/hidden
+    // reasoning, so the built-in idle window is much longer for them.
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {
+        model: {modelId: 'test'},
+        config: {providerName: 'lmstudio', baseURL: 'http://localhost:1234/v1', modelName: 'm', cacheKey: 'k', capabilities: {}},
+      },
+      stallCalls: [1],
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'shell'}], response: {messages: salvagedStep}}],
+      callStreams: [
+        [
+          {type: 'tool-call', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}},
+          {type: 'tool-result', toolCallId: 't1', toolName: 'shell', input: {command: 'ls'}, output: {ok: true, stdout: 'src'}},
+        ],
+        [{type: 'text-delta', text: 'The inspection finished and the requested summary is complete.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    const promise = runAgentTurn('inspect the project', undefined, [], cb);
+    await vi.runAllTimersAsync();
+    const outcome = await promise;
+    expect(cb.events.find(event => event.type === 'timeout')).toMatchObject({phase: 'model-stream', timeoutMs: 30 * 60_000, retryEligible: true});
+    expect(cb.messages.some(m => m.role === 'system' && /Model stream stalled for 30 minutes; retrying attempt 1\/2/.test(m.text))).toBe(true);
+    expect(outcome).toMatchObject({status: 'complete'});
   });
 
   it('routes an aborted terminated response through idle-stall recovery instead of tool-only completion', async () => {

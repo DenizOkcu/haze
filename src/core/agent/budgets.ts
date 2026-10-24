@@ -3,7 +3,27 @@ import type {ToolSet} from 'ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16384;
 /** Keep generated file payloads comfortably below a model's output-token ceiling. */
 export const WRITE_FILE_CHUNK_BYTES = 16 * 1024;
+/** Built-in idle-stream stall window for hosted endpoints (`streamIdleTimeoutMs` setting overrides). */
 export const IDLE_TIMEOUT_MS = 5 * 60_000;
+/**
+ * Built-in idle-stream stall window for loopback/local inference servers.
+ * Their time-to-first-token includes prompt ingestion and hidden reasoning
+ * with zero bytes emitted — LM Studio and Ollama send no SSE keepalives — so
+ * a healthy local model is indistinguishable from a dead stream for minutes.
+ * Aborting and retrying would discard the prefill work and re-do it, so the
+ * local default is deliberately patient; a genuine local hang is better
+ * resolved by the user than by three wasted re-prefills.
+ */
+export const LOCAL_IDLE_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * Effective idle-stream stall window: the explicit `streamIdleTimeoutMs`
+ * setting wins; otherwise local inference servers get the patient local
+ * default and hosted endpoints the hosted one.
+ */
+export function resolveStreamIdleTimeoutMs(setting: number | undefined, localProvider: boolean): number {
+  return setting ?? (localProvider ? LOCAL_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS);
+}
 /** Default per-tool execution deadline; an uncooperative tool cannot defer the turn indefinitely (RH-004). */
 export const DEFAULT_TOOL_DEADLINE_MS = 10 * 60_000;
 /** Subagents legitimately run long; give their wrapper a larger deadline. */

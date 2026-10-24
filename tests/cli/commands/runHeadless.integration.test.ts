@@ -13,7 +13,10 @@ interface FakePart {
 }
 
 async function loadRunHeadless(parts: FakePart[], responseMessages: unknown[] = [], responseError?: Error) {
-  vi.doMock('../../../src/llm/client.js', () => ({
+  vi.doMock('../../../src/llm/client.js', async (importOriginal) => ({
+    // Spread the actual module so non-mocked exports (e.g. isLocalProviderUrl,
+    // used by attemptSetup for the local idle-window default) stay real.
+    ...(await importOriginal<typeof import('../../../src/llm/client.js')>()),
     modelWithConfig: async () => ({
       model: {modelId: 'test'},
       config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}},

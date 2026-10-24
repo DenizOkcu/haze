@@ -144,4 +144,34 @@ describe('createStreamStallGuard retry pool', () => {
     vi.advanceTimersByTime(5 * 60_000);
     expect(guard.retryEligible).toBe(false);
   });
+
+  it('honours a custom effective window (timeoutMs) instead of the 5-minute default', () => {
+    const {base} = guardDeps({timeoutMs: 60_000});
+    const guard = createStreamStallGuard(base);
+    guard.rearm();
+    vi.advanceTimersByTime(59_999);
+    expect(base.controller.signal.aborted).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(base.controller.signal.aborted).toBe(true);
+  });
+
+  it('keeps the 5-minute default when no window is provided', () => {
+    const {base} = guardDeps();
+    const guard = createStreamStallGuard(base);
+    guard.rearm();
+    vi.advanceTimersByTime(5 * 60_000 - 1);
+    expect(base.controller.signal.aborted).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(base.controller.signal.aborted).toBe(true);
+  });
+
+  it('reports the effective window in the timeout event', () => {
+    const {base, events} = guardDeps({timeoutMs: 30 * 60_000});
+    const guard = createStreamStallGuard(base);
+    guard.rearm();
+    vi.advanceTimersByTime(30 * 60_000);
+    const timeout = events.find(event => event.type === 'timeout');
+    expect(timeout && timeout.type === 'timeout' && timeout.timeoutMs).toBe(30 * 60_000);
+    guard.clear();
+  });
 });

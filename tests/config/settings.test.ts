@@ -252,4 +252,20 @@ describe('settings', () => {
     await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
   });
 
+  it('parses the stream idle-timeout window and rejects implausible values loudly', async () => {
+    const {writeSettings, readSettings} = await loadSettings();
+    await writeSettings({streamIdleTimeoutMs: 15 * 60_000});
+    expect((await readSettings()).streamIdleTimeoutMs).toBe(15 * 60_000);
+    // Unset by default (the class-aware built-in applies, nothing is written to disk).
+    await writeSettings({model: 'm'});
+    expect((await readSettings()).streamIdleTimeoutMs).toBeUndefined();
+    // Sub-second windows, fractional values, and windows past the 24h turn-deadline ceiling fail loudly.
+    await fs.writeJson(settingsFile, {streamIdleTimeoutMs: 500});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {streamIdleTimeoutMs: 1.5});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+    await fs.writeJson(settingsFile, {streamIdleTimeoutMs: 25 * 60 * 60_000});
+    await expect(readSettings()).rejects.toThrow(`Failed to read Haze settings at ${settingsFile}`);
+  });
+
 });

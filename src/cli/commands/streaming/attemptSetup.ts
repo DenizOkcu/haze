@@ -1,7 +1,7 @@
 import type {ModelMessage, ToolSet} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, resolveStreamIdleTimeoutMs, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {goalDirectionPrompt, isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {projectPreflight} from '../../../core/agent/projectPreflight.js';
@@ -13,7 +13,7 @@ import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
 import {WorkspaceMutationPolicy} from '../../../core/subagent/workspaceMutationPolicy.js';
-import {modelWithConfig, providerRequestSettings, type ModelRuntimeSelection} from '../../../llm/client.js';
+import {modelWithConfig, providerRequestSettings, isLocalProviderUrl, type ModelRuntimeSelection} from '../../../llm/client.js';
 import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import {assembleRequestContext, type ToolCategory, type TurnExecutionScope} from '../../../llm/requestContext.js';
 import type {LoadedMcpTools} from '../../../llm/mcp.js';
@@ -69,6 +69,8 @@ export interface AttemptSetup {
   modelRetries: number;
   /** Backoff base for the shared model-retry pool, from the `retryBaseDelayMs` setting (default 1000ms). */
   retryBaseDelayMs: number;
+  /** Effective idle-stall window (ms): the `streamIdleTimeoutMs` setting, else 5 min hosted / 30 min local. */
+  streamIdleTimeoutMs: number;
   steeringProfile: 'standard' | 'compact';
 }
 
@@ -261,6 +263,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     toolCategories,
     modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
     retryBaseDelayMs: typeof turnSettings.retryBaseDelayMs === 'number' ? turnSettings.retryBaseDelayMs : DEFAULT_RETRY_BASE_DELAY_MS,
+    streamIdleTimeoutMs: resolveStreamIdleTimeoutMs(turnSettings.streamIdleTimeoutMs, isLocalProviderUrl(runtime.config.baseURL)),
     steeringProfile,
   };
 }

@@ -215,6 +215,8 @@ export interface AttemptFailureDeps {
   maxRetries?: number;
   /** Backoff base for the shared model-retry pool (`retryBaseDelayMs` setting); defaults to DEFAULT_RETRY_BASE_DELAY_MS. */
   retryBaseDelayMs?: number;
+  /** Effective idle-stall window (`streamIdleTimeoutMs` setting; 5 min hosted / 30 min local built-in); defaults to IDLE_TIMEOUT_MS. */
+  idleTimeoutMs?: number;
   goal: SessionGoal;
   turnOptions: TurnExecutionOptions;
 }
@@ -238,6 +240,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
   const {value, callbacks, abortController, turnState, abortCause, stallGuard, salvage, error, goal, turnOptions} = deps;
   const maxRetries = deps.maxRetries ?? DEFAULT_MODEL_RETRIES;
   const retryBaseDelayMs = deps.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+  const idleTimeoutMs = deps.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
   const overflowRetries = deps.overflowRetries ?? 0;
   // Progress refills the shared pool: consecutive failures chain backoff, but
   // a failed attempt that completed steps since the last retry starts fresh.
@@ -251,8 +254,8 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       salvageConversationToLastStep(callbacks, salvage);
       if (stallGuard?.retryEligible) {
         const delay = retryDelayMs(retryAttempt, retryBaseDelayMs);
-        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: `model stream idle for ${formatSeconds(IDLE_TIMEOUT_MS)}`}));
-        callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}. Completed steps are preserved.`});
+        callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: `model stream idle for ${formatSeconds(idleTimeoutMs)}`}));
+        callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(idleTimeoutMs)}; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}. Completed steps are preserved.`});
         // freshController: this stall aborted the controller to kill the hung
         // stream; the retry needs a live signal.
         return {status: 'failed', retry: {attempt: retryAttempt + 1, delayMs: delay, freshController: true}};
@@ -262,7 +265,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
       // path) instead of discarding progress; the interactive UI offers a
       // one-key resume from TurnResult.resume.
       const afterStep = turnState.stepsUsed > 0 ? ` after step ${turnState.stepsUsed}` : '';
-      callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(IDLE_TIMEOUT_MS)}; unfinished task paused${afterStep}. Press R to retry, or send a follow-up message to continue.`});
+      callbacks.addMessage({role: 'system', text: `Model stream stalled for ${formatIdleMinutes(idleTimeoutMs)}; unfinished task paused${afterStep}. Press R to retry, or send a follow-up message to continue.`});
       return {status: 'failed', resume: {kind: 'model-stream-idle', request: value, retryAttempt}};
     }
     if (abortCause.kind === 'turn-deadline') {

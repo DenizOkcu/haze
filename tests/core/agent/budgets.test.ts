@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {tool, type ToolSet} from 'ai';
-import {MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, clampSlice, createToolExecutionBudget, hasUsableBudget, isToolBudgetBlocked, mainTurnBudget, remainingSteps, remainingToolCalls, withToolExecutionBudget, wouldExceedToolCalls, type ToolExecutionBudgetState} from '../../../src/core/agent/budgets.js';
+import {IDLE_TIMEOUT_MS, LOCAL_IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, clampSlice, createToolExecutionBudget, hasUsableBudget, isToolBudgetBlocked, mainTurnBudget, remainingSteps, remainingToolCalls, resolveStreamIdleTimeoutMs, withToolExecutionBudget, wouldExceedToolCalls, type ToolExecutionBudgetState} from '../../../src/core/agent/budgets.js';
 
 
 
@@ -121,5 +121,17 @@ describe('withToolExecutionBudget × withToolDeadline (RH-003/RH-004 composition
     })) as typeof budgeted;
     const blocked = await (deadlineWrapped.eat!.execute as unknown as () => Promise<unknown>)();
     expect(isToolBudgetBlocked(blocked)).toBe(true);
+  });
+});
+
+describe('resolveStreamIdleTimeoutMs', () => {
+  it('an explicit setting wins over both class defaults', () => {
+    expect(resolveStreamIdleTimeoutMs(90_000, false)).toBe(90_000);
+    expect(resolveStreamIdleTimeoutMs(90_000, true)).toBe(90_000);
+  });
+
+  it('unset resolves to 5 minutes hosted and 30 minutes local', () => {
+    expect(resolveStreamIdleTimeoutMs(undefined, false)).toBe(IDLE_TIMEOUT_MS);
+    expect(resolveStreamIdleTimeoutMs(undefined, true)).toBe(LOCAL_IDLE_TIMEOUT_MS);
   });
 });

@@ -118,6 +118,15 @@ export interface HazeSettings {
    */
   retryBaseDelayMs?: number;
   /**
+   * Idle-stream stall window in milliseconds: how long the model stream may
+   * emit nothing before the attempt is aborted (and retried while the shared
+   * model-retry pool lasts). Unset means the built-in class-aware default —
+   * 5 minutes for hosted endpoints, 30 minutes for loopback/local inference
+   * servers, whose prompt ingestion and hidden reasoning can emit no bytes
+   * (no SSE keepalives) for many minutes.
+   */
+  streamIdleTimeoutMs?: number;
+  /**
    * Manual `/compact` mode (F-09): `llm-summary` (default) asks the active
    * model to summarize the older history; `heuristic` keeps the bounded
    * excerpt without a model call. Mid-turn compaction prefers an LLM summary
@@ -191,6 +200,9 @@ const modelRetriesSchema = z.number().int().min(0).max(10);
 /** Retry backoff base must be a plausible delay (not fractions/junk). */
 const retryBaseDelaySchema = z.number().int().min(250).max(60_000);
 
+/** Idle-stall window must be a plausible wait (≥ 1s for tests, capped at the 24h turn-deadline ceiling). */
+const streamIdleTimeoutSchema = z.number().int().min(1_000).max(24 * 60 * 60_000);
+
 /**
  * An escalation model is an explicit `provider:model` selector (KISS: shape
  * only — whether the provider/model actually resolves is checked by the
@@ -213,6 +225,7 @@ const settingsSchema = z.object({
   localContextWindowFallbackTokens: contextWindowFallbackSchema.optional(),
   modelRetries: modelRetriesSchema.optional(),
   retryBaseDelayMs: retryBaseDelaySchema.optional(),
+  streamIdleTimeoutMs: streamIdleTimeoutSchema.optional(),
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   theme: z.string().optional(),

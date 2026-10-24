@@ -1,13 +1,13 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-10-07 for the 1.5.1 release (round-1 review fixes).
+Last updated: 2026-10-24 (streamIdleTimeoutMs tunable).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
 ## Responsibilities
 
 - `paths.ts` defines haze's user-data roots such as `~/.haze` and global skills paths.
-- `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types. Optional tunables (`modelRetries`, `retryBaseDelayMs`, `contextWindowFallbackTokens`, `localContextWindowFallbackTokens`, `manualCompaction`, `theme`, `steeringProfile` (`standard` default or `compact`), `escalationModel` (a validated `provider:model` selector; whether it actually resolves is checked by the provider layer at switch time), …) are validated loudly at parse time and left unset on disk when defaulted; `theme` names are validated by `resolveTheme` at startup (the schema passes the string through).
+- `settings.ts` reads/writes `~/.haze/settings.json`, preserves legacy fields, and defines settings types. Optional tunables (`modelRetries`, `retryBaseDelayMs`, `streamIdleTimeoutMs` (idle-stall window; class-aware built-in default 5 min hosted / 30 min loopback-local), `contextWindowFallbackTokens`, `localContextWindowFallbackTokens`, `manualCompaction`, `theme`, `steeringProfile` (`standard` default or `compact`), `escalationModel` (a validated `provider:model` selector; whether it actually resolves is checked by the provider layer at switch time), …) are validated loudly at parse time and left unset on disk when defaulted; `theme` names are validated by `resolveTheme` at startup (the schema passes the string through).
 - `providers.ts` normalizes configured providers, resolves active provider/model, handles `provider:model` selectors, and migrates legacy OpenRouter settings only when legacy data exists. `modelCatalog.ts` holds the curated known-model metadata (context-window/max-output keyed by model-name pattern) slotted between per-model `modelLimits` and the user fallback; values are input-safe (the smaller window wins when variants differ) and local inference servers never consult it.
 - `providerPresets.ts` contains UI presets for provider setup, authored in a compact definition form (`ProviderPresetDefinition`, model tuples `[id, context, maxOutput]`) and expanded once into the public `PROVIDER_PRESETS` records; do not make presets active implicitly. `modelDiscovery.ts` performs bounded OpenAI-compatible `/models` discovery for pickers and falls back to manual entry on failure. Discovery is credential-safe (CI-01/CI-04): the endpoint transport is validated (`endpointSecurity.ts`) before the first fetch — a draft API key is never sent to an unvalidated URL — redirects are re-checked the same way, and the response body is byte-bounded.
 - `contextFiles.ts` loads global and workspace `CLAUDE.md`/`AGENTS.md`, including lazy scoped nested files, display signatures, and read notifications for turn-time refresh.

@@ -106,6 +106,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
       abortCause,
       retryAttempt,
       maxRetries: attemptSetupResult.modelRetries,
+      timeoutMs: attemptSetupResult.streamIdleTimeoutMs,
       classifyEmission: () => loopState.currentAssistantText.trim().length > 0 || loopState.assistantStarted ? 'text' : loopState.inFlightTools.size > 0 ? 'tool' : 'none',
       isToolInFlight: () => loopState.inFlightTools.size > 0,
       provider: () => attemptSetupResult.runtime.config.providerName,
@@ -120,7 +121,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
     const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage, usageAnchor});
     return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream, retryAttempt, overflowRetries: input.overflowRetries});
   } catch (error) {
-    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, progressSinceLastRetry: input.progressSinceLastRetry, overflowRetries: input.overflowRetries, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries, retryBaseDelayMs: setup?.retryBaseDelayMs, goal, turnOptions});
+    return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, progressSinceLastRetry: input.progressSinceLastRetry, overflowRetries: input.overflowRetries, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries, retryBaseDelayMs: setup?.retryBaseDelayMs, idleTimeoutMs: setup?.streamIdleTimeoutMs, goal, turnOptions});
   } finally {
     await cleanup.closeOnce(ATTEMPT_TEARDOWN_BOUND_MS);
     toolDisplay.finalizeToolGroup();

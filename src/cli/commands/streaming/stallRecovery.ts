@@ -97,6 +97,12 @@ export interface StreamStallGuardDeps {
   retryAttempt: number;
   /** Retry-pool size for this turn (`modelRetries` setting); defaults to DEFAULT_MODEL_RETRIES. */
   maxRetries?: number;
+  /**
+   * Effective idle-stall window in ms, resolved in `prepareAttempt` from the
+   * `streamIdleTimeoutMs` setting with the class-aware built-in default
+   * (5 min hosted / 30 min local); defaults to IDLE_TIMEOUT_MS.
+   */
+  timeoutMs?: number;
   /** Classify what the stalled step emitted so far: partial text, in-flight tool, or nothing. */
   classifyEmission: () => StallEmission;
   isToolInFlight: () => boolean;
@@ -111,13 +117,14 @@ export interface StreamStallGuardDeps {
 
 export function createStreamStallGuard(deps: StreamStallGuardDeps): StreamStallGuard {
   const maxRetries = deps.maxRetries ?? DEFAULT_MODEL_RETRIES;
+  const timeoutMs = deps.timeoutMs ?? IDLE_TIMEOUT_MS;
   let stallEmission: StallEmission = 'none';
   let retryEligible = false;
   let lastStreamEventAt: number | undefined;
   let lastStreamEventType: string | undefined;
 
   const timer = createIdleTimer({
-    timeoutMs: IDLE_TIMEOUT_MS,
+    timeoutMs,
     isBusy: () => deps.isToolInFlight(),
     onTimeout: () => {
       if (deps.controller.signal.aborted) return;
@@ -130,7 +137,7 @@ export function createStreamStallGuard(deps: StreamStallGuardDeps): StreamStallG
       deps.onEvent?.(agentEvent({
         type: 'timeout',
         phase: 'model-stream',
-        timeoutMs: IDLE_TIMEOUT_MS,
+        timeoutMs,
         provider: deps.provider(),
         model: deps.model(),
         lastStreamEventAt: lastEventAtIso,
@@ -140,9 +147,9 @@ export function createStreamStallGuard(deps: StreamStallGuardDeps): StreamStallG
         retryEligible: retryEligible,
         maxRetries: maxRetries,
       }));
-      logEntry(deps.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', error: `model-stream idle ${IDLE_TIMEOUT_MS}ms: provider=${deps.provider() ?? 'unknown'} model=${deps.model() ?? 'unknown'} lastEvent=${lastStreamEventType ?? 'none'}@${lastEventAtIso ?? 'never'} stallEmission=${stallEmission} workPhase=${deps.workPhase()} retryEligible=${retryEligible} maxRetries=${maxRetries} stepsUsed=${deps.stepsUsed()}`});
-      deps.debugLog(`model stream idle for ${IDLE_TIMEOUT_MS}ms (last event: ${lastStreamEventType ?? 'none'}); ${retryEligible ? `retryable stall (${deps.retryAttempt}/${maxRetries} used)` : 'stall not retryable'}`);
-      abortForTurn(deps.abortCause, {kind: 'model-stream-idle', timeoutMs: IDLE_TIMEOUT_MS}, deps.controller, 'haze model stream was idle for the configured timeout.');
+      logEntry(deps.log, {at: new Date().toISOString(), type: 'warning', stream: 'main', error: `model-stream idle ${timeoutMs}ms: provider=${deps.provider() ?? 'unknown'} model=${deps.model() ?? 'unknown'} lastEvent=${lastStreamEventType ?? 'none'}@${lastEventAtIso ?? 'never'} stallEmission=${stallEmission} workPhase=${deps.workPhase()} retryEligible=${retryEligible} maxRetries=${maxRetries} stepsUsed=${deps.stepsUsed()}`});
+      deps.debugLog(`model stream idle for ${timeoutMs}ms (last event: ${lastStreamEventType ?? 'none'}); ${retryEligible ? `retryable stall (${deps.retryAttempt}/${maxRetries} used)` : 'stall not retryable'}`);
+      abortForTurn(deps.abortCause, {kind: 'model-stream-idle', timeoutMs}, deps.controller, 'haze model stream was idle for the configured timeout.');
     },
   });
 
