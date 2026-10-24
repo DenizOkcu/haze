@@ -96,4 +96,34 @@ describe('grep tool', () => {
     const result = await hazeTools.grep.execute({pattern: 'needle', path: 'secret.txt', contextLines: 0, maxMatches: 10, caseInsensitive: false, includeIgnored: true}, {abortSignal: undefined});
     expect(result).toMatchObject({returnedMatches: 1});
   });
+
+  describe('resolveRipgrepExecutable', () => {
+    it('prefers the bundled binary when it exists', async () => {
+      const bundled = path.join(tmp, 'bundled-rg');
+      await fs.writeFile(bundled, '');
+      expect(grepRunner.resolveRipgrepExecutable({bundledPath: bundled})).toBe(bundled);
+    });
+
+    it('falls back to rg on PATH when the bundled binary is missing', async () => {
+      await fs.writeFile(path.join(tmp, 'rg'), '');
+      const previousPath = process.env.PATH;
+      process.env.PATH = tmp;
+      try {
+        expect(grepRunner.resolveRipgrepExecutable({bundledPath: path.join(tmp, 'missing-rg')})).toBe(path.join(tmp, 'rg'));
+      } finally {
+        process.env.PATH = previousPath;
+      }
+    });
+
+    it('returns the bundled path unchanged when no system rg exists', () => {
+      const missing = path.join(tmp, 'missing-rg');
+      const previousPath = process.env.PATH;
+      process.env.PATH = tmp;
+      try {
+        expect(grepRunner.resolveRipgrepExecutable({bundledPath: missing})).toBe(missing);
+      } finally {
+        process.env.PATH = previousPath;
+      }
+    });
+  });
 });

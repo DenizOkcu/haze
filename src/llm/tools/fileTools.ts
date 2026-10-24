@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {tool} from 'ai';
-import {rgPath} from '@vscode/ripgrep';
 import {z} from 'zod';
 import {walkDir, type WalkEntry} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
@@ -17,7 +16,7 @@ import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContex
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './workspaceFile.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './fileToolShared.js';
 import {createIgnoreClassifier} from './gitIgnore.js';
-import {runRipgrepBounded} from './grepRunner.js';
+import {runRipgrepBounded, resolveRipgrepExecutable} from './grepRunner.js';
 import {secretSearchExcludeGlobs} from '../../core/safety/secretPaths.js';
 import {EXACT_MUTATION_BYTES} from '../../core/limits.js';
 import {WRITE_FILE_CHUNK_BYTES} from '../../core/agent/budgets.js';
@@ -221,7 +220,7 @@ export const fileTools = {
         args.push('--glob', '!**/.git/**', '--glob', '!**/node_modules/**');
         args.push('--', pattern, absolutePath);
 
-        const result = await runRipgrepBounded({executable: rgPath, args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});
+        const result = await runRipgrepBounded({executable: resolveRipgrepExecutable(), args, cwd: workspaceRoot(), maxMatches, signal: context.abortSignal});
         const stdout = result.stdout;
         if (result.aborted) throw new Error('ripgrep aborted');
         if (result.timedOut) throw new Error('ripgrep timed out');

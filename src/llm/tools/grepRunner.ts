@@ -1,6 +1,28 @@
+import {existsSync} from 'node:fs';
+import {delimiter, join} from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
+import {rgPath} from '@vscode/ripgrep';
 import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
 import {GREP_STREAM_BYTES, PROCESS_STDERR_BYTES, TEXT_LINE_BYTES} from '../../core/limits.js';
+
+/**
+ * Prefer the bundled ripgrep binary; fall back to a system `rg` on PATH when
+ * the bundled download is absent (installs where dependency lifecycle scripts
+ * are blocked never materialize `@vscode/ripgrep/bin/rg`). Returns the bundled
+ * path unchanged when no system rg exists so spawn errors still name the
+ * expected binary. Injectable for deterministic tests.
+ */
+export function resolveRipgrepExecutable(options?: {bundledPath?: string}): string {
+  const bundled = options?.bundledPath ?? rgPath;
+  if (existsSync(bundled)) return bundled;
+  const name = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  for (const dir of process.env.PATH?.split(delimiter) ?? []) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return bundled;
+}
 
 /**
  * Line-oriented bounded ripgrep runner built on the shared bounded-process
