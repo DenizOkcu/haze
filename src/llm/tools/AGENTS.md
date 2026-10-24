@@ -1,6 +1,6 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-10-07 for the 1.5.1 release.
+Last updated: 2026-10-24 (grep bundled-binary fallback note).
 
 Implementation helpers for haze built-in tools.
 
@@ -50,7 +50,7 @@ Current behavior:
 - `processTool.ts` is the single control surface for listing, reading, and killing registered background processes. Output remains accessible through the same `readToolOutput` handle path; do not expose background spawning to fleet workers.
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
-- `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer.
+- `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer. It prefers the bundled `@vscode/ripgrep` binary and falls back to a system `rg` on PATH when the bundled path is missing (when no system rg exists either, the spawn error still names the bundled path).
 - `gitIgnore.ts` evaluates `.gitignore` and `.git/info/exclude` rules in-process without requiring Git. It discovers parent repository boundaries and linked-worktree git directories, preserves POSIX backslash names, and caches rule files by mtime and size for one listing operation. Reads fail open when a rule source is unreadable; mutation guards report `unknown` and fail closed (F-05).
 
 ## Failure results

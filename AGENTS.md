@@ -31,6 +31,7 @@ npm start              # run built dist CLI
 npm run typecheck      # tsc --noEmit
 npm test               # vitest run
 npm run lint           # eslint src/
+npm run lint:knip      # knip unused-export hygiene
 npm run context:report # estimated prompt/tool/context token breakdown
 
 npm run build          # clean + tsc
