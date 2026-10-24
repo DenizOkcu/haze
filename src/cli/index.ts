@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 import {Command, Option} from 'commander';
-import {chatCommand} from './commands/chat.js';
-import {runHeadless} from './commands/runCommand.js';
 import {installTerminalTitle, terminalTitleLabel} from './terminalTitle.js';
 import {findSession, latestSession, readSessionEntries} from '../core/session/sessionStore.js';
 import {formatSessionReport, summarizeSessionEntries} from '../core/session/sessionReport.js';
@@ -154,6 +152,7 @@ program.action(async () => {
   }
   if (prompt) {
     // One-shot runs are always fresh and non-durable; --continue is ignored in this mode.
+    const {runHeadless} = await import('./commands/runCommand.js');
     const code = await runHeadless({
       prompt,
       modelOverride: opts.model,
@@ -171,6 +170,9 @@ program.action(async () => {
     process.exitCode = code;
     return;
   }
+  // Chat and headless pull the full React/Ink/AI-SDK graph; import them only
+  // when a turn actually runs so --help/report/doctor stay fast to boot.
+  const {chatCommand} = await import('./commands/chat.js');
   await chatCommand({debug: Boolean(opts.debug), continueSession: Boolean(opts.continue), resumeSessionId: opts.resume, noSession: opts.session === false, version, build: sessionBuildProvenance()});
 });
 
