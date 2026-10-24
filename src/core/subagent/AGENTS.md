@@ -1,6 +1,6 @@
 # src/core/subagent/AGENTS.md
 
-Last updated: 2026-10-24 for the 1.6.0 release: V1 result projection and legacy string/maxSteps call shapes removed.
+Last updated: 2026-10-24 for the 1.6.1 release: V1 result projection and legacy string/maxSteps call shapes removed.
 
 Subagent runner and model-facing subagent tool.
 

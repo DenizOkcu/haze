@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.1 - 2026-10-24
+
+### Fixed
+
+- OpenRouter attribution now sends `HTTP-Referer: https://github.com/DenizOkcu/haze` instead of the docs site, so OpenRouter's app lookup (`/apps/url/...`) resolves against the repository page. `X-Title: Haze` is unchanged; other OpenAI-compatible providers are unaffected.
+
 ## 1.6.0 - 2026-10-24
 
 Class-aware idle-stream stall windows so patient local models are not mistaken for dead streams.

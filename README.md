@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.6.0
+## What's new in 1.6.1
+
+haze 1.6.1 fixes OpenRouter app attribution: the `HTTP-Referer` header now points at the GitHub project page (`https://github.com/DenizOkcu/haze`) instead of the docs site, so OpenRouter's `/apps/url/...` lookup resolves. `X-Title: Haze` is unchanged.
+
+### Highlights from 1.6.0
 
 haze 1.6.0 stops mistaking patient local models for dead streams:
 
