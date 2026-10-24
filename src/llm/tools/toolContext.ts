@@ -19,8 +19,7 @@ export {hazeContext} from './toolContextState.js';
  * project instructions (CLAUDE.md / AGENTS.md below the cwd).
  *
  * All state lives on per-tool `context` values, which the agent turn owns and
- * passes to the AI SDK. Tests and older callers may still provide the legacy
- * `experimental_context` shape. Nothing here is persisted.
+ * passes to the AI SDK. Nothing here is persisted.
  */
 
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');

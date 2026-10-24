@@ -13,7 +13,6 @@ import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/s
 export type ToolExecutionContext = {
   abortSignal?: AbortSignal;
   context?: unknown;
-  experimental_context?: unknown;
 };
 
 export type PostMutationDiagnostics = (paths: readonly string[]) => Promise<unknown | undefined>;
@@ -73,8 +72,5 @@ export function isHazeToolContext(value: unknown): value is HazeToolContext {
 }
 
 export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {
-  const value = typeof context.context === 'object' && context.context != null
-    ? context.context
-    : context.experimental_context;
-  return isHazeToolContext(value) ? value : undefined;
+  return isHazeToolContext(context.context) ? context.context : undefined;
 }
