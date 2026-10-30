@@ -295,6 +295,11 @@ describe('image attachments (F03)', () => {
       expect(imageCapabilityError({name: 'cloud', capabilities: {images: true}})).toBeUndefined();
     });
 
+    it('refuses the text/tools-only native kind even when a stored flag claims images', () => {
+      expect(imageCapabilityError({name: 'haze.build', kind: 'haze-build', capabilities: {images: true}})).toContain('text/tools only');
+      expect(imageCapabilityError({name: 'haze.build', kind: 'haze-build'})).toContain('text/tools only');
+    });
+
     it('fails loudly for providers not marked image-capable (AC2 message)', () => {
       expect(imageCapabilityError({name: 'local'})).toBe("Provider 'local' is not marked image-capable. Enable image input for it via /provider, or switch models.");
       expect(imageCapabilityError({name: 'local', capabilities: {images: false}})).toContain("Provider 'local' is not marked image-capable");

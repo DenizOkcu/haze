@@ -297,17 +297,21 @@ export const IMAGE_ONLY_PROMPT_TEXT = 'See the attached image.';
 /** Minimal provider shape the capability gate needs (no settings I/O). */
 export interface ImageCapableProviderLike {
   name: string;
+  kind?: string;
   capabilities?: {images?: boolean};
 }
 
 /**
  * Loud capability gate (constitution VII): images only go to providers the
  * user explicitly marked image-capable. Returns undefined when the provider
- * may receive image parts, otherwise an actionable error message.
+ * may receive image parts, otherwise an actionable error message. The native
+ * haze.build kind is text/tools only regardless of any stored capability
+ * flag, so a hand-edited settings file cannot admit images to it.
  */
 export function imageCapabilityError(provider: ImageCapableProviderLike | undefined): string | undefined {
-  if (provider?.capabilities?.images === true) return undefined;
   if (!provider) return 'No provider is configured. Run /provider to add one, then attach the image again.';
+  if (provider.kind === 'haze-build') return 'haze.build haze0.1-coder-flash is text/tools only; images are not supported.';
+  if (provider.capabilities?.images === true) return undefined;
   return `Provider '${provider.name}' is not marked image-capable. Enable image input for it via /provider, or switch models.`;
 }
 
