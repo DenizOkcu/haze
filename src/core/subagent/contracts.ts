@@ -76,6 +76,9 @@ export interface SubagentExecutionResult {
 }
 
 export interface WorkerRuntime {
+  contextWindowTokens?: number;
+  maxOutputTokens?: number;
+  nativeMaxConcurrency?: number;
   model: LanguageModel;
   selector: string;
   providerName: string;

@@ -1,5 +1,6 @@
 import {isStepCount, streamText, tool, type JSONValue, type ModelMessage} from 'ai';
-import {estimateValueTokens} from '../core/agent/contextBudget.js';
+import {calculateRequestTokenBudget, estimateMessagesTokens, estimateValueTokens} from '../core/agent/contextBudget.js';
+import {compactModelMessages} from '../core/agent/compaction.js';
 import {
   SUBAGENT_SYNTHESIS_RESERVE,
   SUBAGENT_TOOL_ONLY_LIMIT,
@@ -30,6 +31,8 @@ import {SubagentCoordinator} from '../core/subagent/subagentCoordinator.js';
 import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
 import {projectContextSection, type PromptSession} from './systemPrompt.js';
 import {resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
+
+class WorkerCapacityError extends Error {}
 
 const SYNTHESIS_DIRECTIVE = 'You have reached your tool/step budget. Stop calling tools. Return the requested self-contained deliverable now, including evidence, coverage gaps, changed paths, validation, and precise remaining work. A concise partial deliverable is mandatory and better than an empty response.';
 
@@ -95,9 +98,17 @@ export async function runSubagent(
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
   const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
   const maxSteps = profile.maxSteps;
+  const outputTokens = Math.min(profile.maxOutputTokens, runtime.maxOutputTokens ?? profile.maxOutputTokens, Math.max(1, (runtime.contextWindowTokens ?? 128000) - 1000));
   const startedAt = performance.now();
   const bundle = options.contextBundle ?? await assembleWorkerContext(task, profile, options.session);
   if (bundle.policyBlock) return terminalResult(task, runtime, profile, 'policy_blocked', bundle.policyBlock, options.queueMs);
+  const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.contextWindowTokens, requestedOutputTokens: outputTokens, system: bundle.systemPrompt, tools: bundle.tools});
+  const messageBudget = Math.min(requestBudget.messageTokens, Math.max(0, profile.maxInputTokens - requestBudget.systemTokens - requestBudget.toolSchemaTokens));
+  if (messageBudget < estimateValueTokens(workerTaskMessage(task))) return terminalResult(task, runtime, profile, 'policy_blocked', 'Worker task, instructions, tools and output do not fit the selected model capacity. Narrow the task/context.', options.queueMs);
+  let inputEstimateRatio = 1;
+  let lastInputEstimate = bundle.estimatedTokens;
+  let capacityStop = false;
+  let streamError: unknown;
 
   const toolCallLog: SubagentTelemetry['toolCalls'] = [];
   const changedPaths = new Set<string>();
@@ -128,7 +139,7 @@ export async function runSubagent(
     // `no_output` (observed live: glm-5.3 @ high reasoning, 2026-10-04).
     // Applied only when the worker protocol supports the option; other
     // protocols cannot express it and must keep the runtime unchanged.
-    if (runtime.capabilities.supportsReasoningEffort) providerRequestOptions.reasoning = 'none';
+    if (runtime.capabilities.supportsReasoningEffort || runtime.capabilities.supportsBinaryThinking) providerRequestOptions.reasoning = 'none';
     // Use the streaming model path even though workers return one collected
     // capsule. ChatGPT Codex's Responses endpoint requires `stream: true`;
     // `generateText` takes the non-streaming doGenerate path and is rejected.
@@ -138,18 +149,29 @@ export async function runSubagent(
       messages: [{role: 'user', content: workerTaskMessage(task)}],
       tools: budgetedTools,
       stopWhen: isStepCount(maxSteps),
-      ...(!omitMaxOutputTokens ? {maxOutputTokens: profile.maxOutputTokens} : {}),
+      ...(!omitMaxOutputTokens ? {maxOutputTokens: outputTokens} : {}),
       maxRetries: profile.maxRetries,
       ...providerRequestOptions,
       abortSignal: options.abortSignal,
       runtimeContext: toolExecutionContext,
       toolsContext: toolsContextFor(budgetedTools, toolExecutionContext) as never,
       prepareStep({steps, messages}) {
-        const scopedMessages = pendingScopedControl(messages, toolExecutionContext);
+        let scopedMessages = pendingScopedControl(messages, toolExecutionContext);
+        const target = Math.floor(messageBudget / inputEstimateRatio);
+        if (estimateMessagesTokens(scopedMessages) > target) {
+          const compacted = compactModelMessages(scopedMessages, {tokenBudget: Math.max(0, target - 512)});
+          scopedMessages = compacted.messages;
+          capacityStop = true;
+          if (estimateMessagesTokens(scopedMessages) > target) throw new WorkerCapacityError('Worker history cannot fit the selected model capacity; narrow scope/context.');
+        }
+        lastInputEstimate = requestBudget.systemTokens + requestBudget.toolSchemaTokens + estimateMessagesTokens(scopedMessages);
+        if (capacityStop) return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, SYNTHESIS_DIRECTIVE)};
         if (!toolBudget.exceeded && toolBudget.started < profile.maxToolCalls && !shouldForceSynthesis(steps, maxSteps, profile.maxToolCalls)) return scopedMessages !== messages ? {messages: scopedMessages} : undefined;
         return {toolChoice: 'none' as const, messages: withSyntheticControl(scopedMessages, SYNTHESIS_DIRECTIVE)};
       },
+      onError({error}) { streamError = error; },
       onStepEnd({usage}) {
+        if (usage?.inputTokens && lastInputEstimate > 0) inputEstimateRatio = Math.max(inputEstimateRatio, usage.inputTokens / lastInputEstimate);
         if (typeof usage?.inputTokens === 'number') usageIn = (usageIn ?? 0) + usage.inputTokens;
         if (typeof usage?.outputTokens === 'number') usageOut = (usageOut ?? 0) + usage.outputTokens;
       },
@@ -168,6 +190,7 @@ export async function runSubagent(
       },
     });
     const [text, usage, steps] = await Promise.all([result.text, result.usage, result.steps]);
+    if (streamError) throw streamError;
     usageIn = usage.inputTokens ?? usageIn;
     usageOut = usage.outputTokens ?? usageOut;
     const fullText = text.trim();
@@ -180,11 +203,12 @@ export async function runSubagent(
     const toolLimited = toolBudget.exceeded || totalToolCalls >= profile.maxToolCalls;
     const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded'
       : options.abortSignal?.aborted ? 'cancelled'
-        : toolLimited ? 'tool_limit'
+        : capacityStop ? 'step_limit'
+          : toolLimited ? 'tool_limit'
           : steps.length >= maxSteps && !fullText ? 'step_limit'
             : !fullText ? 'no_output'
               : 'completed';
-    const capsule: SubagentResultCapsule = {id: task.id, termination, usable: fullText.length > 0, deliverable, changedPaths: [...changedPaths].sort(), validation, coverageGaps: [], truncated, ...(resultHandle ? {resultHandle} : {})};
+    const capsule: SubagentResultCapsule = {id: task.id, termination, usable: fullText.length > 0, deliverable, changedPaths: [...changedPaths].sort(), validation, coverageGaps: capacityStop ? ['Worker reached its model context budget and returned a bounded synthesis.'] : [], truncated, ...(resultHandle ? {resultHandle} : {})};
     const durationMs = performance.now() - startedAt;
     const telemetry = telemetryBase(runtime, profile, bundle.taskTokens, bundle.estimatedTokens, options.queueMs);
     telemetry.durationMs = durationMs;
@@ -203,8 +227,10 @@ export async function runSubagent(
     // re-dispatching blind. Never echo provider bodies; bound the text.
     const rawMessage = error instanceof Error && error.message.trim().length > 0 ? error.message.trim() : 'the provider call failed before any output';
     const boundedMessage = rawMessage.length > 300 ? `${rawMessage.slice(0, 299)}…` : rawMessage;
-    const capsuleMessage = `${boundedMessage}. No usable worker output was produced; retry this subagent once with the same task, or do the work directly in the main conversation.`;
-    const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded' : options.abortSignal?.aborted ? 'cancelled' : 'provider_error';
+    const capsuleMessage = error instanceof WorkerCapacityError
+      ? `${boundedMessage} Narrow the task/context or do the remaining work in the main conversation; do not retry the same oversized input.`
+      : `${boundedMessage}. No usable worker output was produced; retry this subagent once with the same task, or do the work directly in the main conversation.`;
+    const termination: WorkerTermination = options.deadlineExpired?.() ? 'deadline_exceeded' : options.abortSignal?.aborted ? 'cancelled' : error instanceof WorkerCapacityError ? 'policy_blocked' : 'provider_error';
     const result = terminalResult(task, runtime, profile, termination, capsuleMessage, options.queueMs);
     // Keep the raw provider message on `error` so machine consumers see exactly
     // what the provider said (unchanged contract).

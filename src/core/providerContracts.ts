@@ -23,6 +23,8 @@ export interface ProviderCapabilities {
    * `on`, silently inverting the request. `false` omits the parameter entirely.
    */
   supportsReasoningEffort: boolean;
+  /** Native template switch, independently of OpenAI effort pass-through. */
+  supportsBinaryThinking?: boolean;
 }
 
 export interface ProviderRequestOptions {

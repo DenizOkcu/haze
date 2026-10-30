@@ -144,10 +144,13 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
       return;
     }
 
-    setProviderDraft({name: existingName, url: preset.baseUrl, ...(preset.auth === 'chatgpt-oauth' ? {kind: 'chatgpt-codex' as const} : {})});
+    setProviderDraft({name: existingName, url: preset.baseUrl, ...(preset.auth === 'chatgpt-oauth' ? {kind: 'chatgpt-codex' as const} : preset.kind ? {kind: preset.kind} : {})});
     setSuggestedModels(preset.suggestedModels ?? []);
 
-    if (preset.auth === 'chatgpt-oauth') {
+    if (preset.requiresEndpoint) {
+      setMode('providerAddUrl');
+      showMessage('haze.build API base URL? Use your deployed HTTPS endpoint ending in /v1 (or a loopback tunnel).');
+    } else if (preset.auth === 'chatgpt-oauth') {
       await loginWithChatGpt({name: existingName, url: preset.baseUrl, models: preset.suggestedModels ?? []});
     } else if (preset.needsApiKey) {
       setMode('providerAddKey');

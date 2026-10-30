@@ -21,7 +21,7 @@ export interface HazeProviderSettings {
   key?: string;
   models: string[];
   /** Explicit runtime/auth protocol. Omitted means a normal OpenAI-compatible endpoint. */
-  kind?: 'openai-compatible' | 'chatgpt-codex';
+  kind?: 'openai-compatible' | 'chatgpt-codex' | 'haze-build';
   /**
    * Explicit endpoint capabilities. Never inferred: images are only sent to
    * providers the user marked image-capable (F03); `reasoningEffort: false`
@@ -159,7 +159,7 @@ const providerSchema = z.object({
   url: z.string(),
   key: z.string().optional(),
   models: z.array(z.string()),
-  kind: z.enum(['openai-compatible', 'chatgpt-codex']).optional(),
+  kind: z.enum(['openai-compatible', 'chatgpt-codex', 'haze-build']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
   modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
 }).passthrough();

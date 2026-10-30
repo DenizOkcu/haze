@@ -52,3 +52,5 @@ Current settings behavior:
 ## Tests
 
 Update matching `tests/config/*.test.ts` for any behavior change. Provider resolution and context-file discovery have important edge-case tests; run them directly before full validation.
+
+- `hazeBuild.ts` validates the authenticated native deployment descriptor for `haze.build` / `haze0.1-coder-flash`. Capacity is deployment-bound and refreshed, never guessed from the service alias. The native preset requests an endpoint and preserves explicit selection; its kind survives provider renames. Native modalities are text/tools only.

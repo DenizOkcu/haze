@@ -119,6 +119,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     return undefined;
   }
 
+  for (const warning of runtime.config.warnings ?? []) callbacks.addMessage({role: 'system', text: warning});
   const thinkingLabel = modelThinkingLabel(runtime.config.modelName);
   callbacks.setBusyLabel?.(thinkingLabel);
   // Observable requested-vs-effective reasoning policy (safe: level strings + reason only).
@@ -174,7 +175,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // window minus system prompt, tool schemas, output reserve, and a safety
   // margin — not a fixed 40K constant. Small contexts get a safe budget; the
   // assembled request plus output reserve stays within configured capacity.
-  const requestedOutputTokens = runtime.config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+  const requestedOutputTokens = Math.min(runtime.config.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, Math.max(1, runtime.config.contextWindowTokens - 1000));
   const requestBudget = calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: systemPrompt, tools: availableTools});
   // A context-overflow retry progressively shrinks the target so it cannot loop
   // at an unchanged budget; further overflows get even smaller (RH-005, Pillar

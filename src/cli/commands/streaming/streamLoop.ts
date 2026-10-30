@@ -7,7 +7,7 @@ import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {buildLlmCompactionPrompt, chooseBoundaryCompactionMethod, compactModelMessages, compactModelMessagesWithSummary, extractExistingCompactionSummary} from '../../../core/agent/compaction.js';
 import {isLengthStopOverflow, isSilentContextOverflow} from '../../../core/agent/overflow.js';
 import {type TurnExecutionState} from '../../../core/agent/completionController.js';
-import {COMPACTION_LLM_MAX_OUTPUT_TOKENS, COMPACTION_LLM_MIN_OLDER_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {COMPACTION_LLM_MAX_OUTPUT_TOKENS, COMPACTION_LLM_MIN_OLDER_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {toolsContextFor} from '../../../llm/tools/toolContext.js';
 import {busyToolLabel, toolCallSummary} from '../formatters.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
@@ -302,7 +302,7 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
     model: setup.runtime.model,
     instructions: systemPrompt,
     tools: sliceTools,
-    ...(!omitMaxOutputTokens ? {maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS} : {}),
+    ...(!omitMaxOutputTokens ? {maxOutputTokens: setup.requestBudget.outputReserveTokens} : {}),
     ...providerSettings,
     // One provider request + its tool batch per SDK object graph. A normal
     // ToolLoopAgent would make the same next provider request internally.
@@ -452,7 +452,8 @@ async function compactAtEpochBoundary(deps: AttemptStreamDeps, providerMessages:
     const summarization = await generateText({
       model: setup.runtime.model,
       prompt,
-      maxOutputTokens: COMPACTION_LLM_MAX_OUTPUT_TOKENS,
+      ...(setup.runtime.config.providerKind === 'haze-build' ? {...setup.providerSettings, reasoning: 'none' as const} : {}),
+      maxOutputTokens: Math.min(COMPACTION_LLM_MAX_OUTPUT_TOKENS, setup.runtime.config.maxOutputTokens ?? COMPACTION_LLM_MAX_OUTPUT_TOKENS),
       abortSignal: abortController.signal,
     });
     const summaryText = summarization.text.trim();

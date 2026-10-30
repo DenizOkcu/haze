@@ -1,4 +1,6 @@
 import {createOpenAI} from '@ai-sdk/openai';
+import {discoverHazeBuildManifest, type HazeBuildManifest} from '../config/hazeBuild.js';
+import {createHazeBuildModel} from './hazeBuild.js';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {catalogLimitsFor} from '../config/modelCatalog.js';
@@ -33,7 +35,9 @@ export interface ModelRuntimeConfig {
    */
   contextWindowTokens: number;
   /** Where contextWindowTokens came from: per-model settings, the curated model catalog, a user-set fallback, or the built-in default. */
-  contextWindowSource: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback';
+  contextWindowSource: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback' | 'deployment';
+  deployment?: HazeBuildManifest;
+  warnings?: string[];
   /** Optional output-token limit metadata for request budgeting (RH-005). */
   maxOutputTokens?: number;
 }
@@ -66,15 +70,16 @@ function capabilities(providerName: string, baseURL: string, providerKind: HazeP
   // unsupported levels — even `none` — to `on` (LM Studio), inverting the
   // request, and subagent workers rely on `none` meaning off. Hosted
   // OpenAI-compatible endpoints keep the SDK pass-through (`true`).
-  const supportsReasoningEffort = explicit?.reasoningEffort ?? !isLocalProviderUrl(baseURL);
+  const supportsReasoningEffort = explicit?.reasoningEffort ?? (providerKind === 'haze-build' || !isLocalProviderUrl(baseURL));
   return {
-    reportsCacheUsage: directOpenAI || openRouter,
+    reportsCacheUsage: providerKind === 'haze-build' || directOpenAI || openRouter,
     supportsPromptCacheKey: directOpenAI,
     supportsExtendedCacheRetention: false,
     supportsStickySessionId: openRouter,
     supportsServerCompaction: false,
     supportsTextVerbosity: directOpenAI,
     supportsReasoningEffort,
+    ...(providerKind === 'haze-build' ? {supportsBinaryThinking: true} : {}),
   };
 }
 
@@ -104,7 +109,7 @@ export function isLocalProviderUrl(url: string): boolean {
   }
 }
 
-function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting, sessionReasoningByModel?: Record<string, StoredReasoningSetting>): ModelRuntimeSelection {
+function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting, sessionReasoningByModel?: Record<string, StoredReasoningSetting>, deployment?: HazeBuildManifest): ModelRuntimeSelection {
   const baseURL = selection.provider.url;
   const providerKind = selection.provider.kind;
   const configuredKey = providerKind === 'chatgpt-codex' ? undefined : selection.provider.key ?? settings.apiKey;
@@ -129,7 +134,10 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
-  const reasoningPolicy = reasoningPolicyForModel(name, requestedReasoning, caps);
+  const resolvedPolicy = reasoningPolicyForModel(name, requestedReasoning, caps);
+  const reasoningPolicy = deployment && resolvedPolicy.effective !== 'disabled'
+    ? {...resolvedPolicy, reason: `haze.build binary thinking ${requestedReasoning === 'none' ? 'off' : 'on'}; effort levels do not imply different compute budgets`}
+    : resolvedPolicy;
   const openai = providerKind === 'chatgpt-codex'
     ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
     : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
@@ -153,7 +161,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
   const maxOutputTokens = limits.maxOutputTokens ?? catalog?.maxOutputTokens;
   return {
-    model: providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
+    model: deployment ? createHazeBuildModel({baseURL, apiKey, manifest: deployment}) : providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
     selector,
     config: {
       providerName: selection.provider.name,
@@ -163,9 +171,11 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       cacheKey,
       capabilities: caps,
       reasoningPolicy,
-      contextWindowTokens: limits.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
-      contextWindowSource,
-      ...(maxOutputTokens !== undefined ? {maxOutputTokens} : {}),
+      contextWindowTokens: deployment ? Math.min(limits.contextWindowTokens ?? deployment.contextWindowTokens, deployment.contextWindowTokens) : limits.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
+      contextWindowSource: deployment ? 'deployment' : contextWindowSource,
+      ...(deployment ? {deployment, maxOutputTokens: Math.min(limits.maxOutputTokens ?? deployment.maxOutputTokens, deployment.maxOutputTokens),
+        warnings: limits.contextWindowTokens && limits.contextWindowTokens !== deployment.contextWindowTokens ? ['Configured context differs from the current haze.build deployment; using the smaller safe limit.'] : []}
+        : maxOutputTokens !== undefined ? {maxOutputTokens} : {}),
     },
   };
 }
@@ -190,7 +200,10 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
     const resolved = resolveModelSelector(resolvedSettings, override);
     if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
   } else selection = activeModel(resolvedSettings);
-  return selection ? runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride, session?.reasoningByModel) : undefined;
+  if (!selection) return undefined;
+  const deployment = selection.provider.kind === 'haze-build' ? await discoverHazeBuildManifest(selection.provider) : undefined;
+  if (deployment && selection.model !== deployment.model) throw new Error(`haze.build currently serves ${deployment.model}; choose it explicitly via /model.`);
+  return runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride, session?.reasoningByModel, deployment);
 }
 
 export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection; settings: Awaited<ReturnType<typeof readSettings>>; selector?: string; cwd?: string}): Promise<{status: 'found'; runtime: WorkerRuntime} | {status: 'missing' | 'ambiguous'; message: string}> {
@@ -199,9 +212,11 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
   if (requested) {
     const resolved = resolveModelSelector(input.settings, requested);
     if (resolved.status !== 'found') return {status: resolved.status, message: resolved.status === 'ambiguous' ? `Worker model ${requested} is ambiguous; use provider:model.` : `Worker model ${requested} is not configured. Configure it via /provider or remove subagents.workerModel.`};
-    selected = runtimeForSelection(input.settings, {provider: resolved.provider, model: resolved.model}, input.cwd);
+    const deployment = resolved.provider.kind === 'haze-build' ? await discoverHazeBuildManifest(resolved.provider) : undefined;
+    if (deployment && resolved.model !== deployment.model) return {status: 'missing', message: `haze.build currently serves ${deployment.model}.`};
+    selected = runtimeForSelection(input.settings, {provider: resolved.provider, model: resolved.model}, input.cwd, undefined, undefined, deployment);
   }
-  return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config)}};
+  return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config), contextWindowTokens: selected.config.contextWindowTokens, maxOutputTokens: selected.config.maxOutputTokens, ...(selected.config.deployment ? {nativeMaxConcurrency: Math.min(2, selected.config.deployment.activeSequences)} : {})}};
 }
 
 export function providerRequestSettings(config: ModelRuntimeConfig): ProviderRequestOptions {

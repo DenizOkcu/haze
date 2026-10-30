@@ -119,8 +119,8 @@ describe('providerPresets', () => {
 describe('preset model limits', () => {
   // The curated catalog is only useful while it stays complete. Local presets
   // are exempt (their context depends on the local server, not the model);
-  // Thesean has no models.dev data yet and is the only allowed cloud gap.
-  const LIMIT_EXEMPT = new Set(['ollama', 'llamacpp', 'mlx-server', 'lmstudio', 'thesean']);
+  // haze.build is deployment-configured and discovers a live manifest; Thesean lacks catalog data.
+  const LIMIT_EXEMPT = new Set(['ollama', 'llamacpp', 'mlx-server', 'lmstudio', 'thesean', 'haze.build']);
 
   it('every suggested model on every non-exempt preset carries limits', () => {
     const missing: string[] = [];

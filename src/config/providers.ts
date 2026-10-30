@@ -106,5 +106,5 @@ export function providerHasKey(settings: HazeSettings, provider: HazeProviderSet
 
 /** Image input is explicit-only (F03): never inferred from URL or model name. */
 export function providerImageCapable(provider: HazeProviderSettings) {
-  return provider.capabilities?.images === true;
+  return provider.kind !== 'haze-build' && provider.capabilities?.images === true;
 }

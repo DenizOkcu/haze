@@ -602,3 +602,15 @@ describe('subagent V2 boundary', () => {
     expect(captured.reasoning).toBeUndefined();
   });
 });
+
+describe('worker model capacity', () => {
+  it('blocks an initial task that cannot fit the model before inference', async () => {
+    const result = await runSubagent(capsule('Read the fixture'), {runtime: {
+      model: noopModel!, selector: 'native:model', providerName: 'native',
+      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true},
+      requestOptions: {}, contextWindowTokens: 4096, maxOutputTokens: 1024},
+      contextBundle: {...emptyBundle, systemPrompt: 'x'.repeat(20000)}});
+    expect(result.capsule.termination).toBe('policy_blocked');
+    expect(result.capsule.deliverable).toContain('capacity');
+  });
+});

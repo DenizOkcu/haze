@@ -1906,3 +1906,14 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
     expect(result.evidence).toMatchObject({mutationCount: 1, validationOutcome: 'passed'});
   });
 });
+
+describe('configured output envelope', () => {
+  it.each([4096, 16384, 32768])('transmits the reserved %i output tokens', async maxOutputTokens => {
+    const {runAgentTurn} = await loadStreaming({modelHandle: {model: {modelId: 'test'},
+      config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}, contextWindowTokens: 65536, maxOutputTokens}},
+      streamParts: [{type: 'text-delta', text: 'A complete answer.'}, {type: 'finish', finishReason: 'stop'}],
+      responseMessages: [{role: 'assistant', content: 'A complete answer.'}]});
+    await runAgentTurn('hello', undefined, [], makeCallbacks());
+    expect(mocks.agentOptions[0].maxOutputTokens).toBe(maxOutputTokens);
+  });
+});

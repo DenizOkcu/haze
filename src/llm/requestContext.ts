@@ -5,6 +5,7 @@ import {LspPool} from './lsp/pool.js';
 import {buildSystemPrompt, type PromptSession} from './systemPrompt.js';
 import {readSettings} from '../config/settings.js';
 import {resolveWorkerRuntime, type ModelRuntimeSelection} from './client.js';
+import {resolveModelSelector} from '../config/providers.js';
 import {resolveExecutionProfile} from '../core/subagent/executionProfiles.js';
 import {SubagentCoordinator, type CoordinatorEvent} from '../core/subagent/subagentCoordinator.js';
 import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
@@ -104,13 +105,12 @@ export async function assembleRequestContext(input: {
   }
   const installedLsp = await installedLspServers(settings);
   const hasInstalledLsp = installedLsp.length > 0;
-  const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile;
-  const profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
-  const executionScope = input.executionScope ?? {
-    mutationPolicy: new WorkspaceMutationPolicy(),
-    coordinator: new SubagentCoordinator(profile ?? resolveExecutionProfile(undefined, undefined)!, input.onSubagentEvent),
-  };
-  const {coordinator, mutationPolicy} = executionScope;
+  const workerSelector = input.subagentOverrides?.workerModel ?? settings.subagents?.workerModel;
+  const nativeWorker = workerSelector ? resolveModelSelector(settings, workerSelector) : undefined;
+  const usesNativeWorker = nativeWorker?.status === 'found' ? nativeWorker.provider.kind === 'haze-build' : !workerSelector && input.modelRuntime?.config.providerKind === 'haze-build';
+  const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile ?? (usesNativeWorker ? 'haze-build' : undefined);
+  let profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
+  if (profile && usesNativeWorker) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, 2)};
   let blockedReason = profile ? undefined : `Unknown subagent profile ${profileName}. Configure subagents.profiles or select a built-in profile.`;
   let workerRuntime: WorkerRuntime | undefined;
   if (input.modelRuntime) {
@@ -124,6 +124,13 @@ export async function assembleRequestContext(input: {
     ...fallbackWorkerRuntime(input.model, input.modelRuntime?.selector, input.modelRuntime?.config.providerName),
     capabilities: input.modelRuntime?.config.capabilities ?? fallbackProviderCapabilities(),
   };
+
+  if (profile && workerRuntime.nativeMaxConcurrency) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, workerRuntime.nativeMaxConcurrency)};
+  const executionScope = input.executionScope ?? {
+    mutationPolicy: new WorkspaceMutationPolicy(),
+    coordinator: new SubagentCoordinator(profile ?? resolveExecutionProfile(undefined, undefined)!, input.onSubagentEvent),
+  };
+  const {coordinator, mutationPolicy} = executionScope;
 
   const toolCategories = new Map<string, ToolCategory>();
   const availableTools: ToolSet = {};

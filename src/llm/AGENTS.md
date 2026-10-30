@@ -55,3 +55,5 @@ Current reliability contracts:
 - Do not invent default providers/models; honor `config/providers.ts` resolution.
 - MCP tools are optional per turn. Failures should be isolated and surfaced as system/UI messages, not crash unrelated turns.
 - LSP tools should only appear when enabled and the configured server command is available. Mutating LSP workspace edits must pass the same confinement, secret, ignore, scoped-instruction, coordination, and bounded-diff contracts as built-in file mutations. Pull diagnostics honor the server's advertised `diagnosticProvider` capability and use the `textDocument/diagnostic` method (CI-02): an explicit empty report is a valid empty result, while an absent or timed-out response is reported as such — never as empty diagnostics.
+
+- Native `haze-build` providers use `hazeBuild.ts` and the maintained compatible SDK adapter; contract v1 is refreshed per attempt, including loopback endpoints. Binary thinking travels through the portable reasoning setting, preservation is template/version gated, and text-only input is enforced. Worker runtimes retain model capacity; growing histories compact or synthesize within that envelope.

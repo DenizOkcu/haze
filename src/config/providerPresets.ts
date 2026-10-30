@@ -29,6 +29,8 @@ export interface PresetModelLimits {
 }
 
 export interface ProviderPreset {
+  kind?: 'haze-build';
+  requiresEndpoint?: boolean;
   /** Unique identifier used as the selection value. */
   id: string;
   /** Human-readable name shown in the picker. */
@@ -71,6 +73,8 @@ type PresetModelSpec = string | readonly [model: string, contextWindowTokens: nu
 
 /** Compact authoring form shared by every preset (see the module comment). */
 interface ProviderPresetDefinition {
+  kind?: 'haze-build';
+  requiresEndpoint?: boolean;
   id: string;
   name: string;
   baseUrl: string;
@@ -83,6 +87,9 @@ interface ProviderPresetDefinition {
 }
 
 const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
+  {id: 'haze.build', name: 'haze.build', kind: 'haze-build', requiresEndpoint: true,
+    baseUrl: 'https://haze.build/v1', category: 'cloud', models: ['haze0.1-coder-flash'],
+    apiKeyHint: 'your deployed haze.build inference key'},
   // ── Cloud providers (API key required) ──────────────────────────────
   {
     id: 'openrouter',
@@ -595,6 +602,8 @@ function expandPreset(definition: ProviderPresetDefinition): ProviderPreset {
   const tuples = definition.models?.filter((model): model is Exclude<PresetModelSpec, string> => Array.isArray(model)) ?? [];
   return {
     id: definition.id,
+    ...(definition.kind ? {kind: definition.kind} : {}),
+    ...(definition.requiresEndpoint ? {requiresEndpoint: true} : {}),
     name: definition.name,
     baseUrl: definition.baseUrl,
     needsApiKey: definition.category === 'cloud' && definition.auth == null,

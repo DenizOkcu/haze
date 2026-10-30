@@ -219,7 +219,7 @@ export function harvestModelLimits(body: unknown): HarvestedModelLimits {
     const entry = item as Record<string, unknown>;
     const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : undefined;
     if (!id) continue;
-    const contextWindowTokens = firstHarvested(entry.context_window, entry.context_length, entry.max_context_length, entry.max_context_tokens);
+    const contextWindowTokens = firstHarvested(entry.context_window, entry.context_length, entry.max_context_length, entry.max_context_tokens, entry.max_model_len);
     const maxOutputTokens = firstHarvested(entry.max_output_tokens, entry.max_completion_tokens, entry.max_tokens);
     if (contextWindowTokens !== undefined || maxOutputTokens !== undefined) {
       out[id] = {...(contextWindowTokens !== undefined ? {contextWindowTokens} : {}), ...(maxOutputTokens !== undefined ? {maxOutputTokens} : {})};

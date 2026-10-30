@@ -131,6 +131,7 @@ export function providerRemove(settings: HazeSettings, providerName: string | un
 export function providerSetImageCapable(settings: HazeSettings, providerName: string | undefined, enabled: boolean): WizardPatch {
   const provider = providerName ? findProvider(settings, providerName) : undefined;
   if (!provider) return {message: 'No provider selected.'};
+  if (enabled && provider.kind === 'haze-build') return {provider, message: 'haze.build haze0.1-coder-flash is text/tools only; images are not supported.'};
   const capabilities = {...(provider.capabilities ?? {}), images: enabled};
   return {
     provider,

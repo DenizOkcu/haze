@@ -50,6 +50,7 @@ export const COMPATIBILITY_PROFILE: SubagentExecutionProfile = {
 };
 
 export const BUILT_IN_SUBAGENT_PROFILES: Readonly<Record<string, SubagentExecutionProfile>> = {
+  'haze-build': {...COMPATIBILITY_PROFILE, name: 'haze-build', maxConcurrency: 2, maxInputTokens: 48_000, maxOutputTokens: 6_144, maxRetries: 0},
   'local-safe': {...COMPATIBILITY_PROFILE, name: 'local-safe', maxConcurrency: 1, maxSteps: 32, maxToolCalls: 24, maxOutputTokens: 4_096, maxInputTokens: 40_000, maxRetries: 0},
   'local-throughput': {...COMPATIBILITY_PROFILE, name: 'local-throughput', maxConcurrency: 2, maxSteps: 40, maxToolCalls: 32, maxOutputTokens: 6_144, maxInputTokens: 48_000, maxRetries: 0},
   'cloud-balanced': {...COMPATIBILITY_PROFILE, name: 'cloud-balanced', maxConcurrency: 3, deadlineMs: 360_000},
