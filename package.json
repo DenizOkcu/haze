@@ -46,7 +46,8 @@
     "bench:render": "node --expose-gc scripts/ink-render-benchmark.mjs .",
     "release:verify": "node scripts/verify-release-metadata.mjs",
     "haze": "tsx src/cli/index.ts",
-    "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high && npm run release:verify"
+    "prepublishOnly": "npm run typecheck && npm test && npm run lint && npm run build && npm audit --audit-level=high && npm run release:verify",
+    "eval:native": "node scripts/run-native-evals.mjs"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.83",
