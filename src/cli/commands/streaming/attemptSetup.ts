@@ -1,7 +1,7 @@
 import type {ModelMessage, ToolSet} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, resolveStreamIdleTimeoutMs, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, resolveStreamIdleTimeoutMs, usesPatientIdleWindow, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {goalDirectionPrompt, isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {projectPreflight} from '../../../core/agent/projectPreflight.js';
@@ -264,7 +264,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     toolCategories,
     modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
     retryBaseDelayMs: typeof turnSettings.retryBaseDelayMs === 'number' ? turnSettings.retryBaseDelayMs : DEFAULT_RETRY_BASE_DELAY_MS,
-    streamIdleTimeoutMs: resolveStreamIdleTimeoutMs(turnSettings.streamIdleTimeoutMs, isLocalProviderUrl(runtime.config.baseURL)),
+    streamIdleTimeoutMs: resolveStreamIdleTimeoutMs(turnSettings.streamIdleTimeoutMs, usesPatientIdleWindow(isLocalProviderUrl(runtime.config.baseURL), runtime.config.providerKind)),
     steeringProfile,
   };
 }

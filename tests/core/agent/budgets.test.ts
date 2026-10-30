@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {tool, type ToolSet} from 'ai';
-import {IDLE_TIMEOUT_MS, LOCAL_IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, clampSlice, createToolExecutionBudget, hasUsableBudget, isToolBudgetBlocked, mainTurnBudget, remainingSteps, remainingToolCalls, resolveStreamIdleTimeoutMs, withToolExecutionBudget, wouldExceedToolCalls, type ToolExecutionBudgetState} from '../../../src/core/agent/budgets.js';
+import {IDLE_TIMEOUT_MS, LOCAL_IDLE_TIMEOUT_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, MAIN_TOOL_ONLY_STEP_LIMIT, clampSlice, createToolExecutionBudget, hasUsableBudget, isToolBudgetBlocked, mainTurnBudget, remainingSteps, remainingToolCalls, resolveStreamIdleTimeoutMs, usesPatientIdleWindow, withToolExecutionBudget, wouldExceedToolCalls, type ToolExecutionBudgetState} from '../../../src/core/agent/budgets.js';
 
 
 
@@ -133,5 +133,14 @@ describe('resolveStreamIdleTimeoutMs', () => {
   it('unset resolves to 5 minutes hosted and 30 minutes local', () => {
     expect(resolveStreamIdleTimeoutMs(undefined, false)).toBe(IDLE_TIMEOUT_MS);
     expect(resolveStreamIdleTimeoutMs(undefined, true)).toBe(LOCAL_IDLE_TIMEOUT_MS);
+  });
+});
+
+describe('usesPatientIdleWindow', () => {
+  it('local URLs and the native haze-build kind are patient regardless of URL class', () => {
+    expect(usesPatientIdleWindow(true, undefined)).toBe(true);
+    expect(usesPatientIdleWindow(false, 'haze-build')).toBe(true);
+    expect(usesPatientIdleWindow(false, undefined)).toBe(false);
+    expect(usesPatientIdleWindow(false, 'openai-compatible')).toBe(false);
   });
 });

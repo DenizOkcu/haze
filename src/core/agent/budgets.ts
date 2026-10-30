@@ -18,11 +18,21 @@ export const LOCAL_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * Effective idle-stream stall window: the explicit `streamIdleTimeoutMs`
- * setting wins; otherwise local inference servers get the patient local
- * default and hosted endpoints the hosted one.
+ * setting wins; otherwise patient providers (see `usesPatientIdleWindow`)
+ * get the patient local default and the rest the hosted one.
  */
 export function resolveStreamIdleTimeoutMs(setting: number | undefined, localProvider: boolean): number {
   return setting ?? (localProvider ? LOCAL_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS);
+}
+
+/**
+ * Patient idle class: loopback/local inference servers and native haze.build
+ * deployments. The native server's silent prompt ingestion and hidden
+ * reasoning look identical through a remote HTTPS proxy — no SSE keepalives
+ * either way — so its URL class must not decide the stall window.
+ */
+export function usesPatientIdleWindow(localUrl: boolean, providerKind: string | undefined): boolean {
+  return localUrl || providerKind === 'haze-build';
 }
 /** Default per-tool execution deadline; an uncooperative tool cannot defer the turn indefinitely (RH-004). */
 export const DEFAULT_TOOL_DEADLINE_MS = 10 * 60_000;
