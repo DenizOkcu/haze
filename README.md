@@ -565,31 +565,3 @@ npm publish --access public --provenance
 ## License
 
 MIT
-
-
-### Native haze.build provider
-
-Use `/provider` → add → `haze.build`, supply your deployed HTTPS `/v1` endpoint
-and inference key, then explicitly choose `haze0.1-coder-flash`. This is the
-versioned Haze model family (0.1), backed by the pinned Qwen3.6 AWQ deployment.
-The provider uses kind `haze-build`; it is not inferred from an arbitrary name.
-The authenticated contract validates runtime/model/template identity and refreshes
-live capacity before each attempt. Existing provider/model settings are unchanged.
-
-Native thinking is binary: `none` means off, enabled effort labels mean on,
-and unset leaves the server default. Reasoning survives tool turns with the
-checkpoint's supported thinking preservation. Workers and compaction summaries
-disable thinking to preserve bounded output; images are unsupported. Main and
-worker requests honor the same live context/output envelope. Native workers
-default to at most two (one when the deployment has one active slot).
-
-Server source and deployment instructions are in the related `haze-gpu` project.
-The preset requests the endpoint; it does not assume a public service at the
-provider's display domain. Old `haze-coder` sessions require an explicit new model
-selection after server upgrade. Roll back with the previous tested image/profile
-and use its corresponding provider contract.
-
-Run `npm run eval:native` after configuring the native provider to exercise real
-coding tasks, tools and validation in disposable workspaces. This requires a live
-matching deployment. Plain `npm test` instead runs deterministic native protocol,
-actual-agent fixture, discovery and capacity regressions without network/model use.
