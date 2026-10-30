@@ -7,13 +7,16 @@ import {providerRequestSettings, type ModelRuntimeConfig} from '../../src/llm/cl
 let tmp = '';
 let settingsFile = '';
 
-async function loadClient(createOpenAIImpl?: (options: unknown) => unknown) {
+async function loadClient(createOpenAIImpl?: (options: unknown) => unknown, createCompatibleImpl?: (options: unknown) => unknown) {
   vi.doMock('../../src/config/paths.js', () => ({
     HAZE_DIR: tmp,
     GLOBAL_SKILLS_DIR: path.join(tmp, 'skills'),
   }));
   vi.doMock('@ai-sdk/openai', () => ({
     createOpenAI: vi.fn(createOpenAIImpl ?? ((options: unknown) => ({chat: () => options}))),
+  }));
+  vi.doMock('@ai-sdk/openai-compatible', () => ({
+    createOpenAICompatible: vi.fn(createCompatibleImpl ?? ((options: unknown) => ({chatModel: () => options}))),
   }));
   vi.resetModules();
   return import('../../src/llm/client.js');
@@ -171,13 +174,47 @@ describe('modelWithConfig', () => {
     expect(runtime?.config.providerKind).toBe('chatgpt-codex');
   });
 
+  it('keeps direct OpenAI endpoints on the OpenAI package chat transport', async () => {
+    await writeSettings({
+      providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'sk-test', models: ['gpt-6']}],
+      provider: 'openai',
+      model: 'gpt-6',
+    });
+    const chat = vi.fn((model: string) => ({model}));
+    const chatModel = vi.fn();
+    const {modelWithConfig} = await loadClient(() => ({chat}), () => ({chatModel}));
+    await modelWithConfig();
+    expect(chat).toHaveBeenCalledWith('gpt-6');
+    expect(chatModel).not.toHaveBeenCalled();
+  });
+
+  it('routes non-OpenAI endpoints through the compatible adapter with usage streaming', async () => {
+    await writeSettings({
+      providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', key: 'k', models: ['mistral-large']}],
+      provider: 'mistral',
+      model: 'mistral-large',
+    });
+    const chatModel = vi.fn((model: string) => ({model}));
+    const createCompatible = vi.fn((options: unknown) => ({chatModel, options}));
+    const {modelWithConfig} = await loadClient(undefined, createCompatible);
+    const runtime = await modelWithConfig();
+    expect(createCompatible).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'mistral',
+      baseURL: 'https://api.mistral.ai/v1',
+      apiKey: 'k',
+      includeUsage: true,
+    }));
+    expect(chatModel).toHaveBeenCalledWith('mistral-large');
+    expect(runtime?.config.providerName).toBe('mistral');
+  });
+
   it('sends OpenRouter attribution headers for app statistics', async () => {
     await writeSettings({
       providers: [{name: 'openrouter', url: 'https://openrouter.ai/api/v1', key: 'k', models: ['any']}],
       provider: 'openrouter',
       model: 'any',
     });
-    const {modelWithConfig} = await loadClient((options: {headers?: Record<string, string>} | undefined) => ({chat: () => options}));
+    const {modelWithConfig} = await loadClient(undefined, (options: {headers?: Record<string, string>} | undefined) => ({chatModel: () => options}));
     const runtime = await modelWithConfig();
     const modelArg = runtime!.model as unknown as {headers?: Record<string, string>};
     expect(modelArg.headers).toEqual({
@@ -205,7 +242,7 @@ describe('modelWithConfig', () => {
       provider: 'ollama',
       model: 'llama3',
     });
-    const {modelWithConfig} = await loadClient((options: {apiKey?: string} | undefined) => ({chat: () => options}));
+    const {modelWithConfig} = await loadClient(undefined, (options: {apiKey?: string} | undefined) => ({chatModel: () => options}));
     const runtime = await modelWithConfig();
     const modelArg = runtime!.model as unknown as {apiKey?: string};
     expect(modelArg.apiKey).toBe('not-needed');
@@ -270,7 +307,7 @@ describe('modelWithConfig', () => {
       model: 'm',
     });
     // Both model factories must exist: the codex fixture uses `responses`.
-    const {modelWithConfig} = await loadClient(() => ({chat: () => undefined, responses: () => undefined}));
+    const {modelWithConfig} = await loadClient(() => ({chat: () => undefined, responses: () => undefined}), () => ({chatModel: () => undefined}));
     for (const fixture of fixtures) {
       const runtime = await modelWithConfig({modelSelector: `${fixture.name}:m`});
       expect(runtime!.config.capabilities.supportsReasoningEffort, fixture.name).toBe(fixture.expected);

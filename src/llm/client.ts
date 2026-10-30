@@ -1,4 +1,5 @@
 import {createOpenAI} from '@ai-sdk/openai';
+import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {discoverHazeBuildManifest, type HazeBuildManifest} from '../config/hazeBuild.js';
 import {createHazeBuildModel} from './hazeBuild.js';
 import crypto from 'node:crypto';
@@ -61,8 +62,13 @@ function openRouterHeaders(providerName: string, baseURL: string): Record<string
   };
 }
 
+/** True when the endpoint is OpenAI's own API, not a gateway/local server speaking the compatible subset. */
+function isDirectOpenAi(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind']): boolean {
+  return providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
+}
+
 function capabilities(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind'], explicit?: HazeProviderSettings['capabilities']): ProviderCapabilities {
-  const directOpenAI = providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
+  const directOpenAI = isDirectOpenAi(providerName, baseURL, providerKind);
   const openRouter = isOpenRouter(providerName, baseURL);
   // Reasoning-effort support is explicit-first: a user override wins either
   // way. Otherwise loopback/local inference servers (LM Studio, Ollama,
@@ -138,9 +144,21 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const reasoningPolicy = deployment && resolvedPolicy.effective !== 'disabled'
     ? {...resolvedPolicy, reason: `haze.build binary thinking ${requestedReasoning === 'none' ? 'off' : 'on'}; effort levels do not imply different compute budgets`}
     : resolvedPolicy;
-  const openai = providerKind === 'chatgpt-codex'
-    ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)})
-    : createOpenAI({apiKey, baseURL, headers: openRouterHeaders(selection.provider.name, baseURL)});
+  // Transport split mirrors the wire reality: OpenAI's own endpoints and the
+  // codex OAuth kind ride @ai-sdk/openai (Responses access, `prompt_cache_key`,
+  // catalog effort remapping); every other endpoint — gateways, local servers,
+  // custom proxies — speaks the compatible subset and rides
+  // @ai-sdk/openai-compatible. `includeUsage` is mandatory there: the openai
+  // package always streams `include_usage` and context estimation depends on
+  // provider usage. Reasoning levels pass through verbatim (no catalog remap).
+  const headers = openRouterHeaders(selection.provider.name, baseURL);
+  const model = deployment
+    ? createHazeBuildModel({baseURL, apiKey, manifest: deployment})
+    : providerKind === 'chatgpt-codex'
+      ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)}).responses(name)
+      : isDirectOpenAi(selection.provider.name, baseURL, providerKind)
+        ? createOpenAI({apiKey, baseURL, headers}).chat(name)
+        : createOpenAICompatible({name: selection.provider.name, baseURL, apiKey, headers, includeUsage: true}).chatModel(name);
   const limits = modelLimitsFor(selection.provider, name);
   // Class-aware fallback so unknown local models (server-configured window,
   // silent truncation) stay conservative while unknown hosted models get the
@@ -161,7 +179,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
   const maxOutputTokens = limits.maxOutputTokens ?? catalog?.maxOutputTokens;
   return {
-    model: deployment ? createHazeBuildModel({baseURL, apiKey, manifest: deployment}) : providerKind === 'chatgpt-codex' ? openai.responses(name) : openai.chat(name),
+    model,
     selector,
     config: {
       providerName: selection.provider.name,
@@ -174,7 +192,10 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       contextWindowTokens: deployment ? Math.min(limits.contextWindowTokens ?? deployment.contextWindowTokens, deployment.contextWindowTokens) : limits.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
       contextWindowSource: deployment ? 'deployment' : contextWindowSource,
       ...(deployment ? {deployment, maxOutputTokens: Math.min(limits.maxOutputTokens ?? deployment.maxOutputTokens, deployment.maxOutputTokens),
-        warnings: limits.contextWindowTokens && limits.contextWindowTokens !== deployment.contextWindowTokens ? ['Configured context differs from the current haze.build deployment; using the smaller safe limit.'] : []}
+        warnings: [
+          ...(limits.contextWindowTokens !== undefined && limits.contextWindowTokens !== deployment.contextWindowTokens ? ['Configured context differs from the current haze.build deployment; using the smaller safe limit.'] : []),
+          ...(limits.maxOutputTokens !== undefined && limits.maxOutputTokens !== deployment.maxOutputTokens ? ['Configured output tokens differ from the current haze.build deployment; using the smaller safe limit.'] : []),
+        ]}
         : maxOutputTokens !== undefined ? {maxOutputTokens} : {}),
     },
   };
