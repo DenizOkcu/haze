@@ -467,6 +467,60 @@ describe('runAgentTurn: setup', () => {
     expect(prepare({steps: [], messages: []})?.activeTools).toBeUndefined();
   });
 
+  it('redirects repeated identical tool calls with an instruction, never by narrowing tools (2026-10-30 session 30fd6f)', async () => {
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {readFile: {description: 'read'}, shell: {description: 'shell'}},
+      toolCategories: new Map([['readFile', 'builtin'], ['shell', 'builtin']]),
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await runAgentTurn('inspect a.ts', undefined, [], makeCallbacks());
+    const options = mocks.agentOptions.at(-1)!;
+    const prepare = options.prepareStep as (input: {steps: Array<{toolCalls: Array<{toolName: string; input: unknown}>; text: string}>; messages: unknown[]}) => {toolChoice?: unknown; activeTools?: string[]; messages?: unknown[]} | undefined;
+    const repeatedStep = {toolCalls: [{toolName: 'readFile', input: {path: 'a.ts'}}], text: ''};
+    const redirected = prepare({steps: [{...repeatedStep}, {...repeatedStep}], messages: []});
+    expect(redirected?.activeTools).toBeUndefined();
+    expect(redirected?.toolChoice).toBeUndefined();
+    expect(JSON.stringify(redirected?.messages)).toMatch(/already called readFile with identical input/);
+    // An identical validation rerun is not a repeat: no redirect at all.
+    const validationStep = {toolCalls: [{toolName: 'shell', input: {command: 'cd /repo && npm run typecheck'}}], text: ''};
+    expect(prepare({steps: [{...validationStep}, {...validationStep}], messages: []})).toBeUndefined();
+  });
+
+  it('nudges for validation when mutations accrue after an already-recorded validation (2026-10-30 session 30fd6f)', async () => {
+    const validationStream = (id: string) => [
+      {type: 'tool-call', toolCallId: id, toolName: 'shell', input: {command: 'npm test'}},
+      {type: 'tool-result', toolCallId: id, toolName: 'shell', input: {command: 'npm test'}, output: {ok: true, code: 0, validationSummary: {kind: 'test', status: 'passed', summaryText: 'ok', failedFiles: [], failedTests: [], diagnostics: [], rawOutputTruncated: false}}},
+      {type: 'finish', finishReason: 'tool-calls'},
+    ] as FakeFullStreamPart[];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      availableTools: {editFile: {description: 'edit', execute: async () => ({ok: true})}, shell: {description: 'shell', execute: async () => ({ok: true})}},
+      // One synthetic step end per agent call so the epoch loop advances
+      // (the mock never derives step completion from streamed parts alone).
+      stepEnds: [{stepNumber: 0, text: '', toolCalls: [], response: {messages: []}}],
+      callStreams: [
+        validationStream('v0'),
+        ...Array.from({length: 8}, (_, index) => [
+          {type: 'tool-call', toolCallId: `e${index}`, toolName: 'editFile', input: {path: `src/f${index}.ts`}},
+          {type: 'tool-result', toolCallId: `e${index}`, toolName: 'editFile', input: {path: `src/f${index}.ts`}, output: {ok: true}},
+          {type: 'finish', finishReason: 'tool-calls'},
+        ] as FakeFullStreamPart[]),
+        validationStream('v1'),
+        [{type: 'text-delta', text: 'Validated after the edits.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+    });
+    const cb = makeCallbacks();
+    await runAgentTurn('implement', undefined, [], cb);
+    // The request after the 8th unvalidated mutation carries the
+    // stale-validation nudge — the branch that once never fired because
+    // validationSeq > 0 from the earlier green check.
+    expect(mocks.streamedMessages.some(request => /Several files changed without a check/.test(JSON.stringify(request)))).toBe(true);
+  });
+
   it('uses displayValue when provided instead of the raw value', async () => {
     const {runAgentTurn} = await loadStreaming({
       modelHandle: {

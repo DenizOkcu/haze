@@ -203,15 +203,22 @@ export function assessCompletionReadiness(state: CompletionReadinessInput, evide
   return 'ready';
 }
 
-/** Human-readable, safe (no commands/content) description of a readiness result. */
-export function describeCompletionReadiness(readiness: CompletionReadiness, taskProgress?: WorkTaskProgress): string {
+/**
+ * Human-readable, safe (no commands/content) description of a readiness result.
+ * `openCheckKinds` (from `checkKindsOfIds`) names which confirmed check kinds
+ * still block completion — without it a carried phantom debt reads as an
+ * unexplained "latest validation failed".
+ */
+export function describeCompletionReadiness(readiness: CompletionReadiness, taskProgress?: WorkTaskProgress, openCheckKinds?: string[]): string {
   switch (readiness) {
     case 'pending_tasks': {
       const open = taskProgress ? taskProgress.pending + taskProgress.inProgress : 0;
       return `${open} declared task${open === 1 ? '' : 's'} still pending or in progress`;
     }
     case 'task_ledger_absent': return 'this broad request has no declared outcome list';
-    case 'validation_failed': return 'the latest validation failed and remains unresolved';
+    case 'validation_failed': return openCheckKinds?.length
+      ? `the latest validation failed and remains unresolved (open checks: ${openCheckKinds.join(', ')})`
+      : 'the latest validation failed and remains unresolved';
     case 'validation_stale': return 'edits landed after the latest validation';
     case 'validation_absent_after_mutation': return 'edits landed without any relevant validation';
     case 'red_check_not_green': return 'the captured pre-edit failing check has not passed after the fix';

@@ -244,6 +244,16 @@ describe('assessCompletionReadiness (Cycle 1)', () => {
     expect(describeCompletionReadiness('ready')).toContain('complete');
     expect(JSON.stringify(describeCompletionReadiness('validation_failed'))).not.toMatch(/command|stdout|secret/);
   });
+
+  it('names the open check kinds behind a failed-validation notice (2026-10-30 session 30fd6f)', () => {
+    // A carried phantom debt read as an unexplained "latest validation failed"
+    // while typecheck and tests were green; the kinds make the blocker visible.
+    expect(describeCompletionReadiness('validation_failed', undefined, ['typecheck'])).toContain('(open checks: typecheck)');
+    expect(describeCompletionReadiness('validation_failed', undefined, ['typecheck', 'test'])).toContain('(open checks: typecheck, test)');
+    expect(describeCompletionReadiness('validation_failed', undefined, [])).not.toContain('open checks');
+    const withKinds = describeCompletionReadiness('validation_failed', undefined, ['typecheck']);
+    expect(JSON.stringify(withKinds)).not.toMatch(/command|stdout|secret/);
+  });
 });
 
 describe('recovery decisions (Increment 2: bounded, single-use)', () => {

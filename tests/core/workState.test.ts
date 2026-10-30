@@ -134,6 +134,38 @@ describe('deriveValidationOutcome', () => {
     expect(deriveValidationOutcome(state)).toBe('failed');
   });
 
+  it.each(['2>&1', '2>/dev/null'])('strips a trailing bare stderr redirect so the plain rerun pairs: %s', suffix => {
+    // A trailing bare stderr redirect once defeated the single-invocation gate,
+    // stranding the red check behind an opaque `compound@` scope no green rerun
+    // could pair with (2026-10-30 session 30fd6f).
+    expect(validationCommandKey(`cd web && npm test ${suffix}`)).toBe(validationCommandKey('npm --prefix web test'));
+    const state = createWorkState('implement a feature', 'implement', []);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: `cd web && npm test ${suffix}`}, success: false, output: {ok: false, validationSummary: failedSummary()}});
+    expect(unresolvedFailedCheckIds(state)).toHaveLength(1);
+    expect(unresolvedFailedCheckIds(state)[0]).toMatch(/^npm@/);
+    observeWorkToolEvent(state, {toolName: 'shell', input: {command: 'npm --prefix web test'}, success: true, output: {ok: true, validationSummary: passedSummary()}});
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('clears a red cd-wrapped typecheck with 2>&1 on the plain green rerun across a turn boundary (2026-10-30 session 30fd6f)', () => {
+    // The exact goal-killer: the red form hashed to compound@d67e47d00770c0c6,
+    // which no green rerun could pair with, so a fully green state (typecheck
+    // clean, 155/155 tests) paused as no-progress after 6 cycles.
+    const typecheck = (status: 'passed' | 'failed') => ({ok: status === 'passed', code: status === 'passed' ? 0 : 2, validationSummary: {kind: 'typecheck', status, summaryText: `typecheck ${status}`, failedFiles: [], failedTests: [], diagnostics: []}});
+    const first = createWorkState('implement', 'implement', []);
+    observeWorkToolEvent(first, {toolName: 'editFile', input: {path: 'src/App.tsx'}, success: true, output: {ok: true}});
+    observeWorkToolEvent(first, {toolName: 'shell', input: {command: 'cd /Users/deniz.okcu/development/haze-playground && npm run typecheck 2>&1'}, success: false, output: typecheck('failed')});
+    const ids = unresolvedFailedCheckIds(first);
+    expect(ids).toHaveLength(1);
+    expect(ids[0]).toMatch(/^npm@/);
+    const next = createWorkState('implement', 'implement', []);
+    seedCarriedGoalEvidence(next, {mutationCount: 1, validationOutcome: 'failed', validationKind: 'typecheck', failedCheckIds: ids});
+    observeWorkToolEvent(next, {toolName: 'shell', input: {command: 'cd /Users/deniz.okcu/development/haze-playground && npm run typecheck'}, success: true, output: typecheck('passed')});
+    expect(unresolvedFailedCheckIds(next)).toEqual([]);
+    expect(deriveValidationOutcome(next)).toBe('passed');
+  });
+
   it('requires validation after a mutation with unknown intent', () => {
     const state = createWorkState('make it work', 'unknown', []);
     observeWorkToolEvent(state, {toolName: 'writeFile', input: {path: 'app.ts'}, success: true, output: {ok: true}});
@@ -591,6 +623,15 @@ describe('&& compound validation recording (R2-08)', () => {
     const open = unresolvedFailedCheckIds(state);
     expect(open.length).toBe(1);
     expect(open[0]).toContain(':lint:');
+  });
+
+  it('a green && chain records per-stage summaries without cross-stage text (2026-10-30 session 30fd6f)', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('cd /repo && npm run typecheck && npm test', 'typecheck', 'passed'));
+    expect(state.validations).toEqual([
+      {command: 'cd /repo && npm run typecheck', status: 'passed', summary: 'typecheck passed', revision: 1, kind: 'typecheck'},
+      {command: 'cd /repo && npm test', status: 'passed', summary: 'stage 2/2 of && chain: passed', revision: 1, kind: 'test'},
+    ]);
   });
 
   it('; and || compounds keep the opaque compound scope', () => {

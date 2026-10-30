@@ -43,6 +43,8 @@ export const MAX_TURN_DEADLINE_MS = 24 * 60 * 60_000;
 export const MAIN_STEP_LIMIT = 64;
 export const MAIN_TOOL_CALL_LIMIT = 120;
 export const MAIN_TOOL_ONLY_STEP_LIMIT = 24;
+/** Per-attempt cap on repeated-tool instruction nudges; past it the tool-only/tool-call budget guards take over. */
+export const REPEATED_TOOL_NUDGE_LIMIT = 3;
 export const BACKGROUND_PROCESS_MAX_CONCURRENCY = 5;
 export const BACKGROUND_PROCESS_HISTORY_LIMIT = 20;
 

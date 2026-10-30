@@ -44,6 +44,14 @@ describe('uniqueRepeatedToolNames', () => {
     ];
     expect(uniqueRepeatedToolNames(calls).sort()).toEqual(['readFile', 'shell']);
   });
+
+  it('does not flag an identical validation rerun (2026-10-30 session 30fd6f)', () => {
+    const calls = [
+      {toolName: 'shell', input: {command: 'cd /repo && npm run typecheck'}},
+      {toolName: 'shell', input: {command: 'cd /repo && npm run typecheck'}},
+    ];
+    expect(uniqueRepeatedToolNames(calls)).toEqual([]);
+  });
 });
 
 describe('latestRepeatedToolNames', () => {
@@ -70,6 +78,15 @@ describe('latestRepeatedToolNames', () => {
       {toolName: 'readFile', input: {path: 'a.ts'}},
     ]}];
     expect(latestRepeatedToolNames(steps)).toEqual(['readFile']);
+  });
+
+  it('does not flag a legitimate validation rerun across an edit step (2026-10-30 session 30fd6f)', () => {
+    const steps = [
+      {toolCalls: [{toolName: 'shell', input: {command: 'cd /repo && npm run typecheck'}}]},
+      {toolCalls: [{toolName: 'editFile', input: {path: 'src/App.tsx'}}]},
+      {toolCalls: [{toolName: 'shell', input: {command: 'cd /repo && npm run typecheck'}}]},
+    ];
+    expect(latestRepeatedToolNames(steps)).toEqual([]);
   });
 });
 

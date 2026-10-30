@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.2 - 2026-10-30
+
+### Fixed
+
+- A failed validation whose command carried a trailing bare stderr redirect (e.g. `cd pkg && npm run typecheck 2>&1`) was recorded behind an opaque compound check identity that no later green rerun of the plain command could ever clear, so a fully validated goal could still end `failed` and pause as no-progress. Trailing `2>&1`/`2>/dev/null` are now treated as check-identity noise, and green `&&` chains record per-stage summaries instead of copying one stage's text onto every stage.
+- Repeated identical tool calls are redirected with a one-step instruction appended to the next request instead of removing the tool from it: a model that retried the removed tool hit a step-fatal "unavailable tool" error and lost the provider prefix cache for that step. Identical reruns of recognized validation commands (re-running a test or typecheck after a fix) are never treated as repeats, and the instruction is bounded per attempt.
+- The mid-implementation validation nudge now also fires when earlier validation evidence exists but new mutations have accumulated without a re-validation, so continuation turns with carried evidence no longer run many edits unvalidated.
+- Goal continuation notices for failed validation name the open check kinds (e.g. `open checks: typecheck`), making carried validation debt visible instead of reading as an unexplained "latest validation failed".
+
 ## 1.6.1 - 2026-10-24
 
 ### Fixed

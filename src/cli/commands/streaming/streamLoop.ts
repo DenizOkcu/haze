@@ -7,6 +7,7 @@ import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {buildLlmCompactionPrompt, chooseBoundaryCompactionMethod, compactModelMessages, compactModelMessagesWithSummary, extractExistingCompactionSummary} from '../../../core/agent/compaction.js';
 import {isLengthStopOverflow, isSilentContextOverflow} from '../../../core/agent/overflow.js';
 import {type TurnExecutionState} from '../../../core/agent/completionController.js';
+import {isValidationRerunToolCall} from '../../../core/agent/turnPolicy.js';
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS, COMPACTION_LLM_MIN_OLDER_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {toolsContextFor} from '../../../llm/tools/toolContext.js';
 import {busyToolLabel, toolCallSummary} from '../formatters.js';
@@ -61,6 +62,8 @@ export interface AttemptLoopState {
   generatedToolCalls: number;
   consecutiveToolOnlySteps: number;
   latestRepeatedToolNames: string[];
+  /** Bounded count of repeated-tool instructions this attempt; stops nagging past the limit. */
+  repeatedToolNudges: number;
   seenToolCallFingerprints: Set<string>;
   /** The current epoch rewrote history because the real context budget fired. */
   contextCompactedInEpoch: boolean;
@@ -102,6 +105,7 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     generatedToolCalls: 0,
     consecutiveToolOnlySteps: 0,
     latestRepeatedToolNames: [],
+    repeatedToolNudges: 0,
     seenToolCallFingerprints: new Set<string>(),
     contextCompactedInEpoch: false,
     lastUsage: undefined,
@@ -123,6 +127,9 @@ function recordCompletedStep(loopState: AttemptLoopState, input: {text: string; 
   for (const toolCall of input.toolCalls) {
     const keyed = toolCallFingerprint(toolCall);
     if (!keyed) continue;
+    // Validation reruns are legitimate red→green evidence; never track them
+    // for repetition (shared rule with turnPolicy's step-based detection).
+    if (isValidationRerunToolCall(toolCall)) continue;
     if (loopState.seenToolCallFingerprints.has(keyed.fingerprint)) repeated.add(keyed.toolName);
     loopState.seenToolCallFingerprints.add(keyed.fingerprint);
   }

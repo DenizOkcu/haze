@@ -6,7 +6,7 @@ import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../../core/agent/turnPolicy.js';
 import {RESCUE_BOUNDARY} from '../../../core/agent/completionController.js';
-import {MAIN_TOOL_CALL_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../../core/agent/budgets.js';
+import {MAIN_TOOL_CALL_LIMIT, REPEATED_TOOL_NUDGE_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../../core/agent/budgets.js';
 import {projectContextSection} from '../../../llm/systemPrompt.js';
 import type {HazeToolContext} from '../../../llm/tools/toolContext.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
@@ -19,7 +19,7 @@ import type {TurnExecutionState} from '../../../core/agent/completionController.
  * The per-step request preparation decision tree (extracted from
  * streamLoop.ts): scoped context injection, mid-turn compaction, and the
  * ordered model-constraint guards (rescue synthesis, plan-only finals,
- * malformed-tool retries, edit recovery, repeated-tool suppression, budget
+ * malformed-tool retries, edit recovery, repeated-tool redirection, budget
  * exhaustion). Each guard returns the step's tool-choice/messages override or
  * falls through to the default request.
  */
@@ -129,13 +129,28 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The failed mutation of ${loopState.toolResultState.editRecoveryPath} requires a fresh read, but readFile is unavailable in this bounded recovery slice. Report the unfinished edit as blocked; do not claim it succeeded.`)};
     }
     if (repeatedToolNames.length > 0) {
-      const activeTools = (Object.keys(sliceTools) as Array<keyof typeof sliceTools>).filter(name => !repeatedToolNames.includes(name as string));
-      callbacks.debugLog(`disabling repeated tools for next step: ${repeatedToolNames.join(', ')}`);
-      return activeTools.length > 0
-        ? {activeTools, messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))}
-        : {toolChoice: 'none', messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
+      // Instruct, never restrict: narrowing the request's tool set downgrades
+      // a model's retry of the removed tool into a step-fatal
+      // AI_NoSuchToolError and rewrites the request prefix (observed
+      // 2026-10-30 session 30fd6f) — the lesson the edit-recovery path above
+      // already learned. The prompt redirects; genuine loops stay bounded by
+      // the tool-only and tool-call budget guards below.
+      loopState.repeatedToolNudges += 1;
+      if (loopState.repeatedToolNudges <= REPEATED_TOOL_NUDGE_LIMIT) {
+        callbacks.debugLog(`instructing against repeated tools: ${repeatedToolNames.join(', ')}`);
+        return {messages: appendSyntheticControl(scopedMessages, repeatedToolCallPrompt(repeatedToolNames))};
+      }
+      callbacks.debugLog('repeated-tool instruction limit reached; budget guards take over');
     }
-    if (!loopState.earlyValidationNudgeIssued && goal.mutationCount >= (setup.steeringProfile === 'compact' ? 4 : 8) && goal.validationSeq === 0 && 'shell' in sliceTools) {
+    const nudgeThreshold = setup.steeringProfile === 'compact' ? 4 : 8;
+    // Nudge both when nothing ever validated and when the latest validation
+    // went stale: carried evidence seeds validationSeq > 0, which once left
+    // 22 minutes of edits unvalidated across continuation turns (observed
+    // 2026-10-30 session 30fd6f).
+    const neverValidated = goal.validationSeq === 0 && goal.mutationCount >= nudgeThreshold;
+    const staleValidation = goal.validationSeq > 0 && goal.mutationSeq > goal.validationSeq
+      && goal.mutationCount - (goal.mutationCountAtLastValidation ?? 0) >= nudgeThreshold;
+    if (!loopState.earlyValidationNudgeIssued && (neverValidated || staleValidation) && 'shell' in sliceTools) {
       loopState.earlyValidationNudgeIssued = true;
       return {messages: appendSyntheticControl(scopedMessages, earlyValidationPrompt())};
     }

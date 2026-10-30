@@ -27,11 +27,15 @@ export function intentExpectsValidation(intent: RequestIntent): boolean {
   return intent === 'implement' || intent === 'fix' || intent === 'test';
 }
 
+/** Bare fd merges/discards with no filename — pure output plumbing. */
+const TRAILING_REDIRECT_NOISE = /^(?:\d*>&\d+|\d*>\/dev\/null)$/;
+
 /**
  * Normalize a validation command into a matching key so a green run can be
  * bound to the red repro it must supersede (P4). Whitespace-insensitive; a
  * leading `time`/`nice` prefix, `env` with or without `VAR=value` assignments,
- * a lone line-continuation backslash, and a trailing `--` separator are noise.
+ * a lone line-continuation backslash, a trailing `--` separator, and trailing
+ * bare stderr redirects (`2>&1`, `2>/dev/null`) are noise.
  */
 export function validationCommandKey(command: string): string {
   const words = command.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
@@ -46,6 +50,13 @@ export function validationCommandKey(command: string): string {
     if (i < words.length) words.splice(0, i);
   }
   while (words.length > 1 && words.at(-1) === '--') words.pop();
+  // A trailing bare stderr redirect cannot change a check's identity, but it
+  // defeats the single-invocation gate below (observed 2026-10-30, session
+  // 30fd6f): a red `cd pkg && npm run typecheck 2>&1` kept its whole-compound
+  // identity, so its opaque `compound@` scope could never pair with the plain
+  // green rerun and the goal stayed `failed` with typecheck and tests green.
+  // Trailing tokens only; redirects with a filename stay part of the key.
+  while (words.length > 1 && TRAILING_REDIRECT_NOISE.test(words.at(-1)!)) words.pop();
   const normalized = words.join(' ');
   // npm's --prefix form and a simple `cd` wrapper address the same package.
   // Keep this deliberately narrow: parsing arbitrary shell syntax would risk
@@ -107,7 +118,7 @@ function failedCheckScope(command: string): string {
   const normalized = validationCommandKey(command);
   const scoped = /^npm@(\S+) /.exec(normalized);
   if (scoped) return `npm@${scoped[1]}`;
-  // `// `&&` compounds are recorded per stage (see andStages)// `&&` compounds are recorded per stage (see andStages)` compounds are recorded per stage (see validationStages), so a stage reaching
+  // `&&` compounds are recorded per stage (see validationStages), so a stage reaching
   // this function is a single invocation; `;`/`||` chains are a different
   // check than their stages: a red `npm test; npm run lint` must not be cleared
   // by a green bare `npm test`. The compound gets its own hashed (non-reversible)
@@ -175,6 +186,8 @@ export interface WorkState {
   mutationSeq: number;
   /** Monotonic sequence number of the latest validation (0 = none). */
   validationSeq: number;
+  /** mutationCount when the latest validation ran — the delta since it drives the stale-validation nudge. */
+  mutationCountAtLastValidation?: number;
   /**
    * Current-turn task-list evidence, recorded only from a successful `writeTasks`
    * result. Counts only — never task titles or raw output — so malformed tool
@@ -234,6 +247,10 @@ export function seedCarriedGoalEvidence(state: WorkState, carried: {mutationCoun
   }
   if (carried.validationOutcome === 'passed' || carried.validationOutcome === 'failed') {
     state.validationSeq = 1;
+    // Conservative baseline: treat all carried mutations as predating the
+    // carried validation, so the stale-validation nudge only fires once new
+    // unvalidated mutations accrue (the checkpoint carries no finer ordering).
+    state.mutationCountAtLastValidation = carried.mutationCount;
     state.carriedValidation = carried.validationOutcome === 'passed'
       ? {status: 'passed', ...(carried.validationKind ? {kind: carried.validationKind} : {})}
       : {status: 'failed', ...(carried.validationKind ? {kind: carried.validationKind} : {})};
@@ -440,9 +457,19 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
       // stages are treated as unresolved — individually clearable by a green rerun).
       const stages = validationStages(command);
       if (stages) {
-        for (const stage of stages) {
-          upsertValidation(state, stage, status, summaryText, inferValidationKind(stage), seq);
-        }
+        // Attribute the chain's parsed summary to the stage whose kind it
+        // describes — never copy one stage's text onto another (observed
+        // 2026-10-30 session 30fd6f: a green `typecheck && test` chain
+        // recorded the test stage with summary "typecheck passed"). No kind
+        // match defaults to the first stage.
+        const attributed = stages.findIndex(stage => inferValidationKind(stage) === summary?.kind);
+        const summaryStage = attributed >= 0 ? attributed : 0;
+        stages.forEach((stage, index) => {
+          const stageSummary = index === summaryStage
+            ? summaryText
+            : `stage ${index + 1}/${stages.length} of && chain: ${status}`;
+          upsertValidation(state, stage, status, stageSummary, inferValidationKind(stage), seq);
+        });
       } else {
         upsertValidation(state, command, status, summaryText, summary?.kind ?? 'generic', seq);
       }
@@ -459,6 +486,7 @@ export function observeWorkToolEvent(state: WorkState, event: WorkToolEvent, now
         state.carriedFailedCheckIds = remaining.length ? remaining : undefined;
       }
       state.validationSeq = seq;
+      state.mutationCountAtLastValidation = state.mutationCount;
       state.phase = 'validating';
       state.lastProgressAt = now;
       if (status === 'failed') {
@@ -551,6 +579,16 @@ export function unresolvedFailedCheckIds(state: WorkState): string[] {
   // Completion evidence must keep every open identity across turn boundaries.
   // Bound only the model-facing preview, not the authoritative check set.
   return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])];
+}
+
+/** Distinct confirmed check kinds behind open ids, for bounded human-readable notices. */
+export function checkKindsOfIds(ids: string[]): string[] {
+  const kinds = new Set<string>();
+  for (const id of ids) {
+    const kind = kindOfCheckId(id);
+    if (kind && kind !== 'generic') kinds.add(kind);
+  }
+  return [...kinds];
 }
 
 export function workStatePrompt(state: WorkState) {

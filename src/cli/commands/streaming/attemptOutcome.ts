@@ -3,7 +3,7 @@ import {agentEvent} from '../../../core/agent/events.js';
 import {isContextOverflowError, isRetryableModelError} from '../../../core/agent/errors.js';
 import {completionRescuePrompt, goalContinuationPrompt, lengthContinuationPrompt, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {clampSlice, DEFAULT_MODEL_RETRIES, DEFAULT_RETRY_BASE_DELAY_MS, MAX_OVERFLOW_RETRIES, OVERFLOW_SHRINK_FACTOR, remainingSteps, remainingToolCalls, IDLE_TIMEOUT_MS, type TurnBudget} from '../../../core/agent/budgets.js';
-import {deriveValidationOutcome, redPairStatus, unresolvedFailedCheckIds} from '../../../core/agent/workState.js';
+import {checkKindsOfIds, deriveValidationOutcome, redPairStatus, unresolvedFailedCheckIds} from '../../../core/agent/workState.js';
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
 import {formatSeconds} from '../../../utils/format.js';
@@ -183,7 +183,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
       if (goalSlice && goalSlice.steps > 0) {
         discardRejectedFinal();
         if (readiness === 'validation_failed' || readiness === 'validation_stale' || readiness === 'validation_absent_after_mutation') turnState.validationContinuationUsed = true;
-        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress), taskCountsOf(turnState.taskProgress), turnState.redPair === 'missing' ? 'The captured pre-edit failing check still needs the same validation command to pass after the fix.' : undefined), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
+        return {status: turnStatus, recovery: {kind: 'goal', control: goalContinuationPrompt(describeCompletionReadiness(readiness, turnState.taskProgress, checkKindsOfIds(unresolvedFailedCheckIds(goal))), taskCountsOf(turnState.taskProgress), turnState.redPair === 'missing' ? 'The captured pre-edit failing check still needs the same validation command to pass after the fix.' : undefined), slice: {maxSteps: goalSlice.steps, maxToolCalls: goalSlice.toolCalls}}};
       } else if (rescueSlice && rescueSlice.steps > 0) {
         return {status: turnStatus, recovery: {kind: 'rescue', control: completionRescuePrompt(), slice: {maxSteps: rescueSlice.steps, maxToolCalls: rescueSlice.toolCalls}}};
       } else if (classification === 'recoverable-incomplete') {

@@ -2,7 +2,7 @@ import type {ContextFile} from '../../../config/contextFiles.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
-import type {ValidationOutcome} from '../../../core/agent/workState.js';
+import {checkKindsOfIds, type ValidationOutcome} from '../../../core/agent/workState.js';
 import {classifyRequestIntent, goalContinuationPrompt} from '../../../core/agent/goalPolicy.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
 import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
@@ -85,7 +85,7 @@ function countsToTaskProgress(counts: NonNullable<GoalCheckpoint['taskCounts']>)
 /** Human-readable continuation reason for a checkpoint; stored-goal frontiers may predate a specific readiness. */
 function checkpointReason(checkpoint: GoalCheckpoint): string {
   return checkpoint.readiness
-    ? describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined)
+    ? describeCompletionReadiness(checkpoint.readiness, checkpoint.taskCounts ? countsToTaskProgress(checkpoint.taskCounts) : undefined, checkKindsOfIds(checkpoint.failedCheckIds ?? []))
     : 'the previous run ended before the goal was complete';
 }
 
