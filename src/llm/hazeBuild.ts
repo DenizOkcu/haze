@@ -16,10 +16,16 @@ export function createHazeBuildModel(input: {baseURL: string; apiKey: string; ma
     transformRequestBody: (body: Record<string, unknown>) => {
       const effort = body.reasoning_effort;
       const enabled = typeof effort === 'string' ? effort !== 'none' : undefined;
+      // The client owns native sampling (the server override is only a fallback
+      // for ad-hoc checks) and stays mode-aware: the pinned model recommends
+      // 0.6/0.95 for thinking and 0.7/0.8 without it. Unset thinking means the
+      // template default (on), so it keeps the thinking samplers.
+      const samplers = enabled === false ? {temperature: 0.7, top_p: 0.8} : {temperature: 0.6, top_p: 0.95};
       const transformed: Record<string, unknown> = {...body,
-        temperature: body.temperature ?? 0.6, top_p: body.top_p ?? 0.95,
+        temperature: body.temperature ?? samplers.temperature,
+        top_p: body.top_p ?? samplers.top_p,
         top_k: body.top_k ?? 20, presence_penalty: body.presence_penalty ?? 0,
-        repetition_penalty: 1,
+        repetition_penalty: body.repetition_penalty ?? 1,
         chat_template_kwargs: {preserve_thinking: input.manifest.capabilities.preserveThinking,
           ...(enabled === undefined ? {} : {enable_thinking: enabled})},
       };

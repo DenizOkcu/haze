@@ -29,10 +29,29 @@ export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSetti
   const url = new URL(provider.url);
   if (url.username || url.password || url.search || url.hash) throw new Error('haze.build requires a final API base URL without userinfo, query or fragment.');
   assertCredentialedEndpointSecure(url.href, provider.key);
-  const response = await fetchImpl(`${url.href.replace(/\/+$/, '')}/haze/manifest`, {
-    headers: {authorization: `Bearer ${provider.key}`, accept: 'application/json'},
-    redirect: 'error', signal: AbortSignal.timeout(5000),
-  });
+  const endpoint = `${url.href.replace(/\/+$/, '')}/haze/manifest`;
+  const headers = {authorization: `Bearer ${provider.key}`, accept: 'application/json'};
+  // One retry for transient transport failures only (network error, timeout,
+  // proxy 502/503/504); contract and auth errors are not worth a second round trip.
+  let response: Response | undefined;
+  let networkError: unknown;
+  for (let attempt = 0; attempt < 2 && response === undefined; attempt++) {
+    try {
+      response = await fetchImpl(endpoint, {headers, redirect: 'error', signal: AbortSignal.timeout(15_000)});
+    } catch (error) {
+      networkError = error;
+    }
+    if (response !== undefined && [502, 503, 504].includes(response.status)) {
+      await response.body?.cancel().catch(() => undefined);
+      response = undefined;
+    }
+  }
+  if (response === undefined) {
+    const detail = networkError instanceof Error && (networkError.name === 'TimeoutError' || networkError.name === 'AbortError')
+      ? 'timed out after 15 seconds; the deployment may still be starting'
+      : `is unreachable (${networkError instanceof Error ? networkError.message : 'network error'})`;
+    throw new Error(`haze.build manifest ${detail}. Deploy the compatible server or choose an ordinary OpenAI-compatible provider.`);
+  }
   if (!response.ok) throw new Error(`haze.build manifest returned HTTP ${response.status}; deploy the compatible server or choose an ordinary OpenAI-compatible provider.`);
   if (!response.body) throw new Error('haze.build manifest has no response body.');
   const reader = response.body.getReader();
@@ -50,7 +69,13 @@ export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSetti
     await reader.cancel().catch(() => undefined);
     throw error;
   } finally { reader.releaseLock(); }
-  const parsed = hazeBuildManifestSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new Error('haze.build manifest is not valid JSON; deploy the compatible server or choose an ordinary OpenAI-compatible provider.');
+  }
+  const parsed = hazeBuildManifestSchema.safeParse(payload);
   if (!parsed.success) throw new Error('Incompatible haze.build manifest. Expected contract v1, haze0.1-coder-flash, text/tools and binary thinking with preservation.');
   if (parsed.data.maxOutputTokens >= parsed.data.contextWindowTokens) throw new Error('Invalid haze.build output/context envelope.');
   return parsed.data;

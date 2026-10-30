@@ -123,6 +123,9 @@ export async function assembleRequestContext(input: {
   workerRuntime ??= {
     ...fallbackWorkerRuntime(input.model, input.modelRuntime?.selector, input.modelRuntime?.config.providerName),
     capabilities: input.modelRuntime?.config.capabilities ?? fallbackProviderCapabilities(),
+    // The fallback path must honour the live deployment cap too, or a
+    // single-sequence (quality) deployment could still admit two workers.
+    ...(input.modelRuntime?.config.deployment ? {nativeMaxConcurrency: Math.min(2, input.modelRuntime.config.deployment.activeSequences)} : {}),
   };
 
   if (profile && workerRuntime.nativeMaxConcurrency) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, workerRuntime.nativeMaxConcurrency)};

@@ -41,7 +41,8 @@ describe('native haze.build contract and transport', () => {
     const input = {...settings, providers: [{...provider, modelLimits: {[HAZE_BUILD_MODEL]: {contextWindowTokens: 262144, maxOutputTokens: 32768}}}]};
     const first = (await modelWithConfig(undefined, input))!;
     expect(first.config).toMatchObject({contextWindowTokens: 65536, maxOutputTokens: 16384, contextWindowSource: 'deployment'});
-    expect(first.config.warnings).toHaveLength(1);
+    expect(first.config.warnings).toEqual(['Configured context differs from the current haze.build deployment; using the smaller safe limit.',
+      'Configured output tokens differ from the current haze.build deployment; using the smaller safe limit.']);
     context = 131072;
     expect((await modelWithConfig(undefined, input))!.config.contextWindowTokens).toBe(131072);
     const worker = await resolveWorkerRuntime({active: first, settings});
@@ -102,8 +103,24 @@ describe('native haze.build contract and transport', () => {
     const result = await generateText({model, prompt: 'test', reasoning: 'none'});
     expect(result.reasoningText).toBe('Check.');
     expect(bodies[0].chat_template_kwargs).toEqual({enable_thinking: false, preserve_thinking: true});
+    // Thinking-off requests use the model's non-thinking sampler recommendation.
+    expect(bodies[0]).toMatchObject({temperature: 0.7, top_p: 0.8});
     await generateText({model, prompt: 'test', reasoning: 'provider-default'});
     expect(bodies[1].chat_template_kwargs).toEqual({preserve_thinking: true});
+    // Unset thinking keeps the template default (on) and its thinking samplers.
+    expect(bodies[1]).toMatchObject({temperature: 0.6, top_p: 0.95});
+  });
+
+  it('retries one transient manifest failure and reports malformed bodies without a raw SyntaxError', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async () => {
+      calls.push('attempt');
+      if (calls.length === 1) return new Response('proxy hiccup', {status: 503});
+      return Response.json(descriptor);
+    });
+    await expect(discoverHazeBuildManifest(provider, fetcher as unknown as typeof fetch)).resolves.toMatchObject({model: HAZE_BUILD_MODEL});
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await expect(discoverHazeBuildManifest(provider, async () => new Response('<html>gateway error</html>', {status: 200}))).rejects.toThrow('not valid JSON');
   });
 });
 
@@ -183,7 +200,7 @@ describe('native worker context growth', () => {
         capabilities: {...fallbackProviderCapabilities(), supportsBinaryThinking: true}},
        contextBundle: {systemPrompt: 'Inspect only.', tools, instructions: [], loadedPaths: new Set(), loadedSignatures: new Map(), estimatedTokens: 100, taskTokens: 20, validatedScope: []}});
     expect(bodies).toHaveLength(1);
-    expect(bodies[0]).toMatchObject({max_tokens: 1024, chat_template_kwargs: {enable_thinking: false}});
+    expect(bodies[0]).toMatchObject({max_tokens: 1024, temperature: 0.7, top_p: 0.8, chat_template_kwargs: {enable_thinking: false}});
     expect(result.capsule.termination).toBe('policy_blocked');
     expect(result.capsule.deliverable).toContain('capacity');
     expect(result.capsule.deliverable).not.toContain('retry this subagent once');
