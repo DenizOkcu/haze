@@ -5,6 +5,8 @@ export type ToolFailureReasonCode =
   | 'ignored_path'
   | 'ignore_check_unavailable'
   | 'secret_file_protected'
+  | 'git_internals_protected'
+  | 'multi_link_file_protected'
   | 'path_not_found'
   | 'not_a_file'
   | 'permission_denied'

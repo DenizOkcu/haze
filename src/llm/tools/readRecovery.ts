@@ -109,6 +109,8 @@ export async function readFailureRecovery(filePath: string, error: unknown): Pro
   if (error instanceof HazeToolError) {
     if (error.reasonCode === 'ignored_path') return {reasonCode: error.reasonCode, suggestedNextStep: 'Set allowIgnored=true only when the user explicitly needs this ignored file.'};
     if (error.reasonCode === 'secret_file_protected') return {reasonCode: error.reasonCode, suggestedNextStep: 'Protected secret file: do not retry with other tools, paths, or shell. Ask the user to provide the needed value in the conversation instead.'};
+    if (error.reasonCode === 'git_internals_protected') return {reasonCode: error.reasonCode, suggestedNextStep: 'Git internals are protected: do not retry with other tools, paths, or shell. Ask the user to make the change themselves (e.g. git config) if it is genuinely intended.'};
+    if (error.reasonCode === 'multi_link_file_protected') return {reasonCode: error.reasonCode, suggestedNextStep: 'Multi-link file: Ask the user to confirm this exact file is safe to access before retrying.'};
     if (error.reasonCode === 'binary_file') return {reasonCode: error.reasonCode, suggestedNextStep: 'Use an appropriate binary or image inspection tool instead of retrying readFile.'};
     if (error.reasonCode === 'not_a_file') return {reasonCode: error.reasonCode, suggestedNextStep: 'Use listFiles for the directory, then read the intended regular file.'};
     if (error.reasonCode === 'invalid_line_range') return {reasonCode: error.reasonCode, suggestedNextStep: 'Retry with an offset within the reported total line count.'};

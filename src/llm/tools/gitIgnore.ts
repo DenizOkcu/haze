@@ -88,26 +88,39 @@ async function readSmallPointer(filePath: string) {
   return fs.readFile(filePath, 'utf8');
 }
 
-async function resolveExcludeFile(repositoryRoot: string, gitMarker: string): Promise<{path?: string; checked: boolean}> {
+/**
+ * Resolve the git directories a `.git` marker governs: the marker itself or,
+ * for linked worktrees and separate-git-dir layouts, the `gitdir:` pointer
+ * target, plus the shared common directory when the worktree records one.
+ * Returns undefined when the marker or its pointers cannot be resolved.
+ */
+export async function resolveGitDirs(repositoryRoot: string, gitMarker: string): Promise<string[] | undefined> {
   try {
     const markerStat = await fs.lstat(gitMarker);
     let gitDir = gitMarker;
     if (!markerStat.isDirectory()) {
       const pointer = /^gitdir:\s*(.+)\s*$/im.exec(await readSmallPointer(gitMarker))?.[1];
-      if (!pointer) return {checked: false};
+      if (!pointer) return undefined;
       gitDir = path.resolve(repositoryRoot, pointer);
     }
-    const commonDirFile = path.join(gitDir, 'commondir');
+    const dirs = [gitDir];
     try {
-      const commonDir = (await readSmallPointer(commonDirFile)).trim();
-      if (commonDir) gitDir = path.resolve(gitDir, commonDir);
+      const commonDir = (await readSmallPointer(path.join(gitDir, 'commondir'))).trim();
+      if (commonDir) dirs.push(path.resolve(gitDir, commonDir));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return {checked: false};
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined;
     }
-    return {path: path.join(gitDir, 'info', 'exclude'), checked: true};
+    return dirs;
   } catch {
-    return {checked: false};
+    return undefined;
   }
+}
+
+async function resolveExcludeFile(repositoryRoot: string, gitMarker: string): Promise<{path?: string; checked: boolean}> {
+  // The exclude file lives in the common directory when a worktree records one.
+  const dirs = await resolveGitDirs(repositoryRoot, gitMarker);
+  if (!dirs) return {checked: false};
+  return {path: path.join(dirs[dirs.length - 1]!, 'info', 'exclude'), checked: true};
 }
 
 /** Find the repository boundary without requiring Git, including linked worktrees. */

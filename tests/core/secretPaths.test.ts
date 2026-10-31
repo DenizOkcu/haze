@@ -29,6 +29,7 @@ describe('isProtectedSecretPath', () => {
     [`${HOME}/.gnupg/private-keys-v1.d/key.asc`, true],
     [`${HOME}/.aws/credentials`, true],
     [`${HOME}/.config/gcloud/credentials.db`, true],
+    [`${HOME}/.config/gh/hosts.yml`, true],
     [`${HOME}/.netrc`, true],
     [`${HOME}/.git-credentials`, true],
     [`${HOME}/.docker/config.json`, true],
@@ -36,6 +37,7 @@ describe('isProtectedSecretPath', () => {
     [`${HOME}/.local/share/fish/fish_history`, true],
     [`${HOME}/.zshenv`, false],
     [`${HOME}/.gitconfig`, false],
+    [`${HOME}/.config/other/settings.json`, false],
     [`${HOME}/projects/app/src/index.ts`, false],
   ])('classifies home path %s', (candidate, expected) => {
     expect(isProtectedSecretPath(candidate, HOME)).toBe(expected);
@@ -56,6 +58,14 @@ describe('isProtectedSecretPath', () => {
     ['secrets.json', true],
     ['config/secrets.yaml', true],
     ['secrets.example.json', false],
+    ['gcp-service-account.json', true],
+    ['config/prod-service-account-key.json', true],
+    ['firebase-adminsdk-abc123.json', true],
+    ['service-account-notes.md', false],
+    ['putty-session.ppk', true],
+    ['certs/client.p12', true],
+    ['dist/bundle.pfx', true],
+    ['ppk-notes.txt', false],
   ])('classifies basename %s anywhere on disk', (candidate, expected) => {
     expect(isProtectedSecretPath(candidate, HOME)).toBe(expected);
   });
@@ -66,5 +76,14 @@ describe('secretSearchExcludeGlobs', () => {
     for (const glob of secretSearchExcludeGlobs()) {
       expect(glob.startsWith('!')).toBe(true);
     }
+  });
+
+  it('excludes the service-account and key-container patterns from search', () => {
+    const globs = secretSearchExcludeGlobs();
+    expect(globs).toContain('!*-service-account*.json');
+    expect(globs).toContain('!firebase-adminsdk-*.json');
+    expect(globs).toContain('!*.ppk');
+    expect(globs).toContain('!*.p12');
+    expect(globs).toContain('!*.pfx');
   });
 });

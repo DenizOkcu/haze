@@ -395,9 +395,16 @@ export const fileTools = {
           const code = typeof error === 'object' && error != null && 'code' in error ? (error as {code?: unknown}).code : undefined;
           if (code !== 'ENOENT') throw error;
           if (append) throw new HazeToolError(`Cannot append to missing file: ${filePath}. Create its first chunk with append=false.`, 'append_target_missing');
+          // Directory creation must never produce state outside the workspace:
+          // first assert the nearest EXISTING ancestor is confined (a symlinked
+          // parent like `assets -> $OUTSIDE` would otherwise get `newdir`
+          // created inside the escape target before validation), then create
+          // the tree, then run the full writability assertion against the tree
+          // the write will actually land in (HZ-12).
+          await assertWritableInsideWorkspace();
+          await fs.mkdir(path.dirname(absolutePath), {recursive: true});
           await assertWritableInsideWorkspace();
         }
-        await fs.mkdir(path.dirname(absolutePath), {recursive: true});
         const updated = append ? `${previousContent}${content}` : content;
         const writeDiff = fileDiff(previousContent, updated);
         if (append) await fs.appendFile(absolutePath, content, 'utf8');

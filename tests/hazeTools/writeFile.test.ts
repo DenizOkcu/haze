@@ -38,6 +38,39 @@ describe('writeFile tool', () => {
     await expect(fs.readFile(path.join(tmp, 'nested/dir/app.txt'), 'utf8')).resolves.toBe('hello');
   });
 
+  it('refuses a new-file write whose parent directory is a symlink outside the workspace', async () => {
+    // The directory tree must be created before the writability assertion and
+    // the assertion must see the tree the write lands in (HZ-12): a symlinked
+    // parent escapes the workspace and the write is refused, not followed.
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-writefile-out-'));
+    try {
+      await fs.symlink(outside, path.join(tmp, 'linkdir'));
+      const result = await writeFile({path: 'linkdir/escaped.txt', content: 'nope'});
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.pathExists(path.join(outside, 'escaped.txt'))).resolves.toBe(false);
+    } finally {
+      await fs.remove(outside);
+    }
+  });
+
+  it('creates no directories outside the workspace when refusing a symlinked-parent write', async () => {
+    // The refusal itself must be side-effect free: without a pre-mkdir
+    // confinement check, `assets/newdir/x.txt` would create `newdir` inside
+    // the escape target before the writability assertion refuses.
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-writefile-side-'));
+    try {
+      await fs.symlink(outside, path.join(tmp, 'assets'));
+      const result = await writeFile({path: 'assets/newdir/x.txt', content: 'nope'});
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('outside the workspace');
+      await expect(fs.pathExists(path.join(outside, 'newdir'))).resolves.toBe(false);
+      await expect(fs.pathExists(path.join(outside, 'newdir', 'x.txt'))).resolves.toBe(false);
+    } finally {
+      await fs.remove(outside);
+    }
+  });
+
   it('refuses to overwrite an existing file without overwriteExisting', async () => {
     await fs.writeFile(path.join(tmp, 'existing.txt'), 'original');
     const result = await writeFile({path: 'existing.txt', content: 'replacement'});
@@ -130,7 +163,8 @@ describe('writeFile tool', () => {
     const result = await writeFile({path: 'pkg/src/a.ts', content: 'x', overwriteExisting: true}, context);
     expect(result.ok).toBe(false);
     expect(result.reasonCode).toBe('scoped_instructions_discovered');
-    expect(result.applicableProjectInstructions).toEqual([expect.objectContaining({path: 'pkg/AGENTS.md'})]);
+    expect(result.applicableProjectInstructions?.[0]).toContain('<project_instructions path="pkg/AGENTS.md">');
+    expect(result.suggestedNextStep).toContain('untrusted project guidance');
     await expect(fs.readFile(path.join(tmp, 'pkg/src/a.ts'), 'utf8')).resolves.toBe('old');
 
     // The next model step receives the discovered instructions directly, so

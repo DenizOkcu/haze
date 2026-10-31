@@ -26,7 +26,7 @@ import path from 'node:path';
  */
 
 /** Whole directories under the user's home that tools must never touch. */
-const PROTECTED_HOME_DIRS = ['.ssh', '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.config/gcloud'];
+const PROTECTED_HOME_DIRS = ['.ssh', '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.config/gcloud', '.config/gh'];
 
 /** Shell/REPL history basenames, protected anywhere on disk (not only home). */
 const SHELL_HISTORY_BASENAMES = [
@@ -48,11 +48,26 @@ const PROTECTED_BASENAMES = new Set([
   'secrets.json', 'secrets.yaml', 'secrets.yml', 'secrets.toml',
 ]);
 
+/**
+ * Glob-style basename patterns protected in any directory: cloud
+ * service-account key files whose names carry a project prefix, so a fixed
+ * basename list cannot cover them.
+ */
+const PROTECTED_BASENAME_PATTERNS = [
+  '*-service-account*.json',
+  'firebase-adminsdk-*.json',
+];
+
+const PROTECTED_BASENAME_MATCHERS = PROTECTED_BASENAME_PATTERNS.map(pattern => new RegExp(
+  `^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`,
+  'i',
+));
+
 /** OpenSSH private-key stems; `<stem>.pub` public keys stay readable. */
 const SSH_KEY_STEMS = ['id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'];
 
 /** Extensions that conventionally carry private-key material. */
-const PROTECTED_EXTENSIONS = ['.pem', '.key'];
+const PROTECTED_EXTENSIONS = ['.pem', '.key', '.ppk', '.p12', '.pfx'];
 
 /** Suffixes after `.env`/`.envrc` that conventionally hold placeholders, not secrets. */
 const ENV_DOC_SUFFIXES = new Set(['example', 'sample', 'template']);
@@ -86,6 +101,7 @@ export function isProtectedSecretPath(candidatePath: string, homeDir: string = o
   const basename = path.basename(absolute).toLowerCase();
 
   if (PROTECTED_BASENAMES.has(basename)) return true;
+  if (PROTECTED_BASENAME_MATCHERS.some(matcher => matcher.test(basename))) return true;
   if (isProtectedEnvName(basename)) return true;
   if (isProtectedSshKeyName(basename)) return true;
   if (PROTECTED_EXTENSIONS.some(extension => basename.endsWith(extension))) return true;
@@ -119,6 +135,7 @@ export function secretSearchExcludeGlobs(): string[] {
     ...SSH_KEY_STEMS.map(stem => `!${stem}*`),
     ...PROTECTED_EXTENSIONS.map(extension => `!*${extension}`),
     ...[...PROTECTED_BASENAMES].map(name => `!${name}`),
+    ...PROTECTED_BASENAME_PATTERNS.map(pattern => `!${pattern}`),
     ...PROTECTED_HOME_DIRS.flatMap(directory => [`!**/${directory}`, `!**/${directory}/**`]),
     ...PROTECTED_HOME_FILES.map(file => `!**/${file}`),
   ])];
