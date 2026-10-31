@@ -4,9 +4,9 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.6.1
+## What's new in 1.7.0
 
-haze 1.6.1 fixes OpenRouter app attribution: the `HTTP-Referer` header now points at the GitHub project page (`https://github.com/DenizOkcu/haze`) instead of the docs site, so OpenRouter's `/apps/url/...` lookup resolves. `X-Title: Haze` is unchanged.
+haze 1.7.0 hardens the untrusted-content boundary: MCP tool results of every size now arrive inside escaped untrusted envelopes, one variant-tolerant escaper guards all untrusted container closers (including compaction summaries), project instructions discovered mid-turn no longer ride the engine control channel, terminal control sequences (including OSC 52 clipboard writes) are stripped from the Markdown transcript path, and the protected secret-file list extends to database/CLI credential stores, browser profiles, and `~/.haze/settings.json`/`auth.json` — with the shell-side prompt rule derived from the same list. It also fixes validation-evidence edge cases around trailing stderr redirects and repeated tool-call redirects.
 
 ### Highlights from 1.6.0
 

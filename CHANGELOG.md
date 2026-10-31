@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.6.2 - 2026-10-30
+## 1.7.0 - 2026-10-31
+
+### Security
+
+- MCP tool results of every size now arrive inside the escaped `<mcp_result>` envelope — previously only oversized results were labeled, leaving short payloads (precisely what an attacker wants) indistinguishable from trusted tool output.
+- One variant-tolerant closer escaper guards all five untrusted containers (`web_content`, `mcp_result`, `project_instructions`, `project_context`, `haze_compaction`), so case- or whitespace-variant closing tags can no longer end an envelope early; compaction summaries and context-path attributes are escaped too.
+- Project instructions discovered mid-turn (main agent and subagents) ride ordinary user messages with the startup framing; the nonce'd control channel carries engine directives only.
+- Terminal control sequences (including OSC 52 clipboard writes and 8-bit C1) are stripped from the Markdown transcript path, not just tool rows.
+- The protected secret-file list extends to database and CLI credential stores (`.pgpass`, `.my.cnf`, `.msmtprc`, cloud configs, other agent stores), browser profile directories, and `~/.haze/settings.json`/`auth.json`; the shell-side prompt rule derives from the same category list, pinned by a drift canary test.
 
 ### Fixed
 
