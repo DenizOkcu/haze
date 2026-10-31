@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.2 - 2026-10-31
+
+### Changed
+
+- Update the AI SDK and development tooling to their latest compatible patch versions.
+- Generate the public homepage and documentation with Astro components while preserving existing URLs.
+
 ## 1.7.1 - 2026-10-31
 
 ### Fixed

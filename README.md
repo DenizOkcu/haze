@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.1
+## What's new in 1.7.2
+
+This patch updates the AI SDK and development tooling, and moves the public website and documentation to maintainable Astro components.
+
+### Changes in 1.7.1
 
 This patch updates a provider preset's default endpoint.
 

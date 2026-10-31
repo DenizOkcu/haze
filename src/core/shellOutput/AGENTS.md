@@ -1,6 +1,6 @@
 # src/core/shellOutput/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.1 release (round-1 review fixes).
+Last updated: 2026-10-31 for the 1.7.2 release (round-1 review fixes).
 
 Command-aware reduction of shell stdout/stderr.
 
