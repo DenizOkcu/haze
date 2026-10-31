@@ -10,6 +10,7 @@ dist/
 .haze/plugins/
 .haze/plugin-receipts/
 .pi-sessions/
+.zcode/
 
 # Model-backed eval artifacts (npm run eval); disposable
 .eval/
