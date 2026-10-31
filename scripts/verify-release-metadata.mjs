@@ -104,6 +104,29 @@ if (fs.existsSync(path.join(repoRoot, 'src'))) {
   }
 }
 
+// 7. Packed buildInfo must not leak the publisher's filesystem (SC-7). The
+// build step runs before this check in `prepublishOnly`, so dist/ exists at
+// publish time; when it does not (e.g. release:verify on a fresh checkout in
+// CI, which runs before `npm run build`), the check is skipped like the other
+// file-optional checks above.
+const buildInfoRaw = read('dist/buildInfo.json');
+if (buildInfoRaw !== undefined) {
+  if (buildInfoRaw.includes('/Users/') || buildInfoRaw.includes('/home/')) {
+    problems.push('dist/buildInfo.json: contains an absolute home-directory path (expected no /Users/ or /home/ string; sourceRoot must not ship).');
+  }
+  let buildInfo;
+  try {
+    buildInfo = JSON.parse(buildInfoRaw);
+  } catch {
+    buildInfo = undefined;
+  }
+  if (!buildInfo || typeof buildInfo !== 'object') {
+    problems.push('dist/buildInfo.json: not valid JSON.');
+  } else if (buildInfo.sourceRoot != null && buildInfo.sourceRoot !== '') {
+    problems.push('dist/buildInfo.json: "sourceRoot" must be empty or omitted.');
+  }
+}
+
 if (problems.length > 0) {
   for (const problem of problems) console.error(`✗ ${problem}`);
   console.error(`\n${problems.length} release-metadata mismatch(es) for version ${version}.`);

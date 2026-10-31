@@ -31,7 +31,10 @@ const buildInfo = {
   version: pkg.version,
   ...(gitCommit() ? {commit: gitCommit()} : {}),
   builtAt: new Date().toISOString(),
-  sourceRoot: repoRoot,
+  // No `sourceRoot`: it leaked the publisher's local filesystem path into the
+  // published tarball (SC-7). Runtime consumers (utils/buildInfo.ts) treat it
+  // as optional and never read it; older buildInfo.json files with the field
+  // still parse.
 };
 
 fs.writeFileSync(path.join(distDir, 'buildInfo.json'), `${JSON.stringify(buildInfo, null, 2)}\n`);
