@@ -115,6 +115,43 @@ describe('urlGuard validateUrl', () => {
     });
   });
 
+  describe('blocked_port', () => {
+    it('rejects an explicit non-web port on a public host', async () => {
+      const result = await validateUrl('http://public-host:6379/', {lookup: async () => ['93.184.216.34']});
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reasonCode).toBe('blocked_port');
+    });
+
+    it('rejects a non-web port on a literal public IP', async () => {
+      const result = await validateUrl('http://93.184.216.34:11211/');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reasonCode).toBe('blocked_port');
+    });
+
+    it('rejects an https URL on a non-web port', async () => {
+      const result = await validateUrl('https://example.com:8443/path', {lookup: async () => ['93.184.216.34']});
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reasonCode).toBe('blocked_port');
+    });
+
+    it('accepts port 443 spelled out explicitly', async () => {
+      const result = await validateUrl('https://example.com:443/path', {lookup: async () => ['93.184.216.34']});
+      expect(result.ok).toBe(true);
+    });
+
+    it('accepts port 80 spelled out explicitly', async () => {
+      const result = await validateUrl('http://example.com:80/', {lookup: async () => ['93.184.216.34']});
+      expect(result.ok).toBe(true);
+    });
+
+    it('accepts URLs with default (omitted) ports', async () => {
+      const http = await validateUrl('http://example.com/', {lookup: async () => ['93.184.216.34']});
+      expect(http.ok).toBe(true);
+      const https = await validateUrl('https://example.com/path', {lookup: async () => ['93.184.216.34']});
+      expect(https.ok).toBe(true);
+    });
+  });
+
   describe('DNS resolution (rebinding protection)', () => {
     it('rejects a hostname resolving to a private address', async () => {
       const result = await validateUrl('http://rebind.example', {lookup: async () => ['10.1.2.3']});

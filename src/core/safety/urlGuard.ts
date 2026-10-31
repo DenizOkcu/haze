@@ -16,7 +16,7 @@ export type UrlValidation =
   | {ok: true; url: URL; resolvedAddresses?: string[]}
   | {
       ok: false;
-      reasonCode: 'invalid_url' | 'blocked_scheme' | 'blocked_host' | 'blocked_address';
+      reasonCode: 'invalid_url' | 'blocked_scheme' | 'blocked_host' | 'blocked_address' | 'blocked_port';
       reason: string;
     };
 
@@ -179,9 +179,10 @@ const defaultLookup: DnsLookupFn = async hostname => {
 /**
  * Validate a URL for outbound fetching.
  *
- * Checks scheme allowlist, blocks well-known dangerous hostnames, blocks
- * literal private/loopback/link-local IPs, and (if the host is a DNS name)
- * resolves it to reject names that point at private/loopback/link-local IPs.
+ * Checks scheme allowlist, blocks well-known dangerous hostnames, allows only
+ * the default web ports (80/443), blocks literal private/loopback/link-local
+ * IPs, and (if the host is a DNS name) resolves it to reject names that point
+ * at private/loopback/link-local IPs.
  *
  * `lookup` is injectable for deterministic offline tests.
  */
@@ -212,6 +213,15 @@ export async function validateUrl(
   // Check userinfo/host confusion and empty host (e.g. "http:///").
   if (!host) {
     return {ok: false, reasonCode: 'blocked_host', reason: 'URL has no hostname.'};
+  }
+
+  // Port policy: without one, the fetch tool becomes a scanner for databases
+  // and admin panels on public hosts (Redis/memcached-style services). Only
+  // the default web ports are fetchable; `url.port` is '' when the URL omits
+  // the port or spells out the scheme's default.
+  const port = url.port;
+  if (port !== '' && port !== '80' && port !== '443') {
+    return {ok: false, reasonCode: 'blocked_port', reason: `Port '${port}' is not allowed; only default web ports (80, 443) are permitted.`};
   }
 
   // If the host is a literal IP, check ranges directly (no DNS needed).
