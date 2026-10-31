@@ -58,4 +58,14 @@ describe('StreamingMarkdownText', () => {
     await vi.waitFor(() => expect(frameOf(lastFrame)).toContain('A'));
     expect(frameOf(lastFrame)).toContain('12');
   });
+
+  it('strips terminal control sequences from streamed deltas before rendering (R2-HZ-4)', async () => {
+    const osc52 = '\x1b]52;c;aGVsbG8=\x07';
+    const {lastFrame} = render(<StreamingMarkdownText content={`quoting: ${osc52} harmless`} width={60} />);
+    await vi.waitFor(() => expect(frameOf(lastFrame)).toContain('harmless'));
+    const raw = lastFrame() ?? '';
+    expect(raw).not.toContain('\x1b]52');
+    expect(raw).not.toContain('aGVsbG8=');
+    expect(raw).not.toContain('\u009b');
+  });
 });

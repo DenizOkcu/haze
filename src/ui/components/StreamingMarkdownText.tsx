@@ -1,12 +1,17 @@
 import React, {useEffect, useState} from 'react';
 import {Box, Text, renderToString} from 'ink';
 import {MarkdownText} from './MarkdownText.js';
+import {stripTerminalControlSequences} from '../terminalSanitize.js';
 import {theme} from '../theme.js';
 
 /** Parse the whole active block before splitting its formatted terminal output into rows. */
 function renderMarkdownRows(content: string, width: number): string[] {
   if (!content) return [];
-  const output = renderToString(<MarkdownText content={content} width={width} />, {columns: Math.max(1, width)});
+  // The streaming root's text-preparation point: sanitize here, outside
+  // React's render/commit phases, so a delta quoting OSC 52/CSI/C1 bytes never
+  // reaches the terminal through the live preview rows (R2-HZ-4). Idempotent
+  // with the per-root pass inside MarkdownText itself.
+  const output = renderToString(<MarkdownText content={stripTerminalControlSequences(content)} width={width} />, {columns: Math.max(1, width)});
   // Block margins belong to the settled transcript, not the bottom of a live
   // preview. Keep internal blank rows, but do not let a trailing margin hide
   // the newest content in a small viewport.

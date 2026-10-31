@@ -177,3 +177,41 @@ describe('MarkdownText list rendering', () => {
     expect(frame).not.toContain('App.tsx , types.ts');
   });
 });
+
+describe('MarkdownText terminal-control sanitization (R2-HZ-4)', () => {
+  const OSC_52 = '\x1b]52;c;aGVsbG8=\x07'; // clipboard write payload (BEL-terminated)
+  const CSI = '\x1b[2J\x1b[31m'; // screen clear + color
+  const C1_CSI = '\u009b31mRED\u009b0m'; // 8-bit C1 spelling, no ESC byte
+
+  it('strips OSC 52, CSI, and 8-bit C1 sequences from prose', () => {
+    const content = `The offending line is: ${OSC_52} and ${CSI}harmless text${C1_CSI} after it.`;
+    const {lastFrame} = render(<MarkdownText content={content} width={80} />);
+    const raw = lastFrame() ?? '';
+    expect(raw).not.toContain('\x1b]52');
+    expect(raw).not.toContain('aGVsbG8='); // the clipboard payload is gone, not just the introducer
+    expect(raw).not.toContain('\x1b[2J');
+    expect(raw).not.toContain('\u009b');
+    expect(stripAnsi(raw)).toContain('harmless text');
+    expect(stripAnsi(raw)).toContain('The offending line is:');
+  });
+
+  it('strips OSC 52 sequences quoted inside a fenced code block', () => {
+    const content = ['```sh', `printf '${OSC_52}'`, 'echo done', '```'].join('\n');
+    const {lastFrame} = render(<MarkdownText content={content} width={60} />);
+    const raw = lastFrame() ?? '';
+    expect(raw).not.toContain('\x1b]52');
+    expect(raw).not.toContain('aGVsbG8=');
+    expect(stripAnsi(raw)).toContain('printf');
+    expect(stripAnsi(raw)).toContain('echo done');
+  });
+
+  it('strips sequences inside inline code spans and headings', () => {
+    const content = `## Notes ${OSC_52}\n\nRun \`xterm ${CSI}cmd\` now.`;
+    const {lastFrame} = render(<MarkdownText content={content} width={60} />);
+    const raw = lastFrame() ?? '';
+    expect(raw).not.toContain('\x1b]52');
+    expect(raw).not.toContain('\x1b[2J');
+    expect(stripAnsi(raw)).toContain('Notes');
+    expect(stripAnsi(raw)).toContain('cmd');
+  });
+});

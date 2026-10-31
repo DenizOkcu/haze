@@ -5,11 +5,17 @@ import {cellWidth} from '../textGeometry.js';
 import {wrapDisplayValue} from '../inputBuffer.js';
 import {theme} from '../theme.js';
 import {highlightedCodeLine} from '../codeHighlight.js';
+import {stripTerminalControlSequences} from '../terminalSanitize.js';
 
 const MARKED_OPTIONS = {gfm: true, breaks: true} as const;
 
 export const MarkdownText = React.memo(function MarkdownText({content, width}: {content: string; width: number}) {
-  const tokens = marked.lexer(content, MARKED_OPTIONS);
+  // Assistant text is untrusted (it quotes file/web/MCP content). Sanitize at
+  // the text-preparation point — the same place the lexer runs — so every
+  // downstream sink (headings, inline spans, lists, tables, code fences) sees
+  // control-sequence-free text (R2-HZ-4). One pass per root; the active root
+  // renders offscreen and settled roots are memoized.
+  const tokens = marked.lexer(stripTerminalControlSequences(content), MARKED_OPTIONS);
   const contentWidth = Math.max(1, width - 2);
   return <Box flexDirection="column">
     {tokens.map((token, index) => {

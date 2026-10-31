@@ -1,5 +1,6 @@
 import hljs from 'highlight.js/lib/common';
 import {cellWidth, clipCells} from './textGeometry.js';
+import {stripTerminalControlSequences} from './terminalSanitize.js';
 
 /**
  * Terminal code highlighting on top of highlight.js directly (the common
@@ -133,7 +134,11 @@ export function languageForPath(filePath: string) {
 /** Highlight, clip, and pad one source line to an exact terminal width. */
 export function highlightedCodeLine(code: string, width: number, language?: string) {
   const safeWidth = Math.max(1, width);
-  const singleLine = code.replace(/\t/g, '  ');
+  // Source lines are untrusted (quoted file/web content). Sanitize the INPUT,
+  // never the output: the output must keep the ANSI styling this module itself
+  // generates, while attacker-supplied CSI/OSC/C1 bytes never reach the
+  // terminal through the code sink (R2-HZ-4).
+  const singleLine = stripTerminalControlSequences(code).replace(/\t/g, '  ');
   const fitted = cellWidth(singleLine) > safeWidth
     ? `${clipCells(singleLine, safeWidth - 1)}…`
     : singleLine;
