@@ -1,6 +1,6 @@
 # src/ui/AGENTS.md
 
-Last updated: 2026-10-07 for the 1.7.0 release.
+Last updated: 2026-10-31 for the 1.7.0 release.
 
 Reusable Ink components, theme, and input-buffer logic.
 
