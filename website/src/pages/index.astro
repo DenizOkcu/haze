@@ -1,6 +1,261 @@
 ---
 import Layout from "../layouts/SiteLayout.astro";
-import content from "../content/index.html?raw";
-import meta from "../content/index.json";
 ---
-<Layout page="index" {...meta}><Fragment set:html={content} /></Layout>
+<Layout page="index" title="haze | open-source coding agent for your terminal" description="Install haze, connect any OpenAI-compatible model, and hand it a complete coding task. It reads, edits, runs commands, delegates work, and verifies the result.">
+<a class="skip-link" href="#main">Skip to content</a>
+
+  <main class="shell" id="main">
+    <header class="brand">
+      <a class="wordmark" href="index.html" aria-label="haze home">haze</a>
+      <nav class="top-links" aria-label="Main navigation">
+        <a href="quickstart.html">Quickstart</a>
+        <a href="commands.html">Commands</a>
+        <a href="tools.html">Tools</a>
+        <a href="skills.html">Skills</a>
+        <a href="workflows.html">Workflows</a>
+        <a class="resource-pill" href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a class="resource-pill" href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm v1.7.1</a>
+      </nav>
+    </header>
+
+    <section class="frame" aria-labelledby="hero-title">
+      <div class="hero">
+        <h1 id="hero-title"><code class="product-name">haze</code> a minimal coding agent for your terminal</h1>
+        <p>Install <code class="product-name">haze</code> and run it in a project.<br>
+        Use <code>/provider</code> for setup, then start chatting.<br>
+        Build workflows with <code>/skills</code>.<br><br>
+        Optimized context for local LLMs.<br>
+        Minimal guard rails, no permission hell.</p>
+
+        <div class="hero-install">
+          <button class="copy-command" type="button" data-copy="npm i -g @denizokcu/haze && haze" aria-label="Copy npm install and run command">
+            <code>npm i -g <strong>@denizokcu/haze</strong> &amp;&amp; haze</code>
+            <span class="copy-label" aria-live="polite">Copy</span>
+          </button>
+        </div>
+
+        <div class="session">
+          <div class="session-head"><strong>haze</strong><span>~/api-service</span></div>
+          <div class="session-body" aria-label="Example haze session">
+            <div class="terminal-user">
+              <strong>You asked</strong>
+              <span>find the session leak, fix it, and add a regression test</span>
+            </div>
+
+            <div class="terminal-message">
+              <div><span class="terminal-role tool">Tool</span></div>
+              <div class="terminal-tool-summary">5 calls · 2 changes · 0.3s</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">grep</span> sessionStore · 38 matches</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">readFile</span> src/middleware/session.ts · 142 lines</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">editFile</span> src/middleware/session.ts · +6 -2</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">writeFile</span> tests/session-eviction.test.ts · new file</div>
+              <div class="terminal-tool-row"><span class="status">✓</span> <span class="tool-name">shell</span> npm test · 128 passed</div>
+            </div>
+
+            <div class="terminal-message">
+              <div><span class="terminal-role">haze</span><span class="terminal-meta"> · ✓ Done in 0.4s · 22 tok/s</span></div>
+              <ul class="terminal-answer-list">
+                <li><span class="bullet">•</span><span><strong>Root cause:</strong> expired sessions remained in <code>sessionStore</code> after their TTL.</span></li>
+                <li><span class="bullet">•</span><span><strong>Fix:</strong> added bounded cleanup in <code>src/middleware/session.ts</code>.</span></li>
+                <li><span class="bullet">•</span><span><strong>Regression test:</strong> verifies expired sessions are evicted.</span></li>
+              </ul>
+              <p class="terminal-answer">The full test suite passes.</p>
+            </div>
+
+            <div class="terminal-input" aria-hidden="true">
+              <span class="chevron">›</span>
+              <span class="cursor"></span>
+              <span class="placeholder">Ask haze to help build your app</span>
+            </div>
+            <div class="terminal-status" aria-hidden="true">
+              <div class="terminal-status-left">
+                <span>~/api-service (main)</span>
+                <span>3 messages / 5 tool calls / LLM ↑2.1k ↓180 / 1 skill</span>
+              </div>
+              <span class="terminal-model">ollama:qwen3.6:35b-a3b</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <section class="section" aria-labelledby="benchmark-title">
+      <h2 class="section-title" id="benchmark-title">Measured against the harnesses you know</h2>
+      <div class="section-box">
+        <div class="benchmark-grid">
+          <div class="benchmark-cell">
+            <h3>Input tokens per solved task</h3>
+            <p class="bench-sub">lower is better · cache reads included · lower context per step means cheaper long sessions</p>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder used 90,422 input tokens"><i class="bench-fill" style="width: 16%"></i></span><span class="bench-value">90,422</span></div>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze used 92,320 input tokens"><i class="bench-fill" style="width: 17%"></i></span><span class="bench-value">92,320</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi used 101,817 input tokens"><i class="bench-fill" style="width: 19%"></i></span><span class="bench-value">101,817</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code used 549,062 input tokens"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">549,062</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Agent wall time per solved task</h3>
+            <p class="bench-sub">seconds · same task, same model, same backend for all four harnesses</p>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi finished in 149 seconds"><i class="bench-fill" style="width: 51%"></i></span><span class="bench-value">149 s</span></div>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze finished in 187 seconds"><i class="bench-fill" style="width: 64%"></i></span><span class="bench-value">187 s</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder finished in 233 seconds"><i class="bench-fill" style="width: 80%"></i></span><span class="bench-value">233 s</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code finished in 290 seconds"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">290 s</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Tool calls per solved task</h3>
+            <p class="bench-sub">total calls · haze reached the same result with 6 distinct tools, the others with 3–4</p>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze used 11 tool calls"><i class="bench-fill" style="width: 58%"></i></span><span class="bench-value">11</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi used 13 tool calls"><i class="bench-fill" style="width: 68%"></i></span><span class="bench-value">13</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder used 14 tool calls"><i class="bench-fill" style="width: 74%"></i></span><span class="bench-value">14</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code used 19 tool calls"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">19</span></div>
+          </div>
+          <div class="benchmark-cell">
+            <h3>Shell invocations</h3>
+            <p class="bench-sub">shell calls only · in haze, file tools did the implementation and shell only validated</p>
+            <div class="bench-row is-haze"><span class="bench-label"><strong>haze</strong></span><span class="bench-track" role="img" aria-label="haze ran 3 shell commands"><i class="bench-fill" style="width: 25%"></i></span><span class="bench-value">3</span></div>
+            <div class="bench-row"><span class="bench-label">pi</span><span class="bench-track" role="img" aria-label="pi ran 7 shell commands"><i class="bench-fill" style="width: 58%"></i></span><span class="bench-value">7</span></div>
+            <div class="bench-row"><span class="bench-label">nanocoder</span><span class="bench-track" role="img" aria-label="nanocoder ran 9 shell commands"><i class="bench-fill" style="width: 75%"></i></span><span class="bench-value">9</span></div>
+            <div class="bench-row"><span class="bench-label">claude-code</span><span class="bench-track" role="img" aria-label="claude-code ran 12 shell commands"><i class="bench-fill" style="width: 100%"></i></span><span class="bench-value">12</span></div>
+          </div>
+        </div>
+        <p class="bench-footnote">Harbor differential benchmark, <code>csv-query</code> task (RFC-4180 CSV CLI, 17 verifier tests), 2026-08-16: haze 1.0.0 passed 17/17 like claude-code, nanocoder, and pi — every harness ran the identical <code>glm-5.3</code> model on the same backend, so differences isolate the harness. haze's 11 calls were readFile×3, listFiles×2, writeFile×1, editFile×1, shell×3, readToolOutput×1 — the bash-driven harnesses leaned on the terminal for both implementation and testing. haze completed in one goal cycle with structured passing validation and zero stalls. Full report with the per-step trajectory: <a href="https://github.com/DenizOkcu/haze/tree/main/benchmarks/harbor/results" target="_blank" rel="noopener">benchmarks/harbor/results</a>.</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="capabilities-title">
+      <h2 class="section-title" id="capabilities-title">Built for autonomous workflows</h2>
+      <div class="section-box">
+        <ul class="capability-grid">
+          <li>
+            <h3>Skills are plain Markdown</h3>
+            <p>Skills are haze's most powerful extension point. Describe a workflow, refine the LLM-generated draft, and store it globally or with a repository. The model loads matching skills from user intent, or you can invoke one as a slash command.</p>
+            <pre class="mini-terminal" aria-label="Skills picker example"><span class="prompt">/skills</span>
+<span class="prompt">›</span> code-review    <span class="muted">project</span>
+  deploy-check   <span class="muted">project</span>
+  add skill      <span class="muted">describe a new skill for haze to generate</span></pre>
+          </li>
+          <li>
+            <h3>Repository-native tools</h3>
+            <p>Discover, read, search, edit, and write code with explicit workspace boundaries. Add LSP navigation or MCP tools when the built-ins are not enough.</p>
+            <pre class="mini-terminal" aria-label="File tool example"><span class="success">✓</span> grep      createSession  <span class="muted">12 matches</span>
+<span class="success">✓</span> readFile  src/session.ts <span class="muted">184 lines</span>
+<span class="success">✓</span> editFile  src/session.ts <span class="muted">+8 -3</span></pre>
+          </li>
+          <li>
+            <h3>Work you can resume</h3>
+            <p>Resume or fork a workspace session with its goal, touched files, validation evidence, blockers, and next action intact.</p>
+            <pre class="mini-terminal" aria-label="Session resume example"><span class="prompt">/resume</span>
+<span class="prompt">›</span> auth-refactor    <span class="muted">18 messages · 2m ago</span>
+  dashboard-fix   <span class="muted">12 messages · yesterday</span>
+  release-prep    <span class="muted">9 messages · 3d ago</span></pre>
+          </li>
+          <li>
+            <h3>Parallel, isolated workers</h3>
+            <p>Split independent work across fresh subagent contexts. Concurrency is bounded, file writes are serialized, and the main conversation stays focused.</p>
+            <pre class="mini-terminal" aria-label="Parallel worker example"><span class="prompt">/fleet</span> migrate four packages
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/web     <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/admin   <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/mobile  <span class="muted">migrated</span>
+<span class="success">✓</span> <span class="prompt">subagent</span> packages/cli     <span class="muted">migrated</span></pre>
+          </li>
+          <li>
+            <h3>Commands that stay alive</h3>
+            <p>Run tests and builds in the foreground, or keep up to five managed dev servers and watchers alive while the agent works.</p>
+            <pre class="mini-terminal" aria-label="Background process example"><span class="success">✓</span> shell    npm run dev
+  <span class="prompt">background-1</span> <span class="muted">running on :3000</span>
+<span class="success">✓</span> process  output background-1</pre>
+          </li>
+          <li>
+            <h3>Automation without the TUI</h3>
+            <p>Run <code>haze -p</code> from scripts and CI with text, JSON, or streaming JSON output plus a reliable process exit status. Control reasoning per run with <code>--reasoning</code>; 1.5.1 gates effort by endpoint capability and omits unsupported GPT-6+ choices instead of promoting them. Since 1.6.0, idle-stream stall windows are class-aware — 30 minutes for local inference servers, 5 minutes hosted, overridable via <code>streamIdleTimeoutMs</code> — so slow-burning local models are not aborted mid-work. Interactive width changes replay settled history and formatted Markdown while preserving drafts and active turns.</p>
+            <pre class="mini-terminal" aria-label="Headless operation example"><span class="prompt">$</span> haze -p "audit auth" \
+  --model ollama:qwen3.6:35b-a3b \
+  --output json
+&#123; "status": <span class="success">"complete"</span>, "findings": 2 &#125;</pre>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="principles-title">
+      <h2 class="section-title" id="principles-title">Minimal guardrails and context</h2>
+      <div class="section-box principle-grid">
+        <article>
+          <h3>Workspace boundaries without approval loops</h3>
+          <p>Mutating tools stay inside the current working directory, and file discovery respects <code>.gitignore</code> by default. Explicit <code>@path</code> references add read-only context. Secret files — SSH keys, shell histories, <code>.env</code> files, credentials — are refused outright by every file tool, before any read, and show as <code>blocked: protected secret file</code> in the transcript. Images are attached only when the selected provider supports vision. There is no sandbox or permission layer: shell commands run with your access, so haze is a supervised tool — run it where you would run a shell session yourself, not as an unattended runtime.</p>
+          <pre class="mini-terminal" aria-label="Workspace guardrail example"><span class="prompt">workspace</span>   current directory
+<span class="prompt">.gitignore</span>  respected by default
+<span class="prompt">.env/.ssh</span>   always refused
+<span class="prompt">@ui.png</span>    attached for vision</pre>
+        </article>
+        <article>
+          <h3>A small model-facing footprint</h3>
+          <p>haze's <a href="https://github.com/DenizOkcu/haze/blob/main/src/llm/systemPrompt.ts" target="_blank" rel="noopener">base system prompt</a> is about 1.1k tokens, compared with 20k+ for Claude Code. Request context and tool responses are aggressively bounded or compacted, while large raw outputs remain retrievable by handle. Provider-reported usage re-anchors context estimates, curated limits cover known model families, and overflow recovery compacts and retries before leaving a resumable checkpoint.</p>
+          <pre class="mini-terminal" aria-label="Context footprint example"><span class="prompt">system prompt</span>  ~1.1k tokens
+<span class="prompt">tool output</span>    bounded · retrievable
+<span class="prompt">sessions</span>       compactable</pre>
+        </article>
+        <article>
+          <h3>Instructions at every scope</h3>
+          <p>haze reads user-level guidance from <code>~/.haze/AGENTS.md</code> or <code>~/.claude/CLAUDE.md</code>, then discovers root and nested repository instructions as it works. Create a root <code>AGENTS.md</code> with <code class="command-code">/init</code>. Clear the current conversation and task list with <code class="command-code">/clear</code>.</p>
+          <pre class="mini-terminal" aria-label="Project instruction commands"><span class="prompt">/init</span>   create root AGENTS.md
+<span class="prompt">/clear</span>  clear conversation and tasks</pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="providers-title">
+      <h2 class="section-title" id="providers-title">Bring your own model</h2>
+      <div class="section-box">
+        <p class="provider-note"><strong>Ollama</strong> and <strong>LM Studio</strong> run locally without an API key. For hosted inference, haze includes <a href="https://github.com/DenizOkcu/haze/blob/main/src/config/providerPresets.ts" target="_blank" rel="noopener">presets</a> for <strong>OpenRouter</strong>, <strong>OpenAI</strong>, <strong>Mistral</strong>, <strong>DeepSeek</strong>, <strong>xAI</strong>, and other OpenAI-compatible endpoints; most need only an API key. OpenAI supports both platform API keys and browser sign-in with a supported ChatGPT subscription. You can also connect a custom OpenAI-compatible API. haze is optimized for local inference. Configure a provider with <code>/provider</code>, then select a model with <code>/model</code>.</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="faq-title">
+      <h2 class="section-title" id="faq-title">Common questions</h2>
+      <div class="section-box faq">
+        <details>
+          <summary>Do I need a haze account or subscription?</summary>
+          <p>No. Install the CLI and connect an OpenAI-compatible endpoint. Use a hosted API with your own key or a local endpoint without one.</p>
+        </details>
+        <details>
+          <summary>Will it follow an existing repository's conventions?</summary>
+          <p>Yes. haze reads ancestor and nested <code>AGENTS.md</code> or <code>CLAUDE.md</code> instructions as it enters each subtree. The current workspace remains the mutation boundary.</p>
+        </details>
+        <details>
+          <summary>Will I spend the session approving tool calls?</summary>
+          <p>No. haze does not pause before every file read, edit, or shell command. It keeps mutations inside the current workspace and lets the agent finish its tool loop. Watch the transcript and supervise consequential work as you would any shell session.</p>
+        </details>
+        <details>
+          <summary>What does haze trust?</summary>
+          <p>haze trusts you and your global configuration. Repository content, fetched pages, project skills, MCP/LSP output, and model output are untrusted. There are no command confirmation gates, so supervise consequential work and review debug logs before sharing them.</p>
+        </details>
+        <details>
+          <summary>Can I change how haze looks?</summary>
+          <p>Yes. <code>/themes</code> picks from 14 built-in palettes — the default purple, a light mode, and oh-my-zsh ports like <code>robbyrussell</code> and <code>solarized-dark</code> — and applies the choice immediately; <code>/themes &lt;name&gt;</code> sets one directly. The selection is saved to <code>~/.haze/settings.json</code>. A theme owns both terminal defaults (haze adopts its foreground/background on start and restores yours on exit), so light palettes stay readable.</p>
+        </details>
+        <details>
+          <summary>Is the useful part actually open source?</summary>
+          <p>Yes. The CLI is MIT licensed, with its agent loop, local tools, sessions, skills, subagents, LSP, MCP, and headless mode in the public repository.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="final-action" aria-labelledby="start-title">
+      <div>
+        <h2 id="start-title">Give haze a real task.</h2>
+        <p>Install once, open any project directory, run <code>haze</code>, and choose your provider and model.</p>
+      </div>
+      <a class="button" href="quickstart.html">Start in under five minutes</a>
+    </section>
+
+    <footer class="footer">
+      <span>MIT licensed. Built by Deniz Okcu.</span>
+      <nav aria-label="Footer navigation">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </footer>
+  </main>
+
+</Layout>

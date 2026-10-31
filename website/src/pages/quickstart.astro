@@ -1,36 +1,36 @@
-<main id="main">
-    <div class="doc-head">
-      <div class="container">
-        <div class="doc-eyebrow">Docs / Getting started</div>
-        <h1 class="doc-h1">Quick<span class="em">start.</span></h1>
-        <p class="doc-lede">Install haze, connect an OpenAI-compatible provider, choose a model, and give it real work in under five minutes.</p>
-      </div>
-    </div>
+---
+import DocPage from "../components/DocPage.astro";
+const toc = [
+  {
+    "id": "requirements",
+    "label": "Requirements"
+  },
+  {
+    "id": "install",
+    "label": "Install"
+  },
+  {
+    "id": "providers",
+    "label": "Configure a provider"
+  },
+  {
+    "id": "model",
+    "label": "Pick a model"
+  },
+  {
+    "id": "first-task",
+    "label": "Your first task"
+  },
+  {
+    "id": "next-steps",
+    "label": "Next steps"
+  }
+];
+---
+<DocPage page="quickstart" title="Quickstart — haze docs" description="Install haze, configure an OpenAI-compatible provider, choose a model, and run your first coding task from the terminal." eyebrow="Docs / Getting started" toc={toc}>
+  <Fragment slot="heading">Quick<span class="em">start.</span></Fragment>
+  <Fragment slot="intro">Install haze, connect an OpenAI-compatible provider, choose a model, and give it real work in under five minutes.</Fragment>
 
-    <div class="container">
-      <div class="doc-grid">
-        <aside class="doc-side" aria-label="Page navigation">
-          <div>
-            <div class="doc-side-label">On this page</div>
-            <nav>
-              <a href="#requirements">Requirements</a>
-              <a href="#install">Install</a>
-              <a href="#providers">Configure a provider</a>
-              <a href="#model">Pick a model</a>
-              <a href="#first-task">Your first task</a>
-              <a href="#next-steps">Next steps</a>
-            </nav>
-          </div>
-          <div class="doc-nav-ext">
-            <div class="doc-side-label">More docs</div>
-            <a href="commands.html">Command reference</a>
-            <a href="tools.html">Tool reference</a>
-            <a href="skills.html">Skills guide</a>
-            <a href="workflows.html">Workflows</a>
-          </div>
-        </aside>
-
-        <div class="doc-main">
           <section id="requirements">
             <h2>Requi<span class="em">rements</span></h2>
             <ul>
@@ -126,7 +126,4 @@ add rate limiting to the /auth endpoints, with tests
               <li><a href="workflows.html">Workflows</a> — sessions, fleet, images, and context files in practice.</li>
             </ul>
           </section>
-        </div>
-      </div>
-    </div>
-  </main>
+</DocPage>

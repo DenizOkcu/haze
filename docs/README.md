@@ -31,5 +31,5 @@ Keep the source pages’ npm version stamps and quickstart version example align
 ## Regeneration
 
 The sync generates the public HTML, CSS, JavaScript, robots.txt and sitemap.
-Content is still maintained in `website/src/content/`; it is not automatically
+Content is still maintained in `website/src/pages/`; it is not automatically
 derived from the CLI source. Use the table above as the review checklist.

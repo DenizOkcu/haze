@@ -1,36 +1,36 @@
-<main id="main">
-    <div class="doc-head">
-      <div class="container">
-        <div class="doc-eyebrow">Docs / Guide</div>
-        <h1 class="doc-h1">Work<span class="em">flows.</span></h1>
-        <p class="doc-lede">How haze behaves across longer jobs: durable sessions, parallel fleet runs, image attachments, instruction files, managed processes, and headless pipelines.</p>
-      </div>
-    </div>
+---
+import DocPage from "../components/DocPage.astro";
+const toc = [
+  {
+    "id": "sessions",
+    "label": "Sessions"
+  },
+  {
+    "id": "fleet",
+    "label": "Fleet & subagents"
+  },
+  {
+    "id": "images",
+    "label": "Images"
+  },
+  {
+    "id": "context",
+    "label": "Context files"
+  },
+  {
+    "id": "processes",
+    "label": "Background processes"
+  },
+  {
+    "id": "ci",
+    "label": "Headless & CI"
+  }
+];
+---
+<DocPage page="workflows" title="Workflows — haze docs" description="Practical haze workflows: durable sessions, parallel fleet runs, image attachments, AGENTS.md context files, background dev servers, and headless CI runs." eyebrow="Docs / Guide" toc={toc}>
+  <Fragment slot="heading">Work<span class="em">flows.</span></Fragment>
+  <Fragment slot="intro">How haze behaves across longer jobs: durable sessions, parallel fleet runs, image attachments, instruction files, managed processes, and headless pipelines.</Fragment>
 
-    <div class="container">
-      <div class="doc-grid">
-        <aside class="doc-side" aria-label="Page navigation">
-          <div>
-            <div class="doc-side-label">On this page</div>
-            <nav>
-              <a href="#sessions">Sessions</a>
-              <a href="#fleet">Fleet &amp; subagents</a>
-              <a href="#images">Images</a>
-              <a href="#context">Context files</a>
-              <a href="#processes">Background processes</a>
-              <a href="#ci">Headless &amp; CI</a>
-            </nav>
-          </div>
-          <div class="doc-nav-ext">
-            <div class="doc-side-label">More docs</div>
-            <a href="quickstart.html">Quickstart</a>
-            <a href="commands.html">Command reference</a>
-            <a href="tools.html">Tool reference</a>
-            <a href="skills.html">Skills guide</a>
-          </div>
-        </aside>
-
-        <div class="doc-main">
           <section id="sessions">
             <h2>Durable <span class="em">sessions</span></h2>
             <p>Interactive sessions stay memory-only until the first resumable message, then persist as compact JSONL under <code>~/.haze/sessions</code> unless started with <code>--no-session</code>. Streaming chatter is skipped and bulky tool output is slimmed, so files stay small.</p>
@@ -111,20 +111,20 @@ recreate the chart in @mockups/analytics.png with recharts</pre>
   runs-on: ubuntu-latest
   steps:
     - uses: actions/checkout@v4
-      with: { fetch-depth: 0 }
+      with: &#123; fetch-depth: 0 &#125;
     - uses: actions/setup-node@v4
-      with: { node-version: 22 }
+      with: &#123; node-version: 22 &#125;
     - run: npm i -g @denizokcu/haze
     - name: Configure haze provider <span class="c"># keys live in settings.json, never env vars</span>
       run: |
         mkdir -p ~/.haze
         cat &gt; ~/.haze/settings.json &lt;&lt;EOF
-        { "provider": "openrouter",
+        &#123; "provider": "openrouter",
           "model": "anthropic/claude-sonnet-4.6",
-          "providers": [ { "name": "openrouter",
+          "providers": [ &#123; "name": "openrouter",
             "url": "https://openrouter.ai/api/v1",
-            "key": "${{ secrets.OPENROUTER_API_KEY }}",
-            "models": ["anthropic/claude-sonnet-4.6"] } ] }
+            "key": "$&#123;&#123; secrets.OPENROUTER_API_KEY &#125;&#125;",
+            "models": ["anthropic/claude-sonnet-4.6"] &#125; ] &#125;
         EOF
         chmod 600 ~/.haze/settings.json
     - name: Review the PR diff
@@ -135,7 +135,4 @@ recreate the chart in @mockups/analytics.png with recharts</pre>
             </div>
             <p><code>--output json</code> emits one envelope for scripts; <code>--output stream-json</code> streams live NDJSON events first. Combine with <code>--resume &lt;id&gt;</code> to load a saved session's context without modifying it. For long autonomous runs, <code>--until-done</code> relaunches the goal after transient provider failures (exponential backoff, <code>goal_resume</code> events, a three-strike no-progress guard) until it structurally completes or <code>--timeout</code> hits — a provider hiccup at hour two no longer wastes the run, and unattended operation never grants extra authority. Completion is evidence-gated: declared tasks and post-edit validation must agree before a mutating goal reports done. For fixes, a pre-edit failing check is optional; when one is observed, that same check must turn green. Validation pipelines use <code>pipefail</code>, and shell compounds that can mask failure do not count as passing evidence. See the <a href="commands.html#cli">terminal flags</a> for the full contract.</p>
           </section>
-        </div>
-      </div>
-    </div>
-  </main>
+</DocPage>

@@ -1,0 +1,38 @@
+---
+import SiteLayout from '../layouts/SiteLayout.astro';
+
+const { page, title, description, eyebrow, toc } = Astro.props;
+const docs = [
+  { page: 'quickstart', label: 'Quickstart' },
+  { page: 'commands', label: 'Command reference' },
+  { page: 'tools', label: 'Tool reference' },
+  { page: 'skills', label: 'Skills guide' },
+  { page: 'workflows', label: 'Workflows' },
+];
+---
+<SiteLayout page={page} title={title} description={description}>
+  <main id="main">
+    <div class="doc-head">
+      <div class="container">
+        <div class="doc-eyebrow">{eyebrow}</div>
+        <h1 class="doc-h1"><slot name="heading" /></h1>
+        <p class="doc-lede"><slot name="intro" /></p>
+      </div>
+    </div>
+    <div class="container">
+      <div class="doc-grid">
+        <aside class="doc-side" aria-label="Page navigation">
+          <div>
+            <div class="doc-side-label">On this page</div>
+            <nav>{toc.map(item => <a href={`#${item.id}`}>{item.label}</a>)}</nav>
+          </div>
+          <div class="doc-nav-ext">
+            <div class="doc-side-label">More docs</div>
+            {docs.filter(item => item.page !== page).map(item => <a href={`${item.page}.html`}>{item.label}</a>)}
+          </div>
+        </aside>
+        <div class="doc-main"><slot /></div>
+      </div>
+    </div>
+  </main>
+</SiteLayout>

@@ -1,9 +1,10 @@
 # Public site
 
-This Astro project generates the homepage and documentation. Edit page content
-and metadata in `src/content/`, shared navigation and metadata in
-`src/layouts/`, and browser assets in `public/`. Content files are trusted
-repository-authored HTML fragments, rendered by the shared Astro layout.
+This Astro project generates the homepage and documentation. Edit page content and metadata in `src/pages/*.astro`, the shared documentation
+layout and navigation in `src/components/DocPage.astro`, the site shell in
+`src/layouts/`, and browser assets in `public/`. Documentation page outlines
+are defined by their `toc` arrays. Escape literal braces in examples as
+`&#123;` and `&#125;` so Astro renders them as text.
 
 ```sh
 npm ci --prefix website

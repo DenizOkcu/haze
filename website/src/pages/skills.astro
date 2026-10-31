@@ -1,37 +1,40 @@
-<main id="main">
-    <div class="doc-head">
-      <div class="container">
-        <div class="doc-eyebrow">Docs / Guide</div>
-        <h1 class="doc-h1">Skills <span class="em">guide.</span></h1>
-        <p class="doc-lede">If you do something for the second time, make it a skill. Skills are Markdown workflows that become slash commands — created inside haze, stored as plain files, versioned with your repo.</p>
-      </div>
-    </div>
+---
+import DocPage from "../components/DocPage.astro";
+const toc = [
+  {
+    "id": "create",
+    "label": "Create a skill"
+  },
+  {
+    "id": "anatomy",
+    "label": "Anatomy of a skill"
+  },
+  {
+    "id": "scope",
+    "label": "Scope & precedence"
+  },
+  {
+    "id": "invoke",
+    "label": "Invoking skills"
+  },
+  {
+    "id": "recipes",
+    "label": "Starter recipes"
+  },
+  {
+    "id": "manage",
+    "label": "Manage skills"
+  },
+  {
+    "id": "plugins",
+    "label": "Shared plugins"
+  }
+];
+---
+<DocPage page="skills" title="Skills guide — haze docs" description="Create Markdown skills inside haze with /skills: turn repeated workflows like code review, release prep, and deploy checks into slash commands." eyebrow="Docs / Guide" toc={toc}>
+  <Fragment slot="heading">Skills <span class="em">guide.</span></Fragment>
+  <Fragment slot="intro">If you do something for the second time, make it a skill. Skills are Markdown workflows that become slash commands — created inside haze, stored as plain files, versioned with your repo.</Fragment>
 
-    <div class="container">
-      <div class="doc-grid">
-        <aside class="doc-side" aria-label="Page navigation">
-          <div>
-            <div class="doc-side-label">On this page</div>
-            <nav>
-              <a href="#create">Create a skill</a>
-              <a href="#anatomy">Anatomy of a skill</a>
-              <a href="#scope">Scope &amp; precedence</a>
-              <a href="#invoke">Invoking skills</a>
-              <a href="#recipes">Starter recipes</a>
-              <a href="#manage">Manage skills</a>
-              <a href="#plugins">Shared plugins</a>
-            </nav>
-          </div>
-          <div class="doc-nav-ext">
-            <div class="doc-side-label">More docs</div>
-            <a href="quickstart.html">Quickstart</a>
-            <a href="commands.html">Command reference</a>
-            <a href="tools.html">Tool reference</a>
-            <a href="workflows.html">Workflows</a>
-          </div>
-        </aside>
-
-        <div class="doc-main">
           <section id="create">
             <h2>Create a <span class="em">skill</span></h2>
             <p>Run <code class="cmd">/skills</code>, choose <strong>add skill</strong>, and answer three prompts. haze uses the model to draft the SKILL.md for you.</p>
@@ -147,7 +150,4 @@ haze plugin remove speckit</pre></div>
             <p>The <code class="cmd">/skills</code> picker shows each skill's scope and lets you enable, disable, validate, or remove it. Disabled skills disappear from slash completion and model loading, without deleting the file.</p>
             <div class="callout"><strong>Tip.</strong> Keep skills small and single-purpose — compose larger routines by calling several skills or by giving one skill a clear step list.</div>
           </section>
-        </div>
-      </div>
-    </div>
-  </main>
+</DocPage>

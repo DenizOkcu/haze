@@ -1,37 +1,40 @@
-<main id="main">
-    <div class="doc-head">
-      <div class="container">
-        <div class="doc-eyebrow">Docs / Reference</div>
-        <h1 class="doc-h1">Tool <span class="em">reference.</span></h1>
-        <p class="doc-lede">Fourteen built-in tools across five groups, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</p>
-      </div>
-    </div>
+---
+import DocPage from "../components/DocPage.astro";
+const toc = [
+  {
+    "id": "read",
+    "label": "Read"
+  },
+  {
+    "id": "write",
+    "label": "Write"
+  },
+  {
+    "id": "shell",
+    "label": "Shell"
+  },
+  {
+    "id": "network",
+    "label": "Network"
+  },
+  {
+    "id": "agent",
+    "label": "Agent state"
+  },
+  {
+    "id": "lsp",
+    "label": "LSP & MCP"
+  },
+  {
+    "id": "boundaries",
+    "label": "Safety boundaries"
+  }
+];
+---
+<DocPage page="tools" title="Tool reference — haze docs" description="Every tool the haze model can call: file discovery, editing, shell, background processes, fetch, tasks, skills, subagents, plus LSP and MCP integration." eyebrow="Docs / Reference" toc={toc}>
+  <Fragment slot="heading">Tool <span class="em">reference.</span></Fragment>
+  <Fragment slot="intro">Fourteen built-in tools across five groups, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</Fragment>
 
-    <div class="container">
-      <div class="doc-grid">
-        <aside class="doc-side" aria-label="Page navigation">
-          <div>
-            <div class="doc-side-label">On this page</div>
-            <nav>
-              <a href="#read">Read</a>
-              <a href="#write">Write</a>
-              <a href="#shell">Shell</a>
-              <a href="#network">Network</a>
-              <a href="#agent">Agent state</a>
-              <a href="#lsp">LSP &amp; MCP</a>
-              <a href="#boundaries">Safety boundaries</a>
-            </nav>
-          </div>
-          <div class="doc-nav-ext">
-            <div class="doc-side-label">More docs</div>
-            <a href="quickstart.html">Quickstart</a>
-            <a href="commands.html">Command reference</a>
-            <a href="skills.html">Skills guide</a>
-            <a href="workflows.html">Workflows</a>
-          </div>
-        </aside>
-
-        <div class="doc-main">
           <section id="read">
             <h2><span class="em">Read</span> · 5 tools</h2>
             <table>
@@ -108,7 +111,4 @@
             </ul>
             <div class="callout"><strong>Trust model.</strong> haze is intended for attended expert use. Shell classification is informational and there are no command confirmation gates. Project skills and repository instructions are labeled as untrusted content, but user supervision remains part of the security boundary. Read the <a href="https://github.com/DenizOkcu/haze/blob/main/SECURITY.md" target="_blank" rel="noopener">security policy</a>.</div>
           </section>
-        </div>
-      </div>
-    </div>
-  </main>
+</DocPage>
