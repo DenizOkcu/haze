@@ -1,0 +1,54 @@
+---
+const { title, description, page } = Astro.props;
+const home = page === 'index';
+const siteRoot = new URL(import.meta.env.SITE);
+const canonical = new URL(home ? './' : `${page}.html`, siteRoot).href;
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <meta name="description" content={description}>
+  <link rel="canonical" href={canonical}>
+  <meta property="og:type" content="website">
+  <meta property="og:title" content={title}>
+  <meta property="og:description" content={description}>
+  <meta property="og:url" content={canonical}>
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#181823">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23181823'/><text y='.85em' x='.18em' font-size='74' font-family='monospace' font-weight='700' fill='%23a78bfa'>h</text></svg>">
+  <link rel="stylesheet" href={home ? "home.css" : "site.css"}>
+</head>
+<body>
+  {!home && <><a href="#main" class="skip-link">Skip to content</a><header class="head">
+    <div class="container head-inner">
+      <a href="index.html" class="head-brand" aria-label="haze home">haze<span class="dot">.</span></a>
+      <nav class="head-nav" aria-label="Documentation">
+        <a href="quickstart.html" class:list={["head-link", { active: page === "quickstart" }]}>Quickstart</a>
+        <a href="commands.html" class:list={["head-link", { active: page === "commands" }]}>Commands</a>
+        <a href="tools.html" class:list={["head-link", { active: page === "tools" }]}>Tools</a>
+        <a href="skills.html" class:list={["head-link", { active: page === "skills" }]}>Skills</a>
+        <a href="workflows.html" class:list={["head-link", { active: page === "workflows" }]}>Workflows</a>
+      </nav>
+      <nav class="head-nav" aria-label="Primary">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener" class="head-stamp">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener" class="head-stamp accent">npm v1.7.1</a>
+      </nav>
+    </div>
+  </header></>}
+  <slot />
+  {!home && <footer>
+    <div class="container footer-grid">
+      <div class="footer-colophon">MIT licensed. Built by <a href="https://github.com/DenizOkcu" target="_blank" rel="noopener">Deniz Okcu</a>.</div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="https://github.com/DenizOkcu/haze" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/@denizokcu/haze" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/DenizOkcu/haze/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+    </div>
+  </footer>}
+  {home ? <script is:inline src="home.js"></script> : <script is:inline src="site.js"></script>}
+</body>
+</html>

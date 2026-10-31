@@ -44,7 +44,7 @@ Before release/PR confidence: `npm run typecheck && npm test && npm run lint && 
 - `tests/` — Vitest suite. See `tests/AGENTS.md`.
 - `bin/haze.js` — thin npm binary shim to built CLI.
 - `dist/` — generated build output; never edit directly.
-- `docs/*.html` — static docs pages in repo (`index.html` plus topic pages like `commands.html`, `tools.html`).
+- `website/` — Astro source for the public site; run `npm run sync --prefix website` after editing and commit the generated `docs/` public files. `npm run check --prefix website` detects drift.
 
 ## Global coding conventions
 

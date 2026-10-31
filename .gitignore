@@ -17,3 +17,6 @@ dist/
 
 # Internal security review findings; never published (mentions internal infra)
 security-review/
+
+# Astro generated state
+.astro/

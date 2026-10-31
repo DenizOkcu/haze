@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://denizokcu.github.io/haze/sitemap.xml

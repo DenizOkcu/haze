@@ -1,0 +1,6 @@
+---
+import Layout from "../layouts/SiteLayout.astro";
+import content from "../content/index.html?raw";
+import meta from "../content/index.json";
+---
+<Layout page="index" {...meta}><Fragment set:html={content} /></Layout>
