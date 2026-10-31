@@ -2,6 +2,7 @@ import type {ModelMessage} from 'ai';
 import {estimateMessagesTokens, estimateModelMessageTokens} from './contextBudget.js';
 import {workStatePrompt, type WorkState} from './workState.js';
 import {COMPACTION_LLM_TRANSCRIPT_CHARS, COMPACTION_OLDER_CHARS} from '../limits.js';
+import {escapeEnvelopeClosers} from '../safety/untrustedEnvelopes.js';
 
 export interface CompactionResult {
   compacted: boolean;
@@ -101,8 +102,14 @@ function compactionEntryText(message: ModelMessage): string {
  */
 const COMPACTION_OPEN = '<haze_compaction source="data">';
 
+/**
+ * Wrap the summary in its origin-labeled container. Forged closing tags inside
+ * the summary (which routinely carries quoted tool output) are escaped with
+ * the shared variant-regex escaper (R2-HZ-2) so the container cannot be ended
+ * early and the trailing payload promoted to bare user-role text.
+ */
 function compactionSummaryMessage(summary: string): ModelMessage {
-  return {role: 'user', content: `${COMPACTION_OPEN}\n${summary}\n</haze_compaction>`};
+  return {role: 'user', content: `${COMPACTION_OPEN}\n${escapeEnvelopeClosers(summary)}\n</haze_compaction>`};
 }
 
 export function compactModelMessages(

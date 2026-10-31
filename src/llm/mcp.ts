@@ -12,11 +12,12 @@ const MCP_DISCOVERY_CONCURRENCY = 4;
 const MCP_OVERSIZED_PREVIEW_CHARS = 2_000;
 
 /**
- * Wrap one MCP tool's execute with an output-size cap (HZA-2): a result whose
- * serialized size exceeds `MAX_MCP_OUTPUT_CHARS` is stored behind a
- * readToolOutput handle and the model-visible value becomes a bounded,
- * explicitly untrusted `<mcp_result>` payload, so a hostile server can neither
- * flood the context nor deliver unlabeled instructions. The stored entry
+ * Wrap one MCP tool's execute with untrusted-output labeling (HZA-2, R2-HZ-1):
+ * every result — regardless of size — arrives inside the escaped
+ * `<mcp_result untrusted="data">` envelope, so a hostile server can never
+ * deliver unlabeled instructions. A result whose serialized size exceeds
+ * `MAX_MCP_OUTPUT_CHARS` is additionally stored behind a readToolOutput handle
+ * and the model-visible value becomes a bounded preview; the stored entry
  * carries its mcp origin so every later readToolOutput page re-wraps in the
  * same envelope instead of returning raw unlabeled text.
  */
@@ -33,8 +34,12 @@ function wrapMcpToolExecute(serverName: string, toolName: string, toolDef: ToolS
       } catch {
         text = String(result);
       }
-      if (text.length <= MAX_MCP_OUTPUT_CHARS) return result;
       const origin: StoredOutputOrigin = {kind: 'mcp', server: serverName, toolName};
+      if (text.length <= MAX_MCP_OUTPUT_CHARS) {
+        // Small results are fully inline — but enveloped and escaped like every
+        // other MCP byte; short payloads are precisely what an attacker wants.
+        return {ok: true, server: serverName, toolName, content: wrapUntrustedOutput(origin, text)};
+      }
       const handle = storeToolOutput(text, origin);
       const payload = `${text.slice(0, MCP_OVERSIZED_PREVIEW_CHARS)}\n[... ${text.length - MCP_OVERSIZED_PREVIEW_CHARS} characters omitted; use readToolOutput with handle ${handle} ...]`;
       return {

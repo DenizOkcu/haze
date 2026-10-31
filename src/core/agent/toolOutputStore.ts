@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {TOOL_OUTPUT_ENTRY_BYTES, TOOL_OUTPUT_TOTAL_BYTES} from '../limits.js';
 import {truncateUtf8AtBytes} from '../../utils/utf8.js';
+import {escapeEnvelopeClosers} from '../safety/untrustedEnvelopes.js';
 
 export interface StoredToolOutputPage {
   handle: string;
@@ -32,18 +33,18 @@ function escapeAttribute(value: string) {
 
 /**
  * Wrap untrusted-origin content in its labeled envelope. Occurrences of the
- * closing tag inside the content are escaped so the payload cannot forge the
- * envelope boundary and smuggle instructions outside it. Shared by the
- * fetch/MCP tools (inline results) and `readToolOutput` page re-wraps so both
- * views use identical framing.
+ * closing tag inside the content are escaped (variant-tolerantly — see
+ * `escapeEnvelopeClosers`) so the payload cannot forge the envelope boundary
+ * and smuggle instructions outside it. Shared by the fetch/MCP tools (inline
+ * results) and `readToolOutput` page re-wraps so both views use identical
+ * framing.
  */
 export function wrapUntrustedOutput(origin: StoredOutputOrigin, content: string): string {
+  const escaped = escapeEnvelopeClosers(content);
   if (origin.kind === 'web') {
-    const close = '</web_content>';
-    return `<web_content url="${escapeAttribute(origin.url)}" untrusted="data">\n${content.replaceAll(close, '<\\/web_content>')}\n${close}`;
+    return `<web_content url="${escapeAttribute(origin.url)}" untrusted="data">\n${escaped}\n</web_content>`;
   }
-  const close = '</mcp_result>';
-  return `<mcp_result server="${escapeAttribute(origin.server)}" untrusted="data">\n${content.replaceAll(close, '<\\/mcp_result>')}\n${close}`;
+  return `<mcp_result server="${escapeAttribute(origin.server)}" untrusted="data">\n${escaped}\n</mcp_result>`;
 }
 
 const outputs = new Map<string, {content: string; bytes: number; originalBytes: number; origin?: StoredOutputOrigin}>();
