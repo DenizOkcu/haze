@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag to publish'
+        required: true
+        type: string
 
 # `id-token: write` is required for npm provenance attestations / OIDC trusted
 # publishing (SC-2). Everything else stays read-only.
@@ -17,15 +23,20 @@ jobs:
     steps:
       # SHA-pinned like ci.yml (SC-1); comments record the verified release.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          # Node 24 includes npm 11, required for npm trusted publishing.
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
       # Publish exactly the version the tag names; a mismatched tag would
       # otherwise publish a different version than what was reviewed.
       - name: Verify tag matches package version
-        run: node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'.');process.exit(1);}console.log('Tag v'+tag+' matches package.json '+pkg.version+'.')"
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const tag=process.env.RELEASE_TAG.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'.');process.exit(1);}console.log('Tag v'+tag+' matches package.json '+pkg.version+'.')"
       # Release gate — the same chain as package.json `prepublishOnly`
       # (npm also re-runs prepublishOnly at publish time; the explicit steps
       # here keep the gate visible and fail before any registry interaction).
