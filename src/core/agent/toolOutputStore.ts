@@ -16,7 +16,37 @@ export interface StoredToolOutputPage {
   matches?: number;
 }
 
-const outputs = new Map<string, {content: string; bytes: number; originalBytes: number}>();
+/**
+ * Origin metadata for stored content whose pages must stay inside their
+ * untrusted envelope on every `readToolOutput` read (HZA-2): without it, an
+ * oversized fetch/MCP result invites the model to page through raw, unlabeled
+ * attacker-controlled text via the retrieval handle.
+ */
+export type StoredOutputOrigin =
+  | {kind: 'web'; url: string}
+  | {kind: 'mcp'; server: string; toolName: string};
+
+function escapeAttribute(value: string) {
+  return value.replaceAll('"', '%22');
+}
+
+/**
+ * Wrap untrusted-origin content in its labeled envelope. Occurrences of the
+ * closing tag inside the content are escaped so the payload cannot forge the
+ * envelope boundary and smuggle instructions outside it. Shared by the
+ * fetch/MCP tools (inline results) and `readToolOutput` page re-wraps so both
+ * views use identical framing.
+ */
+export function wrapUntrustedOutput(origin: StoredOutputOrigin, content: string): string {
+  if (origin.kind === 'web') {
+    const close = '</web_content>';
+    return `<web_content url="${escapeAttribute(origin.url)}" untrusted="data">\n${content.replaceAll(close, '<\\/web_content>')}\n${close}`;
+  }
+  const close = '</mcp_result>';
+  return `<mcp_result server="${escapeAttribute(origin.server)}" untrusted="data">\n${content.replaceAll(close, '<\\/mcp_result>')}\n${close}`;
+}
+
+const outputs = new Map<string, {content: string; bytes: number; originalBytes: number; origin?: StoredOutputOrigin}>();
 const dynamicOutputs = new Map<string, () => {content: string; totalBytes: number}>();
 const MAX_STORED_OUTPUTS = 100;
 let storedBytes = 0;
@@ -39,12 +69,12 @@ export function unregisterDynamicToolOutput(handle: string) {
  * budget is evicted on the next `storeToolOutput` call, so callers should not
  * assume a freshly-stored handle survives beyond the next store.
  */
-export function storeToolOutput(content: string) {
+export function storeToolOutput(content: string, origin?: StoredOutputOrigin) {
   const handle = `output-${crypto.randomBytes(8).toString('hex')}`;
   const originalBytes = Buffer.byteLength(content, 'utf8');
   const retained = truncateUtf8AtBytes(content, TOOL_OUTPUT_ENTRY_BYTES).text;
   const bytes = Buffer.byteLength(retained, 'utf8');
-  outputs.set(handle, {content: retained, bytes, originalBytes});
+  outputs.set(handle, {content: retained, bytes, originalBytes, ...(origin ? {origin} : {})});
   storedBytes += bytes;
   while (outputs.size > MAX_STORED_OUTPUTS || storedBytes > TOOL_OUTPUT_TOTAL_BYTES) {
     const oldest = outputs.keys().next().value;
@@ -91,15 +121,17 @@ export function readToolOutput(handle: string, offset = 0, limit = 12_000, optio
     outputs.delete(handle);
     outputs.set(handle, stored);
   }
+  const origin = 'origin' in stored ? stored.origin : undefined;
   const output = stored.content;
   if (options?.query?.trim()) {
     const result = searchOutput(output, options.query.trim(), limit, options.contextLines);
     const omittedBytes = stored.originalBytes - stored.bytes;
-    return {...result, handle, truncated: result.truncated || omittedBytes > 0, totalBytes: stored.originalBytes, retainedBytes: stored.bytes, omittedBytes};
+    return {...result, handle, truncated: result.truncated || omittedBytes > 0, totalBytes: stored.originalBytes, retainedBytes: stored.bytes, omittedBytes,
+      ...(origin ? {content: wrapUntrustedOutput(origin, result.content)} : {})};
   }
   const safeOffset = Math.min(Math.max(0, offset), output.length);
-  const content = output.slice(safeOffset, safeOffset + limit);
-  const nextOffset = safeOffset + content.length < output.length ? safeOffset + content.length : undefined;
+  const page = output.slice(safeOffset, safeOffset + limit);
+  const nextOffset = safeOffset + page.length < output.length ? safeOffset + page.length : undefined;
   return {
     handle,
     offset: safeOffset,
@@ -108,7 +140,7 @@ export function readToolOutput(handle: string, offset = 0, limit = 12_000, optio
     totalBytes: stored.originalBytes,
     retainedBytes: stored.bytes,
     omittedBytes: stored.originalBytes - stored.bytes,
-    content,
+    content: origin ? wrapUntrustedOutput(origin, page) : page,
     truncated: nextOffset != null || stored.originalBytes > stored.bytes,
   };
 }

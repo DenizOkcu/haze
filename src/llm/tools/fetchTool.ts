@@ -5,6 +5,7 @@ import {fetchUrlContent, BlockedUrlError} from '../webFetch.js';
 import {structuredToolFailure} from './failures.js';
 import {compactStoredOutput} from './outputCap.js';
 import {MAX_OUTPUT_CHARS} from '../../core/limits.js';
+import {wrapUntrustedOutput, type StoredOutputOrigin} from '../../core/agent/toolOutputStore.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 
 export const fetchTool = tool({
@@ -12,12 +13,15 @@ export const fetchTool = tool({
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({
     url: z.string().url().describe('Absolute http(s) URL to fetch'),
-    format: z.enum(['auto', 'text']).default('auto').describe('auto = markdown for HTML, pretty for JSON, passthrough for text; text = raw text only'),
+    format: z.enum(['auto', 'text']).default('auto').describe('auto = markdown for HTML, pretty for JSON, or passthrough for text; text = raw text only'),
   }),
   execute: async ({url, format}, context) => runDedupedTool('fetch', {url, format}, context, async () => {
     try {
       const result = await fetchUrlContent(url, {signal: context.abortSignal, format});
-      const capped = compactStoredOutput(result.content, MAX_OUTPUT_CHARS);
+      // The untrusted web origin tags the stored handle so every readToolOutput
+      // page re-wraps in the same envelope as the inline result (HZA-2).
+      const origin: StoredOutputOrigin = {kind: 'web', url: result.url};
+      const capped = compactStoredOutput(result.content, MAX_OUTPUT_CHARS, origin);
       const extractionMethod = format === 'text' ? 'text' as const : result.extractionMethod;
       const fetchMetrics = reductionMetrics(result.content, capped.text);
       return {
@@ -30,7 +34,7 @@ export const fetchTool = tool({
         redirected: result.redirected,
         extractionMethod,
         truncated: capped.truncated,
-        content: capped.text,
+        content: wrapUntrustedOutput(origin, capped.text),
         reducerName: extractionMethod === 'markdown' ? 'web-html-extract' : 'web-content-cap',
         contentKind: 'web',
         lossy: capped.truncated || extractionMethod === 'markdown',

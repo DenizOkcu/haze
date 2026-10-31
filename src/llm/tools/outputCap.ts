@@ -1,15 +1,17 @@
-import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
+import {storeToolOutput, type StoredOutputOrigin} from '../../core/agent/toolOutputStore.js';
 import {COMPACT_COMMAND_CHARS, GREP_MAX_LINE_CHARS, GREP_MAX_OUTPUT_CHARS} from '../../core/limits.js';
 
 export {COMPACT_COMMAND_CHARS};
 
 /**
  * Cap a string to `maxChars` characters, keeping a head + tail and storing the
- * full text behind a `readToolOutput` handle so nothing is lost.
+ * full text behind a `readToolOutput` handle so nothing is lost. Pass an
+ * `origin` for untrusted content (web/MCP) so stored pages re-wrap in their
+ * envelope on every read.
  */
-export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS) {
+export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS, origin?: StoredOutputOrigin) {
   if (text.length <= maxChars) return {text, truncated: false};
-  const handle = storeToolOutput(text);
+  const handle = storeToolOutput(text, origin);
   const headChars = Math.floor(maxChars * 0.4);
   const tailChars = maxChars - headChars;
   return {

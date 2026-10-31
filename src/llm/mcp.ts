@@ -2,10 +2,56 @@ import {createMCPClient, type MCPClient} from '@ai-sdk/mcp';
 import type {ToolSet} from 'ai';
 import type {HazeMcpServer} from '../config/settings.js';
 import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
+import {storeToolOutput, wrapUntrustedOutput, type StoredOutputOrigin} from '../core/agent/toolOutputStore.js';
+import {MAX_MCP_OUTPUT_CHARS} from '../core/limits.js';
 
 const MCP_DISCOVERY_TIMEOUT_MS = 10_000;
 const MCP_CLOSE_TIMEOUT_MS = 2_000;
 const MCP_DISCOVERY_CONCURRENCY = 4;
+/** Bounded head of an oversized MCP result kept model-visible; the rest lives behind the handle. */
+const MCP_OVERSIZED_PREVIEW_CHARS = 2_000;
+
+/**
+ * Wrap one MCP tool's execute with an output-size cap (HZA-2): a result whose
+ * serialized size exceeds `MAX_MCP_OUTPUT_CHARS` is stored behind a
+ * readToolOutput handle and the model-visible value becomes a bounded,
+ * explicitly untrusted `<mcp_result>` payload, so a hostile server can neither
+ * flood the context nor deliver unlabeled instructions. The stored entry
+ * carries its mcp origin so every later readToolOutput page re-wraps in the
+ * same envelope instead of returning raw unlabeled text.
+ */
+function wrapMcpToolExecute(serverName: string, toolName: string, toolDef: ToolSet[string]): ToolSet[string] {
+  const execute = toolDef.execute;
+  if (!execute) return toolDef;
+  return {
+    ...toolDef,
+    execute: async (input, options) => {
+      const result = await execute(input, options);
+      let text: string;
+      try {
+        text = JSON.stringify(result) ?? String(result);
+      } catch {
+        text = String(result);
+      }
+      if (text.length <= MAX_MCP_OUTPUT_CHARS) return result;
+      const origin: StoredOutputOrigin = {kind: 'mcp', server: serverName, toolName};
+      const handle = storeToolOutput(text, origin);
+      const payload = `${text.slice(0, MCP_OVERSIZED_PREVIEW_CHARS)}\n[... ${text.length - MCP_OVERSIZED_PREVIEW_CHARS} characters omitted; use readToolOutput with handle ${handle} ...]`;
+      return {
+        ok: false,
+        server: serverName,
+        toolName,
+        reasonCode: 'mcp_result_oversized' as const,
+        recoverable: true,
+        error: `MCP tool "${toolName}" on server "${serverName}" returned ${text.length} characters (cap ${MAX_MCP_OUTPUT_CHARS}); the full result is stored behind a handle.`,
+        suggestedNextStep: `Use readToolOutput with handle ${handle} to page through the parts of the result you need.`,
+        rawChars: text.length,
+        handle,
+        content: wrapUntrustedOutput(origin, payload),
+      };
+    },
+  };
+}
 
 function timeout<T>(promise: Promise<T>, milliseconds: number, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -86,7 +132,7 @@ export async function loadMcpTools(servers: HazeMcpServer[], reserved: ReadonlyS
       // MCP tool schemas are discovered at runtime. The MCP package's schema
       // generic is wider than the core AI SDK ToolSet generic, although both
       // expose the same runtime tool contract here.
-      taken.add(name); tools[name] = toolDef as ToolSet[string];
+      taken.add(name); tools[name] = wrapMcpToolExecute(result.server.name, name, toolDef as ToolSet[string]);
     }
   }
   return {tools, clients, errors};

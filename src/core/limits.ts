@@ -39,6 +39,8 @@ export const COMPACT_COMMAND_CHARS = 12_000;
 export const SHORT_VALIDATION_CHARS = 2_000;
 /** Total rendered size cap for grep match output. */
 export const GREP_MAX_OUTPUT_CHARS = 30_000;
+/** Model-visible cap for one MCP tool result; larger results move behind a readToolOutput handle. */
+export const MAX_MCP_OUTPUT_CHARS = 100_000;
 /** Per-line cap for rendered grep matches. */
 export const GREP_MAX_LINE_CHARS = 500;
 /** Bounded excerpt of older messages kept by /compact-style compaction. */
