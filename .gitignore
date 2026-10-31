@@ -14,3 +14,6 @@ dist/
 
 # Model-backed eval artifacts (npm run eval); disposable
 .eval/
+
+# Internal security review findings; never published (mentions internal infra)
+security-review/
