@@ -313,6 +313,16 @@ describe('wizardDispatch provider creation discovery', () => {
     expect(deps.setMode).toHaveBeenLastCalledWith('modelPick');
   });
 
+  it('uses the hosted haze.build endpoint and asks for the API key', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+
+    await wizard.dispatch('providerAddPreset', 'haze.build');
+    expect(deps.wizard.providerDraft).toMatchObject({name: 'haze.build', url: 'https://llm.haze.build/v1', kind: 'haze-build'});
+    expect(deps.setMode).toHaveBeenLastCalledWith('providerAddKey');
+    expect(deps.wizard.suggestedModels).toContain('haze0.1-coder-flash');
+  });
+
   it('seeds suggested models for cloud presets before the key step', async () => {
     const deps = makeDeps();
     const wizard = createWizardDispatch(deps);

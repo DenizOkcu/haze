@@ -1,6 +1,6 @@
 # src/config/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.0 release (streamIdleTimeoutMs tunable).
+Last updated: 2026-10-31 for the 1.7.1 release (streamIdleTimeoutMs tunable).
 
 Runtime configuration, paths, context files, and provider/server settings.
 
@@ -53,4 +53,4 @@ Current settings behavior:
 
 Update matching `tests/config/*.test.ts` for any behavior change. Provider resolution and context-file discovery have important edge-case tests; run them directly before full validation.
 
-- `hazeBuild.ts` validates the authenticated native deployment descriptor for `haze.build` / `haze0.1-coder-flash`. Capacity is deployment-bound and refreshed, never guessed from the service alias. The native preset requests an endpoint and preserves explicit selection; its kind survives provider renames. Native modalities are text/tools only.
+- `hazeBuild.ts` validates the authenticated native deployment descriptor for `haze.build` / `haze0.1-coder-flash`. Capacity is deployment-bound and refreshed, never guessed from the service alias. The native preset supplies its hosted endpoint and preserves explicit selection; its kind survives provider renames. Native modalities are text/tools only.

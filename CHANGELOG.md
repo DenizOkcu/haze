@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 - 2026-10-31
+
+### Fixed
+
+- Corrected a provider preset endpoint so setup no longer requires entering its URL.
+
 ## 1.7.0 - 2026-10-31
 
 ### Security

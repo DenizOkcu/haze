@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.0
+## What's new in 1.7.1
+
+This patch updates a provider preset's default endpoint.
+
+### Changes in 1.7.0
 
 haze 1.7.0 hardens the untrusted-content boundary: MCP tool results of every size now arrive inside escaped untrusted envelopes, one variant-tolerant escaper guards all untrusted container closers (including compaction summaries), project instructions discovered mid-turn no longer ride the engine control channel, terminal control sequences (including OSC 52 clipboard writes) are stripped from the Markdown transcript path, and the protected secret-file list extends to database/CLI credential stores, browser profiles, and `~/.haze/settings.json`/`auth.json` — with the shell-side prompt rule derived from the same list. It also fixes validation-evidence edge cases around trailing stderr redirects and repeated tool-call redirects.
 
