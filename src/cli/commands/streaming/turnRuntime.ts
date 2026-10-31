@@ -1,5 +1,5 @@
 import type {ModelMessage} from 'ai';
-import type {ContextFile} from '../../../config/contextFiles.js';
+import {parseProjectInstructionsBlocks, type ContextFile} from '../../../config/contextFiles.js';
 import type {LlmLog} from '../../../core/log/llmLog.js';
 import {appendLogEntry as logAppend, type LlmLogEntry} from '../../../core/log/llmLog.js';
 import {cacheHitRatio, contextBreakdown, effectiveNonCachedInput, estimateValueTokens} from '../../../core/agent/contextBudget.js';
@@ -100,14 +100,15 @@ export function rememberContextFilesFromToolOutput(activeContextFiles: ContextFi
   if (typeof output !== 'object' || output == null) return activeContextFiles;
   const files = (output as {applicableProjectInstructions?: unknown}).applicableProjectInstructions;
   if (!Array.isArray(files)) return activeContextFiles;
+  // Tool results carry framed `<project_instructions>` blocks (untrusted
+  // framing, escaped content), never raw ContextFile objects (HZA-1).
+  const discovered = parseProjectInstructionsBlocks(files);
   const seen = new Set(activeContextFiles.map(file => file.path));
   const next = [...activeContextFiles];
-  for (const file of files) {
-    if (typeof file !== 'object' || file == null) continue;
-    const candidate = file as {path?: unknown; content?: unknown};
-    if (typeof candidate.path !== 'string' || typeof candidate.content !== 'string' || seen.has(candidate.path)) continue;
-    next.push({path: candidate.path, content: candidate.content});
-    seen.add(candidate.path);
+  for (const file of discovered) {
+    if (seen.has(file.path)) continue;
+    next.push(file);
+    seen.add(file.path);
   }
   return next;
 }

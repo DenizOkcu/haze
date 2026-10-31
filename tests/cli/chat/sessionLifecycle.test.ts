@@ -94,7 +94,7 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
     const compacted = deps.conversationRef.current;
     expect(compacted.length).toBeLessThan(conversation.length);
     const first = compacted[0] as {role: string; content: string};
-    expect(first.content).toContain('<haze_compaction>');
+    expect(first.content).toContain('<haze_compaction source="data">');
     expect(first.content).toContain('THE MODEL SUMMARY');
     expect(compacted.at(-1)).toEqual({role: 'user', content: 'the recent ask'});
     expect(recordedMessages.some(m => m.role === 'system' && /model-written summary/.test(m.text))).toBe(true);

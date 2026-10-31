@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import crypto from 'node:crypto';
 import type {ModelMessage} from 'ai';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
@@ -150,7 +151,7 @@ export function contextBreakdown(input: {
   for (const message of input.messages) {
     const tokens = estimateModelMessageTokens(message);
     messagesByRole[message.role] = (messagesByRole[message.role] ?? 0) + tokens;
-    if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith('<haze_control>')) {
+    if (message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SYNTHETIC_CONTROL_MARKER)) {
       syntheticControl += tokens;
     }
     for (const part of contentParts(message)) {
@@ -180,8 +181,20 @@ export function cacheHitRatio(inputTokens: number | undefined, cacheReadTokens: 
 
 // ── Usage-backed context estimation (Pillar 1.1) ─────────────────────────────
 
-/** Marker prefix of a request-local synthetic control message (see requestAssembly.ts). */
-export const SYNTHETIC_CONTROL_MARKER = '<haze_control>';
+/**
+ * Marker prefix of a request-local synthetic control message (see requestAssembly.ts).
+ *
+ * The marker carries a random per-process nonce (HZA-5): untrusted content
+ * (fetched pages, MCP results, file text) can contain a literal forged
+ * `<haze_control>` block, but without the nonce it neither matches
+ * `stripSyntheticControls` nor impersonates a genuine engine directive. A
+ * process-start nonce (rather than per-session state) is deliberate: these
+ * modules are pure functions over message arrays with no session plumbing,
+ * and headless and interactive runs are separate processes, so process scope
+ * is the session scope here.
+ */
+const CONTROL_NONCE = crypto.randomBytes(12).toString('hex');
+export const SYNTHETIC_CONTROL_MARKER = `<haze_control nonce="${CONTROL_NONCE}">`;
 
 function isSyntheticControlMessage(message: ModelMessage): boolean {
   return message.role === 'user' && typeof message.content === 'string' && message.content.startsWith(SYNTHETIC_CONTROL_MARKER);

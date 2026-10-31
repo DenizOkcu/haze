@@ -1074,7 +1074,7 @@ describe('runAgentTurn: mid-turn compaction (Pillar 1.5)', () => {
     expect(secondEpoch.length).toBeLessThan(seeded.length + 3);
     const first = secondEpoch[0] as {role: string; content: string};
     expect(first.role).toBe('user');
-    expect(first.content).toContain('<haze_compaction>');
+    expect(first.content).toContain('<haze_compaction source="data">');
     expect(first.content).toContain('MODEL SUMMARY');
     // The compacted conversation was committed to session state (controls-free).
     expect(cb.getConversation().length).toBeLessThan(seeded.length + 3);
@@ -1899,12 +1899,16 @@ describe('runAgentGoal: end-to-end across the real turn stack', () => {
     const cb = makeCallbacks();
     const result = await runAgentGoal({request: 'implement the roadmap feature', contextFiles: [], callbacks: cb});
     expect(result).toMatchObject({status: 'complete', stopReason: 'completed', cycles: 2});
+    // The marker nonce is created at process start; loadStreaming resets
+    // modules, so read the fresh (post-reset) marker instance the turn stack
+    // actually uses — the top-level static import holds a stale nonce.
+    const {SYNTHETIC_CONTROL_MARKER: freshMarker} = await import('../../../src/core/agent/contextBudget.js');
     // The original user message is never duplicated: each physical turn's
     // request carries it exactly once (the synthetic control is a separate
     // runtime-injected user message), and the second turn rides the preserved
     // conversation with the continuation control.
     for (const request of mocks.streamedMessages) {
-      const realUserMessages = (request as Array<{role: string; content?: unknown}>).filter(message => message.role === 'user' && !String(message.content ?? '').includes('<haze_control>'));
+      const realUserMessages = (request as Array<{role: string; content?: unknown}>).filter(message => message.role === 'user' && !String(message.content ?? '').startsWith(freshMarker));
       expect(realUserMessages).toHaveLength(1);
     }
     expect(mocks.streamedMessages).toHaveLength(2);

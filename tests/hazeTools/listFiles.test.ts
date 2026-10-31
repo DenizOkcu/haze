@@ -133,7 +133,7 @@ describe('listFiles tool', () => {
     await fs.outputFile(path.join(tmp, 'pkg/src/a.ts'), 'x');
     const context = {loadedContextFilePaths: new Set<string>()};
     const result = await listFiles({path: 'pkg/src'}, context);
-    expect(result.applicableProjectInstructions).toEqual([expect.objectContaining({path: 'pkg/AGENTS.md'})]);
+    expect(result.applicableProjectInstructions?.[0]).toContain('<project_instructions path="pkg/AGENTS.md">');
   });
 
   it('returns a structured failure for a missing directory', async () => {
