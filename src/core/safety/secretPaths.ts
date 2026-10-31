@@ -25,8 +25,28 @@ import path from 'node:path';
  * re-include them without whitelisting the whole search).
  */
 
-/** Whole directories under the user's home that tools must never touch. */
-const PROTECTED_HOME_DIRS = ['.ssh', '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.config/gcloud', '.config/gh'];
+/**
+ * Whole directories under the user's home that tools must never touch. Browser
+ * profile directories hold cookie/password stores; `.claude`/`.codex` hold
+ * OAuth credentials of other agent CLIs; `.snowsql`/`.oci`/`.netlify`/`.travis`
+ * hold provider tokens (R2-HZ-5).
+ */
+const PROTECTED_HOME_DIRS = [
+  '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.gcloud', '.config/gcloud', '.config/gh',
+  '.claude', '.codex', '.snowsql', '.config/snowflake', '.oci', '.netlify', '.travis',
+  // Browser profile stores (cookies, logins) — macOS and Linux locations.
+  'library/application support/google/chrome', 'library/application support/chromium',
+  'library/application support/microsoft edge', 'library/application support/firefox',
+  'library/application support/arc',
+  '.mozilla/firefox', '.config/google-chrome', '.config/chromium',
+];
+
+/**
+ * Home-relative directory prefixes with `*` wildcards (one wildcard per path
+ * segment, not crossing `/`): Flatpak browser profiles live under
+ * `.var/app/<app-id>/config/chromium`-style paths.
+ */
+const PROTECTED_HOME_DIR_PATTERNS = ['.var/app/*/config/chromium'];
 
 /** Shell/REPL history basenames, protected anywhere on disk (not only home). */
 const SHELL_HISTORY_BASENAMES = [
@@ -35,10 +55,15 @@ const SHELL_HISTORY_BASENAMES = [
   '.sqlite_history', '.rediscli_history', 'fish_history',
 ];
 
-/** Exact files under the user's home that tools must never touch. */
+/**
+ * Exact files under the user's home that tools must never touch. Includes the
+ * CLI's own credential-bearing settings files — the two files only, so
+ * `~/.haze/sessions` and `~/.haze/logs` stay tool-accessible (R2-HZ-5).
+ */
 const PROTECTED_HOME_FILES = [
   '.netrc', '.npmrc', '.pypirc', '.vault-token', '.git-credentials',
   '.gem/credentials', '.docker/config.json', '.local/share/fish/fish_history',
+  '.pgpass', '.my.cnf', '.msmtprc', '.haze/settings.json', '.haze/auth.json',
   ...SHELL_HISTORY_BASENAMES,
 ];
 
@@ -88,6 +113,14 @@ function isProtectedSshKeyName(basename: string): boolean {
   return SSH_KEY_STEMS.some(stem => basename === stem || (basename.startsWith(`${stem}.`) && basename !== `${stem}.pub`));
 }
 
+/** Whether a lowercased home-relative directory path matches a `*`-wildcard pattern (one wildcard per segment). */
+function matchesHomeDirPattern(pattern: string, joined: string): boolean {
+  const patternSegments = pattern.split('/');
+  const candidateSegments = joined.split('/');
+  if (patternSegments.length !== candidateSegments.length) return false;
+  return patternSegments.every((segment, index) => segment === '*' ? candidateSegments[index] !== '' : segment === candidateSegments[index]);
+}
+
 /**
  * Whether a path points at (or inside) a protected secret file or credential
  * store. Checked against both lexical names and real paths by callers so
@@ -111,7 +144,9 @@ export function isProtectedSecretPath(candidatePath: string, homeDir: string = o
   if (insideHome) {
     const segments = relativeToHome.split(path.sep).map(segment => segment.toLowerCase());
     for (let depth = 1; depth <= segments.length; depth++) {
-      if (PROTECTED_HOME_DIRS.includes(segments.slice(0, depth).join('/'))) return true;
+      const joined = segments.slice(0, depth).join('/');
+      if (PROTECTED_HOME_DIRS.includes(joined)) return true;
+      if (PROTECTED_HOME_DIR_PATTERNS.some(pattern => matchesHomeDirPattern(pattern, joined))) return true;
     }
     if (PROTECTED_HOME_FILES.includes(segments.join('/'))) return true;
   }
@@ -137,6 +172,7 @@ export function secretSearchExcludeGlobs(): string[] {
     ...[...PROTECTED_BASENAMES].map(name => `!${name}`),
     ...PROTECTED_BASENAME_PATTERNS.map(pattern => `!${pattern}`),
     ...PROTECTED_HOME_DIRS.flatMap(directory => [`!**/${directory}`, `!**/${directory}/**`]),
+    ...PROTECTED_HOME_DIR_PATTERNS.flatMap(pattern => [`!**/${pattern}`, `!**/${pattern}/**`]),
     ...PROTECTED_HOME_FILES.map(file => `!**/${file}`),
   ])];
 }

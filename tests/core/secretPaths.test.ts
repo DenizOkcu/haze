@@ -35,6 +35,35 @@ describe('isProtectedSecretPath', () => {
     [`${HOME}/.docker/config.json`, true],
     [`${HOME}/.zsh_history`, true],
     [`${HOME}/.local/share/fish/fish_history`, true],
+    // Database/mail client credentials and other agent CLIs' stores (R2-HZ-5).
+    [`${HOME}/.pgpass`, true],
+    [`${HOME}/.my.cnf`, true],
+    [`${HOME}/.msmtprc`, true],
+    [`${HOME}/.claude/.credentials.json`, true],
+    [`${HOME}/.claude/projects/anything.md`, true],
+    [`${HOME}/.codex/auth.json`, true],
+    [`${HOME}/.snowsql/config`, true],
+    [`${HOME}/.config/snowflake/connections.toml`, true],
+    [`${HOME}/.oci/config`, true],
+    [`${HOME}/.netlify/config.json`, true],
+    [`${HOME}/.travis/config.yml`, true],
+    // The CLI's own credential-bearing files — files only, not the ~/.haze tree.
+    [`${HOME}/.haze/settings.json`, true],
+    [`${HOME}/.haze/auth.json`, true],
+    [`${HOME}/.haze/sessions/abc.jsonl`, false],
+    [`${HOME}/.haze/logs/session.log`, false],
+    [`${HOME}/.haze/AGENTS.md`, false],
+    // Browser profile stores (macOS + Linux + Flatpak wildcard).
+    [`${HOME}/Library/Application Support/Google/Chrome/Default/Cookies`, true],
+    [`${HOME}/Library/Application Support/Chromium/Local State`, true],
+    [`${HOME}/Library/Application Support/Microsoft Edge/Default/Login Data`, true],
+    [`${HOME}/Library/Application Support/Firefox/Profiles/x.default/cookies.sqlite`, true],
+    [`${HOME}/Library/Application Support/Arc/User Data/Default/Cookies`, true],
+    [`${HOME}/.mozilla/firefox/x.default/cookies.sqlite`, true],
+    [`${HOME}/.config/google-chrome/Default/Cookies`, true],
+    [`${HOME}/.config/chromium/Default/Login Data`, true],
+    [`${HOME}/.var/app/com.example.Chromium/config/chromium/Default/Cookies`, true],
+    [`${HOME}/.var/app/com.example.Foo/config/other/notes.txt`, false],
     [`${HOME}/.zshenv`, false],
     [`${HOME}/.gitconfig`, false],
     [`${HOME}/.config/other/settings.json`, false],
@@ -85,5 +114,14 @@ describe('secretSearchExcludeGlobs', () => {
     expect(globs).toContain('!*.ppk');
     expect(globs).toContain('!*.p12');
     expect(globs).toContain('!*.pfx');
+  });
+
+  it('excludes the R2-HZ-5 home credential stores from search', () => {
+    const globs = secretSearchExcludeGlobs();
+    expect(globs).toContain('!**/.pgpass');
+    expect(globs).toContain('!**/.haze/settings.json');
+    expect(globs).toContain('!**/.haze/auth.json');
+    expect(globs).toContain('!**/.claude/**');
+    expect(globs).toContain('!**/.var/app/*/config/chromium/**');
   });
 });

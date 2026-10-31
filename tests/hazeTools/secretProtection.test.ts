@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, it, expect} from 'vitest';
+import {afterEach, beforeEach, describe, it, expect, vi} from 'vitest';
 import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
@@ -392,3 +392,112 @@ describe('dangling symlink write protection', () => {
 function SUPER_SECRET_PATTERN() {
   return 'SUPER_SECRET_MARKER_42';
 }
+
+describe('extended home credential stores (R2-HZ-5)', () => {
+  let tmp: string;
+  let fakeHome: string;
+
+  // Every path class added with R2-HZ-5: db/mail credentials, other agent CLI
+  // stores, cloud configs, browser profiles (macOS/Linux/Flatpak), and the
+  // CLI's own settings/auth files.
+  const PROTECTED_HOME_ENTRIES = [
+    '.pgpass',
+    '.my.cnf',
+    '.msmtprc',
+    '.haze/settings.json',
+    '.haze/auth.json',
+    '.claude/.credentials.json',
+    '.codex/auth.json',
+    '.snowsql/config',
+    '.config/snowflake/connections.toml',
+    '.oci/config',
+    '.netlify/config.json',
+    '.travis/config.yml',
+    'Library/Application Support/Google/Chrome/Default/Cookies',
+    '.mozilla/firefox/x.default/cookies.sqlite',
+    '.var/app/com.example.Chromium/config/chromium/Default/Cookies',
+  ];
+
+  const HOME_SECRET = 'HOME_SECRET_MARKER_99';
+
+  beforeEach(async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-home-secret-'));
+    // Canonicalize so lexical comparisons against mocked `os.homedir()` match
+    // realpaths resolved through the alias (macOS /var vs /private/var).
+    fakeHome = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-fake-home-')));
+    for (const entry of PROTECTED_HOME_ENTRIES) {
+      await fs.outputFile(path.join(fakeHome, ...entry.split('/')), `${HOME_SECRET} ${entry}\n`);
+    }
+    // A workspace symlink aliasing the fake home: a workspace-relative path
+    // through it passes lexical confinement but its real path lands on the
+    // secret — only the real-path half of the secret check catches it.
+    await fs.symlink(fakeHome, path.join(tmp, 'home-link'));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.remove(tmp);
+    await fs.remove(fakeHome);
+  });
+
+  async function run<T>(fn: () => Promise<T>): Promise<T> {
+    const originalCwd = process.cwd();
+    vi.spyOn(os, 'homedir').mockReturnValue(fakeHome);
+    process.chdir(tmp);
+    try {
+      return await fn();
+    } finally {
+      process.chdir(originalCwd);
+    }
+  }
+
+  it.each(PROTECTED_HOME_ENTRIES)('refuses reads of %s and never echoes its content', async (entry) => {
+    const secretPath = path.join(fakeHome, ...entry.split('/'));
+    const result = await run(() => hazeTools.readFile.execute({path: secretPath}, {abortSignal: undefined}));
+    expect(result, entry).toMatchObject({ok: false, reasonCode: 'secret_file_protected', recoverable: false});
+    expect(JSON.stringify(result), entry).not.toContain(HOME_SECRET);
+  });
+
+  it.each(PROTECTED_HOME_ENTRIES)('refuses a blessed read of %s (secret check wins over the bless set)', async (entry) => {
+    const secretPath = path.join(fakeHome, ...entry.split('/'));
+    // Flat execution-context shape so the blessing is actually consulted
+    // after the secret check (the refusal must win, not a malformed bless).
+    const context = {context: {blessedPaths: [{realPath: await fs.realpath(secretPath), isDirectory: false}]}};
+    const result = await run(() => hazeTools.readFile.execute({path: secretPath}, context));
+    expect(result, entry).toMatchObject({ok: false, reasonCode: 'secret_file_protected'});
+    expect(JSON.stringify(result), entry).not.toContain(HOME_SECRET);
+  });
+
+  it.each(PROTECTED_HOME_ENTRIES)('refuses mutations through a workspace symlink alias of %s and leaves it unchanged', async (entry) => {
+    const viaAlias = `home-link/${entry}`;
+    const result = await run(() => hazeTools.editFile.execute({path: viaAlias, edits: [{oldText: HOME_SECRET, newText: 'x'}]}, {abortSignal: undefined}));
+    expect(result, entry).toMatchObject({ok: false, reasonCode: 'secret_file_protected', recoverable: false});
+    await expect(fs.readFile(path.join(fakeHome, ...entry.split('/')), 'utf8'), entry).resolves.toContain(HOME_SECRET);
+  });
+
+  it('refuses writes under protected home paths (append through the alias leaves the file unchanged)', async () => {
+    const result = await run(() => hazeTools.writeFile.execute({path: 'home-link/.claude/.credentials.json', content: '{"token":"x"}', append: true}, {abortSignal: undefined}));
+    expect(result).toMatchObject({ok: false, reasonCode: 'secret_file_protected', recoverable: false});
+    await expect(fs.readFile(path.join(fakeHome, '.claude', '.credentials.json'), 'utf8')).resolves.toContain(HOME_SECRET);
+  });
+
+  it('reads a workspace symlink to an innocent home file through the real-path check only when unprotected', async () => {
+    // Sanity for the alias setup: an unprotected home file through the same
+    // alias IS readable when blessed — the refusals above are the secret list
+    // at work, not the alias mechanics.
+    await fs.outputFile(path.join(fakeHome, 'notes.txt'), 'innocent home notes\n');
+    const context = {context: {blessedPaths: [{realPath: await fs.realpath(path.join(fakeHome, 'notes.txt')), isDirectory: false}]}};
+    const result = await run(() => hazeTools.readFile.execute({path: 'home-link/notes.txt'}, context));
+    expect(result.ok).toBeUndefined();
+    expect(result.content).toContain('innocent home notes');
+  });
+
+  it('keeps ~/.haze sessions and logs tool-accessible (only the two settings files are protected)', async () => {
+    const sessionPath = path.join(fakeHome, '.haze', 'sessions', 'report.jsonl');
+    await fs.outputFile(sessionPath, '{"summary":"session data"}\n');
+    const context = {context: {blessedPaths: [{realPath: await fs.realpath(sessionPath), isDirectory: false}]}};
+    const result = await run(() => hazeTools.readFile.execute({path: sessionPath}, context));
+    expect(result.ok).toBeUndefined();
+    expect(result.content).toContain('session data');
+  });
+});
