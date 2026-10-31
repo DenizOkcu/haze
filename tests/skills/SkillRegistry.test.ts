@@ -88,8 +88,24 @@ describe('loadSkillRegistry', () => {
       const registry = await loadSkillRegistry(workspace);
       expect(registry.skills.get('shared')?.source).toBe('project');
       expect(registry.candidates?.filter(skill => skill.name === 'shared').map(skill => skill.source)).toEqual(['project', 'global']);
+      // The silent shadow is surfaced as a visible load-time notice (HZA-6).
+      expect(registry.notices).toEqual(['Project skill "shared" shadows your same-named global skill; the project (repository-provided) version takes precedence.']);
       const fallback = resolveSkillCandidates(registry.candidates ?? [], skill => skill.source !== 'project');
       expect(fallback.get('shared')?.source).toBe('global');
+    } finally {
+      await fs.remove(workspace);
+    }
+  });
+
+  it('emits no shadow notices without a same-named global skill', async () => {
+    await writeSkill('alpha');
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-project-skills-'));
+    const dir = path.join(workspace, '.haze', 'skills', 'beta');
+    await fs.ensureDir(dir);
+    await fs.writeFile(path.join(dir, 'SKILL.md'), '---\nname: beta\ndescription: project\n---\n\nbody\n');
+    try {
+      const registry = await loadSkillRegistry(workspace);
+      expect(registry.notices).toEqual([]);
     } finally {
       await fs.remove(workspace);
     }

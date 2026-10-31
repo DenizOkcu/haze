@@ -37,4 +37,9 @@ export interface SkillRegistry {
   /** Every valid, selectable skill, including shadowed global skills. */
   candidates?: LoadedSkill[];
   errors: SkillRegistryError[];
+  /**
+   * Load-time notices (HZA-6): visible, non-error observations such as a
+   * project skill shadowing a same-named global skill.
+   */
+  notices?: string[];
 }

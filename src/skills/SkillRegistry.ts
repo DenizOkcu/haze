@@ -57,6 +57,7 @@ export function resolveSkillCandidates(
 
 export async function loadSkillRegistry(cwd = process.cwd()): Promise<SkillRegistry> {
   const errors: SkillRegistry['errors'] = [];
+  const notices: string[] = [];
   await ensureDir(GLOBAL_SKILLS_DIR);
   const global = await loadRoot(GLOBAL_SKILLS_DIR, GLOBAL_SKILLS_DIR, 'global', errors);
   const projectRoot = path.join(cwd, '.haze', 'skills');
@@ -64,6 +65,14 @@ export async function loadSkillRegistry(cwd = process.cwd()): Promise<SkillRegis
   const plugins = await loadPluginSkills(errors);
   const candidates = [...project, ...plugins, ...global];
 
+  // Shadow notice (HZA-6): project skills silently win name collisions against
+  // user-authored global skills; surface that at load time so the user can see
+  // which version actually runs.
+  const globalNames = new Set(global.filter(skill => skill.source === 'global').map(skill => skill.name));
+  for (const candidate of project) {
+    if (globalNames.has(candidate.name)) notices.push(`Project skill "${candidate.name}" shadows your same-named global skill; the project (repository-provided) version takes precedence.`);
+  }
+
   const skills = resolveSkillCandidates(candidates);
-  return {skills, candidates, errors};
+  return {skills, candidates, errors, notices};
 }

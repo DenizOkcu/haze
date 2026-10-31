@@ -145,6 +145,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const persistenceWarningShownRef = useRef(false);
   const skillErrorSignatureRef = useRef('');
+  const skillNoticeSignatureRef = useRef('');
   const projectSkillSignatureRef = useRef('');
   const contextFileSignaturesRef = useRef<Map<string, string>>(new Map());
   const followUps = useFollowUpQueue(text => setMessages(m => [...m, {role: 'system', text}]));
@@ -286,6 +287,13 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       setMessages(messages => [...messages, {role: 'system', text: `Invalid skills were isolated:\n${errorSignature}`}]);
     }
     skillErrorSignatureRef.current = errorSignature;
+    // Visible load-time shadow notices (HZA-6): a project skill silently
+    // overriding a same-named user skill is something the user should see.
+    const noticeSignature = (registry.notices ?? []).join('\n');
+    if (noticeSignature && noticeSignature !== skillNoticeSignatureRef.current) {
+      setMessages(messages => [...messages, {role: 'system', text: noticeSignature}]);
+    }
+    skillNoticeSignatureRef.current = noticeSignature;
     return nextSkills;
   }
 
@@ -338,6 +346,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     clearLiveMessages,
     setTokenUsage,
     manualCompaction: () => settings.manualCompaction ?? 'llm-summary',
+    redactSessionSecrets: () => settings.redactSessionSecrets === true,
     // P1 resume path: an unterminated goal frontier detected on resume becomes
     // the same one-key continue affordance the in-process pause uses — the
     // goal continues from the stored frontier without re-sending the request.

@@ -12,9 +12,28 @@ function untrustedContent(skill: LoadedSkill, content: string) {
   return `<project_skill name="${skill.name}">\n${intro}\n\n${escaped}\n</project_skill>`;
 }
 
+/** Longest flattened description kept in one catalog line (HZA-6). */
+const CATALOG_DESCRIPTION_CHARS = 200;
+/** Most catalog lines embedded in the `skill` tool description (HZA-6): the schema travels with every request, so a repo shipping thousands of skill dirs must not inflate it unboundedly. */
+const CATALOG_MAX_ENTRIES = 40;
+
+/**
+ * Flatten a (potentially repo-controlled) skill description into one bounded
+ * catalog line fragment: collapse whitespace, drop `<` so the schema text
+ * cannot forge envelope/markup tags, and cap the length. Names come from the
+ * directory/catalog; only the description is untrusted prose.
+ */
+function catalogDescriptionLine(description: string): string {
+  const flattened = description.replaceAll('<', '').replace(/\s+/g, ' ').trim();
+  return flattened.length > CATALOG_DESCRIPTION_CHARS ? `${flattened.slice(0, CATALOG_DESCRIPTION_CHARS - 1).trimEnd()}…` : flattened;
+}
+
 export function buildSkillTools(registry: SkillRegistry): ToolSet {
   if (registry.skills.size === 0) return {};
-  const catalog = [...registry.skills.values()].map(skill => `${skill.name} [${skill.source}]: ${skill.description}`).join('\n');
+  const lines = [...registry.skills.values()].map(skill => `${skill.name} [${skill.source}]: ${catalogDescriptionLine(skill.description)}`);
+  const shown = lines.slice(0, CATALOG_MAX_ENTRIES);
+  if (lines.length > shown.length) shown.push(`…and ${lines.length - shown.length} more skills`);
+  const catalog = shown.join('\n');
   return {
     skill: tool({
       description: `Load one installed Markdown workflow by name. Project skills encode this repository's conventions; global skills encode the user's personal workflows. Available skills:\n${catalog}`,
