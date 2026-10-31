@@ -1,6 +1,7 @@
 import {agentEvent, type AgentEventSink} from '../../../core/agent/events.js';
 import {appendLogEntry as logAppend, type LlmLog, type LlmLogEntry} from '../../../core/log/llmLog.js';
 import {toolCallSummary, compact} from '../formatters.js';
+import {stripTerminalControlSequences} from '../../../ui/terminalSanitize.js';
 import {formatElapsedTimeWhole, formatSeconds} from '../../../utils/format.js';
 
 /**
@@ -78,13 +79,15 @@ export function toolDiffFromResult(toolCall: NativeToolCall, output: unknown): T
     if (line.type === 'gap' && typeof line.omittedLines === 'number' && line.omittedLines > 0) {
       return [{type: 'gap', omittedLines: line.omittedLines}];
     }
-    if (line.type === 'meta' && typeof line.text === 'string') return [{type: 'meta', text: line.text}];
+    if (line.type === 'meta' && typeof line.text === 'string') return [{type: 'meta', text: stripTerminalControlSequences(line.text)}];
     if ((line.type !== 'add' && line.type !== 'remove' && line.type !== 'context') || typeof line.text !== 'string') return [];
+    // File content is untrusted: strip terminal control sequences before the
+    // line reaches Ink/the terminal (OSC 52 clipboard writes, OSC 8 links, CSI).
     return [{
       type: line.type,
       ...(typeof line.oldLine === 'number' ? {oldLine: line.oldLine} : {}),
       ...(typeof line.newLine === 'number' ? {newLine: line.newLine} : {}),
-      text: line.text,
+      text: stripTerminalControlSequences(line.text),
     }];
   });
   if (lines.length === 0) return undefined;

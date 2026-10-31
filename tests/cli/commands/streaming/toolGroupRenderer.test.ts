@@ -167,6 +167,28 @@ describe('createToolGroupRenderer', () => {
     expect(toolDiffFromResult(call('edit-1', 'editFile', {path: 'a.ts'}), {ok: true, diff: [{type: 'add', text: 42}]})).toBeUndefined();
   });
 
+  it('strips terminal control sequences from hostile diff lines (HZA-3)', () => {
+    const diff = toolDiffFromResult(call('edit-1', 'editFile', {path: 'evil.ts'}), {
+      ok: true,
+      path: 'evil.ts',
+      diff: [
+        {type: 'add', newLine: 1, text: 'const a = 1; \x1b]52;c;AAAA\x07'},
+        {type: 'add', newLine: 2, text: 'click \x1b]8;;https://evil.example\x1b\\here\x1b]8;;\x1b\\'},
+        {type: 'context', oldLine: 3, text: '\x1b[31mred\x1b[0m plain'},
+        {type: 'meta', text: 'meta \x1b[2J clear'},
+      ],
+    });
+    const texts = diff?.lines.map(line => 'text' in line ? line.text : '') ?? [];
+    const joined = texts.join('\n');
+    expect(joined).not.toContain('\x1b');
+    expect(joined).not.toContain(']52;c;');
+    expect(joined).not.toContain(']8;;');
+    expect(joined).toContain('const a = 1;');
+    expect(joined).toContain('click here');
+    expect(joined).toContain('red plain');
+    expect(joined).toContain('meta  clear');
+  });
+
   it('renders AGENTS.md and CLAUDE.md reads inside the active tool group without a result suffix', () => {
     const deps = fakeDeps();
     const r = createToolGroupRenderer(deps);

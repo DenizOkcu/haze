@@ -45,6 +45,18 @@ describe('toolCallSummary', () => {
     expect(toolCallSummary('shell', {command: 'ls -la'})).toBe('shell $ ls -la');
   });
 
+  it('strips terminal control sequences from untrusted input (HZA-3)', () => {
+    const osc52 = toolCallSummary('shell', {command: 'echo \x1b]52;c;AAAA\x07'});
+    expect(osc52).toBe('shell $ echo ');
+    expect(osc52).not.toContain('\x1b');
+    const osc8 = toolCallSummary('grep', {pattern: '\x1b]8;;https://evil.example\x1b\\click\x1b]8;;\x1b\\'});
+    expect(osc8).toBe('grep "click"');
+    expect(osc8).not.toContain('\x1b');
+    const path = toolCallSummary('readFile', {path: 'a\x1b[2Jb.ts'});
+    expect(path).toBe('readFile ab.ts');
+    expect(toolResultSummary({success: false, error: 'boom \x1b]52;c;AAAA\x07'})).toBe('failed: boom ');
+  });
+
   it('includes timeout for shell commands', () => {
     expect(toolCallSummary('shell', {command: 'sleep', timeoutSeconds: 30})).toBe('shell $ sleep (timeout 30s)');
   });

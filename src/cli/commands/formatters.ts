@@ -1,4 +1,5 @@
 import {formatBytes} from '../../utils/format.js';
+import {stripTerminalControlSequences} from '../../ui/terminalSanitize.js';
 
 export function compact(value: unknown, maxLength = 180) {
   let text: string;
@@ -14,7 +15,16 @@ export function compact(value: unknown, maxLength = 180) {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+/**
+ * One-line summary of a tool call for the transcript rows. Wraps the raw
+ * builder: paths, patterns, and commands are model/repo-derived, so terminal
+ * control sequences are stripped at this sink (HZA-3).
+ */
 export function toolCallSummary(toolName: string, input: unknown) {
+  return stripTerminalControlSequences(toolCallSummaryText(toolName, input));
+}
+
+function toolCallSummaryText(toolName: string, input: unknown) {
   const data = input as Record<string, unknown>;
   if (toolName === 'shell' && typeof data?.command === 'string') {
     const mode = data.background === true ? ' (background)' : typeof data.timeoutSeconds === 'number' ? ` (timeout ${data.timeoutSeconds}s)` : '';
@@ -57,7 +67,15 @@ export function toolCallSummary(toolName: string, input: unknown) {
   return `${toolName} ${compact(input)}`;
 }
 
+/**
+ * One-line summary of a tool result for the transcript rows; same terminal
+ * control-sequence sink discipline as `toolCallSummary` (HZA-3).
+ */
 export function toolResultSummary(event: {success: boolean; output?: unknown; error?: unknown}) {
+  return stripTerminalControlSequences(toolResultSummaryText(event));
+}
+
+function toolResultSummaryText(event: {success: boolean; output?: unknown; error?: unknown}) {
   const output = event.output as Record<string, unknown> | undefined;
   if (!event.success) return `failed: ${compact(event.error ?? output?.error ?? event.output)}`;
   if (output?.duplicateSkipped === true) return 'skipped duplicate';
@@ -121,11 +139,12 @@ export function toolResultSummary(event: {success: boolean; output?: unknown; er
       }
       return 'completed';
     }
-    if (output.reasonCode === 'secret_file_protected') {
+    if (output.reasonCode === 'secret_file_protected' || output.reasonCode === 'git_internals_protected') {
       // Protection events are visible but distinct from ordinary failures so
       // the developer can audit them at a glance; never print file contents.
       const protectedPath = typeof output.path === 'string' && output.path ? ` (${compact(output.path, 80)})` : '';
-      return `blocked: protected secret file${protectedPath}`;
+      const kind = output.reasonCode === 'secret_file_protected' ? 'protected secret file' : 'protected git internals';
+      return `blocked: ${kind}${protectedPath}`;
     }
     const reason = typeof output.reasonCode === 'string' ? ` (${output.reasonCode})` : '';
     return typeof output.error === 'string' ? `failed${reason}: ${compact(output.error)}` : `failed${reason}`;
