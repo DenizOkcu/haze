@@ -4,10 +4,10 @@ import {earlyValidationPrompt, editRecoveryReadPrompt, malformedToolCallPrompt, 
 import {estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {appendSyntheticControl, stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
+import {scopedContextMessage} from '../../../config/contextFiles.js';
 import {latestRepeatedToolNames, toolOnlyStepCount} from '../../../core/agent/turnPolicy.js';
 import {RESCUE_BOUNDARY} from '../../../core/agent/completionController.js';
 import {MAIN_TOOL_CALL_LIMIT, REPEATED_TOOL_NUDGE_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../../core/agent/budgets.js';
-import {projectContextSection} from '../../../llm/systemPrompt.js';
 import type {HazeToolContext} from '../../../llm/tools/toolContext.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
 import {clampOutOfBoundsToolNumbers, isMalformedToolInputError} from './toolCallRecovery.js';
@@ -29,14 +29,22 @@ type RepairToolCallFn = NonNullable<AgentOptions['experimental_repairToolCall']>
 type PrepareStepFn = NonNullable<AgentOptions['prepareStep']>;
 type SyncPrepareStepResult = Exclude<ReturnType<PrepareStepFn>, PromiseLike<unknown>>;
 
-function withScopedContextControl(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
+/**
+ * Late-discovered scoped AGENTS.md/CLAUDE.md content rides an ordinary user
+ * message with the standard `<project_instructions>` framing — never the
+ * nonce'd `<haze_control>` channel, which is engine-directives-only (R2-HZ-3).
+ * The message is durable conversation: it survives control stripping and must
+ * not rewrite the already-sent provider prefix, so it is appended like any
+ * other user turn message.
+ */
+export function appendScopedContextUserMessage(messages: ModelMessage[], context: HazeToolContext): ModelMessage[] {
   const files = context.pendingContextFiles ?? [];
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];
-  return appendSyntheticControl(
-    messages,
-    `Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.${projectContextSection(files)}`,
-  );
+  return [...messages, scopedContextMessage(
+    'Additional scoped project instructions were just read for a non-root path touched by a tool call. Apply them to subsequent work in that subtree.',
+    files,
+  )];
 }
 
 export function createRepairToolCall(deps: {callbacks: StreamCallbacks; loopState: AttemptLoopState}): RepairToolCallFn {
@@ -72,7 +80,7 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
     // therefore resets at each resource epoch; retain only bounded policy
     // metadata in loopState instead of holding prior StepResult graphs.
     const repeatedToolNames = steps.length > 0 ? latestRepeatedToolNames(steps) : loopState.latestRepeatedToolNames;
-    let scopedMessages = withScopedContextControl(messages, toolExecutionContext);
+    let scopedMessages = appendScopedContextUserMessage(messages, toolExecutionContext);
     let messagesChanged = scopedMessages !== messages;
     // Re-evaluate the accumulated request size before each provider call and
     // compact old tool history when it exceeds the model-aware budget, so a

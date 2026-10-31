@@ -11,6 +11,7 @@ import {
 import {storeToolOutput} from '../core/agent/toolOutputStore.js';
 import {changedPathsFromTool} from '../core/agent/toolCapabilities.js';
 import {withSyntheticControl} from '../core/agent/requestAssembly.js';
+import {scopedContextMessage} from '../config/contextFiles.js';
 import {toolOnlyStepCount} from '../core/agent/turnPolicy.js';
 import {toolsContextFor, type HazeToolContext} from './tools/toolContext.js';
 import {assembleWorkerContext, workerTaskMessage, type WorkerContextBundle} from './workerContext.js';
@@ -29,7 +30,7 @@ import {
 import {COMPATIBILITY_PROFILE, type SubagentExecutionProfile} from '../core/subagent/executionProfiles.js';
 import {SubagentCoordinator} from '../core/subagent/subagentCoordinator.js';
 import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
-import {projectContextSection, type PromptSession} from './systemPrompt.js';
+import {type PromptSession} from './systemPrompt.js';
 import {resolveWorkspacePath, workspaceRelativePath} from '../utils/path.js';
 
 class WorkerCapacityError extends Error {}
@@ -54,11 +55,17 @@ function shouldForceSynthesis(steps: SubagentStep[], maxSteps: number, maxToolCa
     || steps.length >= maxSteps - SUBAGENT_SYNTHESIS_RESERVE;
 }
 
-function pendingScopedControl(messages: ModelMessage[], context: HazeToolContext) {
+/**
+ * Late-discovered scoped AGENTS.md/CLAUDE.md content rides an ordinary user
+ * message with the standard `<project_instructions>` framing — never the
+ * nonce'd `<haze_control>` channel, which stays engine-directives-only
+ * (R2-HZ-3). Appended, never rewriting the in-flight provider prefix.
+ */
+function pendingScopedContext(messages: ModelMessage[], context: HazeToolContext) {
   const files = context.pendingContextFiles ?? [];
   if (files.length === 0) return messages;
   context.pendingContextFiles = [];
-  return withSyntheticControl(messages, `Additional scoped project instructions now apply. Follow them before subsequent work.${projectContextSection(files)}`);
+  return [...messages, scopedContextMessage('Additional scoped project instructions now apply. Follow them before subsequent work.', files)];
 }
 
 function validationFromOutput(name: string, output: unknown) {
@@ -156,7 +163,7 @@ export async function runSubagent(
       runtimeContext: toolExecutionContext,
       toolsContext: toolsContextFor(budgetedTools, toolExecutionContext) as never,
       prepareStep({steps, messages}) {
-        let scopedMessages = pendingScopedControl(messages, toolExecutionContext);
+        let scopedMessages = pendingScopedContext(messages, toolExecutionContext);
         const target = Math.floor(messageBudget / inputEstimateRatio);
         if (estimateMessagesTokens(scopedMessages) > target) {
           const compacted = compactModelMessages(scopedMessages, {tokenBudget: Math.max(0, target - 512)});
@@ -285,4 +292,4 @@ export function createSubagentTool(options: {
   });
 }
 
-export const internals = {toolSummary, toolOnlyStepCount, shouldForceSynthesis, validationFromOutput, SYNTHESIS_DIRECTIVE};
+export const internals = {toolSummary, toolOnlyStepCount, shouldForceSynthesis, validationFromOutput, pendingScopedContext, SYNTHESIS_DIRECTIVE};
