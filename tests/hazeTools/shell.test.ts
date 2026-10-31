@@ -1,15 +1,26 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {hazeTools} from '../../src/llm/hazeTools.js';
 import {teardownBackgroundProcesses} from '../../src/core/process/backgroundRegistry.js';
 
+// The shell tool reads settings at spawn time (HZ-10 sanitizeProcessEnv).
+// Mock readSettings so tests never depend on (or mutate) the user's real
+// ~/.haze/settings.json; everything else from the module stays real.
+const readSettingsMock = vi.hoisted(() => vi.fn(async () => ({})));
+vi.mock('../../src/config/settings.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/config/settings.js')>();
+  return {...actual, readSettings: readSettingsMock};
+});
+
 describe('shell tool safety', () => {
   let tmp: string;
 
   beforeEach(async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-test-'));
+    readSettingsMock.mockReset();
+    readSettingsMock.mockImplementation(async () => ({}));
   });
 
   afterEach(async () => {
@@ -203,4 +214,46 @@ describe('shell tool safety', () => {
     expect('text' in result.stdoutBytes).toBe(false);
     expect('text' in result.stderrBytes).toBe(false);
   }, 15_000);
+});
+
+describe('shell tool env sanitizer (HZ-10)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-test-envsan-'));
+    readSettingsMock.mockReset();
+    readSettingsMock.mockImplementation(async () => ({}));
+  });
+
+  afterEach(async () => {
+    delete process.env.HAZE_TEST_FAKE_API_KEY;
+    delete process.env.HAZE_TEST_COOKIE_JAR;
+    await fs.remove(tmpDir);
+  });
+
+  async function shell(command: string) {
+    const originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    try {
+      return await hazeTools.shell.execute({command, purpose: 'auto', background: false}, {abortSignal: undefined});
+    } finally {
+      process.chdir(originalCwd);
+    }
+  }
+
+  it('strips secret-shaped variables from spawned commands when sanitizeProcessEnv is enabled', async () => {
+    readSettingsMock.mockResolvedValue({sanitizeProcessEnv: true, sanitizeProcessEnvExtra: ['haze_test_cookie']});
+    process.env.HAZE_TEST_FAKE_API_KEY = 'shell-secret-value';
+    process.env.HAZE_TEST_COOKIE_JAR = 'cookie-value';
+    const result = await shell("node -e \"process.stdout.write((process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT') + ' ' + (process.env.HAZE_TEST_COOKIE_JAR ?? 'NO-JAR'))\"");
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toEqual(expect.objectContaining({text: 'ABSENT NO-JAR'}));
+  });
+
+  it('keeps the full environment by default (setting absent/off)', async () => {
+    process.env.HAZE_TEST_FAKE_API_KEY = 'shell-secret-value';
+    const result = await shell("node -e \"process.stdout.write(process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT')\"");
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toEqual(expect.objectContaining({text: 'shell-secret-value'}));
+  });
 });

@@ -11,6 +11,37 @@ export interface ProcessTreeSignalOptions {
   spawnProcess?: typeof spawn;
 }
 
+/** Environment keys carrying these case-insensitive markers are treated as secret-shaped (HZ-10). */
+const SECRET_ENV_KEY_PATTERN = /TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL/i;
+
+/** Options for the opt-in child-environment sanitizer (HZ-10). */
+export interface SanitizeEnvOptions {
+  /**
+   * Additional case-insensitive substrings: any environment key containing one
+   * is omitted as well. Matched as plain substrings, never regex, so values
+   * coming from settings cannot widen matching beyond literal names.
+   */
+  extra?: readonly string[];
+}
+
+/**
+ * Build a child environment that omits secret-shaped keys: anything matching
+ * TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL (case-insensitive) plus the caller's
+ * extra substrings. Everything else — PATH, HOME, LANG, TERM, TZ, etc. — is
+ * passed through untouched. Opt-in only; callers that do not ask for this keep
+ * the child inheriting the full environment exactly as before.
+ */
+export function sanitizeChildEnv(env: NodeJS.ProcessEnv, options: SanitizeEnvOptions = {}): NodeJS.ProcessEnv {
+  const extra = (options.extra ?? []).map(marker => marker.trim().toLowerCase()).filter(marker => marker.length > 0);
+  const child: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (SECRET_ENV_KEY_PATTERN.test(key)) continue;
+    if (extra.some(marker => key.toLowerCase().includes(marker))) continue;
+    child[key] = value;
+  }
+  return child;
+}
+
 export function signalProcessTree(child: Pick<ChildProcess, 'pid' | 'kill'>, signal: NodeJS.Signals, options: ProcessTreeSignalOptions = {}) {
   // When pid is null, child.kill is a no-op against a real Node child (returns
   // false). Tests still rely on the call going through so they can observe
@@ -51,7 +82,7 @@ function collector(limit: number) {
   };
 }
 
-export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number; onStdoutChunk?: (chunk: Buffer) => boolean | void}): Promise<BoundedProcessResult> {
+export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number; onStdoutChunk?: (chunk: Buffer) => boolean | void; sanitizeEnv?: SanitizeEnvOptions}): Promise<BoundedProcessResult> {
   const startedAt = Date.now();
   const stdout = collector(input.maxStdoutBytes);
   const stderr = collector(input.maxStderrBytes);
@@ -59,7 +90,9 @@ export async function runBoundedProcess(input: {command: string; args: string[];
     return {code: null, signal: null, stdout: stdout.result(), stderr: stderr.result(), timedOut: false, aborted: true, forced: false, durationMs: 0};
   }
   const detached = process.platform !== 'win32';
-  const child = spawn(input.command, input.args, {cwd: input.cwd, detached, stdio: ['ignore', 'pipe', 'pipe']});
+  // Absent `sanitizeEnv` means the child inherits process.env exactly (no
+  // `env` option at all) — the pre-sanitizer behavior.
+  const child = spawn(input.command, input.args, {cwd: input.cwd, detached, stdio: ['ignore', 'pipe', 'pipe'], ...(input.sanitizeEnv ? {env: sanitizeChildEnv(process.env, input.sanitizeEnv)} : {})});
   let timedOut = false;
   let aborted = false;
   let forced = false;

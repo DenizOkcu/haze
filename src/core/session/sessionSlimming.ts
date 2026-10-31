@@ -2,6 +2,7 @@ import type {ModelMessage} from 'ai';
 import type {SessionEntry} from './sessionStore.js';
 import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits.js';
 import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
+import {redactUnknown} from '../safety/redaction.js';
 import {formatBytes} from '../../utils/format.js';
 
 function jsonByteLength(value: unknown) {
@@ -133,7 +134,15 @@ function slimToolStartInput(input: unknown): Record<string, unknown> {
 /** Goal-ledger request text bound; the exact bytes live in conversation snapshots, the ledger needs a resumable copy (P1). */
 const GOAL_LEDGER_REQUEST_CHARS = 1024;
 
-export function prepareSessionEntryForWrite(entry: SessionEntry): SessionEntry | undefined {
+export function prepareSessionEntryForWrite(entry: SessionEntry, options: {redactSecrets?: boolean} = {}): SessionEntry | undefined {
+  const prepared = slimSessionEntry(entry);
+  if (prepared === undefined) return undefined;
+  // Opt-in secret-shape redaction (HZ-9): applied after slimming so it covers
+  // every persisted entry type, including snapshots and event payloads.
+  return options.redactSecrets === true ? redactUnknown(prepared) as SessionEntry : prepared;
+}
+
+function slimSessionEntry(entry: SessionEntry): SessionEntry | undefined {
   if (entry.type === 'event') {
     if (entry.name === 'message_update') return undefined;
     if (entry.name === 'tool_start' && entry.text) {

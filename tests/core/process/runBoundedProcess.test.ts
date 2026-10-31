@@ -2,7 +2,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {runBoundedProcess, signalProcessTree} from '../../../src/core/process/runBoundedProcess.js';
+import {runBoundedProcess, sanitizeChildEnv, signalProcessTree} from '../../../src/core/process/runBoundedProcess.js';
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => fs.rm(dir, {recursive: true, force: true}))); });
@@ -27,6 +27,53 @@ describe('signalProcessTree', () => {
     const fakeChild = {pid: 2147483647, kill} as unknown as import('node:child_process').ChildProcess;
     signalProcessTree(fakeChild, 'SIGTERM');
     expect(kill).toHaveBeenCalledWith('SIGTERM');
+  });
+});
+
+describe('sanitizeChildEnv (HZ-10)', () => {
+  it('omits secret-shaped keys in any case while keeping essential variables', () => {
+    const env = {
+      PATH: '/usr/bin:/bin',
+      HOME: '/home/u',
+      LANG: 'en_US.UTF-8',
+      TERM: 'xterm-256color',
+      TZ: 'Europe/Berlin',
+      COLORTERM: 'truecolor',
+      npm_node_execpath: '/usr/local/bin/node',
+      GITHUB_TOKEN: 't1',
+      OPENAI_API_KEY: 'k1',
+      DATABASE_PASSWORD: 'p1',
+      AWS_SECRET_ACCESS_KEY: 's1',
+      SERVICE_CREDENTIAL: 'c1',
+    };
+    const child = sanitizeChildEnv(env);
+    expect(Object.keys(child).sort()).toEqual(['COLORTERM', 'HOME', 'LANG', 'PATH', 'TZ', 'TERM', 'npm_node_execpath'].sort());
+  });
+
+  it('omits keys matching configured extra substrings (case-insensitive) and ignores blank entries', () => {
+    const env = {PATH: '/bin', MYAPP_COOKIE: 'z', OTHER_VAR: 'v'};
+    const child = sanitizeChildEnv(env, {extra: ['  myapp_cookie  ', '']});
+    expect(child).toEqual({PATH: '/bin', OTHER_VAR: 'v'});
+  });
+});
+
+describe('runBoundedProcess env sanitizer (HZ-10)', () => {
+  const probe = "process.stdout.write(process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT')";
+
+  afterEach(() => { delete process.env.HAZE_TEST_FAKE_API_KEY; });
+
+  it('passes the parent environment through unchanged by default (sanitizer off)', async () => {
+    process.env.HAZE_TEST_FAKE_API_KEY = 'secret-value';
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', probe], cwd: process.cwd(), timeoutMs: 5000, maxStdoutBytes: 1000, maxStderrBytes: 1000});
+    expect(result.code).toBe(0);
+    expect(result.stdout.text).toBe('secret-value');
+  });
+
+  it('omits secret-shaped variables when enabled while keeping PATH', async () => {
+    process.env.HAZE_TEST_FAKE_API_KEY = 'secret-value';
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', `${probe};process.stdout.write(typeof process.env.PATH)`], cwd: process.cwd(), timeoutMs: 5000, maxStdoutBytes: 1000, maxStderrBytes: 1000, sanitizeEnv: {}});
+    expect(result.code).toBe(0);
+    expect(result.stdout.text).toBe('ABSENTstring');
   });
 });
 

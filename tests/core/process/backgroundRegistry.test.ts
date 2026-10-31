@@ -103,3 +103,52 @@ describe('background process registry (F09)', () => {
     expect(() => startBackgroundProcess({command: 'sleep 30', cwd: process.cwd()})).toThrow(/limit reached.*Kill an existing process/i);
   });
 });
+
+describe('background process registry env sanitizer (HZ-10)', () => {
+  afterEach(() => { delete process.env.HAZE_TEST_FAKE_API_KEY; });
+
+  it('omits secret-shaped variables when sanitizeEnv is requested', async () => {
+    process.env.HAZE_TEST_FAKE_API_KEY = 'secret-value';
+    const started = startBackgroundProcess({command: nodeCommand("console.log(process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT')"), cwd: process.cwd(), sanitizeEnv: {}});
+    await waitFor(() => (getBackgroundProcess(started.backgroundId)?.outputBytes.totalBytes ?? 0) > 0);
+    expect(readToolOutput(started.outputHandle)?.content).toContain('ABSENT');
+    expect(readToolOutput(started.outputHandle)?.content).not.toContain('secret-value');
+  });
+
+  it('inherits the parent environment unchanged by default', async () => {
+    process.env.HAZE_TEST_FAKE_API_KEY = 'secret-value';
+    const started = startBackgroundProcess({command: nodeCommand("console.log(process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT')"), cwd: process.cwd()});
+    await waitFor(() => (getBackgroundProcess(started.backgroundId)?.outputBytes.totalBytes ?? 0) > 0);
+    expect(readToolOutput(started.outputHandle)?.content).toContain('secret-value');
+  });
+});
+
+describe('background process teardown escape reporting (HZ-11)', () => {
+  it.runIf(process.platform !== 'win32')('records an advisory note when a descendant escapes the process group', async () => {
+    // The grandchild detaches into its own session and inherits stdout, so the
+    // registry's SIGKILL to the parent's group cannot reach it and no close
+    // event ever fires — exactly the setsid/daemonize escape the note reports.
+    const escapedScript = 'setInterval(()=>{},5000)';
+    const parentScript = `const {spawn}=require('node:child_process');const child=spawn(process.execPath,['-e',${JSON.stringify(escapedScript)}],{detached:true,stdio:['ignore',1,2]});child.unref();process.stdout.write(String(child.pid));setInterval(()=>{},1000)`;
+    const started = startBackgroundProcess({command: nodeCommand(parentScript), cwd: process.cwd()});
+    await waitFor(() => (getBackgroundProcess(started.backgroundId)?.outputBytes.totalBytes ?? 0) > 0, 3_000);
+    const escapedPid = Number(readToolOutput(started.outputHandle)?.content.trim());
+    try {
+      const killed = await killBackgroundProcess(started.backgroundId, 30);
+      expect(killed?.status).toBe('killed');
+      expect(killed?.teardownNote).toMatch(/not be fully reaped/i);
+    } finally {
+      if (Number.isInteger(escapedPid) && escapedPid > 0) {
+        try { process.kill(escapedPid, 'SIGKILL'); } catch { /* already exited */ }
+      }
+    }
+  });
+
+  it('leaves the teardown note absent for a fully reaped tree', async () => {
+    const started = startBackgroundProcess({command: nodeCommand('setInterval(()=>{},1000)'), cwd: process.cwd()});
+    await waitFor(() => getBackgroundProcess(started.backgroundId)?.status === 'running');
+    const killed = await killBackgroundProcess(started.backgroundId, 2_000);
+    expect(killed?.status).toBe('killed');
+    expect(killed?.teardownNote).toBeUndefined();
+  });
+});

@@ -7,6 +7,7 @@ import {appendPrivateFile, ensurePrivateFile, ensurePrivateDir, tightenPrivateFi
 import {OrderedFileWriter} from '../persistence/orderedFileWriter.js';
 import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
+import {redactUnknown} from '../safety/redaction.js';
 
 export interface LlmLogEntry {
   /** ISO timestamp. */
@@ -93,11 +94,15 @@ export async function createLog(): Promise<LlmLog> {
 }
 
 export async function appendLogEntry(log: LlmLog, entry: LlmLogEntry): Promise<void> {
+  // LLM logs record full prompts/tool IO in plaintext; secret-shaped tokens
+  // are masked on every write (default ON — logs exist only under --debug,
+  // and a printed credential must not persist in cleartext) (HZA-7).
+  const redacted = redactUnknown(entry) as LlmLogEntry;
   if (log.writer) {
-    await log.writer.append(entry);
+    await log.writer.append(redacted);
     return;
   }
-  await appendPrivateFile(log.file, `${JSON.stringify(entry)}\n`);
+  await appendPrivateFile(log.file, `${JSON.stringify(redacted)}\n`);
 }
 
 export async function endLog(log: LlmLog): Promise<void> {

@@ -44,6 +44,27 @@ describe('sessionStore', () => {
     expect(entries.map(entry => entry.type === 'event' ? entry.name : entry.type)).toEqual(['header', 'clear', 'conversation_snapshot', 'ui_message']);
   });
 
+  it('masks secret-shaped tokens on the session write path only when opted in (HZ-9)', async () => {
+    const secret = 'the key is sk-abcdef0123456789abcdef for ghp_1234567890abcdefghij';
+
+    const redacting = await createSession({cwd, sessionsDir});
+    redacting.redactSecrets = true;
+    await appendSessionEntry(redacting, {type: 'ui_message', at: '1', role: 'user', text: secret});
+    await appendSessionEntry(redacting, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: secret} as ModelMessage]});
+    const raw = await fs.readFile(redacting.file, 'utf8');
+    expect(raw).toContain('[redacted:api-key]');
+    expect(raw).toContain('[redacted:github-token]');
+    expect(raw).not.toContain('sk-abcdef0123456789abcdef');
+    expect(raw).not.toContain('ghp_1234567890abcdefghij');
+
+    // Default (no setting): entries persist verbatim for debuggability.
+    const verbatim = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(verbatim, {type: 'ui_message', at: '1', role: 'user', text: secret});
+    const rawDefault = await fs.readFile(verbatim.file, 'utf8');
+    expect(rawDefault).toContain(secret);
+    expect(rawDefault).not.toContain('[redacted:');
+  });
+
   it('remembers the latest model selection and carries it into a fork', async () => {
     const session = await createSession({cwd, sessionsDir});
     await appendSessionEntry(session, {type: 'model_selection', at: '1', selection: {provider: 'first', model: 'shared'}});

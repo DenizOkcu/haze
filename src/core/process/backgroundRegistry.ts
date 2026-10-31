@@ -3,7 +3,7 @@ import {StringDecoder} from 'node:string_decoder';
 import {BACKGROUND_PROCESS_HISTORY_LIMIT, BACKGROUND_PROCESS_MAX_CONCURRENCY} from '../agent/budgets.js';
 import {registerDynamicToolOutput, unregisterDynamicToolOutput} from '../agent/toolOutputStore.js';
 import {BACKGROUND_PROCESS_OUTPUT_BYTES} from '../limits.js';
-import {signalProcessTree} from './runBoundedProcess.js';
+import {signalProcessTree, sanitizeChildEnv, type SanitizeEnvOptions} from './runBoundedProcess.js';
 import {shellInvocation} from './userShell.js';
 import {truncateUtf8TailBufferAtBytes} from '../../utils/utf8.js';
 
@@ -20,6 +20,13 @@ export interface BackgroundProcessSummary {
   signal?: NodeJS.Signals | null;
   outputHandle: string;
   outputBytes: {totalBytes: number; retainedBytes: number; omittedBytes: number};
+  /**
+   * Advisory only (HZ-11): set when teardown could not fully reap the process
+   * group — e.g. a descendant created its own session (setsid/daemonize) and
+   * survived the tree kill. Informational; it never changes kill behavior or
+   * the status above.
+   */
+  teardownNote?: string;
   error?: string;
 }
 
@@ -109,17 +116,20 @@ export function getBackgroundProcess(backgroundId: string): BackgroundProcessSum
   return record ? publicSummary(record) : undefined;
 }
 
-export function startBackgroundProcess(input: {command: string; cwd: string}): BackgroundProcessSummary {
+export function startBackgroundProcess(input: {command: string; cwd: string; sanitizeEnv?: SanitizeEnvOptions}): BackgroundProcessSummary {
   if (activeRecords().length >= BACKGROUND_PROCESS_MAX_CONCURRENCY) {
     throw new Error(`Background process limit reached (${BACKGROUND_PROCESS_MAX_CONCURRENCY}). Kill an existing process with process action=kill, then retry.`);
   }
   installExitHook();
   const backgroundId = `background-${nextId++}`;
   const invocation = shellInvocation(input.command);
+  // Absent `sanitizeEnv` (default) means the child inherits process.env
+  // exactly — no `env` option at all (HZ-10 opt-in).
   const child = spawn(invocation.command, invocation.args, {
     cwd: input.cwd,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
+    ...(input.sanitizeEnv ? {env: sanitizeChildEnv(process.env, input.sanitizeEnv)} : {}),
   });
   const ring = new OutputRing();
   const outputHandle = registerDynamicToolOutput(() => ring.snapshot());
@@ -183,6 +193,14 @@ export async function killBackgroundProcess(backgroundId: string, killGraceMs = 
   if (!closed) {
     signalProcessTree(record.child, 'SIGKILL');
     closed = await waitForClose(record, 100);
+    if (!closed) {
+      // Advisory only (HZ-11): SIGKILL went to the process group, but no close
+      // event arrived — typically a descendant that created its own session
+      // (setsid/daemonize) still holds stdio and survives the group kill.
+      // Record it so the report never implies a fully reaped tree; the kill
+      // behavior itself is unchanged.
+      record.summary.teardownNote = 'Process group may not be fully reaped: no close event after SIGKILL escalation; a descendant in its own session (e.g. setsid/daemonized) may outlive haze teardown.';
+    }
     record.child.stdout?.destroy();
     record.child.stderr?.destroy();
   }

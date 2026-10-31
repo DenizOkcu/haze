@@ -50,6 +50,8 @@ export interface SessionLifecycleDeps {
   setTokenUsage: (usage: TokenUsage) => void;
   /** Manual /compact mode: model-written summary (default) or heuristic excerpt. */
   manualCompaction?: () => 'llm-summary' | 'heuristic';
+  /** Opt-in session-write secret redaction (HZ-9 `redactSessionSecrets` setting). */
+  redactSessionSecrets?: () => boolean;
   /** Called when a resumed session carries an unterminated goal frontier (P1): the UI offers the one-key continue. */
   onGoalFrontier?: (frontier: GoalLedgerFrontier) => void;
   debugLog: (line: string) => void;
@@ -92,6 +94,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       return;
     }
     const session = await createSession({hazeVersion: deps.version, ...(deps.build ? {build: deps.build} : {})});
+    applyRedactionSetting(session);
     deps.sessionRef.current = session;
     const selection = deps.modelSelection?.();
     if (selection) deps.sessionRecorder()?.recordModelSelection(selection);
@@ -109,6 +112,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
 
   async function resumeSession(session: HazeSession, replaceTranscript: boolean) {
     const {messages: conversation, workState, parseErrors, goalFrontier, modelSelection} = await restoreSessionState(session);
+    applyRedactionSetting(session);
     deps.sessionRef.current = session;
     deps.onModelSelection?.(modelSelection);
     if (!modelSelection) {
@@ -131,6 +135,11 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     // resume flow (system note + one-key continue, mirroring the R-resume UX)
     // instead of silently starting fresh.
     if (goalFrontier) deps.onGoalFrontier?.(goalFrontier);
+  }
+
+  /** Stamp the opt-in redaction setting onto every session this lifecycle owns (HZ-9). */
+  function applyRedactionSetting(session: HazeSession) {
+    if (deps.redactSessionSecrets?.()) session.redactSecrets = true;
   }
 
   /** Heuristic-excerpt compaction shared by the sync path and the LLM fallback (F-09). */

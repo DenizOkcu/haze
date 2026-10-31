@@ -68,6 +68,12 @@ export interface HazeSession {
   sessionsDir: string;
   /** New sessions stay memory-only until they contain a resumable message. */
   deferredWrite?: DeferredSessionWrite;
+  /**
+   * Opt-in secret-shape redaction for this session's writes (HZ-9), set from
+   * the `redactSessionSecrets` setting when the session object is created or
+   * resumed; default (absent/false) persists entries verbatim.
+   */
+  redactSecrets?: boolean;
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(HAZE_DIR, 'sessions');
@@ -146,7 +152,7 @@ function entryMakesSessionResumable(entry: SessionEntry): boolean {
 
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
   const file = validatedSessionFile(session);
-  const prepared = prepareSessionEntryForWrite(entry);
+  const prepared = prepareSessionEntryForWrite(entry, {redactSecrets: session.redactSecrets === true});
   if (!prepared) return;
   const deferred = session.deferredWrite;
   if (deferred) {

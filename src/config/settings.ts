@@ -127,6 +127,17 @@ export interface HazeSettings {
    */
   streamIdleTimeoutMs?: number;
   /**
+   * Opt-in (HZ-10): omit secret-shaped environment variables (keys matching
+   * TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL, case-insensitive) from the
+   * environment of processes haze spawns for the `shell` tool (foreground and
+   * background). Default: false — spawned processes inherit the full
+   * environment, unchanged. Essential vars (PATH, HOME, LANG, TERM, TZ, ...)
+   * never match the pattern and are always kept.
+   */
+  sanitizeProcessEnv?: boolean;
+  /** Additional case-insensitive key substrings omitted when `sanitizeProcessEnv` is true. */
+  sanitizeProcessEnvExtra?: string[];
+  /**
    * Manual `/compact` mode (F-09): `llm-summary` (default) asks the active
    * model to summarize the older history; `heuristic` keeps the bounded
    * excerpt without a model call. Mid-turn compaction prefers an LLM summary
@@ -134,6 +145,12 @@ export interface HazeSettings {
    * for small trims and on any summarization failure.
    */
   manualCompaction?: 'llm-summary' | 'heuristic';
+  /**
+   * Opt-in (HZ-9): mask secret-shaped tokens (`sk-…`, `ghp_…`, `AKIA…`,
+   * `xox…-…`, JWTs) in session file writes. Default false — sessions stay
+   * verbatim for debuggability; --debug LLM logs always redact.
+   */
+  redactSessionSecrets?: boolean;
   /** UI tweaks: rotating tips under the busy label, etc. Default enabled. */
   tips?: {enabled?: boolean};
   /** Built-in theme name; unset means `purple`. Other options: `light`, oh-my-zsh ports like `robbyrussell`, palette ports like `solarized-dark`. Validated by `resolveTheme`. */
@@ -226,7 +243,10 @@ const settingsSchema = z.object({
   modelRetries: modelRetriesSchema.optional(),
   retryBaseDelayMs: retryBaseDelaySchema.optional(),
   streamIdleTimeoutMs: streamIdleTimeoutSchema.optional(),
+  sanitizeProcessEnv: z.boolean().optional(),
+  sanitizeProcessEnvExtra: z.array(z.string().trim().min(1)).optional(),
   manualCompaction: z.enum(['llm-summary', 'heuristic']).optional(),
+  redactSessionSecrets: z.boolean().optional(),
   tips: z.object({enabled: z.boolean().optional()}).optional(),
   theme: z.string().optional(),
   apiKey: z.string().optional(),
