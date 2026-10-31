@@ -36,7 +36,9 @@ jobs:
       - name: Verify tag matches package version
         env:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-        run: node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const tag=process.env.RELEASE_TAG.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'.');process.exit(1);}console.log('Tag v'+tag+' matches package.json '+pkg.version+'.')"
+        run: |
+          node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const ref=process.env.RELEASE_TAG;if(!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(ref)||ref.slice(1)!==pkg.version){console.error('Release tag does not match package.json version '+pkg.version+'.');process.exit(1);}console.log('Tag '+ref+' matches package.json '+pkg.version+'.')"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
       # Release gate — the same chain as package.json `prepublishOnly`
       # (npm also re-runs prepublishOnly at publish time; the explicit steps
       # here keep the gate visible and fail before any registry interaction).
