@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `id-token: write` is required for npm provenance attestations / OIDC trusted
+# publishing (SC-2). Everything else stays read-only.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned like ci.yml (SC-1); comments record the verified release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      # Publish exactly the version the tag names; a mismatched tag would
+      # otherwise publish a different version than what was reviewed.
+      - name: Verify tag matches package version
+        run: node -e "const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const tag=process.env.GITHUB_REF_NAME.replace(/^v/,'');if(tag!==pkg.version){console.error('Tag v'+tag+' does not match package.json version '+pkg.version+'.');process.exit(1);}console.log('Tag v'+tag+' matches package.json '+pkg.version+'.')"
+      # Release gate — the same chain as package.json `prepublishOnly`
+      # (npm also re-runs prepublishOnly at publish time; the explicit steps
+      # here keep the gate visible and fail before any registry interaction).
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+      - run: npm audit --audit-level=high
+      - run: npm run release:verify
+      - name: Publish to npm with provenance
+        # Trusted publishing setup (required before first use): link this
+        # repository (DenizOkcu/haze) and this workflow (release.yml) to
+        # @denizokcu/haze in npmjs.com package Access Settings. Once linked,
+        # npm exchanges the GitHub OIDC token granted by `id-token: write`
+        # for publish authorization and emits a provenance attestation
+        # (`npm view @denizokcu/haze@<version> dist.attestations` becomes
+        # non-empty). NODE_AUTH_TOKEN follows the standard registry-auth
+        # semantics: it may stay empty once trusted publishing is live; a
+        # granular publish token can bootstrap the first publish if the npm
+        # side is not yet linked.
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
