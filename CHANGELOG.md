@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.5 - 2026-11-02
+
+### Changed
+
+- Improve recovery from malformed tool inputs and preserve actionable diagnostics.
+- Add bounded jitter and server-directed delay to transient provider retries.
+
 ## 1.7.2 - 2026-10-31
 
 ### Changed

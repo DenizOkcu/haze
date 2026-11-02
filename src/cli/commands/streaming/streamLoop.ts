@@ -44,7 +44,11 @@ export interface AttemptLoopState {
   earlyValidationNudgeIssued: boolean;
   sawToolCall: boolean;
   pendingMalformedToolName: string | undefined;
+  /** Targeted diagnosis for the pending malformed-tool retry (missing/wrong-typed parameters); undefined keeps the generic wording. */
+  pendingMalformedToolProblem: string | undefined;
   unresolvedMalformedToolName: string | undefined;
+  /** Last known diagnosis for the unresolved malformed tool; rides the turn-end system note so later turns see the exact defect. */
+  unresolvedMalformedToolProblem: string | undefined;
   /** Per-attempt (not per-turn) recovery counter: a transient retry gets a fresh map. Bounded across the whole turn by MAIN_TOOL_CALL_LIMIT. */
   malformedRecoveryAttempts: Map<string, number>;
   toolResultState: ToolResultState;
@@ -87,7 +91,9 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     earlyValidationNudgeIssued: false,
     sawToolCall: false,
     pendingMalformedToolName: undefined,
+    pendingMalformedToolProblem: undefined,
     unresolvedMalformedToolName: undefined,
+    unresolvedMalformedToolProblem: undefined,
     malformedRecoveryAttempts: new Map<string, number>(),
     toolResultState: initialToolResultState(),
     inFlightTools: new Set<string>(),
@@ -150,6 +156,7 @@ export interface AttemptStreamOutcome {
   assistantText: string;
   sawToolCall: boolean;
   unresolvedMalformedToolName: string | undefined;
+  unresolvedMalformedToolProblem: string | undefined;
   unresolvedToolInputError: boolean;
   /**
    * Non-error context overflow detected from usage (Pillar 1.2): `silent`
@@ -555,6 +562,7 @@ export async function runAttemptStream(deps: AttemptStreamDeps): Promise<Attempt
     assistantText: loopState.assistantText,
     sawToolCall: loopState.sawToolCall,
     unresolvedMalformedToolName: loopState.unresolvedMalformedToolName,
+    unresolvedMalformedToolProblem: loopState.unresolvedMalformedToolProblem,
     unresolvedToolInputError: loopState.unresolvedMalformedToolName != null,
     usageOverflow,
   };

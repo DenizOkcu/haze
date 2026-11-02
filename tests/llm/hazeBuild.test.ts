@@ -50,6 +50,18 @@ describe('native haze.build contract and transport', () => {
     expect(fetcher.mock.calls[0][1]).toMatchObject({redirect: 'error'});
   });
 
+  it('accepts supported larger scheduler settings', async () => {
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json({...descriptor, activeSequences: 8, scheduler: {...descriptor.scheduler, maxBatchedTokens: 16384}}))).resolves.toMatchObject({activeSequences: 8});
+  });
+
+  it('accepts only explicitly trusted alternate deployment identities', async () => {
+    const candidate = {...descriptor, modelRevision: 'a'.repeat(40), runtimeVersion: '0.33.0'};
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json(candidate))).rejects.toThrow('not trusted');
+    const trusted = {modelRepository: candidate.modelRepository, modelRevision: candidate.modelRevision, templateSha256: candidate.templateSha256, runtimeVersion: candidate.runtimeVersion};
+    await expect(discoverHazeBuildManifest({...provider, trustedDeployments: [trusted]}, async () => Response.json(candidate))).resolves.toMatchObject({runtimeVersion: '0.33.0'});
+    await expect(discoverHazeBuildManifest({...provider, trustedDeployments: [trusted]}, async () => Response.json({...candidate, templateSha256: 'b'.repeat(64)}))).rejects.toThrow('not trusted');
+  });
+
   it('rejects incompatible or oversized manifests and invalid transport before sending a key', async () => {
     for (const bad of [{...descriptor, schemaVersion: 2}, {...descriptor, modelRevision: 'a'.repeat(40)}, {...descriptor, capabilities: {...descriptor.capabilities, images: true}}]) {
       await expect(discoverHazeBuildManifest(provider, async () => Response.json(bad))).rejects.toThrow('Incompatible');

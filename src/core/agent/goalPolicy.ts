@@ -85,10 +85,12 @@ export function formatGoalStatus(goal: SessionGoal) {
 
 /** One-request direction for the active goal. The user request remains the source of truth. */
 export function goalDirectionPrompt(intent: RequestIntent, compact: boolean) {
-  if (intent === 'plan' || intent === 'review' || intent === 'answer') return '';
+  const scope = 'Follow the user’s requested scope in any language. A request to plan, review, or explain implementation authorizes that deliverable, not implementation itself. A task list is not permission to expand the request. If implementation was not requested, do not implement it.';
+  if (intent === 'plan' || intent === 'review' || intent === 'answer') return scope;
   return [
+    scope,
     'For this goal, turn the user\'s explicit requirements into observable outcomes. For substantial work, use writeTasks as the outcome ledger and keep it current.',
-    'Implement one runnable slice, check it, then extend it. Run a relevant check before generating a large batch of dependent files. Keep failed checks open until the same check passes after the fix.',
+    'When implementation is requested, implement one runnable slice, check it, then extend it. Run a relevant check before generating a large batch of dependent files. Keep failed checks open until the same check passes after the fix.',
     'For UI work, exercise a real interaction when a browser runner is available; otherwise name that coverage gap. Do not describe shadcn-style components as an installed shadcn system unless the project actually has one.',
     compact ? 'Compact profile: handle a few files per slice, make one dependent tool decision at a time, prefer concise tool output and targeted reads, and keep the next action explicit.' : '',
   ].filter(Boolean).join(' ');
@@ -132,11 +134,12 @@ export function completionRescuePrompt() {
   return 'You reached the tool-boundary without a substantive final answer. Only edit/write and validation tools are available now. Use at most two tool calls to apply the single most important remaining concrete deliverable you already discovered (do not explore or read new files), then give the final status: current-task changes plus validation evidence, or a single short line stating the next unfinished action. Do not loop.';
 }
 
-export function malformedToolCallPrompt(toolName: string, chunkBytes: number) {
+export function malformedToolCallPrompt(toolName: string, chunkBytes: number, problem?: string) {
   const chunkGuidance = toolName === 'writeFile'
     ? ` Keep content below ${chunkBytes} UTF-8 bytes per call: write the first chunk normally, then continue the same file with append=true.`
     : '';
-  return `The ${toolName} call had invalid, malformed, or truncated JSON input and did not execute. Retry it now with valid smaller arguments; do not merely announce that you will retry.${chunkGuidance}`;
+  const diagnosis = problem ? ` Specific problem: ${problem}.` : '';
+  return `The ${toolName} call had invalid, malformed, or truncated JSON input and did not execute.${diagnosis} Retry it now with valid smaller arguments${problem ? ' that include every required parameter with the declared type' : ''}; do not merely announce that you will retry.${chunkGuidance}`;
 }
 
 /**
@@ -171,5 +174,5 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
     ? ' Rerun the same validation command that failed before the edit and resolve it; a different check does not close the captured red evidence.'
     : '';
   const detailLine = detail ? ` ${detail}` : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${ledgerLine}${redLine}${detailLine} Do not summarize again or restate what remains — resume the next concrete unfinished task now.${taskLine} If you declared a task list with writeTasks, its pending and in-progress items are commitments: complete them and update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${ledgerLine}${redLine}${detailLine} The user's original request defines the scope in any language. A task list cannot authorize work beyond that request; revise out-of-scope tasks rather than carrying them out. Resume the next authorized unfinished task.${taskLine} Update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {classifyRequestIntent, createSessionGoal, formatGoalStatus, goalDirectionPrompt, isPlanOnlyRequest, malformedToolCallPrompt, observeGoalToolEvent, repeatedToolCallPrompt, requiresTaskLedger, toolLoopBudgetPrompt} from '../../../src/core/agent/goalPolicy.js';
+import {classifyRequestIntent, createSessionGoal, formatGoalStatus, goalContinuationPrompt, goalDirectionPrompt, isPlanOnlyRequest, malformedToolCallPrompt, observeGoalToolEvent, repeatedToolCallPrompt, requiresTaskLedger, toolLoopBudgetPrompt} from '../../../src/core/agent/goalPolicy.js';
 
 describe('requestClassifier', () => {
   it('classifies plan-only requests without treating them as actions', () => {
@@ -54,6 +54,11 @@ describe('SessionGoal', () => {
 });
 
 describe('completionPrompts', () => {
+  it('keeps user scope authoritative even when the classifier or task list is wrong', () => {
+    expect(goalDirectionPrompt('implement', false)).toContain('A task list is not permission to expand the request');
+    expect(goalDirectionPrompt('plan', false)).toContain('not implementation itself');
+    expect(goalContinuationPrompt('pending tasks')).toContain('A task list cannot authorize work beyond that request');
+  });
   it('directs implementation toward outcomes, vertical slices, and honest UI coverage', () => {
     const prompt = goalDirectionPrompt('implement', true);
     expect(prompt).toContain('writeTasks');
@@ -86,5 +91,13 @@ describe('completionPrompts', () => {
     expect(prompt).toMatch(/retry it now/i);
     expect(prompt).toMatch(/append=true/i);
     expect(prompt).toContain('16384');
+  });
+
+  it('names the specific input defect in the malformed-retry instruction (session d5fe72)', () => {
+    const prompt = malformedToolCallPrompt('readFile', 16_384, 'the input omitted the required parameter `path`');
+    expect(prompt).toContain('Specific problem: the input omitted the required parameter `path`');
+    expect(prompt).toMatch(/include every required parameter with the declared type/i);
+    // Without a diagnosis the generic instruction is preserved unchanged.
+    expect(malformedToolCallPrompt('readFile', 16_384)).not.toContain('Specific problem');
   });
 });

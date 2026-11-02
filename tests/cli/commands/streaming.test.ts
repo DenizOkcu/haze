@@ -415,6 +415,36 @@ describe('runAgentTurn: setup', () => {
     expect(prepare({steps: [], messages: []}).toolChoice).toBe('none');
   });
 
+  it('names the omitted required parameter in the forced malformed retry (session d5fe72)', async () => {
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {readFile: {description: 'read'}},
+      toolCategories: new Map([['readFile', 'builtin']]),
+    };
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+    });
+    await runAgentTurn('read the app', undefined, [], makeCallbacks());
+    const options = mocks.agentOptions.at(-1)!;
+    const repair = options.experimental_repairToolCall as (input: unknown) => Promise<unknown>;
+    const error = new Error('Invalid input for tool readFile');
+    error.name = 'AI_InvalidToolInputError';
+    // The observed defect: every optional parameter present, `path` missing.
+    await expect(repair({
+      toolCall: {toolCallId: 'c1', toolName: 'readFile', input: JSON.stringify({limit: 20, mode: 'exact', allowIgnored: false})},
+      error,
+      inputSchema: async () => ({type: 'object', properties: {path: {type: 'string'}, limit: {type: 'number'}, mode: {type: 'string'}, allowIgnored: {type: 'boolean'}}, required: ['path']}),
+    })).resolves.toBeNull();
+    const prepare = options.prepareStep as (input: unknown) => {messages: unknown[]};
+    const prepared = prepare({steps: [], messages: []});
+    expect(JSON.stringify(prepared.messages)).toContain('Specific problem: the input omitted the required parameter `path`');
+    // The diagnosis is consumed with the retry; a later step keeps the generic guard only.
+    await repair({toolCall: {toolName: 'readFile'}, error});
+    const second = prepare({steps: [], messages: []}) as {messages: unknown[]};
+    expect(JSON.stringify(second.messages)).not.toContain('Specific problem');
+  });
+
   it('repairs out-of-range numeric tool input by clamping to schema bounds', async () => {
     mocks.assembleContextResult = {
       systemPrompt: 'You are haze.',

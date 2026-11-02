@@ -10,7 +10,7 @@ import {RESCUE_BOUNDARY} from '../../../core/agent/completionController.js';
 import {MAIN_TOOL_CALL_LIMIT, REPEATED_TOOL_NUDGE_LIMIT, WRITE_FILE_CHUNK_BYTES} from '../../../core/agent/budgets.js';
 import type {HazeToolContext} from '../../../llm/tools/toolContext.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
-import {clampOutOfBoundsToolNumbers, isMalformedToolInputError} from './toolCallRecovery.js';
+import {clampOutOfBoundsToolNumbers, describeToolInputProblem, isMalformedToolInputError} from './toolCallRecovery.js';
 import type {AttemptSetup} from './attemptSetup.js';
 import type {AttemptLoopState} from './streamLoop.js';
 import type {TurnExecutionState} from '../../../core/agent/completionController.js';
@@ -56,8 +56,14 @@ export function createRepairToolCall(deps: {callbacks: StreamCallbacks; loopStat
         callbacks.debugLog(`clamped out-of-range numeric input for ${toolCall.toolName}; executing repaired call`);
         return {type: 'tool-call' as const, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, input: JSON.stringify(clamped)};
       }
+      // Name the exact defect in the forced-retry instruction: the generic
+      // "invalid or truncated" wording was ignored 19 consecutive times while a
+      // model dropped readFile's required `path` (observed 2026-10-31 session d5fe72).
+      const problem = await describeToolInputProblem(toolCall.input, toolCall.toolName, error, inputSchema);
       loopState.pendingMalformedToolName = toolCall.toolName;
+      loopState.pendingMalformedToolProblem = problem;
       loopState.unresolvedMalformedToolName = toolCall.toolName;
+      loopState.unresolvedMalformedToolProblem = problem;
     }
     // Truncated generated file content cannot be reconstructed safely here;
     // let the next agent step retry under the bounded tool-choice constraint.
@@ -113,10 +119,12 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
     if (loopState.pendingMalformedToolName && loopState.pendingMalformedToolName in sliceTools) {
       const toolName = loopState.pendingMalformedToolName as keyof typeof sliceTools;
       const attempt = loopState.malformedRecoveryAttempts.get(String(toolName)) ?? 0;
+      const problem = loopState.pendingMalformedToolProblem;
       loopState.pendingMalformedToolName = undefined;
+      loopState.pendingMalformedToolProblem = undefined;
       if (attempt >= 2) {
         callbacks.debugLog(`malformed ${String(toolName)} recovery exhausted`);
-        return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The ${String(toolName)} input remained invalid after two smaller retries. Report this as blocked; do not promise another retry or claim completion.`)};
+        return {toolChoice: 'none' as const, messages: appendSyntheticControl(scopedMessages, `The ${String(toolName)} input remained invalid after two smaller retries${problem ? ` — ${problem}` : ''}. Report this as blocked; do not promise another retry or claim completion.`)};
       }
       loopState.malformedRecoveryAttempts.set(String(toolName), attempt + 1);
       callbacks.debugLog(`forcing smaller retry after malformed ${String(toolName)} input`);
@@ -125,7 +133,7 @@ export function createPrepareStep(deps: {setup: AttemptSetup; callbacks: StreamC
       // required) and reject the object form with HTTP 400. Narrowing to a
       // single active tool plus 'required' preserves the forced-call
       // semantics on every server.
-      return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: appendSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES))};
+      return {activeTools: [toolName] as Array<keyof typeof sliceTools>, toolChoice: 'required' as const, messages: appendSyntheticControl(scopedMessages, malformedToolCallPrompt(String(toolName), WRITE_FILE_CHUNK_BYTES, problem))};
     }
     if (loopState.toolResultState.editRecoveryPath && !loopState.toolResultState.editRecoveryReadSatisfied) {
       // Instruct, do not restrict: the execution-time gate in toolContext

@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.2
+## What's new in 1.7.5
+
+Improved recovery from malformed tool calls and more resilient retry handling for temporary provider errors.
+
+### Changes in 1.7.2
 
 This patch updates the AI SDK and development tooling, and moves the public website and documentation to maintainable Astro components.
 

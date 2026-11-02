@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {InvalidToolInputError} from 'ai';
-import {clampOutOfBoundsToolNumbers, isMalformedToolInputError} from '../../src/cli/commands/streaming/toolCallRecovery.js';
+import {InvalidToolInputError, TypeValidationError} from 'ai';
+import {z} from 'zod';
+import {clampOutOfBoundsToolNumbers, describeToolInputProblem, isMalformedToolInputError, toolInputProblemFromError} from '../../src/cli/commands/streaming/toolCallRecovery.js';
 
 describe('isMalformedToolInputError', () => {
   it('recognizes AI SDK JSON and invalid-input wrappers through causes', () => {
@@ -70,5 +71,74 @@ describe('clampOutOfBoundsToolNumbers', () => {
     expect(await clampOutOfBoundsToolNumbers({pattern: '.', maxMatches: -5}, 'grep', grepSchema)).toBeNull();
     const withExclusiveMax = async () => ({type: 'object', properties: {maxMatches: {type: 'integer', exclusiveMaximum: 200}}});
     expect(await clampOutOfBoundsToolNumbers({maxMatches: 9999}, 'grep', withExclusiveMax)).toBeNull();
+  });
+});
+
+/** Builds the real AI SDK error shape: InvalidToolInputError → TypeValidationError → ZodError(.issues). */
+function invalidToolInputError(toolName: string, input: unknown, schema: z.ZodType, emitted: unknown): InvalidToolInputError {
+  const zodError = schema.safeParse(emitted).error;
+  if (!zodError) throw new Error('test fixture expected the emitted input to fail validation');
+  return new InvalidToolInputError({
+    toolCallId: 'call-1',
+    toolName,
+    input: typeof input === 'string' ? input : JSON.stringify(input),
+    cause: new TypeValidationError({value: emitted, cause: zodError}),
+  });
+}
+
+const readFileSchema = z.object({path: z.string(), limit: z.number().optional(), mode: z.enum(['exact', 'fuzzy']).optional(), allowIgnored: z.boolean().optional()});
+
+describe('toolInputProblemFromError', () => {
+  it('names an omitted required parameter from the Zod issues (session d5fe72 shape)', () => {
+    const error = invalidToolInputError('readFile', {limit: 20, mode: 'exact'}, readFileSchema, {limit: 20, mode: 'exact'});
+    expect(toolInputProblemFromError(error)).toBe('the input omitted the required parameter `path`');
+  });
+
+  it('names wrong-typed parameters alongside omissions', () => {
+    const error = invalidToolInputError('readFile', {limit: '20', mode: 'exact'}, readFileSchema, {limit: '20', mode: 'exact'});
+    expect(toolInputProblemFromError(error)).toBe('the input omitted the required parameter `path`; `limit` expects number but received string');
+  });
+
+  it('lists multiple omissions', () => {
+    const schema = z.object({path: z.string(), pattern: z.string()});
+    const error = invalidToolInputError('grep', {}, schema, {});
+    expect(toolInputProblemFromError(error)).toBe('the input omitted the required parameters `path`, `pattern`');
+  });
+
+  it('stays generic when the error carries no structured issues', () => {
+    const error = new Error('AI_JSONParseError: JSON parsing failed');
+    expect(toolInputProblemFromError(error)).toBeUndefined();
+  });
+});
+
+describe('describeToolInputProblem', () => {
+  const schemaWithRequiredPath = async () => ({type: 'object', properties: {path: {type: 'string'}, limit: {type: 'number'}}, required: ['path']});
+
+  it('falls back to diffing the emitted input against the tool schema', async () => {
+    const error = new Error('AI_InvalidToolInputError: Invalid input for tool readFile');
+    const problem = await describeToolInputProblem({limit: 20, mode: 'exact'}, 'readFile', error, schemaWithRequiredPath);
+    expect(problem).toBe('the input omitted the required parameter `path`');
+  });
+
+  it('parses stringified input before diffing and reports type mismatches', async () => {
+    const error = new Error('AI_InvalidToolInputError: Invalid input for tool readFile');
+    const problem = await describeToolInputProblem(JSON.stringify({limit: '20'}), 'readFile', error, schemaWithRequiredPath);
+    expect(problem).toBe('the input omitted the required parameter `path`; `limit` expects number but received string');
+  });
+
+  it('prefers the error issues over the schema diff', async () => {
+    const error = invalidToolInputError('readFile', {limit: 20}, readFileSchema, {limit: 20});
+    const problem = await describeToolInputProblem({limit: 20}, 'readFile', error, schemaWithRequiredPath);
+    expect(problem).toBe('the input omitted the required parameter `path`');
+  });
+
+  it('returns undefined when neither strategy yields a diagnosis', async () => {
+    const error = new Error('AI_InvalidToolInputError: Invalid input for tool readFile');
+    expect(await describeToolInputProblem(undefined, 'readFile', error)).toBeUndefined();
+    expect(await describeToolInputProblem('not json', 'readFile', error, schemaWithRequiredPath)).toBeUndefined();
+    expect(await describeToolInputProblem({path: 'a.ts'}, 'readFile', error, async () => {
+      throw new Error('unknown tool');
+    })).toBeUndefined();
+    expect(await describeToolInputProblem({path: 'a.ts', limit: 3}, 'readFile', error, schemaWithRequiredPath)).toBeUndefined();
   });
 });

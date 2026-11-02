@@ -3,7 +3,7 @@ import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {projectInstructionsBlocks} from '../../src/config/contextFiles.js';
-import {estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, stepCacheMetrics, subagentTokenEstimate, abortableDelay} from '../../src/cli/commands/streaming/turnRuntime.js';
+import {estimateInputBreakdown, extractUsage, rememberContextFilesFromToolOutput, responseCompletionMetrics, retryDelayMs, transientRetryDelayMs, stepCacheMetrics, subagentTokenEstimate, abortableDelay} from '../../src/cli/commands/streaming/turnRuntime.js';
 
 describe('turnRuntime', () => {
   it('caps retry delay growth', () => {
@@ -16,6 +16,12 @@ describe('turnRuntime', () => {
     expect(retryDelayMs(0, 250)).toBe(250);
     expect(retryDelayMs(1, 250)).toBe(500);
     expect(retryDelayMs(5, 250)).toBe(1000); // capped at 4× the base
+  });
+
+  it('jitters transient retries and respects bounded Retry-After', () => {
+    expect(transientRetryDelayMs(0, 1000, {}, () => 0)).toBe(500);
+    expect(transientRetryDelayMs(1, 1000, {responseHeaders: {'retry-after': '5'}}, () => 1)).toBe(5000);
+    expect(transientRetryDelayMs(1, 1000, {responseHeaders: {'retry-after': '999'}}, () => 0)).toBe(60000);
   });
 
   it('normalizes provider usage details', () => {

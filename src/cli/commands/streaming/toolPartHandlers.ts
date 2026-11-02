@@ -6,7 +6,7 @@ import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '..
 import {validationSummaryFromOutput} from '../../../core/agent/workState.js';
 import {toolResultSummary} from '../formatters.js';
 import {toolDiffFromResult, type NativeToolCall, type ToolGroupRenderer} from './toolGroupRenderer.js';
-import {isMalformedToolInputError} from './toolCallRecovery.js';
+import {isMalformedToolInputError, toolInputProblemFromError} from './toolCallRecovery.js';
 import {logEntry, rememberContextFilesFromToolOutput, subagentTokenEstimate} from './turnRuntime.js';
 import type {StreamCallbacks} from '../streaming.js';
 import type {AttemptSetup} from './attemptSetup.js';
@@ -82,7 +82,10 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
   // the completion gates; a failed edit/write stays a hard tool failure even
   // when an earlier check also failed.
   loopState.lastFailedToolWasValidation = !ok && toolName === 'shell' && validationSummaryFromOutput(part.output) != null;
-  if (ok && part.toolName === loopState.unresolvedMalformedToolName) loopState.unresolvedMalformedToolName = undefined;
+  if (ok && part.toolName === loopState.unresolvedMalformedToolName) {
+    loopState.unresolvedMalformedToolName = undefined;
+    loopState.unresolvedMalformedToolProblem = undefined;
+  }
   const finish: NativeToolFinish = {toolCall, success: ok, output: part.output, durationMs: Date.now() - startedAt};
   const item = toolDisplay.ensureToolItem(toolCall);
   item.status = ok ? 'success' : 'error';
@@ -116,6 +119,14 @@ export function handleToolErrorPart(deps: ToolPartHandlerDeps, part: AttemptStre
   loopState.lastToolOk = false;
   loopState.lastFailedToolWasValidation = false;
   if (isMalformedToolInputError(part.error)) {
+    // The repair hook already stored a schema-aware diagnosis for this call;
+    // this streamed-part path only sees the error, so derive from its Zod
+    // issues when possible and keep the hook's diagnosis otherwise.
+    const problem = toolInputProblemFromError(part.error);
+    if (problem != null || part.toolName !== loopState.unresolvedMalformedToolName) {
+      loopState.pendingMalformedToolProblem = problem;
+      loopState.unresolvedMalformedToolProblem = problem;
+    }
     loopState.pendingMalformedToolName = toolName;
     loopState.unresolvedMalformedToolName = toolName;
   }

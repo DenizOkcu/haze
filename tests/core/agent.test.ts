@@ -136,6 +136,7 @@ describe('agent provider error classification', () => {
     expect(isRetryableModelError(new Error('network connection lost'))).toBe(true);
     expect(isRetryableModelError(new TypeError('terminated'))).toBe(true);
     expect(isRetryableModelError(new Error('insufficient quota'))).toBe(false);
+    expect(isRetryableModelError(new Error('429 Daily allowance exhausted'))).toBe(false);
     expect(isRetryableModelError(new Error('invalid api key'))).toBe(false);
     expect(isRetryableModelError(new Error('maximum context length exceeded'))).toBe(false);
   });

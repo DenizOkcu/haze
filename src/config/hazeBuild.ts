@@ -8,23 +8,27 @@ export const hazeBuildManifestSchema = z.object({
   schemaVersion: z.literal(1),
   provider: z.literal(HAZE_BUILD_PROVIDER),
   model: z.literal(HAZE_BUILD_MODEL),
-  modelRepository: z.literal('cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit'),
-  modelRevision: z.literal('f1e8415c4f29508fe281da4e256df26573213bfd'),
-  templateSha256: z.literal('e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259'),
-  runtimeVersion: z.literal('0.32.0'),
+  modelRepository: z.string().min(1).max(256),
+  modelRevision: z.string().regex(/^[a-f0-9]{40}$/),
+  templateSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  runtimeVersion: z.string().regex(/^\d+\.\d+\.\d+$/),
   sourceRevision: z.string().regex(/^(?:[a-f0-9]{40}|unrecorded)$/),
-  scheduler: z.object({maxBatchedTokens: z.number().int().min(256).max(8192), gpuMemoryUtilization: z.number().min(0.5).max(0.95), cpuOffloadGb: z.number().min(0).max(12), eager: z.boolean()}),
+  scheduler: z.object({maxBatchedTokens: z.number().int().min(256).max(16384), gpuMemoryUtilization: z.number().min(0.5).max(0.95), cpuOffloadGb: z.number().min(0).max(12), eager: z.boolean()}),
   contextWindowTokens: z.number().int().min(4096).max(262144),
   maxOutputTokens: z.number().int().min(256).max(32768),
-  activeSequences: z.number().int().min(1).max(4),
+  activeSequences: z.number().int().min(1).max(8),
   servingProfile: z.enum(['quality', 'concurrent', 'full-context']),
   decodeProfile: z.enum(['baseline', 'ngram', 'mtp']),
   capabilities: z.object({text: z.literal(true), tools: z.literal(true), images: z.literal(false), thinking: z.literal('binary'), preserveThinking: z.literal(true)}),
 });
 export type HazeBuildManifest = z.infer<typeof hazeBuildManifestSchema>;
+const DEFAULT_DEPLOYMENT = {modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
+  modelRevision: 'f1e8415c4f29508fe281da4e256df26573213bfd',
+  templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259', runtimeVersion: '0.32.0'};
+
 
 /** Refreshed per attempt: a mutable endpoint alias must never imply stale capacity. */
-export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSettings, 'url' | 'key'>, fetchImpl: typeof fetch = fetch): Promise<HazeBuildManifest> {
+export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSettings, 'url' | 'key' | 'trustedDeployments'>, fetchImpl: typeof fetch = fetch): Promise<HazeBuildManifest> {
   if (!provider.key?.trim()) throw new Error('haze.build requires an API key. Configure it via /provider.');
   const url = new URL(provider.url);
   if (url.username || url.password || url.search || url.hash) throw new Error('haze.build requires a final API base URL without userinfo, query or fragment.');
@@ -77,6 +81,8 @@ export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSetti
   }
   const parsed = hazeBuildManifestSchema.safeParse(payload);
   if (!parsed.success) throw new Error('Incompatible haze.build manifest. Expected contract v1, haze0.1-coder-flash, text/tools and binary thinking with preservation.');
+  const identities = [DEFAULT_DEPLOYMENT, ...(provider.trustedDeployments ?? [])];
+  if (!identities.some(identity => identity.modelRepository === parsed.data.modelRepository && identity.modelRevision === parsed.data.modelRevision && identity.templateSha256 === parsed.data.templateSha256 && identity.runtimeVersion === parsed.data.runtimeVersion)) throw new Error('Incompatible haze.build manifest: deployment identity is not trusted.');
   if (parsed.data.maxOutputTokens >= parsed.data.contextWindowTokens) throw new Error('Invalid haze.build output/context envelope.');
   return parsed.data;
 }

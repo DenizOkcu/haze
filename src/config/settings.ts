@@ -29,6 +29,8 @@ export interface HazeProviderSettings {
    * endpoints whose own reasoning switch coerces unknown levels).
    */
   capabilities?: {images?: boolean; reasoningEffort?: boolean};
+  /** Additional exact deployment identities explicitly approved for this native provider. */
+  trustedDeployments?: Array<{modelRepository: string; modelRevision: string; templateSha256: string; runtimeVersion: string}>;
   /**
    * Optional per-model capacity metadata used for request budgeting (RH-005).
    * Absent entries fall back to a conservative default window. Preserved as
@@ -178,6 +180,7 @@ const providerSchema = z.object({
   models: z.array(z.string()),
   kind: z.enum(['openai-compatible', 'chatgpt-codex', 'haze-build']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
+  trustedDeployments: z.array(z.object({modelRepository: z.string().min(1).max(256), modelRevision: z.string().regex(/^[a-f0-9]{40}$/), templateSha256: z.string().regex(/^[a-f0-9]{64}$/), runtimeVersion: z.string().regex(/^\d+\.\d+\.\d+$/)})).max(8).optional(),
   modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
 }).passthrough();
 

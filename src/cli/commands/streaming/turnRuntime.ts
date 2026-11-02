@@ -24,6 +24,23 @@ export function retryDelayMs(attempt: number, baseDelayMs = DEFAULT_RETRY_BASE_D
   return Math.min(baseDelayMs * 4, baseDelayMs * 2 ** attempt);
 }
 
+/** Jitter transient retries and honor bounded provider guidance when present. */
+export function transientRetryDelayMs(attempt: number, baseDelayMs: number, error: unknown, random = Math.random, now = Date.now()): number {
+  const backoff = retryDelayMs(attempt, baseDelayMs);
+  let retryAfter = 0;
+  if (error && typeof error === 'object' && 'responseHeaders' in error) {
+    const headers = error.responseHeaders;
+    if (headers && typeof headers === 'object') {
+      const value = headers instanceof Headers ? headers.get('retry-after') : Object.entries(headers).find(([key]) => key.toLowerCase() === 'retry-after')?.[1];
+      if (typeof value === 'string') {
+        const seconds = Number(value);
+        retryAfter = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : Math.max(0, Date.parse(value) - now) || 0;
+      }
+    }
+  }
+  return Math.min(60_000, Math.max(retryAfter, Math.round(backoff * (0.5 + random() * 0.5))));
+}
+
 /** Append one entry to the per-turn LLM log when file logging is enabled; never blocks the turn. */
 export function logEntry(log: LlmLog | undefined, entry: LlmLogEntry) {
   if (log) void logAppend(log, entry).catch(() => undefined);

@@ -7,7 +7,7 @@ import {checkKindsOfIds, deriveValidationOutcome, redPairStatus, unresolvedFaile
 import {withoutRejectedAssistantFinal} from '../../../core/agent/requestAssembly.js';
 import {buildIncompleteGoalResume, taskCountsOf, type CarriedGoalEvidence} from './goalCheckpoint.js';
 import {formatSeconds} from '../../../utils/format.js';
-import {retryDelayMs} from './turnRuntime.js';
+import {retryDelayMs, transientRetryDelayMs} from './turnRuntime.js';
 import {salvageConversationToLastStep, type AttemptSalvage, type StreamStallGuard} from './stallRecovery.js';
 import {formatIdleMinutes} from '../../../utils/format.js';
 import type {TurnAbortCause} from './abortCause.js';
@@ -109,7 +109,7 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const readiness = assessCompletionReadiness(turnState, completionEvidence);
   const classification: TerminalClassification = classifyTerminalOutcome(turnState, completionEvidence);
   const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, lastFailedToolWasValidation: stream.lastFailedToolWasValidation, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, requiresTaskLedger: turnState.requiresTaskLedger, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
-  if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated. The requested work is incomplete.`});
+  if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated${stream.unresolvedMalformedToolProblem ? ` — ${stream.unresolvedMalformedToolProblem}` : ''}. The requested work is incomplete.`});
   goal.phase = 'done';
 
   // Non-error overflow recovery (Pillar 1.2/1.4): a silent overflow completed
@@ -323,7 +323,7 @@ export function handleAttemptFailure(deps: AttemptFailureDeps): AgentAttemptResu
   // Transient model errors share the bounded retry pool with idle-stream
   // stalls, so a turn can never retry more than its configured total.
   if (retryAttempt < maxRetries && isRetryableModelError(error)) {
-    const delay = retryDelayMs(retryAttempt, retryBaseDelayMs);
+    const delay = transientRetryDelayMs(retryAttempt, retryBaseDelayMs, error);
     callbacks.onEvent?.(agentEvent({type: 'retry', attempt: retryAttempt + 1, maxAttempts: maxRetries, delayMs: delay, error: text}));
     callbacks.addMessage({role: 'system', text: `Transient model error; retrying attempt ${retryAttempt + 1}/${maxRetries} in ${formatSeconds(delay)}: ${text}`});
     return {status: 'failed', retry: {attempt: retryAttempt + 1, delayMs: delay}};
