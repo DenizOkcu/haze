@@ -233,7 +233,17 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
   if (requested) {
     const resolved = resolveModelSelector(input.settings, requested);
     if (resolved.status !== 'found') return {status: resolved.status, message: resolved.status === 'ambiguous' ? `Worker model ${requested} is ambiguous; use provider:model.` : `Worker model ${requested} is not configured. Configure it via /provider or remove subagents.workerModel.`};
-    const deployment = resolved.provider.kind === 'haze-build' ? await discoverHazeBuildManifest(resolved.provider) : undefined;
+    // The active deployment was fetched and validated for this attempt. An
+    // explicit worker selecting that same provider/model can reuse it rather
+    // than making a second network round trip; different endpoints still refresh.
+    const sameDeployment = resolved.provider.kind === 'haze-build'
+      && input.active.config.deployment
+      && resolved.provider.name === input.active.config.providerName
+      && resolved.provider.url === input.active.config.baseURL
+      && resolved.model === input.active.config.modelName;
+    const deployment = resolved.provider.kind === 'haze-build'
+      ? sameDeployment ? input.active.config.deployment : await discoverHazeBuildManifest(resolved.provider)
+      : undefined;
     if (deployment && resolved.model !== deployment.model) return {status: 'missing', message: `haze.build currently serves ${deployment.model}.`};
     selected = runtimeForSelection(input.settings, {provider: resolved.provider, model: resolved.model}, input.cwd, undefined, undefined, deployment);
   }

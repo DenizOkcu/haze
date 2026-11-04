@@ -22,7 +22,10 @@ export const hazeBuildManifestSchema = z.object({
   capabilities: z.object({text: z.literal(true), tools: z.literal(true), images: z.literal(false), thinking: z.literal('binary'), preserveThinking: z.literal(true)}),
 });
 export type HazeBuildManifest = z.infer<typeof hazeBuildManifestSchema>;
-const DEFAULT_DEPLOYMENTS = [{modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8',
+const DEFAULT_DEPLOYMENTS = [{modelRepository: 'cyankiwi/Ornith-1.5-35B-A3B-AWQ-INT4',
+  modelRevision: '8afa232234a67f5bce4567982541a99688ac5137',
+  templateSha256: '182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e', runtimeVersion: '0.32.0'},
+{modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8',
   modelRevision: 'b93dbd8128d3d2e6655b8570c992de97fc8ece6e',
   templateSha256: '182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e', runtimeVersion: '0.32.0'},
 {modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',

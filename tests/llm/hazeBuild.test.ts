@@ -17,7 +17,7 @@ import {fallbackProviderCapabilities} from '../../src/core/subagent/contracts.js
 vi.mock('../../src/config/paths.js', () => ({HAZE_DIR: `/tmp/haze-native-test-home-${process.pid}`, GLOBAL_SKILLS_DIR: `/tmp/haze-native-test-home-${process.pid}/skills`}));
 
 const descriptor = {schemaVersion: 1, provider: 'haze.build', model: HAZE_BUILD_MODEL,
-  modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8', modelRevision: 'b93dbd8128d3d2e6655b8570c992de97fc8ece6e',
+  modelRepository: 'cyankiwi/Ornith-1.5-35B-A3B-AWQ-INT4', modelRevision: '8afa232234a67f5bce4567982541a99688ac5137',
   templateSha256: '182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e', runtimeVersion: '0.32.0',
   sourceRevision: '0'.repeat(40), scheduler: {maxBatchedTokens: 2048, gpuMemoryUtilization: 0.92, cpuOffloadGb: 0, eager: false},
   contextWindowTokens: 65536, maxOutputTokens: 16384, activeSequences: 3,
@@ -34,8 +34,10 @@ const sse = (data: string) => {
 afterEach(() => {vi.unstubAllGlobals(); vi.restoreAllMocks();});
 
 describe('native haze.build contract and transport', () => {
-  it('trusts the released Ornith identity and the previous Qwen identity without local overrides', async () => {
+  it('trusts the pinned Ornith AWQ, previous FP8 and Qwen identities without local overrides', async () => {
     await expect(discoverHazeBuildManifest(provider, async () => Response.json(descriptor))).resolves.toMatchObject({modelRepository: descriptor.modelRepository});
+    const fp8 = {...descriptor, modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8', modelRevision: 'b93dbd8128d3d2e6655b8570c992de97fc8ece6e'};
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json(fp8))).resolves.toMatchObject({modelRepository: fp8.modelRepository});
     const qwen = {...descriptor, modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
       modelRevision: 'f1e8415c4f29508fe281da4e256df26573213bfd',
       templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259'};
@@ -60,6 +62,23 @@ describe('native haze.build contract and transport', () => {
 
   it('accepts supported larger scheduler settings', async () => {
     await expect(discoverHazeBuildManifest(provider, async () => Response.json({...descriptor, activeSequences: 8, scheduler: {...descriptor.scheduler, maxBatchedTokens: 16384}}))).resolves.toMatchObject({activeSequences: 8});
+  });
+
+  it('reuses the current manifest for a same-provider worker and refreshes distinct deployments', async () => {
+    const fetcher = vi.fn(async () => Response.json(descriptor));
+    vi.stubGlobal('fetch', fetcher);
+    const other = {...provider, name: 'other', url: 'https://other.test/v1'};
+    const input = {...settings, providers: [provider, other]};
+    const active = (await modelWithConfig(undefined, input))!;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const same = await resolveWorkerRuntime({active, settings: input, selector: `${provider.name}:${HAZE_BUILD_MODEL}`});
+    expect(same).toMatchObject({status: 'found'});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const distinct = await resolveWorkerRuntime({active, settings: input, selector: `${other.name}:${HAZE_BUILD_MODEL}`});
+    expect(distinct.status).toBe('found');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await modelWithConfig(undefined, input);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   it('accepts only explicitly trusted alternate deployment identities', async () => {
