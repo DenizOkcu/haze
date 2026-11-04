@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.5
+## What's new in 1.7.8
+
+This release improves compatibility with updated model deployments and preserves explicitly configured deployment trust.
+
+### Changes in 1.7.5
 
 Improved recovery from malformed tool calls and more resilient retry handling for temporary provider errors.
 

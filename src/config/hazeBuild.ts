@@ -3,11 +3,11 @@ import {assertCredentialedEndpointSecure} from './endpointSecurity.js';
 import type {HazeProviderSettings} from './settings.js';
 
 export const HAZE_BUILD_PROVIDER = 'haze.build';
-export const HAZE_BUILD_MODEL = 'haze0.1-coder-flash';
+export const HAZE_BUILD_MODEL = 'haze1.5-builder-flash';
 export const hazeBuildManifestSchema = z.object({
   schemaVersion: z.literal(1),
   provider: z.literal(HAZE_BUILD_PROVIDER),
-  model: z.literal(HAZE_BUILD_MODEL),
+  model: z.enum([HAZE_BUILD_MODEL, 'haze0.1-coder-flash']),
   modelRepository: z.string().min(1).max(256),
   modelRevision: z.string().regex(/^[a-f0-9]{40}$/),
   templateSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -18,13 +18,16 @@ export const hazeBuildManifestSchema = z.object({
   maxOutputTokens: z.number().int().min(256).max(32768),
   activeSequences: z.number().int().min(1).max(8),
   servingProfile: z.enum(['quality', 'concurrent', 'full-context']),
-  decodeProfile: z.enum(['baseline', 'ngram', 'mtp']),
+  decodeProfile: z.enum(['baseline', 'ngram', 'mtp', 'dflash']),
   capabilities: z.object({text: z.literal(true), tools: z.literal(true), images: z.literal(false), thinking: z.literal('binary'), preserveThinking: z.literal(true)}),
 });
 export type HazeBuildManifest = z.infer<typeof hazeBuildManifestSchema>;
-const DEFAULT_DEPLOYMENT = {modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
+const DEFAULT_DEPLOYMENTS = [{modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8',
+  modelRevision: 'b93dbd8128d3d2e6655b8570c992de97fc8ece6e',
+  templateSha256: '182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e', runtimeVersion: '0.32.0'},
+{modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
   modelRevision: 'f1e8415c4f29508fe281da4e256df26573213bfd',
-  templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259', runtimeVersion: '0.32.0'};
+  templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259', runtimeVersion: '0.32.0'}];
 
 
 /** Refreshed per attempt: a mutable endpoint alias must never imply stale capacity. */
@@ -80,8 +83,8 @@ export async function discoverHazeBuildManifest(provider: Pick<HazeProviderSetti
     throw new Error('haze.build manifest is not valid JSON; deploy the compatible server or choose an ordinary OpenAI-compatible provider.');
   }
   const parsed = hazeBuildManifestSchema.safeParse(payload);
-  if (!parsed.success) throw new Error('Incompatible haze.build manifest. Expected contract v1, haze0.1-coder-flash, text/tools and binary thinking with preservation.');
-  const identities = [DEFAULT_DEPLOYMENT, ...(provider.trustedDeployments ?? [])];
+  if (!parsed.success) throw new Error('Incompatible haze.build manifest. Expected contract v1, haze1.5-builder-flash, text/tools and binary thinking with preservation.');
+  const identities = [...DEFAULT_DEPLOYMENTS, ...(provider.trustedDeployments ?? [])];
   if (!identities.some(identity => identity.modelRepository === parsed.data.modelRepository && identity.modelRevision === parsed.data.modelRevision && identity.templateSha256 === parsed.data.templateSha256 && identity.runtimeVersion === parsed.data.runtimeVersion)) throw new Error('Incompatible haze.build manifest: deployment identity is not trusted.');
   if (parsed.data.maxOutputTokens >= parsed.data.contextWindowTokens) throw new Error('Invalid haze.build output/context envelope.');
   return parsed.data;

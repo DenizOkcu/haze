@@ -1,6 +1,6 @@
 # src/utils/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.5 release.
+Last updated: 2026-10-31 for the 1.7.8 release.
 
 Small shared utilities.
 

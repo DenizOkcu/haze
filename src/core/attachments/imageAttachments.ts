@@ -310,7 +310,7 @@ export interface ImageCapableProviderLike {
  */
 export function imageCapabilityError(provider: ImageCapableProviderLike | undefined): string | undefined {
   if (!provider) return 'No provider is configured. Run /provider to add one, then attach the image again.';
-  if (provider.kind === 'haze-build') return 'haze.build haze0.1-coder-flash is text/tools only; images are not supported.';
+  if (provider.kind === 'haze-build') return 'haze.build haze1.5-builder-flash is text/tools only; images are not supported.';
   if (provider.capabilities?.images === true) return undefined;
   return `Provider '${provider.name}' is not marked image-capable. Enable image input for it via /provider, or switch models.`;
 }

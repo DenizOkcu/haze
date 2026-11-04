@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.8 - 2026-11-04
+
+### Changed
+
+- Update compatibility with current model deployments while preserving support for earlier deployments.
+- Preserve explicitly configured trusted deployment identities.
+
 ## 1.7.5 - 2026-11-02
 
 ### Changed

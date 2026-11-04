@@ -17,8 +17,8 @@ import {fallbackProviderCapabilities} from '../../src/core/subagent/contracts.js
 vi.mock('../../src/config/paths.js', () => ({HAZE_DIR: `/tmp/haze-native-test-home-${process.pid}`, GLOBAL_SKILLS_DIR: `/tmp/haze-native-test-home-${process.pid}/skills`}));
 
 const descriptor = {schemaVersion: 1, provider: 'haze.build', model: HAZE_BUILD_MODEL,
-  modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', modelRevision: 'f1e8415c4f29508fe281da4e256df26573213bfd',
-  templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259', runtimeVersion: '0.32.0',
+  modelRepository: 'ornith-ai/Ornith-1.5-35B-A3B-FP8', modelRevision: 'b93dbd8128d3d2e6655b8570c992de97fc8ece6e',
+  templateSha256: '182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e', runtimeVersion: '0.32.0',
   sourceRevision: '0'.repeat(40), scheduler: {maxBatchedTokens: 2048, gpuMemoryUtilization: 0.92, cpuOffloadGb: 0, eager: false},
   contextWindowTokens: 65536, maxOutputTokens: 16384, activeSequences: 3,
   servingProfile: 'concurrent', decodeProfile: 'baseline',
@@ -34,6 +34,14 @@ const sse = (data: string) => {
 afterEach(() => {vi.unstubAllGlobals(); vi.restoreAllMocks();});
 
 describe('native haze.build contract and transport', () => {
+  it('trusts the released Ornith identity and the previous Qwen identity without local overrides', async () => {
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json(descriptor))).resolves.toMatchObject({modelRepository: descriptor.modelRepository});
+    const qwen = {...descriptor, modelRepository: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
+      modelRevision: 'f1e8415c4f29508fe281da4e256df26573213bfd',
+      templateSha256: 'e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259'};
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json(qwen))).resolves.toMatchObject({modelRepository: qwen.modelRepository});
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json({...descriptor, templateSha256: 'b'.repeat(64)}))).rejects.toThrow('not trusted');
+  });
   it('refreshes live capacity, bounds settings and carries limits to workers', async () => {
     let context = 65536;
     const fetcher = vi.fn(async () => Response.json({...descriptor, contextWindowTokens: context}));
@@ -59,7 +67,13 @@ describe('native haze.build contract and transport', () => {
     await expect(discoverHazeBuildManifest(provider, async () => Response.json(candidate))).rejects.toThrow('not trusted');
     const trusted = {modelRepository: candidate.modelRepository, modelRevision: candidate.modelRevision, templateSha256: candidate.templateSha256, runtimeVersion: candidate.runtimeVersion};
     await expect(discoverHazeBuildManifest({...provider, trustedDeployments: [trusted]}, async () => Response.json(candidate))).resolves.toMatchObject({runtimeVersion: '0.33.0'});
+    vi.stubGlobal('fetch', async () => Response.json(candidate));
+    await expect(modelWithConfig(undefined, {...settings, providers: [{...provider, trustedDeployments: [trusted]}]})).resolves.toBeDefined();
     await expect(discoverHazeBuildManifest({...provider, trustedDeployments: [trusted]}, async () => Response.json({...candidate, templateSha256: 'b'.repeat(64)}))).rejects.toThrow('not trusted');
+  });
+
+  it('accepts the previous served model name for existing deployments', async () => {
+    await expect(discoverHazeBuildManifest(provider, async () => Response.json({...descriptor, model: 'haze0.1-coder-flash'}))).resolves.toMatchObject({model: 'haze0.1-coder-flash'});
   });
 
   it('rejects incompatible or oversized manifests and invalid transport before sending a key', async () => {

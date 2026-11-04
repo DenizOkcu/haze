@@ -35,6 +35,7 @@ function normalizeProvider(provider: HazeProviderSettings, fallbackModel?: strin
     ...(provider.kind ? {kind: provider.kind} : {}),
     ...(capabilities ? {capabilities} : {}),
     ...(provider.modelLimits ? {modelLimits: provider.modelLimits} : {}),
+    ...(provider.trustedDeployments ? {trustedDeployments: provider.trustedDeployments} : {}),
     models: normalizeModels(provider.models, fallbackModel),
   };
 }

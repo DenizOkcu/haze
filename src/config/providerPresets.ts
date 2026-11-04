@@ -88,7 +88,7 @@ interface ProviderPresetDefinition {
 
 const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
   {id: 'haze.build', name: 'haze.build', kind: 'haze-build',
-    baseUrl: 'https://llm.haze.build/v1', category: 'cloud', models: ['haze0.1-coder-flash'],
+    baseUrl: 'https://llm.haze.build/v1', category: 'cloud', models: ['haze1.5-builder-flash'],
     apiKeyHint: 'your deployed haze.build inference key'},
   // ── Cloud providers (API key required) ──────────────────────────────
   {

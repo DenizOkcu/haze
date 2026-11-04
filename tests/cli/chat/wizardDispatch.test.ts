@@ -320,7 +320,7 @@ describe('wizardDispatch provider creation discovery', () => {
     await wizard.dispatch('providerAddPreset', 'haze.build');
     expect(deps.wizard.providerDraft).toMatchObject({name: 'haze.build', url: 'https://llm.haze.build/v1', kind: 'haze-build'});
     expect(deps.setMode).toHaveBeenLastCalledWith('providerAddKey');
-    expect(deps.wizard.suggestedModels).toContain('haze0.1-coder-flash');
+    expect(deps.wizard.suggestedModels).toContain('haze1.5-builder-flash');
   });
 
   it('seeds suggested models for cloud presets before the key step', async () => {
