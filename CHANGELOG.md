@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.9 - 2026-11-04
+
+### Changed
+
+- Avoid redundant deployment discovery when a worker uses the active provider and model.
+- Update compatibility with a new pinned model deployment.
+
 ## 1.7.8 - 2026-11-04
 
 ### Changed
