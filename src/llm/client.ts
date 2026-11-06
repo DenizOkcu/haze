@@ -274,7 +274,7 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
     const selection = {provider: resolved.provider, model: resolved.model};
     selected = runtimeForSelection(input.settings, selection, input.cwd, undefined, undefined, deployment, await refreshLocalLimits(selection, input.settings));
   }
-  return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config), contextWindowTokens: selected.config.contextWindowTokens, maxOutputTokens: selected.config.maxOutputTokens, ...(selected.config.deployment ? {nativeMaxConcurrency: Math.min(2, selected.config.deployment.activeSequences)} : {})}};
+  return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config), contextWindowTokens: selected.config.contextWindowTokens, maxOutputTokens: selected.config.maxOutputTokens, ...(selected.config.deployment ? {nativeMaxConcurrency: selected.config.deployment.activeSequences} : {})}};
 }
 
 export function providerRequestSettings(config: ModelRuntimeConfig): ProviderRequestOptions {

@@ -110,7 +110,6 @@ export async function assembleRequestContext(input: {
   const usesNativeWorker = nativeWorker?.status === 'found' ? nativeWorker.provider.kind === 'haze-build' : !workerSelector && input.modelRuntime?.config.providerKind === 'haze-build';
   const profileName = input.subagentOverrides?.profile ?? settings.subagents?.defaultProfile ?? (usesNativeWorker ? 'haze-build' : undefined);
   let profile = resolveExecutionProfile(profileName, settings.subagents?.profiles, input.subagentOverrides?.maxConcurrency);
-  if (profile && usesNativeWorker) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, 2)};
   let blockedReason = profile ? undefined : `Unknown subagent profile ${profileName}. Configure subagents.profiles or select a built-in profile.`;
   let workerRuntime: WorkerRuntime | undefined;
   if (input.modelRuntime) {
@@ -123,12 +122,15 @@ export async function assembleRequestContext(input: {
   workerRuntime ??= {
     ...fallbackWorkerRuntime(input.model, input.modelRuntime?.selector, input.modelRuntime?.config.providerName),
     capabilities: input.modelRuntime?.config.capabilities ?? fallbackProviderCapabilities(),
-    // The fallback path must honour the live deployment cap too, or a
-    // single-sequence (quality) deployment could still admit two workers.
-    ...(input.modelRuntime?.config.deployment ? {nativeMaxConcurrency: Math.min(2, input.modelRuntime.config.deployment.activeSequences)} : {}),
+    ...(input.modelRuntime?.config.deployment ? {nativeMaxConcurrency: input.modelRuntime.config.deployment.activeSequences} : {}),
   };
 
-  if (profile && workerRuntime.nativeMaxConcurrency) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, workerRuntime.nativeMaxConcurrency)};
+  // The deployment manifest is authoritative for this client's native-worker
+  // allowance: raise it and clients follow; a future multi-tenant server
+  // lowers it and every client backs off without a release. Deployments that
+  // advertise nothing stay conservative at 2.
+  const nativeWorkerCap = workerRuntime.nativeMaxConcurrency ?? (usesNativeWorker ? 2 : undefined);
+  if (profile && nativeWorkerCap) profile = {...profile, maxConcurrency: Math.min(profile.maxConcurrency, nativeWorkerCap)};
   const executionScope = input.executionScope ?? {
     mutationPolicy: new WorkspaceMutationPolicy(),
     coordinator: new SubagentCoordinator(profile ?? resolveExecutionProfile(undefined, undefined)!, input.onSubagentEvent),

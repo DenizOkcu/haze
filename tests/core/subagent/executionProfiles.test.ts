@@ -6,6 +6,9 @@ describe('subagent execution profiles', () => {
     expect(resolveExecutionProfile(undefined, undefined)).toEqual(COMPATIBILITY_PROFILE);
     expect(BUILT_IN_SUBAGENT_PROFILES['local-safe']?.maxConcurrency).toBe(1);
     expect(BUILT_IN_SUBAGENT_PROFILES['cloud-fast']?.maxConcurrency).toBe(5);
+    // Ceiling only: the effective native fleet size is the deployment
+    // manifest's allowance clamped in request assembly, not this profile.
+    expect(BUILT_IN_SUBAGENT_PROFILES['haze-build']?.maxConcurrency).toBe(5);
   });
 
   it('merges bounded custom fields and rejects unknown explicit profiles', () => {

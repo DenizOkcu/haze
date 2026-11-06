@@ -56,7 +56,11 @@ describe('native haze.build contract and transport', () => {
     context = 131072;
     expect((await modelWithConfig(undefined, input))!.config.contextWindowTokens).toBe(131072);
     const worker = await resolveWorkerRuntime({active: first, settings});
-    expect(worker).toMatchObject({status: 'found', runtime: {contextWindowTokens: 65536, maxOutputTokens: 16384, nativeMaxConcurrency: 2}});
+    // The manifest's sequence count is the client's worker allowance verbatim:
+    // this deployment advertises 3 (descriptor fixture), a single-sequence
+    // deployment below advertises 1, and a future multi-tenant server can
+    // lower the number for every client without a client release.
+    expect(worker).toMatchObject({status: 'found', runtime: {contextWindowTokens: 65536, maxOutputTokens: 16384, nativeMaxConcurrency: 3}});
     expect(fetcher.mock.calls[0][1]).toMatchObject({redirect: 'error'});
   });
 

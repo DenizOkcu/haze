@@ -130,4 +130,23 @@ describe('assembleRequestContext', () => {
     expect(mocks.loadMcpTools).not.toHaveBeenCalled();
     expect(result.loadedMcp).toBeUndefined();
   });
+
+  it('clamps native fleet concurrency to the deployment allowance', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+    const runtime = (activeSequences?: number) => ({selector: {provider: 'haze.build', model: 'haze1.5-builder-flash'}, config: {providerKind: 'haze-build', providerName: 'haze.build', modelName: 'haze1.5-builder-flash', reasoningPolicy: {effective: 'disabled'}, capabilities: {}, ...(activeSequences != null ? {deployment: {activeSequences}} : {})}}) as unknown as Parameters<typeof assembleRequestContext>[0]['modelRuntime'];
+    const fleetCap = async (activeSequences?: number) => {
+      const assembled = await assembleRequestContext({contextFiles: [], model: fakeModel, modelRuntime: runtime(activeSequences)});
+      const profile = (assembled.executionScope.coordinator as unknown as {profile: {maxConcurrency: number}}).profile;
+      return profile.maxConcurrency;
+    };
+    // The manifest is authoritative: raise it and the fleet follows.
+    expect(await fleetCap(3)).toBe(3);
+    expect(await fleetCap(1)).toBe(1);
+    // Deployments that advertise nothing stay conservative at two workers so
+    // a future multi-tenant server only ever needs to lower the value.
+    expect(await fleetCap()).toBe(2);
+  });
 });
