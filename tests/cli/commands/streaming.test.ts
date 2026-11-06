@@ -277,10 +277,10 @@ async function loadStreaming(config: MocksConfig) {
     return {
       ...actual,
       ToolLoopAgent: FakeToolLoopAgent,
-      generateText: async (args: unknown) => {
+      streamText: (args: unknown) => {
         mocks.generateTextCalls.push(args);
         if (mocks.generateTextFails) throw new Error('summarizer unavailable');
-        return {text: 'MODEL SUMMARY: goal preserved, next action recorded.', usage: {}};
+        return {text: Promise.resolve('MODEL SUMMARY: goal preserved, next action recorded.'), usage: Promise.resolve({})};
       },
       isStepCount: (n: number) => ({steps: n}),
     };

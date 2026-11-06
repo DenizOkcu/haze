@@ -1,12 +1,13 @@
 import type {ModelMessage} from 'ai';
-import {generateText} from 'ai';
+import {streamText} from 'ai';
+import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, splitForCompaction} from '../../core/agent/compaction.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS} from '../../core/agent/budgets.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
-import {modelWithConfig} from '../../llm/client.js';
+import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
 import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession, type SessionModelSelection} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message} from '../commands/streaming.js';
@@ -35,6 +36,7 @@ export interface SessionLifecycleDeps {
   debug: boolean;
   contextFiles: () => ContextFile[];
   modelSelection?: () => SessionModelSelection | undefined;
+  reasoningByModel?: () => Record<string, StoredReasoningSetting> | undefined;
   onModelSelection?: (selection: SessionModelSelection | undefined) => void;
   sessionRef: {current: HazeSession | undefined};
   sessionRecorder: () => SessionRecorder | undefined;
@@ -273,10 +275,13 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       const sessionAtStart = deps.sessionRef.current;
       try {
         const selection = deps.modelSelection?.();
-        const runtime = await modelWithConfig(selection ? {modelSelector: `${selection.provider}:${selection.model}`} : undefined);
+        const runtime = await modelWithConfig({...(selection ? {modelSelector: `${selection.provider}:${selection.model}`} : {}), reasoningByModel: deps.reasoningByModel?.()});
         if (!runtime?.model) throw new Error('no model provider configured');
-        const summarization = await generateText({
+        const providerSettings = providerRequestSettings(runtime.config);
+        delete providerSettings.omitMaxOutputTokens;
+        const summarization = streamText({
           model: runtime.model,
+          ...providerSettings,
           prompt: buildLlmCompactionPrompt({older: split.older, instructions}),
           maxOutputTokens: COMPACTION_LLM_MAX_OUTPUT_TOKENS,
           abortSignal: AbortSignal.timeout(COMPACT_SUMMARY_TIMEOUT_MS),
@@ -289,7 +294,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
           deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the conversation changed while the summary was being written. Run /compact again.'}]);
           return false;
         }
-        const summaryText = summarization.text.trim();
+        const summaryText = (await summarization.text).trim();
         if (!summaryText) throw new Error('model returned an empty summary');
         const result = compactModelMessagesWithSummary(messages, {summaryText, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, instructions, workState: deps.workStateRef.current});
         if (!result.compacted) throw new Error('nothing older to compact');

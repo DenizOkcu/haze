@@ -67,16 +67,17 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
     summarizer.calls = 0;
     vi.resetModules();
     vi.doMock('../../../src/llm/client.js', () => ({
+      providerRequestSettings: () => ({}),
       modelWithConfig: async () => ({model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}}),
     }));
     vi.doMock('ai', async () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
-      return {...actual, generateText: async (config: {prompt?: string}) => {
+      return {...actual, streamText: (config: {prompt?: string}) => ({text: (async () => {
         summarizer.calls++;
         if (!config.prompt?.includes('<older_conversation>')) throw new Error('unexpected generateText call');
         if (summarizer.mode === 'fail') throw new Error('provider down');
-        return {text: 'THE MODEL SUMMARY'};
-      }};
+        return 'THE MODEL SUMMARY';
+      })()})};
     });
   });
 

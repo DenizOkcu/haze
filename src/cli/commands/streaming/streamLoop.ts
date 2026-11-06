@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {ToolLoopAgent, generateText, isStepCount, type ModelMessage} from 'ai';
+import {ToolLoopAgent, streamText, isStepCount, type ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {contextTokensFromUsage, estimateConversationTokens, estimateValueTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
@@ -463,29 +463,30 @@ async function compactAtEpochBoundary(deps: AttemptStreamDeps, providerMessages:
       previousSummary: extractExistingCompactionSummary(providerMessages),
       splitTurn: split.splitTurn,
     });
-    const summarization = await generateText({
+    const summarization = streamText({
       model: setup.runtime.model,
       prompt,
-      ...(setup.runtime.config.providerKind === 'haze-build' ? {...setup.providerSettings, reasoning: 'none' as const} : {}),
+      ...setup.providerSettings,
       maxOutputTokens: Math.min(COMPACTION_LLM_MAX_OUTPUT_TOKENS, setup.runtime.config.maxOutputTokens ?? COMPACTION_LLM_MAX_OUTPUT_TOKENS),
       abortSignal: abortController.signal,
     });
-    const summaryText = summarization.text.trim();
+    const summaryText = (await summarization.text).trim();
+    const usage = await summarization.usage;
     if (!summaryText) throw new Error('model returned an empty summary');
     const result = compactModelMessagesWithSummary(providerMessages, {summaryText, tokenBudget, workState: goal});
     if (!result.compacted) throw new Error('nothing older to compact');
     callbacks.onEvent?.(agentEvent({type: 'compaction_end', reason: 'threshold', method: 'llm', compacted: true, olderCount: result.olderCount, keptCount: result.keptCount}));
     callbacks.recordTokenUsage?.({
-      inputTokens: summarization.usage?.inputTokens,
-      outputTokens: summarization.usage?.outputTokens,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
       systemPrompt: 0,
       messages: 0,
       toolSchemas: 0,
       outputEstimate: 0,
-      cacheReadTokens: summarization.usage?.inputTokenDetails?.cacheReadTokens ?? 0,
-      cacheWriteTokens: summarization.usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
+      cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens ?? 0,
+      cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens ?? 0,
       noCacheTokens: 0,
-      reasoningTokens: summarization.usage?.outputTokenDetails?.reasoningTokens ?? 0,
+      reasoningTokens: usage?.outputTokenDetails?.reasoningTokens ?? 0,
       logicalInputEstimate: 0,
       effectiveNonCachedInput: undefined,
     });
