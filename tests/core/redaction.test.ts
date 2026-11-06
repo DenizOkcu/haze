@@ -22,6 +22,14 @@ describe('redactSecrets', () => {
     expect(redactSecrets(`Authorization: Bearer ${jwt}`)).toBe('Authorization: Bearer [redacted:jwt]');
   });
 
+  it('masks GCP, GitHub fine-grained, OAuth client and Stripe restricted keys', () => {
+    // Literal tokens split across concatenation so scanners don't flag test fixtures.
+    expect(redactSecrets('gcp AIzaSy' + 'A1234567890abcdefghijklmnopqrstuvwx end')).toBe('gcp [redacted:gcp-api-key] end');
+    expect(redactSecrets('pat github_pat_11' + 'ABCDEFGHijklmnopqrstuv end')).toBe('pat [redacted:github-token] end');
+    expect(redactSecrets('secret GOCSPX-AbCdEf' + 'GhIjKlMnOpQrStUv end')).toBe('secret [redacted:oauth-client-secret] end');
+    expect(redactSecrets('key rk_live_' + '1234567890abcdefghijklmnop done')).toBe('key [redacted:stripe-key] done');
+  });
+
   it('leaves short or ordinary text untouched', () => {
     expect(redactSecrets('sk-short')).toBe('sk-short');
     expect(redactSecrets('the ski trip costs 250')).toBe('the ski trip costs 250');

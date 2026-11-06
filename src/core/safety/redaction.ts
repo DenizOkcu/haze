@@ -25,6 +25,14 @@ const SECRET_PATTERNS: SecretPattern[] = [
   {kind: 'slack-token', pattern: /xox[baprs]-[A-Za-z0-9-]{10,}/g},
   // JWTs (three base64url segments starting with a JSON header).
   {kind: 'jwt', pattern: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g},
+  // GitHub fine-grained / long-lived personal access tokens (github_pat_ prefix).
+  {kind: 'github-token', pattern: /github_pat_[A-Za-z0-9_]{20,}/g},
+  // GCP API keys (AIza prefix).
+  {kind: 'gcp-api-key', pattern: /AIza[0-9A-Za-z_-]{30,}/g},
+  // Google OAuth client secrets (GOCSPX prefix).
+  {kind: 'oauth-client-secret', pattern: /GOCSPX-[A-Za-z0-9_-]{20,}/g},
+  // Stripe restricted keys (rk_live_ / rk_test_ prefix).
+  {kind: 'stripe-key', pattern: /rk_(live|test)_[A-Za-z0-9]{20,}/g},
 ];
 
 /** Replace common secret token shapes in a string with `[redacted:<kind>]`. */
