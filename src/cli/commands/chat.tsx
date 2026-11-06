@@ -46,7 +46,7 @@ import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {contextFileSignatureMap, isPausedGoalRecoveryCommand, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
 import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
-import {hasRestrictedReasoningLevels, providerReasoningLevels} from '../../config/providerReasoning.js';
+import {reasoningLevelsForProvider} from '../../config/providerReasoning.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
@@ -331,6 +331,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     debug,
     contextFiles: () => contextFiles,
     modelSelection: currentModelSelection,
+    reasoningByModel: () => currentPromptSession().reasoningByModel,
     onModelSelection: selection => {
       settingsRef.current = {...settingsRef.current, ...(selection ?? defaultSelectionRef.current)};
       setSettingsRaw(settingsRef.current);
@@ -715,7 +716,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const reasoningSuffix = effectiveReasoning
     ? effectiveReasoning.level === undefined
       ? ' (no reasoning parameter)'
-      : activeSelection && hasRestrictedReasoningLevels(activeSelection.provider.url, activeSelection.model) && (activeSelection.provider.capabilities?.reasoningEffort === false || !(providerReasoningLevels(activeSelection.provider.url, activeSelection.model) ?? (activeSelection.provider.capabilities?.reasoningEffort ? [effectiveReasoning.level] : [])).includes(effectiveReasoning.level))
+      : activeSelection && !reasoningLevelsForProvider(activeSelection.provider, activeSelection.model).includes(effectiveReasoning.level)
         ? ' (provider default)'
       : ` (${effectiveReasoning.level})`
     : '';

@@ -209,7 +209,7 @@ describe('reasoningSuggestions', () => {
     expect(reasoningSuggestions(settings).map(item => item.value)).toEqual(['low', 'medium', 'high', 'unset', 'reset']);
   });
   it('lists every level plus unset/reset and marks the resolved active one', () => {
-    const suggestions = reasoningSuggestions({reasoning: 'medium'});
+    const suggestions = reasoningSuggestions({reasoning: 'medium', provider: 'custom', model: 'm', providers: [{name: 'custom', url: 'https://example.test/v1', models: ['m'], capabilities: {reasoningEffort: true}}]});
     expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'unset', 'reset']);
     expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
@@ -218,7 +218,7 @@ describe('reasoningSuggestions', () => {
   });
 
   it('marks the default level active when the setting is absent', () => {
-    const suggestions = reasoningSuggestions({});
+    const suggestions = reasoningSuggestions({provider: 'custom', model: 'm', providers: [{name: 'custom', url: 'https://example.test/v1', models: ['m'], capabilities: {reasoningEffort: true}}]});
     expect(suggestions.find(suggestion => suggestion.value === 'low')?.description).toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
   });

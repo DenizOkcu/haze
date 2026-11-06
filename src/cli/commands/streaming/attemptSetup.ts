@@ -125,7 +125,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // Observable requested-vs-effective reasoning policy (safe: level strings + reason only).
   const reasoningPolicy = runtime.config.reasoningPolicy;
   if (reasoningPolicy) callbacks.onEvent?.(agentEvent({type: 'reasoning_policy', requested: reasoningPolicy.requested, effective: reasoningPolicy.effective, reason: reasoningPolicy.reason}));
-  if (reasoningPolicy?.effective === 'disabled' && reasoningPolicy.reason.includes('does not support reasoning effort')) callbacks.addMessage({role: 'system', text: reasoningPolicy.reason});
+  if (reasoningPolicy?.effective === 'disabled' && reasoningPolicy.requested && (reasoningOverride || session?.reasoningByModel?.[runtime.selector] || turnSettings.reasoning)) callbacks.addMessage({role: 'system', text: `Reasoning ${reasoningPolicy.requested} was not applied: ${reasoningPolicy.reason}.`});
   // Make the context-budget guess observable: a stream event every turn
   // (headless consumers can gate on it), and — interactively — a system
   // message only when the built-in default was used for a model this session

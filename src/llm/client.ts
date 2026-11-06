@@ -1,15 +1,15 @@
 import {createOpenAI} from '@ai-sdk/openai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
+import {createOpenRouter} from '@openrouter/ai-sdk-provider';
 import {discoverHazeBuildManifest, type HazeBuildManifest} from '../config/hazeBuild.js';
 import {createHazeBuildModel} from './hazeBuild.js';
-import {isMistralApi} from '../config/mistralReasoning.js';
-import {providerOmitsReasoningEffort, providerReasoningLevels} from '../config/providerReasoning.js';
+import {isMistralApi, reasoningLevelsForProvider} from '../config/providerReasoning.js';
 import {mistralRequestBody} from './mistralReasoning.js';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {catalogLimitsFor} from '../config/modelCatalog.js';
 import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
-import {assertCredentialedEndpointSecure} from '../config/endpointSecurity.js';
+import {assertCredentialedEndpointSecure, isLoopbackHostname} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions} from '../core/providerContracts.js';
 import type {WorkerRuntime} from '../core/subagent/contracts.js';
 import {effectiveRequestedReasoning, isStoredReasoning, reasoningCallSetting, resolveAttemptReasoning, resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
@@ -53,8 +53,8 @@ const HAZE_TITLE = 'Haze';
 // static scanners cannot mistake a fixed placeholder for a shipped secret.
 const OAUTH_SDK_SENTINEL = `oauth-sentinel-${crypto.randomUUID()}`;
 
-function isOpenRouter(providerName: string, baseURL: string): boolean {
-  return providerName === 'openrouter' || /openrouter\.ai/i.test(baseURL);
+function isOpenRouter(_providerName: string, baseURL: string): boolean {
+  try { return new URL(baseURL).hostname.toLowerCase() === 'openrouter.ai'; } catch { return false; }
 }
 
 /** Groq Qwen requires parsed reasoning when tools are present. */
@@ -74,23 +74,17 @@ function openRouterHeaders(providerName: string, baseURL: string): Record<string
 }
 
 /** True when the endpoint is OpenAI's own API, not a gateway/local server speaking the compatible subset. */
-function isDirectOpenAi(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind']): boolean {
-  return providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
+function isDirectOpenAi(_providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind']): boolean {
+  try { return providerKind !== 'chatgpt-codex' && new URL(baseURL).hostname.toLowerCase() === 'api.openai.com'; } catch { return false; }
 }
 
-function capabilities(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind'], modelName: string, explicit?: HazeProviderSettings['capabilities']): ProviderCapabilities {
+function capabilities(provider: HazeProviderSettings, modelName: string): ProviderCapabilities {
+  const {name: providerName, url: baseURL, kind: providerKind} = provider;
   const directOpenAI = isDirectOpenAi(providerName, baseURL, providerKind);
   const openRouter = isOpenRouter(providerName, baseURL);
-  // Reasoning-effort support is explicit-first: a user override wins either
-  // way. Otherwise loopback/local inference servers (LM Studio, Ollama,
-  // llama.cpp) default to `false`: their own reasoning switches coerce
-  // unsupported levels — even `none` — to `on` (LM Studio), inverting the
-  // request, and subagent workers rely on `none` meaning off. Hosted
-  // OpenAI-compatible endpoints keep the SDK pass-through (`true`), except
-  // Mistral's direct API, where only documented models enable it by default.
-  // Match the hostname, not the provider name, so gateways remain unaffected.
-  const levels = providerReasoningLevels(baseURL, modelName);
-  const supportsReasoningEffort = explicit?.reasoningEffort ?? (providerKind === 'haze-build' || (!isLocalProviderUrl(baseURL) && !providerOmitsReasoningEffort(baseURL, modelName) && (!isMistralApi(baseURL) || !!levels)));
+  // The same profile drives UI choices, main requests, and worker defaults.
+  const levels = reasoningLevelsForProvider(provider, modelName);
+  const supportsReasoningEffort = levels.length > 0;
   return {
     reportsCacheUsage: providerKind === 'haze-build' || directOpenAI || openRouter,
     supportsPromptCacheKey: directOpenAI,
@@ -99,26 +93,18 @@ function capabilities(providerName: string, baseURL: string, providerKind: HazeP
     supportsServerCompaction: false,
     supportsTextVerbosity: directOpenAI,
     supportsReasoningEffort,
-    ...(levels && supportsReasoningEffort ? {workerReasoningEffort: levels[0]} : {}),
+    ...(openRouter ? {reasoningTransport: 'openrouter' as const} : {}),
+    ...(supportsReasoningEffort && (!openRouter || provider.reasoningLevels || provider.modelReasoningLevels?.[modelName]) ? {workerReasoningEffort: levels[0]} : {}),
     ...(providerKind === 'haze-build' ? {supportsBinaryThinking: true} : {}),
   };
 }
 
-/**
- * Match the pinned OpenAI SDK's GPT-6+ effort restrictions before transport.
- * Unsupported choices are omitted, not promoted to a different effort; the
- * policy retains the request and explains why the provider default will apply.
- */
-function reasoningPolicyForModel(modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities, baseURL: string): ResolvedReasoningPolicy {
+/** Validate the selected level against the endpoint-specific model profile. */
+function reasoningPolicyForModel(provider: HazeProviderSettings, modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities): ResolvedReasoningPolicy {
   const policy = resolveReasoningPolicy({requested, capabilities: caps});
   if (policy.effective === 'disabled') return policy;
-  const levels = providerReasoningLevels(baseURL, modelName);
-  if (levels && requested && !levels.includes(requested)) return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose ${levels.join(', ')}, or unset.`};
-  const version = /^gpt-(\d+)(?:\.\d+)?(?:-.+)?$/.exec(modelName);
-  const supportsNone = modelName === 'gpt-6-sol' || modelName === 'gpt-6-luna';
-  if (version && Number(version[1]) >= 6 && (requested === 'minimal' || (requested === 'none' && !supportsNone))) {
-    return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose low, medium, high, xhigh, or unset.`};
-  }
+  const levels = reasoningLevelsForProvider(provider, modelName);
+  if (requested && !levels.includes(requested)) return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose ${levels.join(', ')}, or unset.`};
   return policy;
 }
 
@@ -126,7 +112,7 @@ function reasoningPolicyForModel(modelName: string, requested: ReasoningLevel | 
 export function isLocalProviderUrl(url: string): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0' || hostname.endsWith('.local');
+    return isLoopbackHostname(hostname) || hostname === '0.0.0.0' || hostname.endsWith('.local');
   } catch {
     return false;
   }
@@ -141,7 +127,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const name = selection.model;
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
-  const caps = capabilities(selection.provider.name, baseURL, providerKind, name, selection.provider.capabilities);
+  const caps = capabilities(selection.provider, name);
   const selector = modelSelector(selection.provider, name);
   // The full precedence chain lives in one pure resolver
   // (`resolveAttemptReasoning`): run-scoped override → session per-model map →
@@ -157,25 +143,28 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
-  const resolvedPolicy = reasoningPolicyForModel(name, requestedReasoning, caps, baseURL);
+  const resolvedPolicy = reasoningPolicyForModel(selection.provider, name, requestedReasoning, caps);
   const reasoningPolicy = deployment && resolvedPolicy.effective !== 'disabled'
     ? {...resolvedPolicy, reason: `haze.build binary thinking ${requestedReasoning === 'none' ? 'off' : 'on'}; effort levels do not imply different compute budgets`}
     : resolvedPolicy;
-  // Transport split mirrors the wire reality: OpenAI's own endpoints and the
-  // codex OAuth kind ride @ai-sdk/openai (Responses access, `prompt_cache_key`,
-  // catalog effort remapping); every other endpoint — gateways, local servers,
-  // custom proxies — speaks the compatible subset and rides
-  // @ai-sdk/openai-compatible. `includeUsage` is mandatory there: the openai
-  // package always streams `include_usage` and context estimation depends on
-  // provider usage. Reasoning levels pass through verbatim (no catalog remap).
+  // Preserve native reasoning continuation on Responses and OpenRouter.
   const headers = openRouterHeaders(selection.provider.name, baseURL);
-  const transformRequestBody = isMistralApi(baseURL) ? mistralRequestBody : groqRequestTransform(baseURL, name);
+  const customFormat = selection.provider.reasoningFormat;
+  const transformRequestBody = customFormat === 'thinking' || customFormat === 'enable-thinking'
+    ? (body: Record<string, unknown>) => {
+      if (typeof body.reasoning_effort !== 'string') return body;
+      const {reasoning_effort: effort, ...rest} = body;
+      return customFormat === 'thinking' ? {...rest, thinking: {type: effort === 'none' ? 'disabled' : 'enabled'}} : {...rest, enable_thinking: effort !== 'none'};
+    }
+    : isMistralApi(baseURL) ? mistralRequestBody : groqRequestTransform(baseURL, name);
   const model = deployment
     ? createHazeBuildModel({baseURL, apiKey, manifest: deployment})
     : providerKind === 'chatgpt-codex'
       ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)}).responses(name)
       : isDirectOpenAi(selection.provider.name, baseURL, providerKind)
-        ? createOpenAI({apiKey, baseURL, headers}).chat(name)
+        ? /^gpt-6(?:\.|-)/i.test(name) ? createOpenAI({apiKey, baseURL, headers}).responses(name) : createOpenAI({apiKey, baseURL, headers}).chat(name)
+        : isOpenRouter(selection.provider.name, baseURL)
+          ? createOpenRouter({apiKey, baseURL, headers, compatibility: 'strict'}).chat(name)
         : createOpenAICompatible({name: selection.provider.name, baseURL, apiKey, headers, includeUsage: true, ...(transformRequestBody ? {transformRequestBody} : {})}).chatModel(name);
   const limits = modelLimitsFor(selection.provider, name);
   // Class-aware fallback so unknown local models (server-configured window,
@@ -282,10 +271,18 @@ export function providerRequestSettings(config: ModelRuntimeConfig): ProviderReq
       ...(reasoning ? {reasoning} : {}),
     };
   }
+  if (isOpenRouter(config.providerName, config.baseURL)) return {
+    headers: {'x-session-id': config.cacheKey},
+    ...(reasoning ? {providerOptions: {openrouter: {reasoning: {effort: reasoning}}}} : {}),
+  };
   const caps = config.capabilities;
   const openaiOptions: Record<string, import('ai').JSONValue | undefined> = {};
   if (caps.supportsPromptCacheKey) openaiOptions.promptCacheKey = config.cacheKey;
   if (caps.supportsTextVerbosity) openaiOptions.textVerbosity = 'low';
+  if (caps.supportsPromptCacheKey && /^gpt-6(?:\.|-)/i.test(config.modelName)) {
+    openaiOptions.store = false;
+    openaiOptions.include = ['reasoning.encrypted_content'];
+  }
   const providerOptions = Object.keys(openaiOptions).length > 0 ? {openai: openaiOptions} : undefined;
   return {
     ...(providerOptions ? {providerOptions} : {}),

@@ -147,7 +147,18 @@ export async function runSubagent(
     // Applied only when the worker protocol supports the option; other
     // protocols cannot express it and must keep the runtime unchanged. Some
     // models have no off switch and use low instead of none.
-    if (runtime.capabilities.supportsReasoningEffort || runtime.capabilities.supportsBinaryThinking) providerRequestOptions.reasoning = runtime.capabilities.workerReasoningEffort ?? 'none';
+    const workerEffort = runtime.capabilities.workerReasoningEffort;
+    if (workerEffort && runtime.capabilities.reasoningTransport === 'openrouter') {
+      providerRequestOptions.providerOptions = {...providerRequestOptions.providerOptions, openrouter: {...providerRequestOptions.providerOptions?.openrouter, reasoning: {effort: workerEffort}}};
+    } else if (workerEffort) providerRequestOptions.reasoning = workerEffort;
+    else {
+      delete providerRequestOptions.reasoning;
+      if (runtime.capabilities.reasoningTransport === 'openrouter' && providerRequestOptions.providerOptions?.openrouter) {
+        const openrouter = {...providerRequestOptions.providerOptions.openrouter};
+        delete openrouter.reasoning;
+        providerRequestOptions.providerOptions = {...providerRequestOptions.providerOptions, openrouter};
+      }
+    }
     // Use the streaming model path even though workers return one collected
     // capsule. ChatGPT Codex's Responses endpoint requires `stream: true`;
     // `generateText` takes the non-streaming doGenerate path and is rejected.

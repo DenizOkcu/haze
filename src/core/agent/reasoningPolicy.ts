@@ -117,7 +117,7 @@ export function isReasoningLevel(value: unknown): value is ReasoningLevel {
 
 /** Aliases accepted by CLI paths (`/reasoning`, `--reasoning`) for "send no reasoning parameter". */
 export function isReasoningUnsetAlias(value: string): boolean {
-  return value === 'unset' || value === 'off' || value === REASONING_PROVIDER_DEFAULT;
+  return value === 'unset' || value === REASONING_PROVIDER_DEFAULT;
 }
 
 export type ParsedReasoningOverride = {ok: true; setting: StoredReasoningSetting} | {ok: false; error: string};
@@ -129,6 +129,7 @@ export type ParsedReasoningOverride = {ok: true; setting: StoredReasoningSetting
  */
 export function parseReasoningOverride(raw: string): ParsedReasoningOverride {
   const value = raw.trim().toLowerCase();
+  if (value === 'off') return {ok: true, setting: 'none'};
   if (isReasoningUnsetAlias(value)) return {ok: true, setting: REASONING_PROVIDER_DEFAULT};
   if (isReasoningLevel(value)) return {ok: true, setting: value};
   return {ok: false, error: `Unknown reasoning level "${raw.trim()}". Valid levels: ${REASONING_LEVELS.join(', ')} — or unset for the provider default.`};

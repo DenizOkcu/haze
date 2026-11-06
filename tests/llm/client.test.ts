@@ -15,6 +15,7 @@ async function loadClient(createOpenAIImpl?: (options: unknown) => unknown, crea
   vi.doMock('@ai-sdk/openai', () => ({
     createOpenAI: vi.fn(createOpenAIImpl ?? ((options: unknown) => ({chat: () => options}))),
   }));
+  vi.doMock('@openrouter/ai-sdk-provider', () => ({createOpenRouter: vi.fn((options: unknown) => ({chat: () => options}))}));
   vi.doMock('@ai-sdk/openai-compatible', () => ({
     createOpenAICompatible: vi.fn(createCompatibleImpl ?? ((options: unknown) => ({chatModel: () => options}))),
   }));
@@ -276,7 +277,7 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.capabilities.supportsTextVerbosity).toBe(false);
   });
 
-  it('applies the default reasoning level low when the setting is absent', async () => {
+  it('omits reasoning for GPT-4o when the setting is absent', async () => {
     await writeSettings({
       providers: [{name: 'openai', url: 'https://api.openai.com/v1', key: 'k', models: ['gpt-4o']}],
       provider: 'openai',
@@ -284,15 +285,15 @@ describe('modelWithConfig', () => {
     });
     const {modelWithConfig} = await loadClient();
     const runtime = await modelWithConfig();
-    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'low'});
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'disabled'});
   });
 
   it('gates reasoning-effort by endpoint class with an explicit override winning either way', async () => {
     const fixtures: Array<{name: string; url: string; kind?: string; capabilities?: {reasoningEffort?: boolean}; expected: boolean}> = [
       {name: 'openrouter', url: 'https://openrouter.ai/api/v1', expected: true},
-      {name: 'custom', url: 'https://example.com/v1', expected: true},
+      {name: 'custom', url: 'https://example.com/v1', expected: false},
       {name: 'my-mistral', url: 'https://api.mistral.ai/v1', expected: false},
-      {name: 'mistral', url: 'https://gateway.example/v1', expected: true},
+      {name: 'mistral', url: 'https://gateway.example/v1', expected: false},
       {name: 'mistral-on', url: 'https://api.mistral.ai/v1', capabilities: {reasoningEffort: true}, expected: true},
       {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', expected: true},
       // Loopback inference servers (LM Studio, Ollama) default off: their own
@@ -405,7 +406,7 @@ describe('modelWithConfig', () => {
 
   it('resolves the requested reasoning level into an effective policy and the transport setting', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m']}],
       provider: 'custom',
       model: 'm',
       reasoning: 'minimal',
@@ -418,7 +419,7 @@ describe('modelWithConfig', () => {
 
   it('lets a run-scoped reasoningOverride win over the stored setting and session overrides', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m']}],
       provider: 'custom',
       model: 'm',
       reasoning: 'minimal',
@@ -431,7 +432,7 @@ describe('modelWithConfig', () => {
 
   it('lets a session per-model override win over the stored setting and default', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m', 'other']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m', 'other']}],
       provider: 'custom',
       model: 'm',
       reasoning: 'minimal',
@@ -447,7 +448,7 @@ describe('modelWithConfig', () => {
 
   it('maps a session per-model unset override to no reasoning parameter', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m']}],
       provider: 'custom',
       model: 'm',
       reasoning: 'minimal',
@@ -460,7 +461,7 @@ describe('modelWithConfig', () => {
 
   it('maps a run-scoped unset override to no reasoning parameter, overriding a stored level', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m']}],
       provider: 'custom',
       model: 'm',
       reasoning: 'minimal',
@@ -475,7 +476,7 @@ describe('modelWithConfig', () => {
 
   it('applies the default low when the reasoningOverride is absent', async () => {
     await writeSettings({
-      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
+      providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', capabilities: {reasoningEffort: true}, models: ['m']}],
       provider: 'custom',
       model: 'm',
     });
@@ -484,7 +485,7 @@ describe('modelWithConfig', () => {
     expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'low', effective: 'low'});
   });
 
-  it('returns all-false capabilities except the reasoning pass-through for an unrelated provider', async () => {
+  it('omits reasoning for an unknown provider', async () => {
     await writeSettings({
       providers: [{name: 'custom', url: 'https://example.com/v1', key: 'k', models: ['m']}],
       provider: 'custom',
@@ -499,7 +500,7 @@ describe('modelWithConfig', () => {
       supportsStickySessionId: false,
       supportsServerCompaction: false,
       supportsTextVerbosity: false,
-      supportsReasoningEffort: true,
+      supportsReasoningEffort: false,
     });
   });
 

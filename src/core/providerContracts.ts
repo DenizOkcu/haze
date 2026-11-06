@@ -14,17 +14,12 @@ export interface ProviderCapabilities {
   supportsStickySessionId: boolean;
   supportsServerCompaction: boolean;
   supportsTextVerbosity: boolean;
-  /**
-   * Protocol accepts a reasoning-effort request. Explicit-first: a provider
-   * `capabilities.reasoningEffort` override in settings wins. The default is
-   * `false` for unknown direct Mistral models and loopback/local inference servers.
-   * Local reasoning switches can coerce unsupported levels (even `none`) to
-   * `on`. Other hosted endpoints default to SDK pass-through (`true`).
-   * `false` omits the parameter entirely.
-   */
+  /** The resolved model profile has at least one supported reasoning choice. */
   supportsReasoningEffort: boolean;
   /** Lowest supported worker effort when the model does not accept none. */
   workerReasoningEffort?: ReasoningLevel;
+  /** OpenRouter accepts effort inside its provider-specific reasoning object. */
+  reasoningTransport?: 'openrouter';
   /** Native template switch, independently of OpenAI effort pass-through. */
   supportsBinaryThinking?: boolean;
 }

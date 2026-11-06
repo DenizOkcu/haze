@@ -7,8 +7,8 @@ import {PROVIDER_PRESETS} from '../../config/providerPresets.js';
 import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
-import {isStoredReasoning, resolveReasoningChoice, REASONING_LEVELS, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
-import {hasRestrictedReasoningLevels, providerReasoningLevels} from '../../config/providerReasoning.js';
+import {isStoredReasoning, resolveReasoningChoice, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
+import {reasoningLevelsForProvider} from '../../config/providerReasoning.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {BUILT_IN_THEME_SPECS, DEFAULT_THEME_NAME, resolveTheme} from '../../ui/theme.js';
 import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
@@ -465,12 +465,13 @@ export function reasoningSuggestions(settings: HazeSettings, sessionReasoning?: 
     max: 'maximum reasoning (supported models)',
   };
   const active = activeModel(settings);
-  const levels = active && hasRestrictedReasoningLevels(active.provider.url, active.model) ? active.provider.capabilities?.reasoningEffort === false ? [] : providerReasoningLevels(active.provider.url, active.model) ?? (active.provider.capabilities?.reasoningEffort ? REASONING_LEVELS : []) : REASONING_LEVELS;
+  const binary = active?.provider.kind === 'haze-build' || active?.provider.reasoningFormat === 'thinking' || active?.provider.reasoningFormat === 'enable-thinking';
+  const levels = active ? reasoningLevelsForProvider(active.provider, active.model) : [];
   const choice = resolveReasoningChoice(active ? sessionReasoning?.[modelSelector(active.provider, active.model)] : undefined, isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
   return [
     ...levels.map(level => ({
       value: level,
-      description: `${descriptions[level] ?? 'reasoning level'}${choice.level === level ? ' · active' : ''}`,
+      description: `${binary ? (level === 'none' ? 'thinking off' : 'thinking on') : descriptions[level] ?? 'reasoning level'}${choice.level === level ? ' · active' : ''}`,
       kind: 'command' as const,
     })),
     {value: 'unset', description: 'provider default — sends no reasoning parameter', kind: 'command' as const},

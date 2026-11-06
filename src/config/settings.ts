@@ -29,6 +29,12 @@ export interface HazeProviderSettings {
    * endpoints whose own reasoning switch coerces unknown levels).
    */
   capabilities?: {images?: boolean; reasoningEffort?: boolean};
+  /** Explicit supported effort levels for compatible custom endpoints. */
+  reasoningLevels?: ReasoningLevel[];
+  /** Per-model overrides, keyed by the exact model ID. An empty list disables the parameter. */
+  modelReasoningLevels?: Record<string, ReasoningLevel[]>;
+  /** Wire format for custom OpenAI-compatible servers with a binary switch. */
+  reasoningFormat?: 'effort' | 'thinking' | 'enable-thinking';
   /** Additional exact deployment identities explicitly approved for this native provider. */
   trustedDeployments?: Array<{modelRepository: string; modelRevision: string; templateSha256: string; runtimeVersion: string}>;
   /**
@@ -180,6 +186,9 @@ const providerSchema = z.object({
   models: z.array(z.string()),
   kind: z.enum(['openai-compatible', 'chatgpt-codex', 'haze-build']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
+  reasoningLevels: z.array(z.enum(REASONING_LEVELS as [ReasoningLevel, ...ReasoningLevel[]])).optional(),
+  modelReasoningLevels: z.record(z.string(), z.array(z.enum(REASONING_LEVELS as [ReasoningLevel, ...ReasoningLevel[]]))).optional(),
+  reasoningFormat: z.enum(['effort', 'thinking', 'enable-thinking']).optional(),
   trustedDeployments: z.array(z.object({modelRepository: z.string().min(1).max(256), modelRevision: z.string().regex(/^[a-f0-9]{40}$/), templateSha256: z.string().regex(/^[a-f0-9]{64}$/), runtimeVersion: z.string().regex(/^\d+\.\d+\.\d+$/)})).max(8).optional(),
   modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
 }).passthrough();

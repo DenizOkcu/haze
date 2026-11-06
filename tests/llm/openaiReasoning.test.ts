@@ -6,7 +6,7 @@ import type {StoredReasoningSetting} from '../../src/core/agent/reasoningPolicy.
 
 async function runtimeFor(model: string, reasoning?: StoredReasoningSetting, kind?: HazeProviderSettings['kind']) {
   const settings: HazeSettings = {
-    providers: [{name: 'test', url: 'https://example.test/v1', models: [model], kind}],
+    providers: [{name: 'test', url: 'https://api.openai.com/v1', models: [model], kind}],
     provider: 'test',
     model,
     ...(reasoning !== undefined ? {reasoning} : {}),
@@ -46,14 +46,12 @@ describe('OpenAI model reasoning restrictions', () => {
     expect(providerRequestSettings(minimalRuntime.config)).not.toHaveProperty('reasoning');
   });
 
-  it.each(['gpt-6', 'gpt-6.1-luna', 'gpt-6-sol-2026-10-01', 'gpt-7'])('matches the SDK restriction for %s', async model => {
-    for (const level of ['none', 'minimal'] as const) {
-      const runtime = await runtimeFor(model, level);
-      expect(providerRequestSettings(runtime.config)).not.toHaveProperty('reasoning');
-    }
+  it('allows none for GPT-6.1 Terra', async () => {
+    const runtime = await runtimeFor('gpt-6.1-terra', 'none');
+    expect(providerRequestSettings(runtime.config).reasoning).toBe('none');
   });
 
-  it.each(['gpt-5.4', 'custom-model', 'openai/gpt-6.1-sol'])('leaves SDK-unrestricted model %s unchanged', async model => {
+  it.each(['custom-model', 'openai/gpt-6.1-sol'])('leaves SDK-unrestricted model %s unchanged', async model => {
     for (const level of ['none', 'minimal'] as const) {
       const runtime = await runtimeFor(model, level);
       expect(providerRequestSettings(runtime.config).reasoning).toBe(level);

@@ -2,8 +2,7 @@ import type {Mode} from '../../commands/chatModes.js';
 import {isStoredReasoning, resolveReasoningChoice} from '../../../core/agent/reasoningPolicy.js';
 import {resolveReasoningCommand} from '../../commands/reasoningCommand.js';
 import {activeModel} from '../../../config/providers.js';
-import {hasRestrictedReasoningLevels, providerReasoningLevels} from '../../../config/providerReasoning.js';
-import {REASONING_LEVELS} from '../../../core/agent/reasoningPolicy.js';
+import {reasoningLevelsForProvider} from '../../../config/providerReasoning.js';
 import {selectThemeResult} from '../../commands/themesCommand.js';
 import {SESSION_ACTIONS} from '../../commands/sessionPicker.js';
 import type {WizardDispatchDeps, WizardHandler, WizardSetterContext} from './types.js';
@@ -60,7 +59,7 @@ export function createSessionThemeHandlers(deps: WizardDispatchDeps, ctx: Wizard
     }
     const stored = isStoredReasoning(deps.settings.reasoning) ? deps.settings.reasoning : undefined;
     const active = activeModel(deps.settings);
-    const supportedLevels = active && hasRestrictedReasoningLevels(active.provider.url, active.model) ? active.provider.capabilities?.reasoningEffort === false ? [] : providerReasoningLevels(active.provider.url, active.model) ?? (active.provider.capabilities?.reasoningEffort ? REASONING_LEVELS : []) : undefined;
+    const supportedLevels = active ? reasoningLevelsForProvider(active.provider, active.model) : [];
     const result = resolveReasoningCommand(value, {current: resolveReasoningChoice(hook.get(modelSelector), stored), stored, modelSelector, supportedLevels});
     if (result.action === 'set') hook.set(modelSelector, result.setting);
     else if (result.action === 'reset') hook.set(modelSelector, undefined);

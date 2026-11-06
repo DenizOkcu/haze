@@ -600,7 +600,7 @@ describe('subagent V2 boundary', () => {
     const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
     await runSubagent(capsule('reasoning override'), {contextBundle: emptyBundle, runtime: {
       model: noopModel, selector: 'zai:glm-5.3', providerName: 'zai',
-      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true},
+      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true, workerReasoningEffort: 'none'},
       requestOptions: {reasoning: 'high'},
     }});
     expect(captured.reasoning).toBe('none');

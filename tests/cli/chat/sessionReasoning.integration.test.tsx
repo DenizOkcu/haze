@@ -19,7 +19,7 @@ const fixture = vi.hoisted(() => ({
 fixture.home = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-session-reasoning-'));
 const settings: HazeSettings = {
   provider: 'fixture', model: 'fixture-model',
-  providers: [{name: 'fixture', url: 'http://localhost:1234/v1', models: ['fixture-model']}],
+  providers: [{name: 'fixture', url: 'http://localhost:1234/v1', models: ['fixture-model'], capabilities: {reasoningEffort: true}}],
 };
 let streams: {stdin: FixtureInput; stdout: FixtureOutput; stderr: FixtureOutput};
 let app: Instance | undefined;

@@ -116,9 +116,13 @@ describe('parseReasoningOverride (CLI --reasoning)', () => {
   });
 
   it('maps the unset aliases to the provider-default sentinel (no parameter sent)', () => {
-    for (const alias of ['unset', 'off', 'provider-default']) {
+    for (const alias of ['unset', 'provider-default']) {
       expect(parseReasoningOverride(alias)).toEqual({ok: true, setting: REASONING_PROVIDER_DEFAULT});
     }
+  });
+
+  it('maps off to an explicit none request', () => {
+    expect(parseReasoningOverride('off')).toEqual({ok: true, setting: 'none'});
   });
 
   it('rejects unknown values with the valid-level list', () => {

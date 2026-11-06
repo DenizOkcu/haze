@@ -24,7 +24,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - Provider key order is saved provider key, then legacy OpenRouter `apiKey`, then local-provider placeholder behavior where the client layer expects it.
 - Custom/local OpenAI-compatible providers may intentionally use placeholder keys.
 - Model selectors use `provider:model` in haze settings/UI, not slash-separated provider IDs.
-- Providers carry an optional `capabilities` object. `images` is explicit-only (default off) and gates attachments (F03). `reasoningEffort` explicitly enables or disables sending effort; absent it, recognized local inference endpoints omit effort and hosted OpenAI-compatible endpoints retain pass-through. Omission leaves the server default in control. Unknown capability keys round-trip through settings and provider upserts.
+- Providers carry an optional `capabilities` object. `images` is explicit-only (default off) and gates attachments (F03). `reasoningEffort` explicitly enables or disables sending effort; unknown endpoints omit effort unless configured. `reasoningLevels` and `modelReasoningLevels` declare supported portable levels, and `reasoningFormat` selects effort or a supported binary wire format. Omission leaves the server default in control. Unknown capability keys round-trip through settings and provider upserts.
 
 ## Context file contract
 

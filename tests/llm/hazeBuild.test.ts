@@ -242,7 +242,7 @@ describe('native worker context growth', () => {
     const result = await runSubagent({id: 'worker', objective: 'Inspect a file', deliverable: 'Report findings', mode: 'inspect', scope: [], acceptanceCriteria: []},
       {runtime: {model, selector: 'haze.build:'+HAZE_BUILD_MODEL, providerName: 'haze.build',
         contextWindowTokens: 4096, maxOutputTokens: 1024, requestOptions: {},
-        capabilities: {...fallbackProviderCapabilities(), supportsBinaryThinking: true}},
+        capabilities: {...fallbackProviderCapabilities(), supportsBinaryThinking: true, workerReasoningEffort: 'none'}},
        contextBundle: {systemPrompt: 'Inspect only.', tools, instructions: [], loadedPaths: new Set(), loadedSignatures: new Map(), estimatedTokens: 100, taskTokens: 20, validatedScope: []}});
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({max_tokens: 1024, temperature: 0.7, top_p: 0.8, chat_template_kwargs: {enable_thinking: false}});
