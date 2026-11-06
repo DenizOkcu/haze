@@ -136,7 +136,12 @@ export async function runSubagent(
   const release = mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate')
     ? await mutationPolicy.acquire(mutationOwner, options.abortSignal).catch(() => undefined)
     : undefined;
-  if (mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate') && !release) return terminalResult(task, runtime, profile, options.deadlineExpired?.() ? 'deadline_exceeded' : 'cancelled', 'Worker cancelled before workspace admission.', options.queueMs);
+  // When a mutation slot is required but acquisition failed, `release` is
+  // undefined here, so there is nothing to release; the try/finally below only
+  // releases a slot that was actually acquired.
+  if (mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate') && !release) {
+    return terminalResult(task, runtime, profile, options.deadlineExpired?.() ? 'deadline_exceeded' : 'cancelled', 'Worker cancelled before workspace admission.', options.queueMs);
+  }
 
   try {
     const providerRequestOptions = auxiliaryRequestOptions(runtime.requestOptions, runtime.capabilities, 'worker', outputTokens);
@@ -196,6 +201,10 @@ export async function runSubagent(
         }
       },
     });
+    // Surface a stream error as soon as streamText returns, before awaiting the
+    // result promises, so the real onError payload is surfaced rather than a
+    // Promise.all wrapper that could mask it.
+    if (streamError) throw streamError;
     const [text, usage, steps] = await Promise.all([result.text, result.usage, result.steps]);
     if (streamError) throw streamError;
     usageIn = usage.inputTokens ?? usageIn;
