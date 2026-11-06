@@ -60,5 +60,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function isValidationSummary(value: unknown): value is ValidationSummary {
-  return isObject(value) && typeof value.summaryText === 'string' && Array.isArray(value.diagnostics);
+  // Require the discriminating fields too, not just summaryText/diagnostics, so
+  // a shape that merely has those two cannot be narrowed to a full ValidationSummary.
+  return isObject(value)
+    && typeof value.kind === 'string'
+    && typeof value.status === 'string'
+    && typeof value.summaryText === 'string'
+    && Array.isArray(value.diagnostics);
 }
