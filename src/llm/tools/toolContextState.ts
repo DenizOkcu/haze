@@ -2,6 +2,7 @@ import type {ContextFile} from '../../config/contextFiles.js';
 import type {ToolFailureReasonCode} from '../toolResultTypes.js';
 import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
+import type {PostMutationGraphAdvisory} from './graphAdvisory.js';
 
 /**
  * The turn-scoped tool execution state schema and guards, split from
@@ -38,6 +39,8 @@ export type HazeToolContext = {
   blessedPaths?: readonly BlessedPath[];
   /** Runs LSP diagnostics after successful file mutations and embeds them in that tool result. */
   postMutationDiagnostics?: PostMutationDiagnostics;
+  /** Attaches reverse-dependency graph advisories (and a staleness note) after successful file mutations. */
+  postMutationGraph?: PostMutationGraphAdvisory;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,7 +71,8 @@ export function isHazeToolContext(value: unknown): value is HazeToolContext {
     && validOptional('mutationOwner', field => typeof field === 'symbol')
     && validOptional('isSubagent', field => typeof field === 'boolean')
     && validOptional('blessedPaths', field => Array.isArray(field) && field.every(item => isRecord(item) && typeof item.realPath === 'string' && typeof item.isDirectory === 'boolean'))
-    && validOptional('postMutationDiagnostics', field => typeof field === 'function');
+    && validOptional('postMutationDiagnostics', field => typeof field === 'function')
+    && validOptional('postMutationGraph', field => typeof field === 'function');
 }
 
 export function hazeContext(context: ToolExecutionContext): HazeToolContext | undefined {

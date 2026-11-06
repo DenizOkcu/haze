@@ -213,6 +213,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     mutationPolicy,
     blessedPaths: turnOptions.blessedPaths,
     postMutationDiagnostics: assembled.postMutationDiagnostics,
+    postMutationGraph: assembled.postMutationGraph,
   };
 
   const recoverySlice = turnOptions.recoverySlice;

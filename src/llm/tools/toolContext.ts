@@ -95,17 +95,29 @@ function changedPathsForDiagnostics(toolName: string, input: unknown, result: un
   return changedPathsFromTool(toolName, input, result);
 }
 
-async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown, result: T, diagnostics: PostMutationDiagnostics | undefined): Promise<T> {
-  if (!diagnostics) return result;
+async function attachPostMutationDiagnostics<T>(toolName: string, input: unknown, result: T, diagnostics: PostMutationDiagnostics | undefined, graphAdvisory: HazeToolContext['postMutationGraph']): Promise<T> {
+  if (!diagnostics && !graphAdvisory) return result;
   const paths = changedPathsForDiagnostics(toolName, input, result);
   if (paths.length === 0 || !isRecordValue(result)) return result;
-  try {
-    const lspDiagnostics = await diagnostics(paths);
-    return lspDiagnostics === undefined ? result : {...result, lspDiagnostics} as T;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {...result, lspDiagnostics: {ok: false, error: `Automatic LSP diagnostics failed: ${message.split('\n')[0]}`}} as T;
+  let enriched: Record<string, unknown> = result;
+  if (diagnostics) {
+    try {
+      const lspDiagnostics = await diagnostics(paths);
+      if (lspDiagnostics !== undefined) enriched = {...enriched, lspDiagnostics};
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      enriched = {...enriched, lspDiagnostics: {ok: false, error: `Automatic LSP diagnostics failed: ${message.split('\n')[0]}`}};
+    }
   }
+  if (graphAdvisory) {
+    try {
+      const advisory = await graphAdvisory(paths);
+      if (advisory !== undefined) enriched = {...enriched, graphAffected: advisory};
+    } catch {
+      // Graph advisories are best-effort orientation; failures stay invisible.
+    }
+  }
+  return enriched as T;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -228,7 +240,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
       }
     }
     ctx.completedToolCalls.set(key, ctx.mutationEpoch);
-    return await attachPostMutationDiagnostics(toolName, input, result, ctx.postMutationDiagnostics);
+    return await attachPostMutationDiagnostics(toolName, input, result, ctx.postMutationDiagnostics, ctx.postMutationGraph);
   } catch (error) {
     if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(error)) {
       ctx.failedMutationPaths.add(mutationPathKey);

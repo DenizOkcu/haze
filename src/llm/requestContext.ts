@@ -19,7 +19,9 @@ import {isSkillEnabled} from '../config/skillSettings.js';
 import {createSubagentTool} from './subagentRunner.js';
 import type {ContextFile} from '../config/contextFiles.js';
 import {addCapabilityTools} from './capabilities.js';
+import {createPostMutationGraphAdvisory} from './tools/graphAdvisory.js';
 import type {PostMutationDiagnostics} from './tools/toolContext.js';
+import type {PostMutationGraphAdvisory} from './tools/graphAdvisory.js';
 
 export type ToolCategory = 'builtin' | 'lsp' | 'skill' | 'subagent' | 'mcp';
 
@@ -67,6 +69,8 @@ export interface AssembledRequestContext {
   lspPool?: LspPool;
   /** Bounded automatic diagnostics attached to successful file-mutation results. */
   postMutationDiagnostics?: PostMutationDiagnostics;
+  /** Reverse-dependency graph advisory attached to successful file-mutation results. */
+  postMutationGraph?: PostMutationGraphAdvisory;
   executionScope: TurnExecutionScope;
 }
 
@@ -170,5 +174,6 @@ export async function assembleRequestContext(input: {
   return {
     systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope,
     ...(lspPool ? {postMutationDiagnostics: createPostMutationDiagnostics(installedLsp, lspPool)} : {}),
+    postMutationGraph: createPostMutationGraphAdvisory(),
   };
 }
