@@ -88,7 +88,9 @@ async function readStdinPrompt(): Promise<string | undefined> {
       };
       const onError = () => {
         cleanup();
-        resolve(undefined);
+        // A stdin read error is a real failure, not "no prompt": reject so the
+        // caller surfaces it instead of silently starting an empty chat turn.
+        reject(new Error('stdin prompt could not be read.'));
       };
       process.stdin.setEncoding('utf8');
       process.stdin.on('data', onData);
