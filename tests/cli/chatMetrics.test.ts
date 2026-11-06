@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {compactHomePath, estimateConversationTokens, statusBarMetrics, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
+import {busyDetailLabel, compactHomePath, estimateConversationTokens, nextFleetStatus, statusBarMetrics, toolCallCount} from '../../src/cli/chat/chatMetrics.js';
 import {formatTokenCount} from '../../src/utils/format.js';
 import {EMPTY_TOKEN_USAGE} from '../../src/cli/chat/turnState.js';
 import type {Message} from '../../src/cli/commands/streaming.js';
@@ -65,5 +65,41 @@ describe('chat metrics', () => {
     const base = {messages: [], tokenUsage: {...EMPTY_TOKEN_USAGE}, enabledSkillCount: 0};
     expect(statusBarMetrics({...base, backgroundProcessCount: 2}).statusDetailLabel).toContain('⏵ 2 bg');
     expect(statusBarMetrics({...base, backgroundProcessCount: 0}).statusDetailLabel).not.toContain(' bg');
+  });
+});
+
+describe('fleet status folding', () => {
+  it('tracks queue depth and admissions across coordinator events', () => {
+    let status = nextFleetStatus(undefined, {type: 'subagent_state', state: 'queued', queued: 4, running: 0});
+    expect(status).toEqual({running: 0, queued: 4});
+    status = nextFleetStatus(status, {type: 'subagent_state', state: 'started', running: 1});
+    expect(status).toEqual({running: 1, queued: 3});
+    status = nextFleetStatus(status, {type: 'subagent_state', state: 'terminal', running: 0});
+    expect(status).toEqual({running: 0, queued: 3});
+    status = nextFleetStatus(status, {type: 'subagent_state', state: 'queued', queued: 2, running: 0});
+    expect(status).toEqual({running: 0, queued: 2});
+  });
+
+  it('ignores unrelated events and never drops below zero', () => {
+    expect(nextFleetStatus({running: 2, queued: 0}, {type: 'turn_start'})).toEqual({running: 2, queued: 0});
+    expect(nextFleetStatus({running: 1, queued: 0}, {type: 'subagent_state', state: 'started', running: 2})!.queued).toBe(0);
+  });
+});
+
+describe('busy detail label', () => {
+  it('estimates the live generation rate from the streaming message', () => {
+    const now = 10_000;
+    const label = busyDetailLabel({now, messages: [
+      {role: 'assistant', text: 'done earlier', startedAt: now - 60_000},
+      {role: 'assistant', text: 'x'.repeat(400), streaming: true, startedAt: now - 5_000},
+    ]});
+    expect(label).toContain('~20 tok/s');
+  });
+
+  it('appends fleet depth and omits the label when idle', () => {
+    const now = 10_000;
+    expect(busyDetailLabel({now, messages: [], fleet: {running: 2, queued: 3}})).toBe('workers 2 running, 3 queued');
+    expect(busyDetailLabel({now, messages: [], fleet: {running: 1, queued: 0}})).toBe('workers 1 running');
+    expect(busyDetailLabel({now, messages: [], fleet: {running: 0, queued: 0}})).toBeUndefined();
   });
 });

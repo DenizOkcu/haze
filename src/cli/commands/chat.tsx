@@ -40,7 +40,7 @@ import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../ch
 import {buildContextReport} from '../chat/contextReport.js';
 import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
 import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
-import {compactHomePath, statusBarMetrics} from '../chat/chatMetrics.js';
+import {busyDetailLabel, compactHomePath, nextFleetStatus, statusBarMetrics, type FleetStatus} from '../chat/chatMetrics.js';
 import {formatTokenCount} from '../../utils/format.js';
 import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
@@ -170,6 +170,9 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // the developer always sees rolling activity (elapsed turn time) even when
   // the model is thinking with no streamed output and no tool is running.
   const {busy, setBusy: setBusyWithHeartbeat, elapsed: busyElapsed} = useBusyIndicator();
+  // Fleet depth for the busy row; folded from coordinator events so a
+  // minutes-long fan-out turn visibly progresses (workers running/queued).
+  const [fleet, setFleet] = useState<FleetStatus | undefined>(undefined);
   const terminalControl = useTerminalControl();
   const [backgroundCount, setBackgroundCount] = useState(backgroundProcessCount);
   const [busyLabel, setBusyLabel] = useState(() => thinkingLabelForSettings(settings));
@@ -677,6 +680,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       },
       onEvent: event => {
         sessionRecorder.recordEvent(event);
+        if (event.type === 'subagent_state') setFleet(current => nextFleetStatus(current, event));
+        else if (event.type === 'goal_end') setFleet(undefined);
       },
       onTasksChanged: () => { loadTasksFromStore().then(t => {
         if (stoppingRef.current) return;
@@ -714,6 +719,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 
   const visible = messages.filter(message => !message.hidden);
   const activeLiveMessages = liveMessages.filter(message => !message.hidden);
+  // Recomputed each busy heartbeat (1 Hz) alongside the elapsed label; the
+  // streaming-rate estimate rides the already-live message text, so no extra
+  // timer or token bookkeeping is introduced.
+  const busyDetail = busy ? busyDetailLabel({messages: activeLiveMessages, fleet}) : undefined;
   const {staticItems: staticTranscriptItems, streamingItems} = partitionDisplayMessages([...visible, ...activeLiveMessages]);
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
@@ -801,7 +810,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} wrap="truncate-end">{index + 1}. {item}</Text>)}
       </> : undefined,
       tasks: visibleTasks.length > 0 ? <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={Math.max(1, terminalRows - 8)} /> : undefined,
-      activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} tip={showingTip ? TIPS[tipIndex] : undefined} />
+      activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} detail={busyDetail} tip={showingTip ? TIPS[tipIndex] : undefined} />
         : pausedResume ? <StatusNotice variant="warning">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</StatusNotice> : undefined,
       status: <>
         <Box width="100%" flexDirection="row" justifyContent="space-between" flexShrink={0}>
