@@ -1,6 +1,4 @@
 export const PROCESSING_OUTPUT_CHAR_LIMIT = 200_000;
-export const COMPACT_OUTPUT_CHAR_LIMIT = 10_000;
-export const SHORT_VALIDATION_CHAR_LIMIT = 2_000;
 const PROCESSING_TRUNCATION_MARKER = '\n[... output truncated for processing ...]\n';
 
 export type ReductionContentKind = 'validation' | 'log' | 'search' | 'diff' | 'json' | 'table' | 'web' | 'source-outline' | 'generic';
@@ -64,11 +62,11 @@ export function reductionMetrics(raw: string, returned: string): ReductionMetric
   };
 }
 
-export function retrievalHint(handle: string) {
+function retrievalHint(handle: string) {
   return `Use readToolOutput with handle ${handle} for the original output.`;
 }
 
-export function isInflating(raw: string, returned: string) {
+function isInflating(raw: string, returned: string) {
   return raw.trim().length > 0 && returned.length > raw.length;
 }
 
