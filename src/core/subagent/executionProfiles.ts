@@ -61,10 +61,10 @@ export const BUILT_IN_SUBAGENT_PROFILES: Readonly<Record<string, SubagentExecuti
 };
 
 export const MODE_TOOL_NAMES: Readonly<Record<WorkerMode, readonly string[]>> = {
-  inspect: ['listFiles', 'readFile', 'grep', 'readToolOutput'],
-  research: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'fetch'],
-  implement: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'shell'],
-  validate: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'shell'],
+  inspect: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'graphQuery', 'graphExplain', 'graphPath'],
+  research: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'fetch', 'graphQuery', 'graphExplain', 'graphPath'],
+  implement: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'editFile', 'replaceLines', 'writeFile', 'shell', 'graphQuery', 'graphAffected'],
+  validate: ['listFiles', 'readFile', 'grep', 'readToolOutput', 'shell', 'graphAffected'],
 };
 
 export function isMutationMode(mode: WorkerMode) {

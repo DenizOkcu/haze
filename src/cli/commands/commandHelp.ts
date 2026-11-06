@@ -32,6 +32,8 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/logs', description: 'List recent log files with sizes and dates.'},
   {usage: '/lsp', description: 'Configure Language Server Protocol navigation tools (interactive picker).'},
   {usage: '/mcp', description: 'Configure Model Context Protocol servers like Context7 (interactive picker).'},
+  {usage: '/map', description: 'Build or refresh the persistent workspace code graph (deterministic tree-sitter extraction, incremental after the first build) and show an orientation report: subsystems, hub symbols, import cycles.'},
+  {usage: '/map status', description: 'Show the current code graph state (nodes, edges, build time, staleness) without rebuilding. /map force rebuilds from scratch.'},
   {usage: '/logs <id>', description: 'Show summary of a specific log: entry counts by type, total tokens, tool calls.'},
   {usage: '/logs <id> view', description: 'Page the raw log JSONL through $PAGER in a fullscreen terminal handoff.'},
   {usage: '/editor', description: 'Compose a prompt in $EDITOR, then submit it as the next message.'},

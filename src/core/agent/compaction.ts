@@ -205,7 +205,7 @@ export function chooseBoundaryCompactionMethod(input: {messages: ModelMessage[];
  * updates it in place (iterative summaries); a split turn adds instructions to
  * preserve the unfinished task's request, progress, and next action.
  */
-export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instructions?: string; maxChars?: number; previousSummary?: string; splitTurn?: boolean}): string {
+export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instructions?: string; maxChars?: number; previousSummary?: string; splitTurn?: boolean; codeGraphDigest?: string}): string {
   const maxChars = input.maxChars ?? COMPACTION_LLM_TRANSCRIPT_CHARS;
   const entries = input.older.map(message => {
     const text = compactionEntryText(message).replace(/\s+/g, ' ').trim();
@@ -235,6 +235,9 @@ export function buildLlmCompactionPrompt(input: {older: ModelMessage[]; instruct
       ? `A previous compaction summary exists. Update it with the new messages: PRESERVE everything still relevant, ADD new progress/decisions/context, DROP only what the recent tail supersedes.\n\n<previous-summary>\n${input.previousSummary}\n</previous-summary>`
       : undefined,
     input.instructions ? `User compaction instructions: ${input.instructions}` : undefined,
+    input.codeGraphDigest
+      ? `A deterministic code-graph digest of the workspace follows. When the summary mentions structure (modules, hubs, relationships), prefer referencing these named symbols/files instead of re-describing them in prose:\n${input.codeGraphDigest}`
+      : undefined,
     `Write a dense summary in at most 60 lines. ${omitted > 0 ? `(${omitted} oldest message(s) already omitted from this transcript.)` : ''}`.trim(),
     '',
     '<older_conversation>',

@@ -6,6 +6,7 @@ import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {contextTokensFromUsage, estimateConversationTokens, estimateValueTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
 import {buildLlmCompactionPrompt, chooseBoundaryCompactionMethod, compactModelMessages, compactModelMessagesWithSummary, extractExistingCompactionSummary} from '../../../core/agent/compaction.js';
+import {buildCodeGraphDigest} from '../../../core/graph/digest.js';
 import {isLengthStopOverflow, isSilentContextOverflow} from '../../../core/agent/overflow.js';
 import {type TurnExecutionState} from '../../../core/agent/completionController.js';
 import {isValidationRerunToolCall} from '../../../core/agent/turnPolicy.js';
@@ -463,6 +464,7 @@ async function compactAtEpochBoundary(deps: AttemptStreamDeps, providerMessages:
       older: split.older,
       previousSummary: extractExistingCompactionSummary(providerMessages),
       splitTurn: split.splitTurn,
+      codeGraphDigest: await buildCodeGraphDigest(),
     });
     const summarization = streamText({
       model: setup.runtime.model,

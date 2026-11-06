@@ -18,7 +18,7 @@ describe('subagent execution profiles', () => {
   });
 
   it('keeps read-only modes free of shell and mutation tools', () => {
-    expect(MODE_TOOL_NAMES.inspect).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput']);
+    expect(MODE_TOOL_NAMES.inspect).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput', 'graphQuery', 'graphExplain', 'graphPath']);
     expect(MODE_TOOL_NAMES.research).toContain('fetch');
     expect(MODE_TOOL_NAMES.research).not.toContain('shell');
     expect(MODE_TOOL_NAMES.validate).toContain('shell');

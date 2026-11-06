@@ -42,7 +42,7 @@ describe('assembleWorkerContext', () => {
 
   it('uses a mode-specific tool diet', async () => {
     const inspect = await assembleWorkerContext(task('inspect'), COMPATIBILITY_PROFILE, {cwd: root});
-    expect(Object.keys(inspect.tools)).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput']);
+    expect(Object.keys(inspect.tools)).toEqual(['listFiles', 'readFile', 'grep', 'readToolOutput', 'graphQuery', 'graphExplain', 'graphPath']);
     const validate = await assembleWorkerContext(task('validate'), COMPATIBILITY_PROFILE, {cwd: root});
     expect(Object.keys(validate.tools)).toContain('shell');
     expect(Object.keys(validate.tools)).not.toContain('writeFile');

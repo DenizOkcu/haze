@@ -9,6 +9,7 @@ import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
 import {handleFleetCommand} from './fleetCommand.js';
 import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
+import {handleMapCommand} from './mapCommand.js';
 import {handleModelCommand} from './modelCommand.js';
 import {handleReasoningCommand} from './reasoningCommand.js';
 import {handleThemesCommand} from './themesCommand.js';
@@ -123,6 +124,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   {match: exactOrArgs('/reasoning'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/thinking'), run: async (args, ctx) => await handleReasoningCommand(args, ctx)},
   {match: exactOrArgs('/fleet'), run: (args, ctx) => handleFleetCommand(args, ctx)},
+  {match: exactOrArgs('/map'), run: async (args, ctx) => await handleMapCommand(args, ctx)},
 ];
 
 export async function handleSlashCommand(

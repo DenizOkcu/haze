@@ -5,6 +5,7 @@ import {transitionProviderConversation} from '../../core/agent/providerTransitio
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, splitForCompaction} from '../../core/agent/compaction.js';
+import {buildCodeGraphDigest} from '../../core/graph/digest.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS} from '../../core/agent/budgets.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
@@ -292,7 +293,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         const summarization = streamText({
           model: runtime.model,
           ...providerSettings,
-          prompt: buildLlmCompactionPrompt({older: split.older, instructions}),
+          prompt: buildLlmCompactionPrompt({older: split.older, instructions, codeGraphDigest: await buildCodeGraphDigest()}),
           abortSignal: AbortSignal.timeout(COMPACT_SUMMARY_TIMEOUT_MS),
         });
         const summaryText = (await summarization.text).trim();
