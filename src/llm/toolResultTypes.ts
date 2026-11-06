@@ -29,6 +29,8 @@ export type ToolFailureReasonCode =
   | 'output_expired'
   | 'aborted'
   | 'missing_executable'
+  | 'graph_not_built'
+  | 'graph_unavailable'
   | 'scoped_instructions_discovered';
 
 export type ToolDiffLine =

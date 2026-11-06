@@ -4,6 +4,7 @@ import {fileTools} from './tools/fileTools.js';
 import {fetchTool} from './tools/fetchTool.js';
 import {shellTool} from './tools/shellTool.js';
 import {processTool} from './tools/processTool.js';
+import {graphTools} from './tools/graphTools.js';
 
 /**
  * The public built-in tool catalog. Implementations live in `tools/`
@@ -16,4 +17,5 @@ export const hazeTools = {
   fetch: fetchTool,
   shell: shellTool,
   process: processTool,
+  ...graphTools,
 };

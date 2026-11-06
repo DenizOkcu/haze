@@ -64,6 +64,10 @@ function toolCallSummaryText(toolName: string, input: unknown) {
   if ((toolName === 'lspFindSymbol' || toolName === 'lspRenameSymbol' || toolName === 'lspSafeDeleteSymbol' || toolName === 'lspDiagnosticsForSymbol') && typeof data?.namePath === 'string') return `${toolName} ${typeof data.path === 'string' ? `${data.path}:` : ''}${data.namePath}`;
   if (toolName === 'lspDiagnostics' && typeof data?.path === 'string') return `lspDiagnostics ${data.path}`;
   if ((toolName === 'lspDefinition' || toolName === 'lspTypeDefinition' || toolName === 'lspImplementation' || toolName === 'lspReferences') && typeof data?.path === 'string') return `${toolName} ${data.path}:${data.line}:${data.column}`;
+  if (toolName === 'graphQuery' && typeof data?.question === 'string') return `graphQuery "${compact(data.question, 60)}"`;
+  if ((toolName === 'graphExplain' || toolName === 'graphAffected') && typeof data?.symbol === 'string') return `${toolName} ${data.symbol}`;
+  if (toolName === 'graphPath' && typeof data?.from === 'string' && typeof data?.to === 'string') return `graphPath ${data.from} -> ${data.to}`;
+  if (toolName === 'graphRebuild') return 'graphRebuild';
   return `${toolName} ${compact(input)}`;
 }
 
@@ -124,6 +128,19 @@ function toolResultSummaryText(event: {success: boolean; output?: unknown; error
   if (typeof output?.server === 'string' && Array.isArray(output.locations)) {
     const count = output.locations.length;
     return `${count} location${count === 1 ? '' : 's'} from ${output.server}`;
+  }
+  if (typeof output?.answer === 'string' && typeof output?.graph === 'object') {
+    // graphQuery/graphPath answers
+    const stale = (output.graph as {stale?: unknown}).stale === true ? ' · stale graph' : '';
+    const seeds = typeof output.seeds === 'number' ? `${output.seeds} seed${output.seeds === 1 ? '' : 's'}` : typeof output.hops === 'number' ? `${output.hops} hop${output.hops === 1 ? '' : 's'}` : '';
+    return `${seeds}${stale}: ${compact(output.answer, 120)}`;
+  }
+  if (Array.isArray(output?.affected) && typeof output.symbol === 'string') {
+    const count = (output.affected as unknown[]).length;
+    return count === 0 ? `no reverse relationships for ${output.symbol}` : `${count} affected by ${output.symbol}`;
+  }
+  if (typeof output?.nodes === 'number' && typeof output?.edges === 'number' && output?.toolName === 'graphRebuild') {
+    return `graph built: ${output.nodes} nodes · ${output.edges} edges · ${output.files} files`;
   }
   if (typeof output?.ok === 'boolean') {
     // writeTasks result
@@ -199,6 +216,13 @@ export function busyToolLabel(toolName: string, input: unknown) {
       return 'Running subagent';
     case 'writeTasks':
       return 'Updating tasks';
+    case 'graphQuery':
+    case 'graphExplain':
+    case 'graphPath':
+    case 'graphAffected':
+      return 'Querying code graph';
+    case 'graphRebuild':
+      return 'Building code graph';
     case 'skill':
       return 'Loading skill';
     default:

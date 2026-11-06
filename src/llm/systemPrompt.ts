@@ -44,6 +44,9 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = [], session?: Pr
   const mcpToolRule = options.mcpAvailable
     ? '- MCP server tools (e.g. Context7 docs lookup) are available when configured via /mcp. They extend the toolset with external capabilities; use them when the user asks for up-to-date docs or library info those tools expose, instead of guessing from memory.\n'
     : '';
+  const graphToolRule = options.availableTools?.has('graphQuery')
+    ? '- Code-graph tools map the workspace structurally (symbols, calls, imports, inheritance) in a persistent deterministic graph. Prefer graphQuery for architecture/orientation/relationship questions and unfamiliar large codebases; graphExplain for one symbol; graphPath to trace how two things connect; graphAffected for change blast radius before risky edits. Edges marked INFERRED are resolved leads, not facts; grep stays better for exact-string lookups. Graph output is advisory context, never validation evidence. A stale graph flag means files changed since it was built — graphRebuild refreshes it cheaply.\n'
+    : '';
   const modelLine = options.model ? `\nActive model: ${options.model.provider}/${options.model.name}` : '';
   const hasTool = (name: string) => options.availableTools?.has(name) ?? true;
   const processRule = hasTool('process') ? ', inspect them with process/readToolOutput, and kill every process you start when done' : '';
@@ -67,7 +70,7 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = [], session?: Pr
 - ${SECRET_FILE_RULE}
 
 ## Tool use
-${lspToolRule}${mcpToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
+${lspToolRule}${mcpToolRule}${graphToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
 - grep locates text patterns and non-semantic matches. listFiles discovers structure. readFile returns bounded numbered lines with nextOffset for pagination.
 - editFile performs unique replacements. If an edit fails, read that exact file again before retrying; use replaceLines when current line numbers are safer. For repeated cross-file text changes, use replaceInFiles with a dry run and current occurrence IDs or an expected-count guard.
 - writeFile creates files and only overwrites when explicitly requested. Before a complete rewrite of a requested path that may already exist, read it, then use overwriteExisting=true. Keep each content payload within the tool's byte limit; for larger files, write the first chunk normally and continue the same file with append=true. Never split one logical file into imported part files merely to bypass the limit. shell runs inspection, scripts, and validation; set purpose=validation for custom assertion/check commands so their real exit result counts as completion evidence. Use background=true only when managed process tools are available${processRule}. readToolOutput retrieves omitted oversized command output.
