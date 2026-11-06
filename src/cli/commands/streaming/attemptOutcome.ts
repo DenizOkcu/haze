@@ -110,8 +110,6 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
   const classification: TerminalClassification = classifyTerminalOutcome(turnState, completionEvidence);
   const turnStatus = terminalTurnStatus({aborted: false, assistantText: stream.assistantText, sawToolCall: stream.sawToolCall, lastToolOk: stream.lastToolOk, lastFailedToolWasValidation: stream.lastFailedToolWasValidation, finishReason: stream.finishReason, budgetReached: turnState.budgetBoundary, unresolvedToolInputError: stream.unresolvedToolInputError, intent: turnState.intent, mutationCount: turnState.mutationCount, validationOutcome: turnState.validationOutcome, taskProgress: turnState.taskProgress, requiresTaskLedger: turnState.requiresTaskLedger, ...(turnState.redPair ? {redPair: turnState.redPair} : {})});
   if (stream.unresolvedMalformedToolName) callbacks.addMessage({role: 'system', text: `${stream.unresolvedMalformedToolName} did not execute because its generated input remained invalid or truncated${stream.unresolvedMalformedToolProblem ? ` — ${stream.unresolvedMalformedToolProblem}` : ''}. The requested work is incomplete.`});
-  goal.phase = 'done';
-
   // Non-error overflow recovery (Pillar 1.2/1.4): a silent overflow completed
   // its response, so compact only — the next physical turn (or the supervisor)
   // continues from the smaller history; a length-stop overflow dropped the
@@ -194,6 +192,11 @@ export function finalizeAttemptOutcome(deps: AttemptOutcomeDeps): AgentAttemptRe
       }
     }
   }
+  // Terminal state: reached only when the attempt neither retries, proposes a
+  // recovery slice, nor checkpoints — so the goal is genuinely finished. Set the
+  // 'done' phase here (not unconditionally at the top) so retry, continue, and
+  // checkpoint paths keep the goal active.
+  goal.phase = 'done';
   return {status: turnStatus};
 }
 

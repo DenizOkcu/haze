@@ -1,10 +1,16 @@
 import {describe, expect, it} from 'vitest';
-import {handleAttemptFailure, projectGoalEvidence, terminalTurnStatus} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
+import {finalizeAttemptOutcome, handleAttemptFailure, projectGoalEvidence, terminalTurnStatus} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
 import {createTurnExecutionState} from '../../../../src/core/agent/completionController.js';
-import {createSessionGoal, observeGoalToolEvent} from '../../../../src/core/agent/goalPolicy.js';
+import {createSessionGoal, observeGoalToolEvent, type SessionGoal} from '../../../../src/core/agent/goalPolicy.js';
+import {mainTurnBudget} from '../../../../src/core/agent/budgets.js';
 import type {TurnAbortCause} from '../../../../src/cli/commands/streaming/abortCause.js';
 import type {StreamCallbacks} from '../../../../src/cli/commands/streaming.js';
 import type {Message} from '../../../../src/cli/commands/streaming.js';
+import type {AttemptOutcomeDeps} from '../../../../src/cli/commands/streaming/attemptOutcome.js';
+import type {TurnBudget} from '../../../../src/core/agent/budgets.js';
+import type {AttemptStreamOutcome} from '../../../../src/cli/commands/streaming/streamLoop.js';
+import type {TurnExecutionState} from '../../../../src/core/agent/completionController.js';
+import type {TurnExecutionOptions} from '../../../../src/cli/commands/streaming.js';
 
 describe('projectGoalEvidence', () => {
   it('preserves cumulative mutation and validation state for abnormal terminal paths', () => {
@@ -172,3 +178,108 @@ describe('handleAttemptFailure: bounded overflow recovery (Pillar 1.4)', () => {
     expect(unavailable.messages.some(m => /does not attempt automatic compaction/.test(m.text))).toBe(true);
   });
 });
+
+// ── finalizeAttemptOutcome: goal.phase on terminal vs. recovery paths ────────
+// finalizeAttemptOutcome folds the finished turn into the goal. A terminal path
+// must complete the goal (phase "done"); a recovery-returning path must leave
+// the goal mid-flight (phase !== "done"). This pins the reporting-correctness
+// fix surfaced by the streaming review, which asserted goal.status but never
+// goal.phase.
+
+function minimalCallbacks(): StreamCallbacks {
+  return {
+    addMessage() {},
+    updateMessage() {},
+    setConversation() {},
+    setBusy() {},
+    debugLog() {},
+    getConversation() {
+      return [];
+    },
+    getLastAssistantText() {
+      return '';
+    },
+    setLastAssistantText() {},
+  };
+}
+
+function buildStream(overrides: Partial<AttemptStreamOutcome>): AttemptStreamOutcome {
+  return {
+    finishReason: 'stop',
+    lastToolOk: undefined,
+    lastFailedToolWasValidation: false,
+    assistantText: '',
+    sawToolCall: false,
+    unresolvedMalformedToolName: undefined,
+    unresolvedMalformedToolProblem: undefined,
+    unresolvedToolInputError: false,
+    usageOverflow: undefined,
+    ...overrides,
+  };
+}
+
+function buildTurnState(overrides: Partial<TurnExecutionState>): TurnExecutionState {
+  return {...createTurnExecutionState(), ...overrides};
+}
+
+function buildDeps(stream: AttemptStreamOutcome, turnState: TurnExecutionState, goal: SessionGoal): AttemptOutcomeDeps {
+  return {
+    value: 'x',
+    callbacks: minimalCallbacks(),
+    abortController: new AbortController(),
+    turnOptions: {},
+    turnState,
+    turnBudget: mainTurnBudget(),
+    goal,
+    remainingTurnDeadlineMs: () => 60_000,
+    stream,
+    retryAttempt: 0,
+    overflowRetries: 0,
+  };
+}
+
+describe('finalizeAttemptOutcome goal.phase', () => {
+  it('folds the turn into the goal (phase "done") on a terminal path', async () => {
+    const goal = createSessionGoal('review the code');
+    const stream = buildStream({finishReason: 'stop', assistantText: 'Done.', sawToolCall: false});
+    const turnState = buildTurnState({
+      finishCause: 'stop',
+      intent: 'review',
+      mutationCount: 0,
+      validationOutcome: 'absent',
+      requiresTaskLedger: false,
+      redPair: 'not-required',
+      budgetBoundary: false,
+      aborted: false,
+    });
+    const outcome = await finalizeAttemptOutcome(buildDeps(stream, turnState, goal));
+    expect(outcome.status).toBe('complete');
+    expect(goal.phase).toBe('done');
+    expect(goal.status).toBe('complete');
+  });
+
+  it('leaves the goal mid-flight (phase !== "done") on a recovery-returning path', async () => {
+    const goal = createSessionGoal('fix the bug');
+    goal.mutationCount = 1;
+    goal.requiresTaskLedger = true;
+    goal.taskProgress = {total: 3, pending: 2, inProgress: 1, completed: 0, revision: 1};
+    const stream = buildStream({finishReason: 'tool-calls', assistantText: 'Continuing...', sawToolCall: true, lastToolOk: true});
+    const turnState = buildTurnState({
+      finishCause: 'tool-calls',
+      intent: 'fix',
+      mutationCount: 1,
+      validationOutcome: 'absent',
+      requiresTaskLedger: true,
+      taskProgress: {total: 3, pending: 2, inProgress: 1, completed: 0, revision: 1},
+      redPair: 'not-required',
+      budgetBoundary: false,
+      aborted: false,
+    });
+    const outcome = await finalizeAttemptOutcome(buildDeps(stream, turnState, goal));
+    expect(outcome.recovery?.kind).toBe('goal');
+    expect(goal.phase).not.toBe('done');
+    expect(goal.status).toBe('needs-user');
+  });
+
+});
+
