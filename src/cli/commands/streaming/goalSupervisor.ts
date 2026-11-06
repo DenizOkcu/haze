@@ -12,7 +12,7 @@ import {runAgentTurn, type StreamCallbacks, type TurnExecutionOptions, type Turn
 import {goalCheckpointSignature, hashRequest, type GoalCheckpoint, type GoalLedgerAppend, type IncompleteGoalResume} from './goalCheckpoint.js';
 
 /** Why a logical goal stopped. `completed` is the only success. */
-export type GoalStopReason = 'completed' | 'no-progress' | 'goal-deadline' | 'blocked' | 'model-error' | 'model-stream-idle' | 'user-aborted' | 'context-exhausted';
+export type GoalStopReason = 'completed' | 'no-progress' | 'goal-deadline' | 'blocked' | 'model-error' | 'model-stream-idle' | 'user-aborted' | 'context-exhausted' | 'cycle-limit';
 
 export type {GoalLedgerAppend};
 
@@ -59,6 +59,11 @@ export interface GoalRunOptions {
 
 /** Pause after one corrective physical turn without measurable outcome progress. */
 const GOAL_NO_PROGRESS_LIMIT = 1;
+
+/** Hard ceiling on physical turns for a single logical goal. The no-progress
+ * guard above stops most stuck goals; this is a backstop so a goal that keeps
+ * inching forward without completing cannot run unbounded. */
+const GOAL_MAX_CYCLES = 12;
 
 function checkpointFromResume(resume: IncompleteGoalResume, noProgressCount: number): GoalCheckpoint {
   const validationOutcome: ValidationOutcome = resume.validationOutcome ?? 'not_applicable';
@@ -246,6 +251,9 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, activeModelOverride, turnOptions, options.reasoningOverride);
     initialRetryAttempt = 0;
     cycle += 1;
+    if (cycle >= GOAL_MAX_CYCLES) {
+      return finish('failed', 'cycle-limit', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
+    }
     lastEvidence = result.evidence;
     if (result.checkpoint) checkpoint = result.checkpoint;
 
