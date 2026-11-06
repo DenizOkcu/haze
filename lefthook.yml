@@ -1,15 +1,18 @@
-# Git hooks managed by lefthook (https://lefthook.dev) — run `lefthook install` once.
-# Tools on PATH: gitleaks, jscpd, osv-scanner (knip runs via npm script).
-# A check is skipped with a notice when its binary is not installed; when the
-# binary is present, its failure fails the commit.
+# Git hooks managed by lefthook (https://lefthook.dev) — install once with `npx lefthook install`.
+# Every pre-commit check is MANDATORY — a missing tool fails the commit with install
+# instructions; nothing is ever skipped silently.
+#   lefthook, jscpd, knip  -> npm devDependencies, run from node_modules/.bin (run `npm ci`)
+#   gitleaks, osv-scanner  -> Go binaries, not published on npm, install with
+#     `brew install gitleaks osv-scanner` or download from
+#     https://github.com/gitleaks/gitleaks/releases and https://github.com/google/osv-scanner/releases
 pre-commit:
   parallel: false
   commands:
     gitleaks:
-      run: if command -v gitleaks >/dev/null 2>&1; then gitleaks protect --staged --redact --no-banner; else echo "gitleaks not installed; skipping"; fi
+      run: if ! command -v gitleaks >/dev/null 2>&1; then echo "ERROR - gitleaks is required by the pre-commit hook but was not found on PATH"; echo "Install it with 'brew install gitleaks' or from https://github.com/gitleaks/gitleaks/releases"; exit 1; fi; gitleaks protect --staged --redact --no-banner
     osv-scanner:
-      run: if command -v osv-scanner >/dev/null 2>&1; then osv-scanner scan --lockfile package-lock.json; else echo "osv-scanner not installed; skipping"; fi
+      run: if ! command -v osv-scanner >/dev/null 2>&1; then echo "ERROR - osv-scanner is required by the pre-commit hook but was not found on PATH"; echo "Install it with 'brew install osv-scanner' or from https://github.com/google/osv-scanner/releases"; exit 1; fi; osv-scanner scan --config osv-scanner.toml --lockfile package-lock.json
     jscpd:
-      run: if command -v jscpd >/dev/null 2>&1; then jscpd --min-tokens 50 --reporters console src tests; else echo "jscpd not installed; skipping"; fi
+      run: if [ ! -x node_modules/.bin/jscpd ]; then echo "ERROR - jscpd is required by the pre-commit hook but node_modules/.bin/jscpd is missing"; echo "Install dev dependencies with 'npm ci'"; exit 1; fi; ./node_modules/.bin/jscpd --min-tokens 100 --threshold 1 --reporters console src tests
     knip:
-      run: npm run lint:knip
+      run: if [ ! -x node_modules/.bin/knip ]; then echo "ERROR - knip is required by the pre-commit hook but node_modules/.bin/knip is missing"; echo "Install dev dependencies with 'npm ci'"; exit 1; fi; npm run lint:knip

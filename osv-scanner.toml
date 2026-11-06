@@ -1,0 +1,6 @@
+# osv-scanner config, loaded by the pre-commit hook (lefthook.yml) via --config.
+# The scanner always runs and fails the commit on any finding; the entries below
+# are explicit, reviewed exceptions — not a way to skip the check.
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+reason = "deepmerge has no fixed release (unmaintained since 4.3.1); transitive dep of @inkjs/ui, used only for CLI UI option merging. Re-evaluate on every lockfile or osv-scanner bump."
