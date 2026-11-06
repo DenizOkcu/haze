@@ -18,7 +18,7 @@ vi.mock('../../../src/config/paths.js', () => ({
 
 // Keep settings writes in-memory: wizardDispatch calls updateSettings on
 // successful steps, and tests must not touch ~/.haze/settings.json.
-const mocks = vi.hoisted(() => ({updateSettings: vi.fn(), discoverProviderModels: vi.fn()}));
+const mocks = vi.hoisted(() => ({updateSettings: vi.fn(), discoverProviderModels: vi.fn(), vibeLogin: vi.fn(), codexLogin: vi.fn(), setProviderAuth: vi.fn()}));
 vi.mock('../../../src/config/settings.js', async () => {
   const actual = await import('../../../src/config/settings.js');
   return {...actual, updateSettings: mocks.updateSettings};
@@ -31,6 +31,12 @@ vi.mock('../../../src/config/modelDiscovery.js', () => ({
   // run against non-Ollama fakes, so resolve to no enrichment.
   ollamaModelLimits: async () => ({}),
 }));
+vi.mock('../../../src/llm/mistralVibeAuth.js', () => ({startMistralVibeLogin: mocks.vibeLogin}));
+vi.mock('../../../src/llm/openaiCodexOAuth.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/llm/openaiCodexOAuth.js')>('../../../src/llm/openaiCodexOAuth.js');
+  return {...actual, openBrowser: vi.fn(async () => true), startChatGptBrowserLogin: mocks.codexLogin};
+});
+vi.mock('../../../src/config/providerAuth.js', () => ({setProviderAuth: mocks.setProviderAuth, removeProviderAuth: vi.fn()}));
 
 const {createWizardDispatch, initialWizardUiState, wizardUiReducer} = await import('../../../src/cli/chat/wizardDispatch.js');
 
@@ -290,7 +296,7 @@ describe('wizardDispatch provider creation discovery', () => {
     expect(mocks.discoverProviderModels).not.toHaveBeenCalled();
   });
 
-  it('includes preset suggested models in the creation fallback prompt', async () => {
+  it('does not suggest model names when local discovery fails', async () => {
     mocks.discoverProviderModels.mockResolvedValue(discoveryFailed('endpoint returned HTTP 404'));
     const preset = findPreset('ollama')!;
     const deps = makeDeps({wizard: {providerDraft: {name: preset.name, url: preset.baseUrl}}});
@@ -299,16 +305,16 @@ describe('wizardDispatch provider creation discovery', () => {
     await wizard.discoverProviderModelsForDraft(deps.wizard.providerDraft);
     expect(deps.setMode).toHaveBeenLastCalledWith('providerAddModels');
     const message = (deps.showMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string;
-    expect(message).toContain(`Example: ${preset.suggestedModels!.join(', ')}`);
+    expect(message).not.toContain('Example:');
   });
 
-  it('seeds suggested models from the chosen preset before discovery', async () => {
+  it('shows discovered local models without curated suggestions', async () => {
     const deps = makeDeps();
     const wizard = createWizardDispatch(deps);
 
     await wizard.dispatch('providerAddPreset', 'ollama');
     const preset = findPreset('ollama')!;
-    expect(deps.wizard.suggestedModels).toEqual(preset.suggestedModels);
+    expect(deps.wizard.suggestedModels).toEqual([]);
     expect(mocks.discoverProviderModels).toHaveBeenCalledWith({url: preset.baseUrl, key: undefined});
     expect(deps.setMode).toHaveBeenLastCalledWith('modelPick');
   });
@@ -331,6 +337,36 @@ describe('wizardDispatch provider creation discovery', () => {
     const preset = findPreset('deepseek')!;
     expect(deps.wizard.suggestedModels).toEqual(preset.suggestedModels);
     expect(deps.setMode).toHaveBeenLastCalledWith('providerAddKey');
+  });
+
+  it('registers a subscription with the Codex endpoint and its own model limits', async () => {
+    mocks.codexLogin.mockResolvedValue({url: 'https://example.test/login', complete: async () => ({type: 'oauth', access: 'test', refresh: 'test', expires: 1}), close: async () => undefined});
+    mocks.setProviderAuth.mockResolvedValue(undefined);
+    const deps = makeDeps();
+    await createWizardDispatch(deps).dispatch('providerAddPreset', 'openai-subscription');
+    const patch = mocks.updateSettings.mock.calls[0]?.[0] as HazeSettings;
+    const provider = patch.providers?.find(p => p.name === 'OpenAI Subscription');
+    expect(provider).toMatchObject({url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', modelLimits: {'gpt-6.1-sol': {contextWindowTokens: 500_000, maxOutputTokens: 128_000}}});
+  });
+
+  it('checks new Vibe suggestions against account discovery without changing existing providers', async () => {
+    mocks.vibeLogin.mockResolvedValue({url: 'https://example.test/login', complete: async () => 'test-key'});
+    mocks.discoverProviderModels.mockResolvedValue(discovered(['mistral-large-4', 'other']));
+    const deps = makeDeps();
+    await createWizardDispatch(deps).dispatch('providerAddPreset', 'mistral-vibe');
+    const patch = mocks.updateSettings.mock.calls[0]?.[0] as HazeSettings;
+    expect(patch.providers?.find(p => p.name === 'Mistral Vibe Subscription')?.models).toEqual(['mistral-large-4']);
+    expect(patch.providers).toContainEqual(baseSettings().providers![0]);
+  });
+
+  it('keeps the Vibe alias and explains when account discovery fails', async () => {
+    mocks.vibeLogin.mockResolvedValue({url: 'https://example.test/login', complete: async () => 'test-key'});
+    mocks.discoverProviderModels.mockResolvedValue(discoveryFailed('unavailable'));
+    const deps = makeDeps();
+    await createWizardDispatch(deps).dispatch('providerAddPreset', 'mistral-vibe');
+    const patch = mocks.updateSettings.mock.calls[0]?.[0] as HazeSettings;
+    expect(patch.providers?.find(p => p.name === 'Mistral Vibe Subscription')?.models).toEqual(['mistral-vibe-cli-latest']);
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('did not confirm'));
   });
 });
 

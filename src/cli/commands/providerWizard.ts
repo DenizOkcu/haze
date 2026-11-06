@@ -45,7 +45,7 @@ export function providerAppendModels(settings: HazeSettings, providerName: strin
   // provider itself reported in /models discovery win over the static catalog
   // (this is the only source that knows a local server's configured window);
   // existing user-configured keys always win over both.
-  const curatedLimits = presetModelLimitsForModels({name: provider.name, url: provider.url}, models);
+  const curatedLimits = presetModelLimitsForModels(provider, models);
   const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, provider.modelLimits);
   const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(modelLimits ? {modelLimits} : {})};
   return {
@@ -64,7 +64,7 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
   try { assertCredentialedEndpointSecure(draft.url, draft.key); } catch (error) {
     return {models, message: error instanceof Error ? error.message : String(error)};
   }
-  const curatedLimits = presetModelLimitsForModels({name: draft.name, url: draft.url}, models);
+  const curatedLimits = presetModelLimitsForModels(draft, models);
   const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, undefined);
   const provider: HazeProviderSettings = {
     name: draft.name,

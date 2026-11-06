@@ -223,10 +223,10 @@ describe('handleSlashCommand', () => {
 
   it('rejects an unknown reasoning level with the valid levels listed', async () => {
     const ctx = mockContext();
-    expect(await handleSlashCommand('/reasoning max', ctx)).toBe('handled');
+    expect(await handleSlashCommand('/reasoning extreme', ctx)).toBe('handled');
     expect(ctx.setSessionReasoning).not.toHaveBeenCalled();
     expect(ctx.updateSettings).not.toHaveBeenCalled();
-    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown reasoning level "max"'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown reasoning level "extreme"'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('none, minimal, low, medium, high, xhigh'));
   });
 

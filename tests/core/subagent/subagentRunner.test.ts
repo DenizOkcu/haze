@@ -606,6 +606,22 @@ describe('subagent V2 boundary', () => {
     expect(captured.reasoning).toBe('none');
   });
 
+  it('uses the lowest supported effort for workers whose model has no none mode', async () => {
+    let captured: Record<string, unknown> = {};
+    vi.doMock('ai', async () => {
+      const actual = await vi.importActual<typeof import('ai')>('ai');
+      return {...actual, streamText: async (config: Record<string, unknown>) => { captured = config; return genResult({text: 'done'}); }};
+    });
+    vi.resetModules();
+    const {runSubagent} = await import('../../../src/llm/subagentRunner.js');
+    await runSubagent(capsule('reasoning override'), {contextBundle: emptyBundle, runtime: {
+      model: noopModel, selector: 'mistral:mistral-large-4', providerName: 'mistral',
+      capabilities: {reportsCacheUsage: false, supportsPromptCacheKey: false, supportsExtendedCacheRetention: false, supportsStickySessionId: false, supportsServerCompaction: false, supportsTextVerbosity: false, supportsReasoningEffort: true, workerReasoningEffort: 'low'},
+      requestOptions: {reasoning: 'high'},
+    }});
+    expect(captured.reasoning).toBe('low');
+  });
+
   it('keeps runtime reasoning untouched when the worker protocol has no reasoning-effort option', async () => {
     let captured: Record<string, unknown> = {};
     vi.doMock('ai', async () => {

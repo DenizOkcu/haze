@@ -6,9 +6,9 @@ export type {ProviderCapabilities} from '../providerContracts.js';
  * `provider-default`). `'none'` is an explicit request to disable reasoning;
  * the stored `provider-default` sentinel means "send no parameter at all".
  */
-export type ReasoningLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export const REASONING_LEVELS: readonly ReasoningLevel[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+export const REASONING_LEVELS: readonly ReasoningLevel[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
  * Level applied when nothing more specific exists: no session per-model

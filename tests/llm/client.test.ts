@@ -291,6 +291,9 @@ describe('modelWithConfig', () => {
     const fixtures: Array<{name: string; url: string; kind?: string; capabilities?: {reasoningEffort?: boolean}; expected: boolean}> = [
       {name: 'openrouter', url: 'https://openrouter.ai/api/v1', expected: true},
       {name: 'custom', url: 'https://example.com/v1', expected: true},
+      {name: 'my-mistral', url: 'https://api.mistral.ai/v1', expected: false},
+      {name: 'mistral', url: 'https://gateway.example/v1', expected: true},
+      {name: 'mistral-on', url: 'https://api.mistral.ai/v1', capabilities: {reasoningEffort: true}, expected: true},
       {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', expected: true},
       // Loopback inference servers (LM Studio, Ollama) default off: their own
       // reasoning switches coerce unsupported levels — LM Studio maps any
@@ -312,6 +315,64 @@ describe('modelWithConfig', () => {
       const runtime = await modelWithConfig({modelSelector: `${fixture.name}:m`});
       expect(runtime!.config.capabilities.supportsReasoningEffort, fixture.name).toBe(fixture.expected);
     }
+  });
+
+  it('omits reasoning for direct Mistral requests, including an explicit none selection', async () => {
+    await writeSettings({
+      providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', key: 'k', models: ['mistral-large-2512']}],
+      provider: 'mistral', model: 'mistral-large-2512', reasoning: 'none',
+    });
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const runtime = await modelWithConfig();
+    expect(runtime!.config.reasoningPolicy).toMatchObject({requested: 'none', effective: 'disabled'});
+    expect(providerRequestSettings(runtime!.config)).not.toHaveProperty('reasoning');
+  });
+
+  it('gates direct Mistral reasoning by documented model and level', async () => {
+    const models = ['mistral-small-2603', 'mistral-small-latest', 'mistral-medium-latest', 'mistral-vibe-cli-latest', 'mistral-medium-3-5', 'mistral-large-4', 'zai-glm-5-3', 'mistral-large-2512', 'mistral-large-latest'];
+    await writeSettings({providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', key: 'k', models}], provider: 'mistral', model: models[0]});
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    for (const [model, level, expected] of [
+      ['mistral-small-2603', 'high', 'high'], ['mistral-small-2603', 'low', undefined],
+      ['mistral-small-latest', 'high', 'high'], ['mistral-medium-latest', 'none', 'none'], ['mistral-vibe-cli-latest', 'high', 'high'],
+      ['mistral-medium-3-5', 'none', 'none'], ['mistral-large-4', 'none', undefined],
+      ['mistral-large-4', 'medium', 'medium'], ['zai-glm-5-3', 'max', 'max'],
+      ['mistral-large-2512', 'high', undefined],
+      ['mistral-large-latest', 'high', undefined],
+    ] as const) {
+      const runtime = (await modelWithConfig({modelSelector: `mistral:${model}`, reasoningOverride: level}))!;
+      expect(providerRequestSettings(runtime.config).reasoning, `${model} ${level}`).toBe(expected);
+    }
+    const large = (await modelWithConfig({modelSelector: 'mistral:mistral-large-4'}))!;
+    expect(large.config.capabilities.workerReasoningEffort).toBe('low');
+  });
+
+  it('uses supported reasoning for Groq and Kimi, including worker requests', async () => {
+    const providers = [
+      {name: 'groq', url: 'https://api.groq.com/openai/v1', key: 'k', models: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b']},
+      {name: 'kimi', url: 'https://api.kimi.com/coding/v1', key: 'k', models: ['k3', 'kimi-for-coding']},
+    ];
+    await writeSettings({providers, provider: 'groq', model: 'openai/gpt-oss-120b'});
+    const {modelWithConfig, providerRequestSettings} = await loadClient();
+    const groq = (await modelWithConfig({reasoningOverride: 'none'}))!;
+    expect(providerRequestSettings(groq.config).reasoning).toBeUndefined();
+    expect(groq.config.capabilities.workerReasoningEffort).toBe('low');
+    const qwen = (await modelWithConfig({modelSelector: 'groq:qwen/qwen3.8-27b', reasoningOverride: 'none'}))!;
+    expect(providerRequestSettings(qwen.config).reasoning).toBe('none');
+    const kimi = (await modelWithConfig({modelSelector: 'kimi:k3', reasoningOverride: 'high'}))!;
+    expect(kimi.config.capabilities.workerReasoningEffort).toBe('low');
+    const legacy = (await modelWithConfig({modelSelector: 'kimi:kimi-for-coding', reasoningOverride: 'high'}))!;
+    expect(providerRequestSettings(legacy.config).reasoning).toBeUndefined();
+  });
+
+  it('sets Groq Qwen parsed reasoning only for requests with tools', async () => {
+    let options: Record<string, unknown> = {};
+    await writeSettings({providers: [{name: 'groq', url: 'https://api.groq.com/openai/v1', key: 'k', models: ['qwen/qwen3.8-27b']}], provider: 'groq', model: 'qwen/qwen3.8-27b'});
+    const {modelWithConfig} = await loadClient(undefined, (value: unknown) => { options = value as Record<string, unknown>; return {chatModel: () => ({})}; });
+    await modelWithConfig();
+    const transform = options.transformRequestBody as (body: Record<string, unknown>) => Record<string, unknown>;
+    expect(transform({tools: [{type: 'function'}]})).toEqual({tools: [{type: 'function'}], reasoning_format: 'parsed'});
+    expect(transform({messages: []})).toEqual({messages: []});
   });
 
   it('omits the reasoning parameter for local inference servers by default (LM Studio on/off coercion)', async () => {

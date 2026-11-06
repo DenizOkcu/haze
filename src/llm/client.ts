@@ -2,6 +2,9 @@ import {createOpenAI} from '@ai-sdk/openai';
 import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {discoverHazeBuildManifest, type HazeBuildManifest} from '../config/hazeBuild.js';
 import {createHazeBuildModel} from './hazeBuild.js';
+import {isMistralApi} from '../config/mistralReasoning.js';
+import {providerOmitsReasoningEffort, providerReasoningLevels} from '../config/providerReasoning.js';
+import {mistralRequestBody} from './mistralReasoning.js';
 import crypto from 'node:crypto';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
 import {catalogLimitsFor} from '../config/modelCatalog.js';
@@ -54,6 +57,14 @@ function isOpenRouter(providerName: string, baseURL: string): boolean {
   return providerName === 'openrouter' || /openrouter\.ai/i.test(baseURL);
 }
 
+/** Groq Qwen requires parsed reasoning when tools are present. */
+function groqRequestTransform(baseURL: string, model: string): ((body: Record<string, unknown>) => Record<string, unknown>) | undefined {
+  try {
+    if (new URL(baseURL).hostname.toLowerCase() !== 'api.groq.com' || model.toLowerCase() !== 'qwen/qwen3.8-27b') return undefined;
+  } catch { return undefined; }
+  return body => Array.isArray(body.tools) && body.tools.length ? {...body, reasoning_format: 'parsed'} : body;
+}
+
 function openRouterHeaders(providerName: string, baseURL: string): Record<string, string> | undefined {
   if (!isOpenRouter(providerName, baseURL)) return undefined;
   return {
@@ -67,7 +78,7 @@ function isDirectOpenAi(providerName: string, baseURL: string, providerKind: Haz
   return providerKind !== 'chatgpt-codex' && (providerName === 'openai' || /api\.openai\.com/i.test(baseURL));
 }
 
-function capabilities(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind'], explicit?: HazeProviderSettings['capabilities']): ProviderCapabilities {
+function capabilities(providerName: string, baseURL: string, providerKind: HazeProviderSettings['kind'], modelName: string, explicit?: HazeProviderSettings['capabilities']): ProviderCapabilities {
   const directOpenAI = isDirectOpenAi(providerName, baseURL, providerKind);
   const openRouter = isOpenRouter(providerName, baseURL);
   // Reasoning-effort support is explicit-first: a user override wins either
@@ -75,8 +86,11 @@ function capabilities(providerName: string, baseURL: string, providerKind: HazeP
   // llama.cpp) default to `false`: their own reasoning switches coerce
   // unsupported levels — even `none` — to `on` (LM Studio), inverting the
   // request, and subagent workers rely on `none` meaning off. Hosted
-  // OpenAI-compatible endpoints keep the SDK pass-through (`true`).
-  const supportsReasoningEffort = explicit?.reasoningEffort ?? (providerKind === 'haze-build' || !isLocalProviderUrl(baseURL));
+  // OpenAI-compatible endpoints keep the SDK pass-through (`true`), except
+  // Mistral's direct API, where only documented models enable it by default.
+  // Match the hostname, not the provider name, so gateways remain unaffected.
+  const levels = providerReasoningLevels(baseURL, modelName);
+  const supportsReasoningEffort = explicit?.reasoningEffort ?? (providerKind === 'haze-build' || (!isLocalProviderUrl(baseURL) && !providerOmitsReasoningEffort(baseURL, modelName) && (!isMistralApi(baseURL) || !!levels)));
   return {
     reportsCacheUsage: providerKind === 'haze-build' || directOpenAI || openRouter,
     supportsPromptCacheKey: directOpenAI,
@@ -85,6 +99,7 @@ function capabilities(providerName: string, baseURL: string, providerKind: HazeP
     supportsServerCompaction: false,
     supportsTextVerbosity: directOpenAI,
     supportsReasoningEffort,
+    ...(levels && supportsReasoningEffort ? {workerReasoningEffort: levels[0]} : {}),
     ...(providerKind === 'haze-build' ? {supportsBinaryThinking: true} : {}),
   };
 }
@@ -94,9 +109,11 @@ function capabilities(providerName: string, baseURL: string, providerKind: HazeP
  * Unsupported choices are omitted, not promoted to a different effort; the
  * policy retains the request and explains why the provider default will apply.
  */
-function reasoningPolicyForModel(modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities): ResolvedReasoningPolicy {
+function reasoningPolicyForModel(modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities, baseURL: string): ResolvedReasoningPolicy {
   const policy = resolveReasoningPolicy({requested, capabilities: caps});
   if (policy.effective === 'disabled') return policy;
+  const levels = providerReasoningLevels(baseURL, modelName);
+  if (levels && requested && !levels.includes(requested)) return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose ${levels.join(', ')}, or unset.`};
   const version = /^gpt-(\d+)(?:\.\d+)?(?:-.+)?$/.exec(modelName);
   const supportsNone = modelName === 'gpt-6-sol' || modelName === 'gpt-6-luna';
   if (version && Number(version[1]) >= 6 && (requested === 'minimal' || (requested === 'none' && !supportsNone))) {
@@ -124,7 +141,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   const name = selection.model;
   const cacheSeed = cwd ?? process.cwd();
   const cacheKey = crypto.createHash('sha256').update(`${cacheSeed}\0${name}`).digest('hex').slice(0, 32);
-  const caps = capabilities(selection.provider.name, baseURL, providerKind, selection.provider.capabilities);
+  const caps = capabilities(selection.provider.name, baseURL, providerKind, name, selection.provider.capabilities);
   const selector = modelSelector(selection.provider, name);
   // The full precedence chain lives in one pure resolver
   // (`resolveAttemptReasoning`): run-scoped override → session per-model map →
@@ -140,7 +157,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
-  const resolvedPolicy = reasoningPolicyForModel(name, requestedReasoning, caps);
+  const resolvedPolicy = reasoningPolicyForModel(name, requestedReasoning, caps, baseURL);
   const reasoningPolicy = deployment && resolvedPolicy.effective !== 'disabled'
     ? {...resolvedPolicy, reason: `haze.build binary thinking ${requestedReasoning === 'none' ? 'off' : 'on'}; effort levels do not imply different compute budgets`}
     : resolvedPolicy;
@@ -152,13 +169,14 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   // package always streams `include_usage` and context estimation depends on
   // provider usage. Reasoning levels pass through verbatim (no catalog remap).
   const headers = openRouterHeaders(selection.provider.name, baseURL);
+  const transformRequestBody = isMistralApi(baseURL) ? mistralRequestBody : groqRequestTransform(baseURL, name);
   const model = deployment
     ? createHazeBuildModel({baseURL, apiKey, manifest: deployment})
     : providerKind === 'chatgpt-codex'
       ? createOpenAI({apiKey: OAUTH_SDK_SENTINEL, baseURL, fetch: createChatGptCodexFetch(selection.provider.name)}).responses(name)
       : isDirectOpenAi(selection.provider.name, baseURL, providerKind)
         ? createOpenAI({apiKey, baseURL, headers}).chat(name)
-        : createOpenAICompatible({name: selection.provider.name, baseURL, apiKey, headers, includeUsage: true}).chatModel(name);
+        : createOpenAICompatible({name: selection.provider.name, baseURL, apiKey, headers, includeUsage: true, ...(transformRequestBody ? {transformRequestBody} : {})}).chatModel(name);
   const limits = modelLimitsFor(selection.provider, name);
   // Class-aware fallback so unknown local models (server-configured window,
   // silent truncation) stay conservative while unknown hosted models get the

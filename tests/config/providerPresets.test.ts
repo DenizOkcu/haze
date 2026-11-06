@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {PROVIDER_PRESETS, findPreset, presetModelLimitsForModels} from '../../src/config/providerPresets.js';
+import {PROVIDER_PRESETS, presetModelLimitsForModels, findPreset} from '../../src/config/providerPresets.js';
 describe('providerPresets', () => {
   it('has at least one cloud and one local preset', () => {
     expect(PROVIDER_PRESETS.some(p => p.category === 'cloud')).toBe(true);
@@ -15,9 +15,13 @@ describe('providerPresets', () => {
   it('cloud presets require an API key unless they have an explicit OAuth flow', () => {
     for (const preset of PROVIDER_PRESETS) {
       if (preset.category === 'cloud') {
-        expect(preset.needsApiKey || preset.auth === 'chatgpt-oauth').toBe(true);
+        expect(preset.needsApiKey || Boolean(preset.auth)).toBe(true);
       }
     }
+  });
+
+  it('offers a separate browser sign-in for Mistral Vibe', () => {
+    expect(findPreset('mistral-vibe')).toMatchObject({auth: 'mistral-vibe', needsApiKey: false, suggestedModels: ['mistral-vibe-cli-latest', 'mistral-large-4']});
   });
 
   it('separates OpenAI API-key and subscription provider data', () => {
@@ -68,43 +72,22 @@ describe('providerPresets', () => {
     expect(findPreset('nonexistent')).toBeUndefined();
   });
 
-  it('includes key providers', () => {
+  it('exposes the selected hosted and local providers', () => {
     const ids = PROVIDER_PRESETS.map(p => p.id);
-    // Cloud
-    expect(ids).toContain('openrouter');
-    expect(ids).toContain('openai-api-key');
-    expect(ids).toContain('google-gemini');
-    expect(ids).toContain('mistral');
-    expect(ids).toContain('deepseek');
-    expect(ids).toContain('xai');
-    expect(ids).toContain('z-ai');
-    expect(ids).toContain('z-ai-coding');
-    expect(ids).toContain('kimi-code');
-    expect(ids).toContain('moonshot');
-    expect(ids).toContain('groq');
-    expect(ids).toContain('cerebras');
-    expect(ids).toContain('together');
-    expect(ids).toContain('fireworks');
-    expect(ids).toContain('huggingface');
-    expect(ids).toContain('nvidia');
-    expect(ids).toContain('qwen-token-plan');
-    expect(ids).toContain('opencode-zen');
-    expect(ids).toContain('requesty');
-    expect(ids).toContain('thesean');
-    expect(ids).toContain('atlas-cloud');
-    expect(ids).toContain('openai-subscription');
-    expect(ids).toContain('poe');
-    // Curated multi-model gateways added from the models.dev catalog.
-    expect(ids).toContain('kilo');
-    expect(ids).toContain('novita');
-    expect(ids).toContain('deep-infra');
-    expect(ids).toContain('siliconflow');
-    expect(ids).toContain('nebius');
-    // Local
-    expect(ids).toContain('ollama');
-    expect(ids).toContain('llamacpp');
-    expect(ids).toContain('mlx-server');
-    expect(ids).toContain('lmstudio');
+    expect(ids).toEqual(expect.arrayContaining(['haze.build', 'openrouter', 'openai-api-key', 'openai-subscription', 'google-gemini', 'mistral-api', 'mistral-vibe', 'deepseek', 'xai', 'z-ai-api', 'z-ai-coding', 'moonshot', 'kimi-code', 'groq', 'together', 'ollama', 'lmstudio', 'llamacpp', 'mlx-server', 'vllm']));
+    expect(ids).not.toContain('opencode-zen');
+    expect(findPreset('z-ai')?.id).toBe('z-ai-api');
+  });
+
+  it('leaves model discovery and manual entry to every local server', () => {
+    for (const preset of PROVIDER_PRESETS.filter(p => p.category === 'local')) {
+      expect(preset.suggestedModels).toBeUndefined();
+      expect(preset.modelLimits).toBeUndefined();
+    }
+  });
+
+  it('uses the subscription endpoint rather than the OpenAI API-key endpoint', () => {
+    expect(findPreset('openai-subscription')?.baseUrl).toBe('https://chatgpt.com/backend-api/codex');
   });
 
   it('uses SCREAMING_SNAKE_CASE env var names for apiKeyEnvVar', () => {
@@ -117,38 +100,24 @@ describe('providerPresets', () => {
 });
 
 describe('preset model limits', () => {
-  // The curated catalog is only useful while it stays complete. Local presets
-  // are exempt (their context depends on the local server, not the model);
-  // haze.build is deployment-configured and discovers a live manifest; Thesean lacks catalog data.
-  const LIMIT_EXEMPT = new Set(['ollama', 'llamacpp', 'mlx-server', 'lmstudio', 'thesean', 'haze.build']);
-
-  it('every suggested model on every non-exempt preset carries limits', () => {
-    const missing: string[] = [];
-    for (const preset of PROVIDER_PRESETS) {
-      if (LIMIT_EXEMPT.has(preset.id)) continue;
-      for (const model of preset.suggestedModels ?? []) {
-        if (!preset.modelLimits?.[model]) missing.push(`${preset.id}:${model}`);
-      }
-    }
-    expect(missing).toEqual([]);
-  });
-
   it.each([
-    ['openai-api-key', 'gpt-6.1-sol', 1_050_000, 128_000],
-    ['openai-subscription', 'gpt-6.1-sol', 1_050_000, 128_000],
+    ['openai-api-key', 'gpt-6.1-sol', 922_000, 128_000],
+    ['openai-subscription', 'gpt-6.1-sol', 500_000, 128_000],
     ['openrouter', 'anthropic/claude-sonnet-5.5', 1_000_000, 128_000],
-    ['openrouter', 'deepseek/deepseek-v4.1-flash', 1_048_576, 943_718],
+    ['openrouter', 'deepseek/deepseek-v4.1-flash', 1_048_576, 393_216],
     ['google-gemini', 'gemini-3.8-flash', 1_048_576, 65_536],
-    ['z-ai', 'glm-5.3-flash', 1_000_000, 131_072],
+    ['z-ai-api', 'glm-5.3-flash', 1_000_000, 131_072],
     ['xai', 'grok-4.7', 500_000, 500_000],
-    ['openrouter', 'x-ai/grok-4.7', 500_000, 450_000],
-    ['opencode-zen', 'claude-opus-5-5', 1_000_000, 128_000],
-    ['requesty', 'gemini-3.8-flash', 1_048_576, 65_535],
-    ['kilo', 'openai/gpt-6.1-sol', 1_050_000, 128_000],
-  ])('includes verified recent limits for %s:%s', (presetId, model, contextWindowTokens, maxOutputTokens) => {
+    ['groq', 'openai/gpt-oss-120b', 131_072, 65_536],
+  ])('includes provider-specific limits for %s:%s', (presetId, model, contextWindowTokens, maxOutputTokens) => {
     const preset = findPreset(presetId)!;
     expect(preset.suggestedModels).toContain(model);
     expect(preset.modelLimits?.[model]).toEqual({contextWindowTokens, maxOutputTokens});
+  });
+
+  it('does not invent limits for moving model aliases', () => {
+    expect(findPreset('mistral-api')?.modelLimits).not.toHaveProperty('mistral-small-latest');
+    expect(findPreset('mistral-vibe')?.modelLimits).toBeUndefined();
   });
 
   it('carries no limit entries for models not in suggestedModels', () => {
@@ -174,15 +143,12 @@ describe('preset model limits', () => {
     }
   });
 
-  it('resolves limits by provider URL and name without cross-preset leakage', () => {
-    const byUrl = presetModelLimitsForModels({url: 'https://api.deepseek.com/v1'}, ['deepseek-v4-pro', 'kimi-k3']);
-    expect(byUrl['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_000_000, maxOutputTokens: 393_216});
-    // The same model id on a different provider resolves to that provider's cap.
-    const byRouter = presetModelLimitsForModels({url: 'https://api.together.ai/v1'}, ['deepseek-ai/DeepSeek-V4-Pro']);
-    expect(byRouter['deepseek-ai/DeepSeek-V4-Pro']?.contextWindowTokens).toBe(512_000);
-    const byName = presetModelLimitsForModels({name: 'OpenAI Subscription'}, ['gpt-5.5']);
-    expect(byName['gpt-5.5']).toMatchObject({contextWindowTokens: 1_050_000, maxOutputTokens: 128_000});
+  it('resolves only selected models by endpoint without leaking across providers', () => {
+    const byUrl = presetModelLimitsForModels({url: 'https://api.deepseek.com/v1/'}, ['deepseek-v4-pro', 'kimi-k3']);
+    expect(byUrl).toEqual({'deepseek-v4-pro': {contextWindowTokens: 1_048_576, maxOutputTokens: 393_216}});
+    expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://chatgpt.com/backend-api/codex'}, ['gpt-6.1-sol'])).toEqual({'gpt-6.1-sol': {contextWindowTokens: 500_000, maxOutputTokens: 128_000}});
+    expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://unknown.example/v1'}, ['gpt-6.1-sol'])).toEqual({});
+    expect(presetModelLimitsForModels({url: 'https://api.mistral.ai/v1'}, ['mistral-large-4'])).toEqual({});
     expect(presetModelLimitsForModels({url: 'http://localhost:8080/v1'}, ['qwen3-coder'])).toEqual({});
-    expect(presetModelLimitsForModels({url: 'https://unknown.example/v1'}, ['gpt-5.5'])).toEqual({});
   });
 });

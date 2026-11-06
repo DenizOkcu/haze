@@ -56,6 +56,11 @@ describe('providerActionSuggestions', () => {
     expect(actions).not.toContain('set API key');
   });
 
+  it('offers Vibe sign-in for direct Mistral providers', () => {
+    const mistral = settings({providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', models: ['mistral-vibe-cli-latest']}]});
+    expect(providerActionSuggestions(mistral, 'mistral').map(result => result.value)).toContain('sign in with Mistral Vibe');
+  });
+
   it('adapts the API-key label to whether a key is saved', () => {
     const withKey = settings({providers: [{name: 'p', url: 'u', key: 'k', models: []}]});
     const noKey = settings({providers: [{name: 'p', url: 'u', models: []}]});
@@ -185,9 +190,27 @@ describe('themeSuggestions', () => {
 });
 
 describe('reasoningSuggestions', () => {
+  it('offers only documented levels for the selected direct Mistral model', () => {
+    const settings = {providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', models: ['mistral-small-2603']}], provider: 'mistral', model: 'mistral-small-2603'};
+    expect(reasoningSuggestions(settings).map(item => item.value)).toEqual(['none', 'high', 'unset', 'reset']);
+  });
+  it.each(['mistral-small-latest', 'mistral-medium-latest', 'mistral-vibe-cli-latest'])('offers none and high for %s', model => {
+    const settings = {providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', models: [model]}], provider: 'mistral', model};
+    expect(reasoningSuggestions(settings).map(item => item.value)).toEqual(['none', 'high', 'unset', 'reset']);
+  });
+  it('offers the Large 4 effort levels and leaves Large latest at its provider default', () => {
+    const provider = {name: 'mistral', url: 'https://api.mistral.ai/v1', models: ['mistral-large-4', 'mistral-large-latest']};
+    expect(reasoningSuggestions({providers: [provider], provider: 'mistral', model: 'mistral-large-4'}).map(item => item.value)).toEqual(['low', 'medium', 'high', 'unset', 'reset']);
+    expect(reasoningSuggestions({providers: [provider], provider: 'mistral', model: 'mistral-large-latest'}).map(item => item.value)).toEqual(['unset', 'reset']);
+  });
+  it('shows only supported Groq GPT-OSS reasoning levels', () => {
+    const model = 'openai/gpt-oss-120b';
+    const settings = {providers: [{name: 'groq', url: 'https://api.groq.com/openai/v1', models: [model]}], provider: 'groq', model};
+    expect(reasoningSuggestions(settings).map(item => item.value)).toEqual(['low', 'medium', 'high', 'unset', 'reset']);
+  });
   it('lists every level plus unset/reset and marks the resolved active one', () => {
     const suggestions = reasoningSuggestions({reasoning: 'medium'});
-    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'unset', 'reset']);
+    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'unset', 'reset']);
     expect(suggestions.find(suggestion => suggestion.value === 'medium')?.description).toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'high')?.description).not.toContain('active');
     expect(suggestions.find(suggestion => suggestion.value === 'unset')?.description).toContain('provider default');

@@ -8,6 +8,7 @@ import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {SessionSummary} from '../../core/session/sessionStore.js';
 import {isStoredReasoning, resolveReasoningChoice, REASONING_LEVELS, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
+import {hasRestrictedReasoningLevels, providerReasoningLevels} from '../../config/providerReasoning.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 import {BUILT_IN_THEME_SPECS, DEFAULT_THEME_NAME, resolveTheme} from '../../ui/theme.js';
 import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
@@ -37,6 +38,7 @@ export const PROVIDER_ACTIONS = {
   addModels: 'add models',
   manageAccess: 'set API key',
   signInChatGpt: 'sign in with ChatGPT',
+  signInMistral: 'sign in with Mistral Vibe',
   markImageCapable: 'mark image-capable',
   clearImageCapable: 'clear image-capable',
   removeModels: 'remove models',
@@ -222,6 +224,7 @@ export function providerActionSuggestions(settings: HazeSettings, selectedProvid
     ...(provider?.kind === 'chatgpt-codex'
       ? [{value: PROVIDER_ACTIONS.signInChatGpt, description: 'Sign in again or switch ChatGPT account', kind: 'provider' as const}]
       : [{value: PROVIDER_ACTIONS.manageAccess, description: provider?.key ? 'Update the saved API key' : 'Add an API key', kind: 'provider' as const}]),
+    ...(provider?.url === 'https://api.mistral.ai/v1' ? [{value: PROVIDER_ACTIONS.signInMistral, description: 'Sign in or switch Mistral Vibe account', kind: 'provider' as const}] : []),
     provider
       ? (providerImageCapable(provider)
         ? {value: PROVIDER_ACTIONS.clearImageCapable, description: 'Stop sending attached images to this provider', kind: 'provider' as const}
@@ -238,7 +241,7 @@ export function presetSuggestions(): TextInputSuggestion[] {
   return [
     ...cloudPresets.map(preset => ({
       value: preset.id,
-      description: `${preset.baseUrl}${preset.auth === 'chatgpt-oauth' ? ' · browser sign-in' : ''}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
+      description: `${preset.baseUrl}${preset.auth ? ' · browser sign-in' : ''}${preset.suggestedModels?.length ? ' · e.g. ' + preset.suggestedModels.slice(0, 2).join(', ') : ''}`,
       kind: 'provider' as const,
     })),
     ...localPresets.map(preset => ({
@@ -459,11 +462,13 @@ export function reasoningSuggestions(settings: HazeSettings, sessionReasoning?: 
     medium: 'moderate reasoning',
     high: 'deep reasoning',
     xhigh: 'maximum reasoning',
+    max: 'maximum reasoning (supported models)',
   };
   const active = activeModel(settings);
+  const levels = active && hasRestrictedReasoningLevels(active.provider.url, active.model) ? active.provider.capabilities?.reasoningEffort === false ? [] : providerReasoningLevels(active.provider.url, active.model) ?? (active.provider.capabilities?.reasoningEffort ? REASONING_LEVELS : []) : REASONING_LEVELS;
   const choice = resolveReasoningChoice(active ? sessionReasoning?.[modelSelector(active.provider, active.model)] : undefined, isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined);
   return [
-    ...REASONING_LEVELS.map(level => ({
+    ...levels.map(level => ({
       value: level,
       description: `${descriptions[level] ?? 'reasoning level'}${choice.level === level ? ' · active' : ''}`,
       kind: 'command' as const,

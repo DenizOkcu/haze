@@ -1,5 +1,8 @@
 import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, isReasoningLevel, isReasoningUnsetAlias, isStoredReasoning, resolveReasoningChoice, type ResolvedReasoningChoice, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import type {CommandContext, CommandResult} from './commands.js';
+import {activeModel} from '../../config/providers.js';
+import {isMistralApi, mistralReasoningLevels} from '../../config/mistralReasoning.js';
+import {hasRestrictedReasoningLevels, providerReasoningLevels} from '../../config/providerReasoning.js';
 
 /**
  * `/reasoning` — per-model, per-session reasoning-effort picker and direct
@@ -37,7 +40,7 @@ function describeChoice(choice: ResolvedReasoningChoice): string {
  * model. Pure: the caller applies `set`/`reset` to the session-scoped
  * per-model map (`PromptSession.reasoningByModel`); nothing touches settings.
  */
-export function resolveReasoningCommand(args: string, input: {current: ResolvedReasoningChoice; stored: StoredReasoningSetting | undefined; modelSelector?: string}): ReasoningCommandResult {
+export function resolveReasoningCommand(args: string, input: {current: ResolvedReasoningChoice; stored: StoredReasoningSetting | undefined; modelSelector?: string; supportedLevels?: readonly import('../../core/agent/reasoningPolicy.js').ReasoningLevel[]}): ReasoningCommandResult {
   const value = args.trim().toLowerCase();
   const scope = input.modelSelector ? ` for ${input.modelSelector}` : '';
   if (!value) return {action: 'open-picker'};
@@ -54,6 +57,7 @@ export function resolveReasoningCommand(args: string, input: {current: ResolvedR
   if (!isReasoningLevel(value)) {
     return {action: 'error', message: `Unknown reasoning level "${value}". Valid levels: ${LEVELS_LIST} — unset sends no reasoning parameter, reset falls back to the saved/default level.`};
   }
+  if (input.supportedLevels && !input.supportedLevels.includes(value)) return {action: 'error', message: input.supportedLevels.length ? `Supported reasoning levels${scope}: ${input.supportedLevels.join(', ')}. Use /reasoning unset for the provider default.` : `No documented reasoning levels${scope}; use /reasoning unset for the provider default.`};
   return {action: 'set', setting: value, message: `Reasoning effort set to ${value}${scope}. Applies to this model for the current session; each model keeps its own level. Not written to ~/.haze/settings.json.`};
 }
 
@@ -67,7 +71,12 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
   const modelSelector = activeModelSelector(ctx);
   if (!args.trim()) {
     ctx.setMode('reasoning');
-    ctx.addSystemMessage('Choose a reasoning effort level for the active model, for this session. unset sends no reasoning parameter (provider default); reset falls back to the saved or default level.');
+    const selected = activeModel(ctx.settings);
+    if (selected && isMistralApi(selected.provider.url) && !mistralReasoningLevels(selected.provider.url, selected.model) && !selected.provider.capabilities?.reasoningEffort) {
+      ctx.addSystemMessage(`No adjustable reasoning levels are known for ${selected.model}. Choose a supported model such as mistral-large-4 via /model to use reasoning levels; unset sends no parameter.`);
+    } else {
+      ctx.addSystemMessage('Choose a reasoning effort level for the active model, for this session. unset sends no reasoning parameter (provider default); reset falls back to the saved or default level.');
+    }
     return 'handled';
   }
   if (!modelSelector) {
@@ -76,6 +85,20 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
   }
   const stored = isStoredReasoning(ctx.settings.reasoning) ? ctx.settings.reasoning : undefined;
   const current = resolveReasoningChoice(ctx.getSessionReasoning(modelSelector), stored);
+  const active = activeModel(ctx.settings);
+  if (active && hasRestrictedReasoningLevels(active.provider.url, active.model)) {
+    const levels = active.provider.capabilities?.reasoningEffort === false ? [] : providerReasoningLevels(active.provider.url, active.model) ?? (active.provider.capabilities?.reasoningEffort ? REASONING_LEVELS : []);
+    const value = args.trim().toLowerCase();
+    if (isReasoningLevel(value) && !levels.includes(value)) {
+      ctx.addSystemMessage(levels.length ? `${active.model} supports reasoning levels: ${levels.join(', ')}. Use /reasoning unset for the provider default.` : `Reasoning levels are not documented for ${active.model}; use /reasoning unset for the provider default.`);
+      return 'handled';
+    }
+    if (value === 'status') {
+      const applied = current.level && levels.includes(current.level) ? describeChoice(current) : 'provider default (no parameter sent)';
+      ctx.addSystemMessage(`Reasoning effort for ${modelSelector}: ${applied}. ${levels.length ? `Supported levels: ${levels.join(', ')}.` : 'No documented reasoning levels for this model.'}`);
+      return 'handled';
+    }
+  }
   const result = resolveReasoningCommand(args, {current, stored, modelSelector});
   if (result.action === 'set') ctx.setSessionReasoning(modelSelector, result.setting);
   else if (result.action === 'reset') ctx.setSessionReasoning(modelSelector, undefined);

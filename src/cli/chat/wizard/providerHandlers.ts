@@ -10,6 +10,7 @@ import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, commaList, isYesConfi
 import {chatgptCodexUrlWarning, providerActionResult, providerAppendModels, providerFinishAdd, providerRemove, providerRemoveModels, providerSetImageCapable, providerSetKey} from '../../commands/providerWizard.js';
 import {startupProviderInfo} from '../startupInfo.js';
 import {openBrowser, startChatGptBrowserLogin} from '../../../llm/openaiCodexOAuth.js';
+import {startMistralVibeLogin} from '../../../llm/mistralVibeAuth.js';
 import type {WizardDispatchDeps, WizardHandler, WizardSetterContext} from './types.js';
 
 /**
@@ -68,7 +69,8 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
         setMode('chat');
         return;
       }
-      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models, ...presetModelLimitsForModels({name: input.name, url: input.url}, input.models)};
+      const limits = presetModelLimitsForModels(input, input.models);
+      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models, ...(Object.keys(limits).length ? {modelLimits: limits} : {})};
       await ctx.applySettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
       setProviderDraft({});
       setSuggestedModels([]);
@@ -78,6 +80,44 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
     } catch (error) {
       await login?.close().catch(() => undefined);
       showMessage(`ChatGPT sign-in failed: ${error instanceof Error ? error.message : String(error)}`);
+      setProviderDraft({});
+      setMode('chat');
+    } finally {
+      deps.setBusy(false);
+      deps.setBusyLabel(deps.idleBusyLabel);
+    }
+  }
+
+  async function loginWithMistral(input: {name: string; url: string; models: string[]; existing?: HazeProviderSettings}) {
+    deps.setBusyLabel('Waiting for Mistral sign-in');
+    deps.setBusy(true);
+    try {
+      const login = await startMistralVibeLogin();
+      showMessage(`Complete Mistral Vibe sign-in in your browser.\nIf it does not open, visit:\n${login.url}`);
+      await openBrowser(login.url);
+      const key = await login.complete();
+      // Account-specific access may be narrower than the preset. Existing
+      // providers retain their explicitly configured models on re-sign-in.
+      const listing = input.existing ? undefined : await discoverProviderModels({url: input.url, key});
+      const offered = listing?.status === 'ok' ? input.models.filter(model => listing.models.includes(model)) : [];
+      const models = input.existing ? input.models : offered.length ? offered : input.models.slice(0, 1);
+      const provider: HazeProviderSettings = {...input.existing, name: input.name, url: input.url, key, models};
+      if (input.existing) {
+        await ctx.applySettings({providers: upsertProvider(deps.settings, provider)});
+        setSelectedProviderName(undefined);
+        setMode('chat');
+        showMessage(`Mistral Vibe sign-in updated for ${provider.name}. Usage and billing depend on your Mistral plan.`);
+        return;
+      }
+      await ctx.applySettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
+      setProviderDraft({});
+      setSuggestedModels([]);
+      setModelProviderFilter(provider.name);
+      setMode('model');
+      const discoveryNote = offered.length ? ' Suggested models were checked against the account model list.' : ' Model discovery did not confirm the suggested alias; available models depend on your account.';
+      showMessage(`Mistral Vibe connected as ${provider.name}. Choose a model explicitly.${discoveryNote} Usage and billing depend on your Mistral plan.`);
+    } catch (error) {
+      showMessage(`Mistral sign-in failed: ${error instanceof Error ? error.message : String(error)}`);
       setProviderDraft({});
       setMode('chat');
     } finally {
@@ -127,7 +167,6 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
       showMessage('Provider name? Example: openrouter, local, lmstudio.');
       return;
     }
-
     const preset = findPreset(presetId);
     if (!preset) {
       showMessage(`Unknown preset: ${presetId}.`);
@@ -152,6 +191,8 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
       showMessage('haze.build API base URL? Use your deployed HTTPS endpoint ending in /v1 (or a loopback tunnel).');
     } else if (preset.auth === 'chatgpt-oauth') {
       await loginWithChatGpt({name: existingName, url: preset.baseUrl, models: preset.suggestedModels ?? []});
+    } else if (preset.auth === 'mistral-vibe') {
+      await loginWithMistral({name: existingName, url: preset.baseUrl, models: preset.suggestedModels ?? []});
     } else if (preset.needsApiKey) {
       setMode('providerAddKey');
       const keyHint = preset.apiKeyHint ?? (preset.apiKeyEnvVar ? `commonly ${preset.apiKeyEnvVar}` : undefined);
@@ -212,6 +253,10 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
     }
     if (action === PROVIDER_ACTIONS.signInChatGpt && provider.kind === 'chatgpt-codex') {
       await loginWithChatGpt({name: provider.name, url: provider.url, models: provider.models, existing: provider});
+      return;
+    }
+    if (action === PROVIDER_ACTIONS.signInMistral && provider.url === 'https://api.mistral.ai/v1') {
+      await loginWithMistral({name: provider.name, url: provider.url, models: provider.models, existing: provider});
       return;
     }
     const actionResult = providerActionResult(action, provider);

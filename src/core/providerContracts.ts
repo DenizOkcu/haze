@@ -17,12 +17,14 @@ export interface ProviderCapabilities {
   /**
    * Protocol accepts a reasoning-effort request. Explicit-first: a provider
    * `capabilities.reasoningEffort` override in settings wins. The default is
-   * the SDK pass-through (`true`) for hosted OpenAI-compatible endpoints and
-   * `false` for loopback/local inference servers, whose own reasoning switches
-   * (e.g. LM Studio's `on`/`off`) coerce unsupported levels — even `none` — to
-   * `on`, silently inverting the request. `false` omits the parameter entirely.
+   * `false` for unknown direct Mistral models and loopback/local inference servers.
+   * Local reasoning switches can coerce unsupported levels (even `none`) to
+   * `on`. Other hosted endpoints default to SDK pass-through (`true`).
+   * `false` omits the parameter entirely.
    */
   supportsReasoningEffort: boolean;
+  /** Lowest supported worker effort when the model does not accept none. */
+  workerReasoningEffort?: ReasoningLevel;
   /** Native template switch, independently of OpenAI effort pass-through. */
   supportsBinaryThinking?: boolean;
 }

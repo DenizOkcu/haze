@@ -169,7 +169,7 @@ describe('isReasoningLevel', () => {
   it('accepts every widened level and rejects everything else', () => {
     for (const level of REASONING_LEVELS) expect(isReasoningLevel(level), level).toBe(true);
     expect(isReasoningLevel('provider-default')).toBe(false);
-    expect(isReasoningLevel('max')).toBe(false);
+    expect(isReasoningLevel('extreme')).toBe(false);
     expect(isReasoningLevel('unset')).toBe(false);
     expect(isReasoningLevel(undefined)).toBe(false);
   });
