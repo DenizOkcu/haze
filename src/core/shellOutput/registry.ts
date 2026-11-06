@@ -7,7 +7,7 @@ import {reduceGitOutput} from './reducers/git.js';
 import {reduceGhOutput} from './reducers/gh.js';
 import {reduceSearchOutput} from './reducers/search.js';
 import {reduceGenericLogOutput, reduceJsonOutput, reduceUnifiedDiffOutput} from './reducers/content.js';
-import {capOutputForProcessing, isInflating, reductionMetrics, retrievalHint, type ReductionContentKind} from '../toolOutput/reduction.js';
+import {capOutputForProcessing, type ReductionContentKind, makeStreamReduction, passthroughReduction} from '../toolOutput/reduction.js';
 
 const builtInLineFilters: LineFilterDefinition[] = [
   {name: 'markdownlint', matchCommand: /(^|[;&|]\s*)markdownlint\b/, stripAnsi: true, truncateLinesAt: 200, maxLines: 80, onEmpty: 'markdownlint: ok'},
@@ -20,50 +20,7 @@ const builtInLineFilters: LineFilterDefinition[] = [
 ];
 
 function makeReduction(raw: string, text: string, filtered: boolean, filterName: string | undefined, input: ShellOutputFilterInput, warning?: string, contentKind: ReductionContentKind = 'generic'): StreamReduction {
-  let finalText = text;
-  let handle: string | undefined;
-  let truncated = false;
-  if (finalText.length > input.compactMaxChars) {
-    const compacted = input.fallbackCompact(finalText, input.compactMaxChars);
-    finalText = compacted.text;
-    handle = compacted.handle;
-    truncated = compacted.truncated;
-  }
-  const lossy = filtered && finalText !== raw;
-  const rawHandle = lossy && input.storeRawOutput ? input.storeRawOutput(raw) : handle;
-  if (filtered && contentKind !== 'validation' && raw.length > 2000 && isInflating(raw, finalText)) return passthroughReduction(raw, input);
-  if (lossy && rawHandle && !finalText.includes(rawHandle)) finalText = `${finalText}\n\n[${retrievalHint(rawHandle)}]`;
-  const metrics = reductionMetrics(raw, finalText);
-  return {
-    text: finalText,
-    truncated,
-    filtered,
-    ...(filterName ? {filterName, reducerName: filterName} : {}),
-    contentKind,
-    lossy,
-    parseTier: warning ? 'degraded' : filtered ? 'full' : 'passthrough',
-    ...(warning ? {warning} : {}),
-    ...(handle ?? rawHandle ? {handle: handle ?? rawHandle} : {}),
-    ...(rawHandle ? {rawHandle} : {}),
-    omittedChars: Math.max(0, raw.length - finalText.length),
-    ...metrics,
-  };
-}
-
-function passthroughReduction(raw: string, input: ShellOutputFilterInput): StreamReduction {
-  const compacted = input.fallbackCompact(raw, input.compactMaxChars);
-  return {
-    text: compacted.text,
-    truncated: compacted.truncated,
-    filtered: false,
-    reducerName: 'generic-cap',
-    contentKind: 'generic',
-    lossy: compacted.truncated,
-    parseTier: 'passthrough',
-    ...(compacted.handle ? {handle: compacted.handle, rawHandle: compacted.handle} : {}),
-    omittedChars: compacted.omittedChars ?? Math.max(0, raw.length - compacted.text.length),
-    ...reductionMetrics(raw, compacted.text),
-  };
+  return makeStreamReduction(raw, text, filtered, filterName, input, warning, contentKind);
 }
 
 export function filterShellOutput(input: ShellOutputFilterInput): ShellOutputFilterResult {

@@ -1,3 +1,4 @@
+import {compactOutput} from '../../core/toolOutput/reduction.js';
 import {storeToolOutput, type StoredOutputOrigin} from '../../core/agent/toolOutputStore.js';
 import {COMPACT_COMMAND_CHARS, GREP_MAX_LINE_CHARS, GREP_MAX_OUTPUT_CHARS} from '../../core/limits.js';
 
@@ -10,16 +11,8 @@ export {COMPACT_COMMAND_CHARS};
  * envelope on every read.
  */
 export function compactStoredOutput(text: string, maxChars = COMPACT_COMMAND_CHARS, origin?: StoredOutputOrigin) {
-  if (text.length <= maxChars) return {text, truncated: false};
-  const handle = storeToolOutput(text, origin);
-  const headChars = Math.floor(maxChars * 0.4);
-  const tailChars = maxChars - headChars;
-  return {
-    text: `${text.slice(0, headChars)}\n\n[... ${text.length - maxChars} characters omitted; use readToolOutput with handle ${handle} ...]\n\n${text.slice(-tailChars)}`,
-    truncated: true,
-    omittedChars: text.length - maxChars,
-    handle,
-  };
+  const result = compactOutput(text, maxChars, origin ? (text) => storeToolOutput(text, origin) : storeToolOutput);
+  return result;
 }
 
 /** Truncate a single over-long line in place. */
