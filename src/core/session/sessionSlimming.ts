@@ -70,6 +70,9 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) return value.map(item => slimUnknown(item, seen));
 
   const record = value as Record<string, unknown>;
+  // These fields are provider continuation state, not display previews. Their
+  // exact bytes can be required for the next tool request after resume.
+  if (record.type === 'reasoning') return record;
   if (isImageFilePart(record)) return slimImageFilePart(record);
   if (record.type === 'tool-result') {
     return {
@@ -80,7 +83,7 @@ function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
   }
 
   const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) next[key] = slimUnknown(child, seen);
+  for (const [key, child] of Object.entries(record)) next[key] = key === 'providerOptions' || key === 'providerMetadata' || key === 'reasoning_content' || key === 'reasoning_details' ? child : slimUnknown(child, seen);
   return next;
 }
 
