@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.10 - 2026-11-05
+
+### Fixed
+
+- Rebuild the npm package with build metadata matching the package version.
+
 ## 1.7.9 - 2026-11-04
 
 ### Changed

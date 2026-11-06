@@ -1,6 +1,6 @@
 # src/core/process/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.9 release.
+Last updated: 2026-10-31 for the 1.7.10 release.
 
 Bounded subprocess execution shared by `shell` and `grep`.
 

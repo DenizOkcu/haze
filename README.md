@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.9
+## What's new in 1.7.10
+
+This patch rebuilds the npm package with matching version and build metadata.
+
+### Changes in 1.7.9
 
 This release improves model deployment discovery for configured workers.
 
