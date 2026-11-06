@@ -24,6 +24,7 @@
   "files": [
     "bin",
     "dist",
+    "assets",
     "README.md",
     "SECURITY.md",
     "LICENSE",
@@ -65,6 +66,7 @@
     "marked": "18.1.3",
     "react": "19.3.1",
     "string-width": "8.3.0",
+    "web-tree-sitter": "^0.23.2",
     "wrap-ansi": "10.0.2",
     "yaml": "2.9.1",
     "zod": "4.6.7"
@@ -79,6 +81,7 @@
     "knip": "6.44.1",
     "lefthook": "^2.2.2",
     "strip-ansi": "7.2.0",
+    "tree-sitter-wasms": "^0.1.13",
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.72.1",

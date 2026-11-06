@@ -1,7 +1,17 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "scripts/**/*.mjs"],
-  "ignoreDependencies": ["@ai-sdk/provider", "jscpd", "linkedom", "turndown"],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.{ts,tsx}",
+    "scripts/**/*.mjs"
+  ],
+  "ignoreDependencies": [
+    "@ai-sdk/provider",
+    "jscpd",
+    "linkedom",
+    "turndown",
+    "tree-sitter-wasms"
+  ],
   "rules": {
     "types": "off"
   }
