@@ -19,7 +19,7 @@ Current entry types are:
 
 - `header` — session metadata.
 - `ui_message` — display message history.
-- `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state, slimmed before write so large tool results become previews/metadata.
+- `conversation_snapshot` — durable AI SDK `ModelMessage[]` conversation state, serialized losslessly with binary file data encoded for JSON.
 - `work_state_snapshot` — structured work state.
 - `event` — lightweight structured lifecycle/tool/message events.
 - `model_selection` — the session's pinned provider/model selection (`SessionModelSelection`); recorded on selection changes and restored on resume, continue, and fork so a global default change never rewrites an active session. `restoreSessionState()` surfaces it as `modelSelection`; headless `--resume` follows it unless `--model` is explicit.
@@ -35,8 +35,9 @@ The `haze report` projection in `sessionReport.ts` reads only bounded metadata a
 - `appendSessionEntry` is the choke point for durable writes; keep session-size policy centralized there or in `sessionSlimming.ts`.
 - Do not persist streaming `message_update` events by default. They are UI progress, not durable resume state.
 - Keep completed messages, tool lifecycle events, work-state snapshots, and conversation snapshots useful for resume.
-- Large persisted tool outputs/errors should be replaced with previews, byte counts, and omission metadata. Active in-memory model context can stay richer than the persisted JSONL audit trail.
-- User-attached image `file` parts (F03) are slimmed to a short text placeholder (filename, media type, byte count) so sessions never store image bytes. The placeholder is a valid text part, so resumed conversations stay protocol-safe for any provider.
+- Conversation snapshots preserve tool outputs and file data; separate tool lifecycle events remain bounded previews. Opt-in redaction may intentionally change saved strings.
+- Conversation snapshots above the JSONL line bound are stored as ordered 256 KiB chunks plus a checksum commit. Restore emits only a fully verified snapshot; incomplete snapshots leave the previous one intact. A logical snapshot is bounded to 64 MiB and oversized writes fail visibly. Vacuum must re-encode chunked snapshots through the same serializer.
+- User-attached image and other file parts are stored in the private session file and restored as SDK-compatible data; binary bytes are encoded without loss.
 
 ## Restore behavior
 

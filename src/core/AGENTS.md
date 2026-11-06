@@ -16,7 +16,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `shellOutput/` — command-aware reduction of shell stdout/stderr, with validation/git/search/diff/json/log reducers and line filters.
 - `attachments/` — user-typed image attachment resolution and turn-scoped read blessings for explicit paths.
 - `safety/` — shell command trait/risk classification and fail-closed URL SSRF guard, including malformed IP-shaped literals.
-- `session/` — lazy durable JSONL session storage, resumable-session summaries/restore helpers, and disk-size slimming for streaming events/large tool outputs.
+- `session/` — lazy durable JSONL session storage, resumable-session summaries/restore helpers, bounded lossless conversation snapshots, and slimming for separate streaming/tool events.
 - `subagent/` — independent tool-loop runner, execution profiles, coordination, and mutation policy used by the `subagent` tool and `/fleet`.
 - `tasks/` — workspace-local `.haze/tasks.json` storage.
 - `validation/` — parser for test/typecheck/lint/build output summaries.

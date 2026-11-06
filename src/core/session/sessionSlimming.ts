@@ -1,9 +1,8 @@
 import type {ModelMessage} from 'ai';
 import type {SessionEntry} from './sessionStore.js';
-import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_LARGE_STRING_CHARS as LARGE_STRING_CHARS, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits.js';
-import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
+import {SESSION_INLINE_VALUE_BYTES as INLINE_VALUE_BYTES, SESSION_PREVIEW_CHARS as PREVIEW_CHARS} from '../limits.js';
+import {encodeSnapshotMessages} from './snapshotCodec.js';
 import {redactUnknown} from '../safety/redaction.js';
-import {formatBytes} from '../../utils/format.js';
 
 function jsonByteLength(value: unknown) {
   try {
@@ -29,62 +28,8 @@ function slimLargeValue(value: unknown) {
   };
 }
 
-/**
- * Image file parts become text placeholders (F03): resumed sessions must not
- * replay megabytes of base64, and the placeholder stays a protocol-safe
- * ModelMessage part for any provider. The model re-asks if it needs the image.
- */
-function slimImageFilePart(part: Record<string, unknown>) {
-  const bytes = imageFilePartBytes(part.data);
-  const name = typeof part.filename === 'string' && part.filename ? ` ${part.filename}` : '';
-  return {
-    type: 'text',
-    text: `[image omitted from session:${name} ${part.mediaType}, ${formatBytes(bytes)} — ask the user to re-attach it if needed]`,
-  };
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value);
-}
-
-/**
- * Slim a tool-result output while preserving the AI SDK output envelope.
- * Restored snapshots are re-sent to providers, and `modelMessageSchema` requires
- * a tool-result output to be `{type: 'json'|'text'|... , value}`; a bare slim
- * marker as the output made every resumed session fail with
- * AI_InvalidPromptError (F-09 regression).
- */
-function slimToolResultOutput(output: unknown) {
-  if (!isRecord(output) || typeof output.type !== 'string' || !('value' in output)) return slimLargeValue(output);
-  return {...output, value: slimLargeValue(output.value)};
-}
-
-function slimUnknown(value: unknown, seen = new WeakSet<object>()): unknown {
-  if (typeof value === 'string') {
-    if (value.length <= LARGE_STRING_CHARS) return value;
-    return `${value.slice(0, PREVIEW_CHARS)}\n\n[Session value truncated: ${value.length - PREVIEW_CHARS} characters omitted]`;
-  }
-  if (value == null || typeof value !== 'object') return value;
-  if (seen.has(value)) return '[Circular]';
-  seen.add(value);
-  if (Array.isArray(value)) return value.map(item => slimUnknown(item, seen));
-
-  const record = value as Record<string, unknown>;
-  // These fields are provider continuation state, not display previews. Their
-  // exact bytes can be required for the next tool request after resume.
-  if (record.type === 'reasoning') return record;
-  if (isImageFilePart(record)) return slimImageFilePart(record);
-  if (record.type === 'tool-result') {
-    return {
-      ...record,
-      output: slimToolResultOutput(record.output),
-      result: slimLargeValue(record.result),
-    };
-  }
-
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) next[key] = key === 'providerOptions' || key === 'providerMetadata' || key === 'reasoning_content' || key === 'reasoning_details' ? child : slimUnknown(child, seen);
-  return next;
 }
 
 /**
@@ -120,8 +65,8 @@ export function repairRestoredConversation(messages: ModelMessage[]): ModelMessa
   return repairLegacySlimmedMessages(messages);
 }
 
-function slimConversationSnapshot(messages: ModelMessage[]): ModelMessage[] {
-  return slimUnknown(messages) as ModelMessage[];
+function prepareConversationSnapshot(messages: ModelMessage[]): ModelMessage[] {
+  return encodeSnapshotMessages(messages);
 }
 
 function slimToolStartInput(input: unknown): Record<string, unknown> {
@@ -184,7 +129,7 @@ function slimSessionEntry(entry: SessionEntry): SessionEntry | undefined {
   }
 
   if (entry.type === 'conversation_snapshot') {
-    return {...entry, messages: slimConversationSnapshot(entry.messages)};
+    return {...entry, messages: prepareConversationSnapshot(entry.messages)};
   }
 
   // Goal-ledger entries are small bounded metadata; only the request text is

@@ -8,6 +8,7 @@ import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
 import type {ValidationKind} from '../../llm/toolResultTypes.js';
 import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';
+import {decodeSnapshotMessages, encodeSnapshotMessages} from './snapshotCodec.js';
 import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
 import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
@@ -15,12 +16,13 @@ import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 export interface SessionModelSelection {
   provider: string;
   model: string;
+  endpointFingerprint?: string;
 }
 
 export type SessionEntry =
   | {type: 'header'; id: string; cwd: string; createdAt: string; hazeVersion?: string; forkedFrom?: string; build?: {commit?: string; builtAt?: string}}
   | {type: 'ui_message'; at: string; role: 'system' | 'user' | 'assistant' | 'tool'; text: string}
-  | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]}
+  | {type: 'conversation_snapshot'; at: string; messages: ModelMessage[]; selection?: SessionModelSelection}
   | {type: 'work_state_snapshot'; at: string; state: WorkState}
   | {type: 'model_selection'; at: string; selection: SessionModelSelection}
   | {type: 'event'; at: string; name: string; text?: string}
@@ -74,6 +76,8 @@ export interface HazeSession {
    * resumed; default (absent/false) persists entries verbatim.
    */
   redactSecrets?: boolean;
+  /** Internal: the existing JSONL tail has been checked before appending. */
+  tailChecked?: boolean;
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(HAZE_DIR, 'sessions');
@@ -150,6 +154,47 @@ function entryMakesSessionResumable(entry: SessionEntry): boolean {
   return entry.type === 'conversation_snapshot' && entry.messages.length > 0;
 }
 
+// A snapshot is one logical record, but large opaque provider data must not
+// exceed the line reader's bound. The commit line makes incomplete writes
+// invisible; the digest prevents a damaged snapshot from being replayed.
+const SNAPSHOT_CHUNK_BYTES = 256 * 1024;
+const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+
+function serializeSessionEntry(entry: SessionEntry): string {
+  const serializable = entry.type === 'conversation_snapshot' ? {...entry, messages: encodeSnapshotMessages(entry.messages)} : entry;
+  const json = JSON.stringify(serializable);
+  const bytes = Buffer.from(json, 'utf8');
+  if (bytes.length <= JSONL_LINE_BYTES - 1) return `${json}\n`;
+  if (entry.type !== 'conversation_snapshot') throw new Error(`Session ${entry.type} exceeds the ${JSONL_LINE_BYTES} byte line limit`);
+  if (bytes.length > MAX_SNAPSHOT_BYTES) throw new Error(`Session snapshot exceeds the ${MAX_SNAPSHOT_BYTES} byte limit`);
+  const id = crypto.randomUUID();
+  const count = Math.ceil(bytes.length / SNAPSHOT_CHUNK_BYTES);
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  const lines: string[] = [];
+  for (let index = 0; index < count; index++) {
+    lines.push(JSON.stringify({type: 'snapshot_chunk', id, index, count, data: bytes.subarray(index * SNAPSHOT_CHUNK_BYTES, (index + 1) * SNAPSHOT_CHUNK_BYTES).toString('base64')}));
+  }
+  lines.push(JSON.stringify({type: 'snapshot_commit', id, count, bytes: bytes.length, digest}));
+  return `${lines.join('\n')}\n`;
+}
+
+async function hasUnterminatedTail(file: string): Promise<boolean> {
+  const handle = await fs.open(file, 'r').catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (!handle) return false;
+  try {
+    const {size} = await handle.stat();
+    if (!size) return false;
+    const last = Buffer.alloc(1);
+    await handle.read(last, 0, 1, size - 1);
+    return last[0] !== 10;
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function appendSessionEntry(session: HazeSession, entry: SessionEntry): Promise<void> {
   const file = validatedSessionFile(session);
   const prepared = prepareSessionEntryForWrite(entry, {redactSecrets: session.redactSecrets === true});
@@ -161,11 +206,20 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
       return;
     }
     const entries = [deferred.header, ...deferred.entries, prepared];
-    await appendPrivateFile(file, entries.map(item => JSON.stringify(item)).join('\n') + '\n');
+    await appendPrivateFile(file, entries.map(serializeSessionEntry).join(''));
     session.deferredWrite = undefined;
+    session.tailChecked = true;
     return;
   }
-  await appendPrivateFile(file, `${JSON.stringify(prepared)}\n`);
+  const separator = !session.tailChecked && await hasUnterminatedTail(file) ? '\n' : '';
+  try {
+    await appendPrivateFile(file, separator + serializeSessionEntry(prepared));
+  } catch (error) {
+    // A failed append can leave a partial JSONL line even in this process.
+    session.tailChecked = false;
+    throw error;
+  }
+  session.tailChecked = true;
   // Snapshot deduplication runs inside the same serialized writer as the
   // append, so ordering with subsequent entries is preserved (F-03).
   await vacuumSessionFileIfLarge(session).catch(() => undefined);
@@ -233,7 +287,7 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   const droppedGoalBytes = entries
     .filter((entry, index) => entry.type === 'goal' && !keepGoal.has(index))
     .reduce((sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry), 'utf8'), 0);
-  const serialized = kept.map(entry => JSON.stringify(entry)).join('\n') + '\n';
+  const serialized = kept.map(serializeSessionEntry).join('');
   // Only rewrite when it meaningfully shrinks the file (otherwise a single
   // dominant snapshot would trigger a full rewrite on every append), or when
   // the goal-ledger trim alone has accumulated enough to amortize the rewrite.
@@ -323,14 +377,16 @@ function parseSessionEntry(value: unknown): SessionEntry {
       return value as SessionEntry;
     case 'conversation_snapshot':
       if (typeof value.at !== 'string' || !Array.isArray(value.messages)) return invalid('conversation_snapshot messages must be an array');
+      if (value.selection !== undefined && (!isRecord(value.selection) || typeof value.selection.provider !== 'string' || !value.selection.provider.trim() || typeof value.selection.model !== 'string' || !value.selection.model.trim() || (value.selection.endpointFingerprint !== undefined && (typeof value.selection.endpointFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.selection.endpointFingerprint))))) return invalid('invalid conversation_snapshot selection');
       if (!value.messages.every((message: unknown) => isRecord(message)
         && typeof message.role === 'string'
         && MODEL_MESSAGE_ROLES.has(message.role))) return invalid('conversation_snapshot contains an invalid message role');
-      return value as SessionEntry;
+      return {...value, messages: decodeSnapshotMessages(value.messages as ModelMessage[])} as SessionEntry;
     case 'model_selection':
       if (typeof value.at !== 'string' || !isRecord(value.selection)
         || typeof value.selection.provider !== 'string' || !value.selection.provider.trim()
-        || typeof value.selection.model !== 'string' || !value.selection.model.trim()) return invalid('invalid model_selection');
+        || typeof value.selection.model !== 'string' || !value.selection.model.trim()
+        || (value.selection.endpointFingerprint !== undefined && (typeof value.selection.endpointFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(value.selection.endpointFingerprint)))) return invalid('invalid model_selection');
       return value as SessionEntry;
     case 'work_state_snapshot':
       if (typeof value.at !== 'string' || !isRecord(value.state)) return invalid('work_state_snapshot state must be an object');
@@ -370,18 +426,68 @@ async function scanSessionEntries(session: HazeSession, onEntry: (entry: Session
     if (parseErrors.length < MAX_PARSE_ERRORS) parseErrors.push(message);
     else omittedErrors++;
   };
+  let pending: {id: string; count: number; chunks: Buffer[]; bytes: number; line: number} | undefined;
+  let legacyReader: AsyncGenerator<import('../io/boundedRead.js').BoundedUtf8Line> | undefined;
+  const recoverLegacySnapshot = async (lineNumber: number): Promise<SessionEntry | undefined> => {
+    legacyReader ??= iterateBoundedUtf8Lines(file, MAX_SNAPSHOT_BYTES);
+    for (;;) {
+      const next = await legacyReader.next();
+      if (next.done || next.value.lineNumber > lineNumber) return undefined;
+      if (next.value.lineNumber < lineNumber) continue;
+      if (next.value.oversized) return undefined;
+      try {
+        const value: unknown = JSON.parse(next.value.line);
+        if (!isRecord(value) || value.type !== 'conversation_snapshot') return undefined;
+        return parseSessionEntry(value);
+      } catch { return undefined; }
+    }
+  };
   for await (const {line, lineNumber, oversized} of iterateBoundedUtf8Lines(file, JSONL_LINE_BYTES)) {
     if (!line && !oversized) continue;
     if (oversized) {
+      if (pending) { report(`Line ${pending.line}: incomplete snapshot`); pending = undefined; }
+      const legacy = await recoverLegacySnapshot(lineNumber);
+      if (legacy) { onEntry(legacy); continue; }
       report(`Line ${lineNumber}: exceeds ${JSONL_LINE_BYTES} byte limit`);
       continue;
     }
     try {
-      onEntry(parseSessionEntry(JSON.parse(line) as unknown));
+      const value: unknown = JSON.parse(line);
+      if (isRecord(value) && value.type === 'snapshot_chunk') {
+        if (typeof value.id !== 'string' || !Number.isInteger(value.index) || !Number.isInteger(value.count) || typeof value.data !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(value.data)) throw new Error('invalid snapshot chunk');
+        const index = value.index as number;
+        const count = value.count as number;
+        if (count < 1 || count > Math.ceil(MAX_SNAPSHOT_BYTES / SNAPSHOT_CHUNK_BYTES) || index < 0 || index >= count || value.data.length > Math.ceil(SNAPSHOT_CHUNK_BYTES / 3) * 4) throw new Error('snapshot chunk out of bounds');
+        if (index === 0) {
+          if (pending) report(`Line ${pending.line}: incomplete snapshot`);
+          pending = {id: value.id, count, chunks: [], bytes: 0, line: lineNumber};
+        }
+        if (!pending || pending.id !== value.id || pending.count !== count || pending.chunks.length !== index) throw new Error('snapshot chunks out of order');
+        const chunk = Buffer.from(value.data, 'base64');
+        pending.bytes += chunk.length;
+        if (chunk.length > SNAPSHOT_CHUNK_BYTES || pending.bytes > MAX_SNAPSHOT_BYTES) throw new Error('snapshot exceeds size limit');
+        pending.chunks.push(chunk);
+        continue;
+      }
+      if (isRecord(value) && value.type === 'snapshot_commit') {
+        if (!pending || value.id !== pending.id || value.count !== pending.count || pending.chunks.length !== pending.count || value.bytes !== pending.bytes || typeof value.digest !== 'string') throw new Error('invalid snapshot commit');
+        const bytes = Buffer.concat(pending.chunks, pending.bytes);
+        if (crypto.createHash('sha256').update(bytes).digest('hex') !== value.digest) throw new Error('snapshot checksum mismatch');
+        const entry = parseSessionEntry(JSON.parse(bytes.toString('utf8')) as unknown);
+        if (entry.type !== 'conversation_snapshot') throw new Error('chunked entry is not a conversation snapshot');
+        pending = undefined;
+        onEntry(entry);
+        continue;
+      }
+      if (pending) { report(`Line ${pending.line}: incomplete snapshot`); pending = undefined; }
+      onEntry(parseSessionEntry(value));
     } catch (error) {
+      pending = undefined;
       report(`Line ${lineNumber}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  await legacyReader?.return(undefined);
+  if (pending) report(`Line ${pending.line}: incomplete snapshot`);
   if (omittedErrors > 0) parseErrors.push(`${omittedErrors} additional parse errors omitted.`);
   return parseErrors;
 }
@@ -468,7 +574,10 @@ export async function restoreSessionState(session: HazeSession): Promise<Restore
     // Legacy slim markers (pre-envelope-fix) are re-wrapped so the restored
     // conversation is a protocol-safe ModelMessage[] for the next provider
     // request (F-09).
-    if (entry.type === 'conversation_snapshot') messages = repairRestoredConversation(entry.messages);
+    if (entry.type === 'conversation_snapshot') {
+      messages = repairRestoredConversation(entry.messages);
+      if (entry.selection) modelSelection = entry.selection;
+    }
     // SU-02: a durable clear marker means "no conversation after this line";
     // later snapshots (if any) re-materialize it, otherwise restore yields [].
     if (entry.type === 'event' && entry.name === 'clear') {
@@ -561,7 +670,11 @@ async function summarizeSession(session: HazeSession, stat: Stats): Promise<Sess
       if (messageCount === 0) messageCount = entry.messages.length;
       if (!firstUserPreview) {
         const firstUser = entry.messages.find(message => message.role === 'user');
-        if (firstUser) firstUserPreview = previewText(typeof firstUser.content === 'string' ? firstUser.content : JSON.stringify(firstUser.content));
+        if (firstUser) {
+          const content = firstUser.content;
+          const text = typeof content === 'string' ? content : content.flatMap(part => part.type === 'text' ? [part.text] : []).join(' ');
+          firstUserPreview = previewText(text || '[attachment]');
+        }
       }
     }
     if (entry.type === 'event' && entry.name === 'turn_end' && entry.text) {

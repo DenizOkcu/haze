@@ -51,5 +51,3 @@ export const COMPACTION_LLM_TRANSCRIPT_CHARS = 60_000;
 export const SESSION_INLINE_VALUE_BYTES = 32 * 1024;
 /** Preview length for slimmed session values. */
 export const SESSION_PREVIEW_CHARS = 4 * 1024;
-/** Strings longer than this are truncated in session snapshots. */
-export const SESSION_LARGE_STRING_CHARS = 8 * 1024;

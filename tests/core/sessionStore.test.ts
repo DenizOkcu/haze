@@ -26,6 +26,71 @@ describe('sessionStore', () => {
     await fs.remove(tmp);
   });
 
+  it('persists and restores a large reasoning snapshot through vacuum without truncation', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const reasoning = '🧠'.repeat(1_100_000);
+    const messages: ModelMessage[] = [{role: 'user', content: 'new'}, {role: 'assistant', content: [{type: 'reasoning', text: reasoning}]}];
+    const selection = {provider: 'p', model: 'm', endpointFingerprint: 'a'.repeat(64)};
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'old'}]});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages, selection});
+    const restored = await restoreSessionState(session);
+    expect(restored.parseErrors).toEqual([]);
+    expect(restored.messages).toEqual(messages);
+    expect(restored.modelSelection).toEqual(selection);
+    await vacuumSessionFileIfLarge(session, 1);
+    expect((await restoreSessionState(session)).messages).toEqual(messages);
+  });
+
+  it('recovers a pre-chunk oversized snapshot without losing it during vacuum', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'old'}]});
+    const messages: ModelMessage[] = [{role: 'user', content: 'new'}, {role: 'assistant', content: [{type: 'reasoning', text: 'x'.repeat(JSONL_LINE_BYTES)}]}];
+    await fs.appendFile(session.file, `${JSON.stringify({type: 'conversation_snapshot', at: '2', messages})}\n`);
+    const restored = await restoreSessionState(session);
+    expect(restored.parseErrors).toEqual([]);
+    expect(restored.messages).toEqual(messages);
+    await vacuumSessionFileIfLarge(session, 1);
+    expect((await restoreSessionState(session)).messages).toEqual(messages);
+  });
+
+  it('ignores an interrupted chunked snapshot and keeps the last complete one', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'safe'}]});
+    await fs.appendFile(session.file, `${JSON.stringify({type: 'snapshot_chunk', id: 'partial', index: 0, count: 2, data: Buffer.from('partial').toString('base64')})}\n`);
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual([{role: 'user', content: 'safe'}]);
+    expect(restored.parseErrors).toEqual([expect.stringContaining('incomplete snapshot')]);
+  });
+
+  it('starts the next record on a new line after a crash leaves a partial tail', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'old'}]});
+    await fs.appendFile(session.file, '{"type":"snapshot_chunk"');
+    const reopened = await findSession(session.id, cwd, sessionsDir);
+    expect(reopened).toBeDefined();
+    await appendSessionEntry(reopened!, {type: 'conversation_snapshot', at: '2', messages: [{role: 'user', content: 'new'}]});
+    const restored = await restoreSessionState(reopened!);
+    expect(restored.messages).toEqual([{role: 'user', content: 'new'}]);
+    expect(restored.parseErrors).toHaveLength(1);
+  });
+
+  it('rejects a damaged chunked snapshot without adopting its model selection', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'safe'}]});
+    const selection = {provider: 'new', model: 'm', endpointFingerprint: 'a'.repeat(64)};
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '2', messages: [{role: 'assistant', content: [{type: 'reasoning', text: 'x'.repeat(JSONL_LINE_BYTES)}]}], selection});
+    const lines = (await fs.readFile(session.file, 'utf8')).trimEnd().split('\n');
+    const index = lines.findIndex(line => line.includes('"type":"snapshot_chunk"'));
+    const chunk = JSON.parse(lines[index]);
+    chunk.data = `${chunk.data.startsWith('A') ? 'B' : 'A'}${chunk.data.slice(1)}`;
+    lines[index] = JSON.stringify(chunk);
+    await fs.writeFile(session.file, `${lines.join('\n')}\n`);
+    const restored = await restoreSessionState(session);
+    expect(restored.messages).toEqual([{role: 'user', content: 'safe'}]);
+    expect(restored.modelSelection).toBeUndefined();
+    expect(restored.parseErrors).toEqual([expect.stringContaining('snapshot checksum mismatch')]);
+  });
+
   it('keeps a new session memory-only until it contains a resumable message', async () => {
     const session = await createSession({cwd, sessionsDir, hazeVersion: 'test'});
     expect(session.cwd).toBe(cwd);
@@ -406,7 +471,7 @@ describe('sessionStore', () => {
     expect(disk).not.toContain('inputTokens');
   });
 
-  it('slims large tool results in conversation snapshots', async () => {
+  it('preserves large tool results in conversation snapshots', async () => {
     const session = await createSession({cwd, sessionsDir});
     const messages: ModelMessage[] = [{
       role: 'tool',
@@ -420,13 +485,7 @@ describe('sessionStore', () => {
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
 
     const restored = await restoreConversation(session);
-    const content = restored.messages[0]?.content;
-    const toolResult = Array.isArray(content) ? content[0] as {output?: {type?: string; value?: {omitted?: boolean; originalBytes?: number}}} : undefined;
-    // The slim marker must stay inside the AI SDK output envelope so the
-    // restored conversation remains a protocol-safe ModelMessage[] (F-09).
-    expect(toolResult?.output?.type).toBe('json');
-    expect(toolResult?.output?.value?.omitted).toBe(true);
-    expect(toolResult?.output?.value?.originalBytes).toBeGreaterThan(32_000);
+    expect(restored.messages).toEqual(messages);
     for (const message of restored.messages) expect(() => modelMessageSchema.parse(message)).not.toThrow();
   });
 
@@ -461,7 +520,7 @@ describe('sessionStore', () => {
     expect(output?.type).toBe('json');
   });
 
-  it('slims image file parts to placeholders so sessions never store image bytes (F03, AC4)', async () => {
+  it('preserves base64 image parts in conversation snapshots', async () => {
     const session = await createSession({cwd, sessionsDir});
     const imageData = 'A'.repeat(40_000); // base64-shaped payload
     const messages: ModelMessage[] = [{
@@ -474,21 +533,13 @@ describe('sessionStore', () => {
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
 
     const disk = await fs.readFile(session.file, 'utf8');
-    expect(disk).not.toContain(imageData.slice(0, 1000));
+    expect(disk).toContain(imageData.slice(0, 1000));
 
     const restored = await restoreConversation(session);
-    const parts = restored.messages[0]?.content;
-    expect(Array.isArray(parts)).toBe(true);
-    const list = parts as Array<{type?: string; text?: string}>;
-    expect(list[0]).toEqual({type: 'text', text: 'fix this layout'});
-    // The placeholder is a text part: resumed conversations stay protocol-safe.
-    expect(list[1]?.type).toBe('text');
-    expect(list[1]?.text).toContain('shot.png');
-    expect(list[1]?.text).toContain('image/png');
-    expect(list[1]?.text).toContain('omitted from session');
+    expect(restored.messages).toEqual(messages);
   });
 
-  it('keeps snapshot lines bounded even for megabyte image parts (F03)', async () => {
+  it('round-trips binary image parts through snapshot storage and vacuum', async () => {
     const session = await createSession({cwd, sessionsDir});
     const messages: ModelMessage[] = [{
       role: 'user',
@@ -499,10 +550,24 @@ describe('sessionStore', () => {
     }];
     await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
 
-    expect((await fs.stat(session.file)).size).toBeLessThan(64 * 1024);
     const restored = await restoreConversation(session);
     expect(restored.parseErrors).toEqual([]);
-    expect(restored.messages).toHaveLength(1);
+    expect(restored.messages).toEqual(messages);
+    expect((await listSessions(cwd, sessionsDir))[0]?.firstUserPreview).toBe('see screenshot');
+    await vacuumSessionFileIfLarge(session, 1);
+    expect((await restoreConversation(session)).messages).toEqual(messages);
+  });
+
+  it('preserves tagged and URL image data in snapshots', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    const messages: ModelMessage[] = [{role: 'user', content: [
+      {type: 'file', mediaType: 'image/png', data: {type: 'data', data: new Uint8Array([1, 2, 255])}},
+      {type: 'image', image: new URL('https://example.test/image.png')},
+    ]}];
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages});
+    const restored = await restoreConversation(session);
+    expect(restored.messages).toEqual(messages);
+    expect(() => modelMessageSchema.parse(restored.messages[0])).not.toThrow();
   });
 
   it('restores conversation and work state in one pass with parse errors reported once (regression CR-013)', async () => {
