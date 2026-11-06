@@ -23,8 +23,10 @@ const SECRET_PATTERNS: SecretPattern[] = [
   {kind: 'aws-key', pattern: /AKIA[0-9A-Z]{16}/g},
   // Slack tokens (bot, app, refresh, user tokens).
   {kind: 'slack-token', pattern: /xox[baprs]-[A-Za-z0-9-]{10,}/g},
-  // JWTs (three base64url segments starting with a JSON header).
-  {kind: 'jwt', pattern: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g},
+  // JWTs (three base64url segments starting with a JSON header). Per-segment
+  // minimums cut false positives on short token-shaped strings while still
+  // matching real JWTs, whose segments are far longer than this.
+  {kind: 'jwt', pattern: /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g},
   // GitHub fine-grained / long-lived personal access tokens (github_pat_ prefix).
   {kind: 'github-token', pattern: /github_pat_[A-Za-z0-9_]{20,}/g},
   // GCP API keys (AIza prefix).
