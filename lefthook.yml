@@ -1,0 +1,15 @@
+# Git hooks managed by lefthook (https://lefthook.dev) — run `lefthook install` once.
+# Tools on PATH: gitleaks, jscpd, osv-scanner (knip runs via npm script).
+# A check is skipped with a notice when its binary is not installed; when the
+# binary is present, its failure fails the commit.
+pre-commit:
+  parallel: false
+  commands:
+    gitleaks:
+      run: if command -v gitleaks >/dev/null 2>&1; then gitleaks protect --staged --redact --no-banner; else echo "gitleaks not installed; skipping"; fi
+    osv-scanner:
+      run: if command -v osv-scanner >/dev/null 2>&1; then osv-scanner scan --lockfile package-lock.json; else echo "osv-scanner not installed; skipping"; fi
+    jscpd:
+      run: if command -v jscpd >/dev/null 2>&1; then jscpd --min-tokens 50 --reporters console src tests; else echo "jscpd not installed; skipping"; fi
+    knip:
+      run: npm run lint:knip

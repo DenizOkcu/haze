@@ -16,7 +16,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "bin": {
     "haze": "bin/haze.js"
@@ -50,19 +50,19 @@
     "eval:native": "node scripts/run-native-evals.mjs"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.88",
-    "@ai-sdk/openai": "4.0.106",
-    "@ai-sdk/openai-compatible": "3.0.82",
+    "@ai-sdk/mcp": "^2.0.91",
+    "@ai-sdk/openai": "4.0.109",
+    "@ai-sdk/openai-compatible": "3.0.85",
     "@inkjs/ui": "2.0.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@vscode/ripgrep": "1.18.0",
-    "ai": "7.0.159",
+    "ai": "7.0.163",
     "commander": "15.0.0",
     "defuddle": "^0.19.6",
     "highlight.js": "^11.12.0",
     "ignore": "^7.0.14",
     "ink": "8.0.0",
-    "marked": "18.1.2",
+    "marked": "18.1.3",
     "react": "19.3.1",
     "string-width": "8.3.0",
     "wrap-ansi": "10.0.2",
@@ -80,6 +80,6 @@
     "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   }
 }
