@@ -65,6 +65,11 @@ function applyOccurrences(content: string, occurrences: Occurrence[]) {
 
 export async function replaceInFiles(input: ReplaceInFilesInput, context: ToolExecutionContext) {
   if (!input.needle) throw new Error('needle must not be empty');
+  // A regex needle this long is almost always catastrophic-backtracking input
+  // rather than a real search pattern; reject it before scanning any file.
+  if (input.mode === 'regex' && input.needle.length > 512) {
+    throw new Error('regex needle exceeds 512 characters; shorten it or switch to literal mode.');
+  }
   const base = await prepareWorkspaceRead(input.path, false, context);
   const stat = await fs.stat(base);
   const ignore = createIgnoreClassifier(workspaceRoot());

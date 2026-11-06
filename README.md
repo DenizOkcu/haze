@@ -4,7 +4,11 @@ A minimal LLM harness for your terminal.
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.10
+## What's new in 1.7.11
+
+Fleet size now follows the deployment manifest's worker allowance, and long turns show live generation speed and fleet depth in the busy bar.
+
+### Changes in 1.7.10
 
 This patch rebuilds the npm package with matching version and build metadata.
 

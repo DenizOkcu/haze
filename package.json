@@ -1,6 +1,6 @@
 {
   "name": "@denizokcu/haze",
-  "version": "1.7.10",
+  "version": "1.7.11",
   "description": "A minimal LLM harness for your terminal.",
   "type": "module",
   "license": "MIT",
@@ -50,13 +50,13 @@
     "eval:native": "node scripts/run-native-evals.mjs"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.91",
-    "@ai-sdk/openai": "4.0.109",
-    "@ai-sdk/openai-compatible": "3.0.85",
+    "@ai-sdk/mcp": "^2.0.92",
+    "@ai-sdk/openai": "4.0.110",
+    "@ai-sdk/openai-compatible": "3.0.86",
     "@inkjs/ui": "2.0.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@vscode/ripgrep": "1.18.0",
-    "ai": "7.0.163",
+    "ai": "7.0.164",
     "commander": "15.0.0",
     "defuddle": "^0.19.6",
     "highlight.js": "^11.12.0",

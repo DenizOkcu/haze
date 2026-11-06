@@ -1,6 +1,6 @@
 # src/core/tasks/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.10 release.
+Last updated: 2026-10-31 for the 1.7.11 release.
 
 Workspace-local task storage.
 

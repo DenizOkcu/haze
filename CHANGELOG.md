@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.11 - 2026-11-06
+
+### Changed
+
+- Native fleet size follows the deployment manifest's worker allowance instead of a hardcoded two; deployments that advertise nothing stay conservative at two workers.
+- The busy bar shows live progress for long turns: estimated generation tok/s and fleet workers running or queued.
+
 ## 1.7.10 - 2026-11-05
 
 ### Fixed
