@@ -14,16 +14,26 @@ describe('provider wizard helpers', () => {
     expect(result.message).toContain('Added 2 models');
   });
 
+  it('preserves unknown fields on every provider when editing one', () => {
+    const configured = {providers: [
+      {name: 'one', url: 'https://one.example/v1', models: ['a'], customMetadata: {owner: 'team'}},
+      {name: 'two', url: 'https://two.example/v1', models: ['b'], customMetadata: {owner: 'other'}},
+    ]};
+    const result = providerAppendModels(configured, 'one', 'new');
+    expect(result.settingsPatch?.providers?.find(provider => provider.name === 'one')).toMatchObject({customMetadata: {owner: 'team'}});
+    expect(result.settingsPatch?.providers?.find(provider => provider.name === 'two')).toMatchObject({customMetadata: {owner: 'other'}});
+  });
+
   it('creates a provider from draft and model input', () => {
     const result = providerFinishAdd({}, {name: 'remote', url: 'https://x/v1', key: 'k'}, 'a, a, b');
     expect(result.provider).toEqual({name: 'remote', url: 'https://x/v1', key: 'k', models: ['a', 'b']});
     expect(result.settingsPatch?.provider).toBe('remote');
   });
 
-  it('writes preset-curated limits for matching models and never overwrites user limits', () => {
+  it('keeps preset limits separate and never overwrites user limits', () => {
     const created = providerFinishAdd({}, {name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: 'k'}, 'deepseek-v4-pro, other');
-    expect(created.provider?.modelLimits?.['deepseek-v4-pro']).toMatchObject({contextWindowTokens: 1_048_576, maxOutputTokens: 393_216});
-    expect(Object.keys(created.provider?.modelLimits ?? {})).toEqual(['deepseek-v4-pro', 'other'].filter(model => created.provider?.modelLimits?.[model]));
+    expect(created.provider?.modelLimits).toBeUndefined();
+    expect(created.provider?.discoveredModelLimits).toBeUndefined();
 
     const withUserLimits = {
       provider: 'DeepSeek',
@@ -47,7 +57,7 @@ describe('provider wizard helpers', () => {
       'unrelated-model': {contextWindowTokens: 99_999},
     };
     const created = providerFinishAdd({}, {name: 'DeepSeek', url: 'https://api.deepseek.com/v1', key: 'k'}, 'deepseek-v4-pro', discovered);
-    expect(created.provider?.modelLimits).toEqual({
+    expect(created.provider?.discoveredModelLimits).toEqual({
       'deepseek-v4-pro': {contextWindowTokens: 512_000, maxOutputTokens: 65_536},
     });
 
@@ -57,6 +67,13 @@ describe('provider wizard helpers', () => {
     };
     const appended = providerAppendModels(withUserValue, 'DeepSeek', 'deepseek-v4-pro', discovered);
     expect(appended.settingsPatch?.providers?.[0].modelLimits?.['deepseek-v4-pro']).toEqual({contextWindowTokens: 1, maxOutputTokens: 1});
+  });
+
+  it('refreshes discovered values without losing partial fields or user overrides', () => {
+    const configured = {providers: [{name: 'custom', url: 'https://example.test/v1', models: ['m'], modelLimits: {m: {maxOutputTokens: 2048}}, discoveredModelLimits: {m: {contextWindowTokens: 200_000, maxOutputTokens: 8192}}}]};
+    const result = providerAppendModels(configured, 'custom', 'm', {m: {contextWindowTokens: 16_000}});
+    expect(result.settingsPatch?.providers?.[0].discoveredModelLimits?.m).toEqual({contextWindowTokens: 16_000, maxOutputTokens: 8192});
+    expect(result.settingsPatch?.providers?.[0].modelLimits?.m).toEqual({maxOutputTokens: 2048});
   });
 
   it('removes models and updates active model when necessary', () => {

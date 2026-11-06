@@ -8,11 +8,12 @@ import {parseReasoningOverride, type EffectiveReasoning, type ReasoningLevel, ty
 import {EMPTY_TOKEN_USAGE, accumulateTokenUsage} from '../chat/turnState.js';
 import {type PromptSession} from '../../llm/systemPrompt.js';
 import {readSettings} from '../../config/settings.js';
-import {activeModel, modelSelector, resolveModelSelector} from '../../config/providers.js';
+import {activeModel, modelSelector, providerEndpointFingerprint, resolveModelSelector} from '../../config/providers.js';
 import {createLog, endLog, type LlmLog} from '../../core/log/llmLog.js';
 import {agentEvent, type AgentEvent} from '../../core/agent/events.js';
 import {findSession, restoreSessionState} from '../../core/session/sessionStore.js';
 import {compactModelMessages} from '../../core/agent/compaction.js';
+import {transitionProviderConversation} from '../../core/agent/providerTransition.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js';
 import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
@@ -60,7 +61,7 @@ type HeadlessStreamEvent =
   | {type: 'tool_end'; id: string; name: string; success: boolean; durationMs: number; errorCode?: string; error?: string; at: string}
   | {type: 'retry'; attempt: number; maxAttempts: number; delayMs: number; error: string; at: string}
   | {type: 'reasoning_policy'; requested?: ReasoningLevel; effective: EffectiveReasoning; reason: string; at: string}
-  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback' | 'deployment'; at: string}
+  | {type: 'context_budget'; contextWindowTokens: number; source: 'settings' | 'discovery' | 'preset' | 'catalog' | 'user-fallback' | 'default-fallback' | 'deployment'; at: string}
   | {type: 'context_overflow'; recovered: boolean; error: string; at: string}
   | {type: 'compaction_start'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm'; at: string}
   | {type: 'compaction_end'; reason: 'threshold' | 'overflow' | 'manual'; method: 'heuristic' | 'llm' | 'none'; compacted: boolean; olderCount?: number; keptCount?: number; willRetry?: boolean; error?: string; at: string}
@@ -240,6 +241,11 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
   const contextFiles: ContextFile[] = await readContextFiles(process.cwd());
   const session: PromptSession = {start: new Date(), cwd: process.cwd()};
   let conversation: ModelMessage[] = restored?.messages ?? [];
+  const endpointChanged = resolvedModel?.status === 'found' && (!savedModel?.endpointFingerprint || savedModel.endpointFingerprint !== providerEndpointFingerprint(resolvedModel.provider));
+  if (resumed && sessionModel && ((!savedModel || `${savedModel.provider}:${savedModel.model}` !== sessionModel) || endpointChanged) && conversation.length) {
+    conversation = transitionProviderConversation(conversation);
+    process.stderr.write('Model changed: previous tool history was converted to text and provider reasoning state was cleared.\n');
+  }
   for (const error of restored?.parseErrors ?? []) process.stderr.write(`Session parse error: ${error}\n`);
   // Assistant text is delivered in two stages by runAgentTurn: an initial streaming
   // `addMessage`, then a finalizing `updateMessage` with the complete text. We key

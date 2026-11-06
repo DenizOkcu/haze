@@ -82,6 +82,7 @@ export function createQuarantinableCallbacks(callbacks: StreamCallbacks): Quaran
     addMessage: whileLive(callbacks.addMessage),
     updateMessage: whileLive(callbacks.updateMessage),
     setConversation: whileLive(callbacks.setConversation),
+    onModelTransition: callbacks.onModelTransition && whileLive(callbacks.onModelTransition),
     setBusy: whileLive(callbacks.setBusy),
     setLastAssistantText: whileLive(callbacks.setLastAssistantText),
     setBusyLabel: callbacks.setBusyLabel && whileLive(callbacks.setBusyLabel),

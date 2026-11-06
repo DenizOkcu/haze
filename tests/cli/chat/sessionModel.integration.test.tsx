@@ -44,6 +44,7 @@ vi.mock('../../../src/cli/chat/startupSequence.js', () => ({
 vi.mock('../../../src/cli/commands/streaming/goalSupervisor.js', () => ({runAgentGoal: fixture.goal}));
 const {chatCommand} = await import('../../../src/cli/commands/chat.js');
 const {createSession, appendSessionEntry, restoreSessionState, listSessions, findSession} = await import('../../../src/core/session/sessionStore.js');
+const {providerEndpointFingerprint} = await import('../../../src/config/providers.js');
 
 afterEach(async () => {
   app?.unmount();
@@ -64,6 +65,31 @@ async function submit(text: string) {
   await app!.waitUntilRenderFlush();
 }
 
+it('creates a portable boundary when a resumed provider endpoint has changed', async () => {
+  const oldProvider = {name: 'fixture', url: 'http://localhost:1111/v1', models: ['m']};
+  fixture.settings = {provider: 'fixture', model: 'm', providers: [{...oldProvider, url: 'http://localhost:2222/v1'}]};
+  const source = await createSession();
+  await appendSessionEntry(source, {type: 'model_selection', at: 'now', selection: {provider: 'fixture', model: 'm', endpointFingerprint: providerEndpointFingerprint(oldProvider)}});
+  await appendSessionEntry(source, {type: 'conversation_snapshot', at: 'now', messages: [
+    {role: 'user', content: 'check'},
+    {role: 'assistant', content: [{type: 'reasoning', text: 'old opaque'}, {type: 'tool-call', toolCallId: 'c', toolName: 'readFile', input: {path: 'a'}}]},
+    {role: 'tool', content: [{type: 'tool-result', toolCallId: 'c', toolName: 'readFile', output: {type: 'text', value: 'file data'}}]},
+  ]});
+  streams = {stdin: new FixtureInput(), stdout: new FixtureOutput(), stderr: new FixtureOutput()};
+  let history = '';
+  fixture.goal.mockImplementation(async options => {
+    history = JSON.stringify(options.callbacks.getConversation());
+    return {status: 'complete', stopReason: 'completed', cycles: 1, escalations: 0};
+  });
+  running = chatCommand({resumeSessionId: source.id});
+  await expect.poll(() => stripAnsi(streams.stdout.writes.join('')).replace(/\s+/g, ' ')).toContain('Provider endpoint changed or its previous identity was unknown');
+  await submit('continue');
+  await expect.poll(() => fixture.goal.mock.calls.length).toBe(1);
+  expect(history).not.toContain('old opaque');
+  expect(history).not.toContain('tool-call');
+  expect(history).toContain('file data');
+});
+
 it.each(['startup', 'resume', 'latest', 'fork', 'picker'])('keeps the session model through %s, settings changes, and explicit reselection', async kind => {
   fixture.settings = {
     provider: 'fixture', model: 'new-model',
@@ -75,7 +101,17 @@ it.each(['startup', 'resume', 'latest', 'fork', 'picker'])('keeps the session mo
   const existingIds = new Set((await listSessions()).map(session => session.id));
   streams = {stdin: new FixtureInput(), stdout: new FixtureOutput(), stderr: new FixtureOutput()};
   fixture.goal.mockImplementation(async options => {
-    options.callbacks.setConversation([{role: 'user', content: options.request}]);
+    if (options.request === 'another follow-up') {
+      const history = JSON.stringify(options.callbacks.getConversation());
+      expect(history).not.toContain('opaque reasoning');
+      expect(history).not.toContain('tool-call');
+      expect(history).toContain('Previous tool results');
+    }
+    options.callbacks.setConversation([
+      {role: 'user', content: options.request},
+      {role: 'assistant', content: [{type: 'reasoning', text: 'opaque reasoning'}, {type: 'tool-call', toolCallId: 'call', toolName: 'readFile', input: {path: 'a'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 'call', toolName: 'readFile', output: {type: 'text', value: 'content'}}]},
+    ]);
     return {status: 'complete', stopReason: 'completed', cycles: 1, escalations: 0};
   });
   running = chatCommand(kind === 'startup' ? {resumeSessionId: source.id} : kind === 'latest' ? {continueSession: true} : {});
@@ -109,7 +145,7 @@ it.each(['startup', 'resume', 'latest', 'fork', 'picker'])('keeps the session mo
   await running;
   const forkId = (await listSessions()).find(session => !existingIds.has(session.id))?.id;
   const active = kind === 'fork' ? await findSession(forkId!) : source;
-  expect((await restoreSessionState(active!)).modelSelection).toEqual({provider: 'fixture', model: 'new-model'});
+  expect((await restoreSessionState(active!)).modelSelection).toMatchObject({provider: 'fixture', model: 'new-model', endpointFingerprint: expect.any(String)});
 });
 
 it('pins a new session even when another session changes the global default', async () => {

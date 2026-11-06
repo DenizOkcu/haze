@@ -5,7 +5,6 @@ import type {Mode} from './chatModes.js';
 
 
 import {assertCredentialedEndpointSecure} from '../../config/endpointSecurity.js';
-import {presetModelLimitsForModels} from '../../config/providerPresets.js';
 import {CHATGPT_CODEX_BASE_URL} from '../../llm/openaiCodexOAuth.js';
 import type {HarvestedModelLimits} from '../../config/modelDiscovery.js';
 
@@ -19,11 +18,10 @@ export function chatgptCodexUrlWarning(provider: HazeProviderSettings): string |
   return `Note: ${provider.name} uses ChatGPT sign-in, which always sends requests to ${CHATGPT_CODEX_BASE_URL}. The configured URL (${provider.url}) is ignored for requests.`;
 }
 
-/** Merge order for per-model limits on add: preset-curated < live-discovered < existing user settings. */
-function mergedModelLimits(curated: HarvestedModelLimits, models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
-  const discoveredSubset: HarvestedModelLimits = {};
-  for (const model of models) if (discovered?.[model]) discoveredSubset[model] = discovered[model];
-  const merged = {...curated, ...discoveredSubset, ...existing};
+/** Refresh discovered facts field by field without touching explicit user limits. */
+function mergedModelLimits(models: readonly string[], discovered: HarvestedModelLimits | undefined, existing: HarvestedModelLimits | undefined) {
+  const merged = {...existing};
+  for (const model of models) if (discovered?.[model]) merged[model] = {...merged[model], ...discovered[model]};
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
@@ -40,14 +38,9 @@ export function providerAppendModels(settings: HazeSettings, providerName: strin
   const models = commaList(modelsValue);
   if (!provider) return {message: 'No provider selected.'};
   if (models.length === 0) return {provider, models, message: 'Enter at least one model name.'};
-  // Preset-curated limits (models.dev) flow into settings so request budgeting
-  // uses the real window without the user configuring anything. Live values the
-  // provider itself reported in /models discovery win over the static catalog
-  // (this is the only source that knows a local server's configured window);
-  // existing user-configured keys always win over both.
-  const curatedLimits = presetModelLimitsForModels(provider, models);
-  const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, provider.modelLimits);
-  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(modelLimits ? {modelLimits} : {})};
+  // Keep discovery separate so later refreshes do not overwrite user limits.
+  const discoveredModelLimits = mergedModelLimits(models, discoveredLimits, provider.discoveredModelLimits);
+  const nextProvider = {...provider, models: [...new Set([...provider.models, ...models])], ...(discoveredModelLimits ? {discoveredModelLimits} : {})};
   return {
     provider,
     models,
@@ -64,15 +57,14 @@ export function providerFinishAdd(settings: HazeSettings, draft: Partial<HazePro
   try { assertCredentialedEndpointSecure(draft.url, draft.key); } catch (error) {
     return {models, message: error instanceof Error ? error.message : String(error)};
   }
-  const curatedLimits = presetModelLimitsForModels(draft, models);
-  const modelLimits = mergedModelLimits(curatedLimits, models, discoveredLimits, undefined);
+  const discoveredModelLimits = mergedModelLimits(models, discoveredLimits, undefined);
   const provider: HazeProviderSettings = {
     name: draft.name,
     url: draft.url,
     ...(draft.key ? {key: draft.key} : {}),
     ...(draft.kind ? {kind: draft.kind} : {}),
     models: [...new Set(models)],
-    ...(modelLimits ? {modelLimits} : {}),
+    ...(discoveredModelLimits ? {discoveredModelLimits} : {}),
   };
   const divergence = chatgptCodexUrlWarning(provider);
   return {

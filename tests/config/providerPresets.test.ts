@@ -117,7 +117,8 @@ describe('preset model limits', () => {
 
   it('does not invent limits for moving model aliases', () => {
     expect(findPreset('mistral-api')?.modelLimits).not.toHaveProperty('mistral-small-latest');
-    expect(findPreset('mistral-vibe')?.modelLimits).toBeUndefined();
+    expect(findPreset('mistral-vibe')?.modelLimits).not.toHaveProperty('mistral-vibe-cli-latest');
+    expect(findPreset('mistral-vibe')?.modelLimits?.['mistral-large-4']).toEqual(findPreset('mistral-api')?.modelLimits?.['mistral-large-4']);
   });
 
   it('carries no limit entries for models not in suggestedModels', () => {
@@ -148,7 +149,7 @@ describe('preset model limits', () => {
     expect(byUrl).toEqual({'deepseek-v4-pro': {contextWindowTokens: 1_048_576, maxOutputTokens: 393_216}});
     expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://chatgpt.com/backend-api/codex'}, ['gpt-6.1-sol'])).toEqual({'gpt-6.1-sol': {contextWindowTokens: 500_000, maxOutputTokens: 128_000}});
     expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://unknown.example/v1'}, ['gpt-6.1-sol'])).toEqual({});
-    expect(presetModelLimitsForModels({url: 'https://api.mistral.ai/v1'}, ['mistral-large-4'])).toEqual({});
+    expect(presetModelLimitsForModels({url: 'https://api.mistral.ai/v1'}, ['mistral-large-4'])).toEqual({'mistral-large-4': {contextWindowTokens: 1_048_576, maxOutputTokens: 262_144}});
     expect(presetModelLimitsForModels({url: 'http://localhost:8080/v1'}, ['qwen3-coder'])).toEqual({});
   });
 });

@@ -93,6 +93,8 @@ export interface StreamCallbacks {
   addMessage: (msg: Message) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
   setConversation: (messages: ModelMessage[]) => void;
+  /** Persist an atomic portable boundary when the supervisor switches models. */
+  onModelTransition?: (selector: string, messages: ModelMessage[]) => void;
   setBusy: (busy: boolean) => void;
   setBusyLabel?: (label: string) => void;
   debugLog: (line: string) => void;

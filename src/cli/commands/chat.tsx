@@ -9,7 +9,7 @@ import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.j
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel} from '../../config/providers.js';
+import {activeModel, providerEndpointFingerprint, resolveModelSelector} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
 import {Header} from '../../ui/components/Header.js';
 import {TextInput} from '../../ui/components/TextInput.js';
@@ -46,13 +46,14 @@ import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from
 import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
 import {contextFileSignatureMap, isPausedGoalRecoveryCommand, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
 import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
-import {reasoningLevelsForProvider} from '../../config/providerReasoning.js';
+import {resolveProviderReasoning} from '../../config/providerReasoning.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
 import {useBusyIndicator} from '../chat/busyIndicator.js';
 import {useTerminalControl} from '../chat/terminalControl.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
+import {transitionProviderConversation} from '../../core/agent/providerTransition.js';
 import {commandParts} from './wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_SESSION_PICKER_RESULTS} from './sessionPicker.js';
@@ -99,20 +100,30 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const settingsRef = useRef<HazeSettings>({});
   const defaultSelectionRef = useRef<{provider?: string; model?: string}>({});
   function setSettings(next: HazeSettings, patch?: HazeSettings) {
+    const previousSelection = currentModelSelection();
+    const previousProvider = activeModel(settingsRef.current)?.provider;
     // The ref records the global default from `next` (what updateSettings
     // returned) before the patch merge; unrelated settings writes must not
     // replace a resumed session's model (merge policy in chat/userInput.ts).
     defaultSelectionRef.current = {provider: next.provider, model: next.model};
     settingsRef.current = patch ? mergeSettingsSelection(next, settingsRef.current, patch) : next;
+    const selected = currentModelSelection();
+    const selectedProvider = activeModel(settingsRef.current)?.provider;
+    const changedEndpoint = selectedProvider && (!previousProvider || previousProvider.url !== selectedProvider.url || previousProvider.kind !== selectedProvider.kind);
+    if (patch && previousSelection && selected && (previousSelection.provider !== selected.provider || previousSelection.model !== selected.model || changedEndpoint) && conversationRef.current.length) {
+      conversationRef.current = transitionProviderConversation(conversationRef.current);
+      sessionRecorderRef.current?.recordModelTransition(conversationRef.current, selected);
+      setMessages(messages => [...messages, {role: 'system', text: 'Model changed: previous tool history was converted to text and provider reasoning state was cleared.'}]);
+    }
     setSettingsRaw(settingsRef.current);
     if (patch && ('provider' in patch || 'model' in patch)) {
-      const selected = currentModelSelection();
       if (selected) sessionRecorderRef.current?.recordModelSelection(selected);
     }
   }
   function currentModelSelection() {
     const {provider, model} = settingsRef.current;
-    return provider && model ? {provider, model} : undefined;
+    const selected = activeModel(settingsRef.current);
+    return provider && model ? {provider, model, ...(selected ? {endpointFingerprint: providerEndpointFingerprint(selected.provider)} : {})} : undefined;
   }
   const [settingsError, setSettingsError] = useState<string | undefined>();
   const conversationRef = useRef<ModelMessage[]>([]);
@@ -333,7 +344,8 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     modelSelection: currentModelSelection,
     reasoningByModel: () => currentPromptSession().reasoningByModel,
     onModelSelection: selection => {
-      settingsRef.current = {...settingsRef.current, ...(selection ?? defaultSelectionRef.current)};
+      const model = selection ? {provider: selection.provider, model: selection.model} : defaultSelectionRef.current;
+      settingsRef.current = {...settingsRef.current, ...model};
       setSettingsRaw(settingsRef.current);
     },
     sessionRef,
@@ -640,6 +652,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
         conversationRef.current = msgs;
         sessionRecorder.recordConversation(msgs);
       },
+      onModelTransition: (selector, msgs) => {
+        const resolved = resolveModelSelector(settingsRef.current, selector);
+        if (resolved.status === 'found') sessionRecorder.recordModelTransition(msgs, {provider: resolved.provider.name, model: resolved.model, endpointFingerprint: providerEndpointFingerprint(resolved.provider)});
+      },
       setBusy: setBusyWithHeartbeat,
       setBusyLabel,
       debugLog,
@@ -716,7 +732,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const reasoningSuffix = effectiveReasoning
     ? effectiveReasoning.level === undefined
       ? ' (no reasoning parameter)'
-      : activeSelection && !reasoningLevelsForProvider(activeSelection.provider, activeSelection.model).includes(effectiveReasoning.level)
+      : activeSelection && resolveProviderReasoning(activeSelection.provider, activeSelection.model, effectiveReasoning.level).effective === 'disabled'
         ? ' (provider default)'
       : ` (${effectiveReasoning.level})`
     : '';

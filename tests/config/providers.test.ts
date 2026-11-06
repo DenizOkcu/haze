@@ -1,7 +1,13 @@
 import {describe, expect, it} from 'vitest';
-import {activeModel, activeProvider, configuredProviders, providerImageCapable, resolveModelSelector} from '../../src/config/providers.js';
+import {activeModel, activeProvider, configuredProviders, providerApiKey, providerImageCapable, resolveModelSelector} from '../../src/config/providers.js';
 
 describe('providers', () => {
+  it('scopes a legacy key to its OpenRouter endpoint', () => {
+    const settings = {apiKey: 'synthetic-legacy-key'};
+    expect(providerApiKey(settings, {name: 'openrouter', url: 'https://openrouter.ai/api/v1', models: ['m']})).toBe('synthetic-legacy-key');
+    expect(providerApiKey(settings, {name: 'openrouter', url: 'https://other.example/v1', models: ['m']})).toBeUndefined();
+    expect(providerApiKey(settings, {name: 'custom', url: 'https://other.example/v1', models: ['m']})).toBeUndefined();
+  });
   it('turns legacy OpenRouter settings into a provider', () => {
     const providers = configuredProviders({provider: 'openrouter', apiKey: 'key', model: 'x-ai/grok-build-0.1'});
     expect(providers[0]).toMatchObject({

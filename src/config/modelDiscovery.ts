@@ -105,7 +105,7 @@ const OLLAMA_PROBE_TIMEOUT_MS = 4_000;
 /** Bound the per-save /api/show probe loop so bulk pastes stay cheap. */
 const OLLAMA_PROBE_MAX_MODELS = 8;
 
-function loopbackRoot(baseUrl: string): string | undefined {
+function endpointRoot(baseUrl: string): string | undefined {
   try {
     const url = new URL(baseUrl);
     return `${url.protocol}//${url.host}`;
@@ -131,7 +131,7 @@ export function ollamaContextFromShow(show: unknown): OllamaShowFacts {
       // Skip derived keys like `<arch>.rope.scaling.original_context_length`,
       // which describe the pre-scaling trained length, not the usable window.
       if (!key.endsWith('.context_length') || /rope|original/.test(key)) continue;
-      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= HARVEST_MAX_TOKENS) {
         max = max === undefined ? value : Math.max(max, value);
       }
     }
@@ -140,7 +140,7 @@ export function ollamaContextFromShow(show: unknown): OllamaShowFacts {
   if (typeof record.parameters === 'string') {
     const match = /(?<![\w.])num_ctx\s+(\d+)/.exec(record.parameters);
     const parsed = match ? Number(match[1]) : undefined;
-    if (parsed !== undefined && Number.isSafeInteger(parsed) && parsed > 0) facts.numCtx = parsed;
+    if (parsed !== undefined && Number.isSafeInteger(parsed) && parsed > 0 && parsed <= HARVEST_MAX_TOKENS) facts.numCtx = parsed;
   }
   return facts;
 }
@@ -156,17 +156,17 @@ function resolveOllamaContext(psContext: number | undefined, facts: OllamaShowFa
 /**
  * Probe a local Ollama server for the effective context of the given models.
  * Best-effort: any failing request simply omits that model. Only call for
- * loopback base URLs (the /api/* surface is Ollama-specific).
+ * endpoints explicitly classified as local (the /api/* surface is Ollama-specific).
  */
 export async function ollamaModelLimits(input: {baseUrl: string; models: readonly string[]; conservativeCap: number; fetchImpl?: typeof fetch; timeoutMs?: number}): Promise<HarvestedModelLimits> {
-  const root = loopbackRoot(input.baseUrl);
+  const root = endpointRoot(input.baseUrl);
   if (!root || input.models.length === 0) return {};
   const fetchImpl = input.fetchImpl ?? fetch;
   const timeoutMs = input.timeoutMs ?? OLLAMA_PROBE_TIMEOUT_MS;
   const get = async (url: string, init?: RequestInit): Promise<unknown> => {
-    const response = await fetchImpl(url, {...init, signal: AbortSignal.timeout(timeoutMs)});
+    const response = await fetchImpl(url, {...init, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs)});
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
+    return await readBodyBounded(response);
   };
   const out: HarvestedModelLimits = {};
   // Runtime ground truth for loaded models (one request, may be stale/empty).
@@ -175,7 +175,7 @@ export async function ollamaModelLimits(input: {baseUrl: string; models: readonl
     const ps = await get(`${root}/api/ps`) as {models?: Array<{name?: unknown; model?: unknown; context_length?: unknown}>};
     for (const entry of ps?.models ?? []) {
       for (const key of [entry.name, entry.model]) {
-        if (typeof key === 'string' && typeof entry.context_length === 'number' && entry.context_length > 0) {
+        if (typeof key === 'string' && typeof entry.context_length === 'number' && Number.isSafeInteger(entry.context_length) && entry.context_length > 0 && entry.context_length <= HARVEST_MAX_TOKENS) {
           psLoaded.set(key, entry.context_length);
         }
       }

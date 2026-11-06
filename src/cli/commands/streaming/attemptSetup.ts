@@ -167,8 +167,8 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // Keep the active provider history exact. Routine tool-history slimming used
   // to rewrite older successful calls/results here, invalidating provider
   // prompt-cache prefixes before the context budget required compaction.
-  // Durable session snapshots are slimmed independently at the persistence
-  // boundary; only the model-aware compaction below may rewrite active history.
+  // Durable session snapshots preserve this history; only model-aware
+  // compaction or an explicit provider transition may rewrite it.
   const durableRequestMessages = retryingExistingRequest
     ? stripSyntheticControls(callbacks.getConversation())
     : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])];
@@ -265,7 +265,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     toolCategories,
     modelRetries: typeof turnSettings.modelRetries === 'number' ? turnSettings.modelRetries : DEFAULT_MODEL_RETRIES,
     retryBaseDelayMs: typeof turnSettings.retryBaseDelayMs === 'number' ? turnSettings.retryBaseDelayMs : DEFAULT_RETRY_BASE_DELAY_MS,
-    streamIdleTimeoutMs: resolveStreamIdleTimeoutMs(turnSettings.streamIdleTimeoutMs, usesPatientIdleWindow(isLocalProviderUrl(runtime.config.baseURL), runtime.config.providerKind)),
+    streamIdleTimeoutMs: resolveStreamIdleTimeoutMs(turnSettings.streamIdleTimeoutMs, usesPatientIdleWindow(runtime.config.isLocal ?? isLocalProviderUrl(runtime.config.baseURL), runtime.config.providerKind)),
     steeringProfile,
   };
 }

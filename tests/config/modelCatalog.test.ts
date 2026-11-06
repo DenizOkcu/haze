@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {catalogLimitsFor, getModelCatalog} from '../../src/config/modelCatalog.js';
+import {catalogLimitsFor, getModelCatalog} from '../../src/config/providerModelFacts.js';
 
 describe('model catalog', () => {
   it('resolves known model families case-insensitively by prefix', () => {

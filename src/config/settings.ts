@@ -22,6 +22,8 @@ export interface HazeProviderSettings {
   models: string[];
   /** Explicit runtime/auth protocol. Omitted means a normal OpenAI-compatible endpoint. */
   kind?: 'openai-compatible' | 'chatgpt-codex' | 'haze-build';
+  /** Override automatic local/hosted inference for custom endpoints. */
+  location?: 'local' | 'hosted';
   /**
    * Explicit endpoint capabilities. Never inferred: images are only sent to
    * providers the user marked image-capable (F03); `reasoningEffort: false`
@@ -43,6 +45,8 @@ export interface HazeProviderSettings {
    * passthrough so unknown metadata is not dropped.
    */
   modelLimits?: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>;
+  /** Last discovered endpoint limits, separate from explicit user overrides. */
+  discoveredModelLimits?: Record<string, {contextWindowTokens?: number; maxOutputTokens?: number}>;
 }
 
 export interface HazeLspServerSettings {
@@ -185,12 +189,14 @@ const providerSchema = z.object({
   key: z.string().optional(),
   models: z.array(z.string()),
   kind: z.enum(['openai-compatible', 'chatgpt-codex', 'haze-build']).optional(),
+  location: z.enum(['local', 'hosted']).optional(),
   capabilities: providerCapabilitiesSchema.optional(),
   reasoningLevels: z.array(z.enum(REASONING_LEVELS as [ReasoningLevel, ...ReasoningLevel[]])).optional(),
   modelReasoningLevels: z.record(z.string(), z.array(z.enum(REASONING_LEVELS as [ReasoningLevel, ...ReasoningLevel[]]))).optional(),
   reasoningFormat: z.enum(['effort', 'thinking', 'enable-thinking']).optional(),
   trustedDeployments: z.array(z.object({modelRepository: z.string().min(1).max(256), modelRevision: z.string().regex(/^[a-f0-9]{40}$/), templateSha256: z.string().regex(/^[a-f0-9]{64}$/), runtimeVersion: z.string().regex(/^\d+\.\d+\.\d+$/)})).max(8).optional(),
   modelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
+  discoveredModelLimits: z.record(z.string(), z.object({contextWindowTokens: z.number().int().positive(), maxOutputTokens: z.number().int().positive()}).partial()).optional(),
 }).passthrough();
 
 const lspServerSchema = z.object({

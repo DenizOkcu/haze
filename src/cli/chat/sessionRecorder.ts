@@ -24,17 +24,16 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
   // the full history on every call makes the JSONL grow quadratically. Keep at
   // most one snapshot of each type in flight: while a write is pending, newer
   // snapshots replace the pending one so only the latest reaches disk.
-  let pendingConversation: {messages: ModelMessage[]; at: string} | undefined;
+  let pendingConversation: {session: HazeSession; messages: ModelMessage[]; at: string; selection?: SessionModelSelection} | undefined;
   let pendingWorkState: {state: WorkState; at: string} | undefined;
   let conversationInFlight = false;
   let workStateInFlight = false;
 
-  const writeConversation = (snapshot: {messages: ModelMessage[]; at: string}) => {
-    const session = getSession();
-    if (!session) return;
+  const writeConversation = (snapshot: {session: HazeSession; messages: ModelMessage[]; at: string; selection?: SessionModelSelection}) => {
+    const {session, messages, at, selection} = snapshot;
     conversationInFlight = true;
     void writer
-      .append({session, entry: {type: 'conversation_snapshot', at: snapshot.at, messages: snapshot.messages}})
+      .append({session, entry: {type: 'conversation_snapshot', at, messages, ...(selection ? {selection} : {})}})
       .catch(() => undefined)
       .finally(() => {
         conversationInFlight = false;
@@ -66,19 +65,36 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
     writeWorkState(snapshot);
   };
 
-  let lastModelSelection: {session: HazeSession; provider: string; model: string} | undefined;
+  let lastModelSelection: ({session: HazeSession} & SessionModelSelection) | undefined;
+  function recordModelSelection(selection: SessionModelSelection) {
+    const session = getSession();
+    if (!session || (lastModelSelection?.session === session && lastModelSelection.provider === selection.provider && lastModelSelection.model === selection.model && lastModelSelection.endpointFingerprint === selection.endpointFingerprint)) return;
+    lastModelSelection = {session, ...selection};
+    appendEntry({type: 'model_selection', at: new Date().toISOString(), selection});
+  }
   return {
-    recordModelSelection(selection: SessionModelSelection) {
+    recordModelSelection,
+    recordModelTransition(messages: ModelMessage[], selection: SessionModelSelection) {
+      // Snapshot and selection must survive a crash together. Drop superseded
+      // queued snapshots before enqueuing the atomic transition record.
       const session = getSession();
-      if (!session || (lastModelSelection?.session === session && lastModelSelection.provider === selection.provider && lastModelSelection.model === selection.model)) return;
+      if (!session) return;
+      if (pendingConversation && pendingConversation.session !== session) {
+        const pending = pendingConversation;
+        void writer.append({session: pending.session, entry: {type: 'conversation_snapshot', at: pending.at, messages: pending.messages, ...(pending.selection ? {selection: pending.selection} : {})}}).catch(() => undefined);
+      }
+      pendingConversation = undefined;
+      appendEntry({type: 'conversation_snapshot', at: new Date().toISOString(), messages, selection});
       lastModelSelection = {session, ...selection};
-      appendEntry({type: 'model_selection', at: new Date().toISOString(), selection});
     },
     recordUiMessage(message: Message) {
       appendEntry({type: 'ui_message', at: new Date().toISOString(), role: message.role, text: message.text});
     },
     recordConversation(messages: ModelMessage[]) {
-      pendingConversation = {messages, at: new Date().toISOString()};
+      const session = getSession();
+      if (!session) return;
+      const selection = lastModelSelection?.session === session ? {provider: lastModelSelection.provider, model: lastModelSelection.model, ...(lastModelSelection.endpointFingerprint ? {endpointFingerprint: lastModelSelection.endpointFingerprint} : {})} : undefined;
+      pendingConversation = {session, messages, at: new Date().toISOString(), ...(selection ? {selection} : {})};
       drainConversation();
     },
     recordWorkState(state: WorkState) {

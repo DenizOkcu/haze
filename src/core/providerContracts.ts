@@ -32,3 +32,20 @@ export interface ProviderRequestOptions {
   /** Codex subscription requests let the provider manage the output limit. */
   omitMaxOutputTokens?: boolean;
 }
+
+/** Apply the same output-limit and purpose-specific reasoning rules to auxiliary calls. */
+export function auxiliaryRequestOptions(options: ProviderRequestOptions, capabilities: ProviderCapabilities, purpose: 'worker' | 'compaction', maxOutputTokens: number): Omit<ProviderRequestOptions, 'omitMaxOutputTokens'> & {maxOutputTokens?: number} {
+  const {omitMaxOutputTokens, ...result} = options;
+  if (purpose === 'worker') {
+    const effort = capabilities.workerReasoningEffort;
+    if (capabilities.reasoningTransport === 'openrouter') {
+      const openrouter = {...result.providerOptions?.openrouter};
+      if (effort) openrouter.reasoning = {effort};
+      else delete openrouter.reasoning;
+      result.providerOptions = {...result.providerOptions, openrouter};
+      delete result.reasoning;
+    } else if (effort) result.reasoning = effort;
+    else delete result.reasoning;
+  }
+  return {...result, ...(!omitMaxOutputTokens ? {maxOutputTokens} : {})};
+}

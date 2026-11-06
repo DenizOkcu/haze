@@ -1,5 +1,6 @@
 import type {HazeSettings, HazeProviderSettings} from './settings.js';
 import {findByName, upsertByName} from '../utils/collections.js';
+import {createHash} from 'node:crypto';
 
 // Used only to migrate legacy single-provider OpenRouter settings (apiKey/baseURL)
 // into the providers array. There is no default provider or model anymore: users
@@ -28,7 +29,8 @@ function normalizeProvider(provider: HazeProviderSettings, fallbackModel?: strin
   const key = provider.key?.trim();
   // Capabilities are explicit only: an absent/false flag means "not capable".
   const capabilities = provider.capabilities ?? undefined;
-  return {
+  const normalized: HazeProviderSettings = {
+    ...provider,
     name,
     url,
     ...(key ? {key} : {}),
@@ -41,6 +43,8 @@ function normalizeProvider(provider: HazeProviderSettings, fallbackModel?: strin
     ...(provider.trustedDeployments ? {trustedDeployments: provider.trustedDeployments} : {}),
     models: normalizeModels(provider.models, fallbackModel),
   };
+  if (!key) delete normalized.key;
+  return normalized;
 }
 
 export function configuredProviders(settings: HazeSettings): HazeProviderSettings[] {
@@ -100,12 +104,23 @@ export function modelSelector(provider: HazeProviderSettings, model: string) {
   return `${provider.name}:${model}`;
 }
 
+/** Stable non-secret endpoint identity for detecting changes across resume. */
+export function providerEndpointFingerprint(provider: Pick<HazeProviderSettings, 'url' | 'kind'>): string {
+  return createHash('sha256').update(`${provider.kind ?? 'openai-compatible'}\0${provider.url}`).digest('hex');
+}
+
 export function upsertProvider(settings: HazeSettings, provider: HazeProviderSettings): HazeProviderSettings[] {
   return upsertByName(configuredProviders(settings), provider);
 }
 
 export function providerHasKey(settings: HazeSettings, provider: HazeProviderSettings) {
-  return Boolean(provider.key ?? (provider.name === 'openrouter' ? settings.apiKey : undefined));
+  return Boolean(providerApiKey(settings, provider));
+}
+
+/** Legacy API keys are scoped to the legacy OpenRouter provider. */
+export function providerApiKey(settings: HazeSettings, provider: HazeProviderSettings): string | undefined {
+  const legacyUrl = settings.baseURL ?? LEGACY_OPENROUTER_URL;
+  return provider.key ?? (provider.name === 'openrouter' && provider.url.replace(/\/+$/, '') === legacyUrl.replace(/\/+$/, '') ? settings.apiKey : undefined);
 }
 
 /** Image input is explicit-only (F03): never inferred from URL or model name. */

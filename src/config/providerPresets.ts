@@ -1,3 +1,5 @@
+import {endpointModelFacts} from './providerModelFacts.js';
+
 // Curated provider presets, verified against provider catalogs on 2026-11-06.
 
 /**
@@ -8,18 +10,14 @@
  * Hosted presets carry a pre-configured base URL so users only need to supply an API key
  * and model names. Local/keyless providers have sensible localhost defaults.
  *
- * Presets are authored in a compact definition form (`ProviderPresetDefinition`) and
- * expanded once into the public `ProviderPreset` records: each curated model is a single
- * `[id, contextWindowTokens, maxOutputTokens]` tuple instead of appearing twice (once in
- * `suggestedModels`, once in `modelLimits`), and `needsApiKey` is derived from the
- * category (cloud presets need a key unless they carry an explicit OAuth flow; local
- * ones never do).
+ * Presets list model IDs; limits and reasoning capabilities live in the shared
+ * endpoint/model facts. `needsApiKey` is derived from category and auth flow.
  *
  * `modelLimits` values are curated from provider catalogs and models.dev. They are keyed by the exact suggested model id for
  * THIS preset: aggregators may cap context below the origin model's capability (e.g.
  * Together serves DeepSeek-V4-Pro at 512K vs DeepSeek's own 1M), so limits never
- * transfer between providers. When the wizard adds a suggested model, these values are
- * written into the provider's settings `modelLimits`, where they remain user-editable.
+ * transfer between providers. These values remain in the shared facts and are resolved at
+ * runtime after explicit settings and live discovery.
  * Local providers (Ollama/llama.cpp/MLX/LM Studio) intentionally carry no limits: their
  * effective context depends on the local server configuration, not the model.
  */
@@ -65,12 +63,8 @@ export interface ProviderPreset {
   category: 'cloud' | 'local';
 }
 
-/**
- * A curated model in authoring form: a bare id, or a
- * `[id, contextWindowTokens, maxOutputTokens]` tuple when models.dev limits are
- * known for this preset's serving of the model.
- */
-type PresetModelSpec = string | readonly [model: string, contextWindowTokens: number, maxOutputTokens: number];
+/** A curated model ID; endpoint-specific facts live in providerModelFacts. */
+type PresetModelSpec = string;
 
 /** Compact authoring form shared by every preset (see the module comment). */
 interface ProviderPresetDefinition {
@@ -90,51 +84,51 @@ interface ProviderPresetDefinition {
 const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
   {id: 'haze.build', name: 'haze.build', kind: 'haze-build', baseUrl: 'https://llm.haze.build/v1', category: 'cloud', models: ['haze1.5-builder-flash'], apiKeyHint: 'your deployed haze.build inference key'},
   {id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKeyEnvVar: 'OPENROUTER_API_KEY', category: 'cloud', models: [
-    ['anthropic/claude-opus-5.5', 1_000_000, 128_000], ['anthropic/claude-sonnet-5.5', 1_000_000, 128_000],
-    ['openai/gpt-6.1-sol', 922_000, 128_000], ['openai/gpt-6-luna', 922_000, 128_000],
-    ['google/gemini-4-argon', 1_048_576, 32_768], ['google/gemini-3.8-flash', 1_048_576, 65_536],
-    ['mistralai/mistral-large-4-0', 1_048_576, 262_144], ['deepseek/deepseek-v4.1-flash', 1_048_576, 393_216],
-    ['moonshotai/kimi-k3.1-pro', 1_048_576, 131_072], ['z-ai/glm-5.3', 1_000_000, 131_072],
-    ['qwen/qwen3.8-2.4t-a95b', 1_048_576, 131_072], ['minimax/minimax-m3.1-flash', 1_048_576, 524_288],
-    ['x-ai/grok-4.7', 500_000, 450_000],
+    'anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5',
+    'openai/gpt-6.1-sol', 'openai/gpt-6-luna',
+    'google/gemini-4-argon', 'google/gemini-3.8-flash',
+    'mistralai/mistral-large-4-0', 'deepseek/deepseek-v4.1-flash',
+    'moonshotai/kimi-k3.1-pro', 'z-ai/glm-5.3',
+    'qwen/qwen3.8-2.4t-a95b', 'minimax/minimax-m3.1-flash',
+    'x-ai/grok-4.7',
   ]},
   {id: 'openai-api-key', name: 'OpenAI API Key', baseUrl: 'https://api.openai.com/v1', apiKeyEnvVar: 'OPENAI_API_KEY', category: 'cloud', models: [
-    ['gpt-6.1-sol', 922_000, 128_000], ['gpt-6-astra', 922_000, 128_000], ['gpt-6-luna', 922_000, 128_000],
+    'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna',
   ]},
   {id: 'openai-subscription', name: 'OpenAI Subscription', baseUrl: 'https://chatgpt.com/backend-api/codex', auth: 'chatgpt-oauth', category: 'cloud', models: [
-    ['gpt-6.1-sol', 500_000, 128_000], ['gpt-6.1-terra', 500_000, 128_000], ['gpt-6-luna', 272_000, 128_000],
-    ['gpt-5.6-sol', 272_000, 128_000], ['gpt-5.6-terra', 272_000, 128_000], ['gpt-5.6-luna', 272_000, 128_000],
+    'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna',
+    'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna',
   ]},
   {id: 'google-gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKeyHint: 'API Key (from https://aistudio.google.com/apikey)', apiKeyEnvVar: 'GEMINI_API_KEY', category: 'cloud', models: [
-    ['gemini-4-argon', 1_048_576, 32_768], ['gemini-3.8-flash', 1_048_576, 65_536],
+    'gemini-4-argon', 'gemini-3.8-flash',
   ]},
   {id: 'mistral-api', name: 'Mistral AI (API Key)', baseUrl: 'https://api.mistral.ai/v1', apiKeyHint: 'API Key (from https://console.mistral.ai)', apiKeyEnvVar: 'MISTRAL_API_KEY', category: 'cloud', models: [
-    ['mistral-large-4', 1_048_576, 262_144], 'mistral-small-latest', 'codestral-latest',
+    'mistral-large-4', 'mistral-small-latest', 'codestral-latest',
   ]},
   {id: 'mistral-vibe', name: 'Mistral Vibe Subscription', baseUrl: 'https://api.mistral.ai/v1', auth: 'mistral-vibe', category: 'cloud', models: ['mistral-vibe-cli-latest', 'mistral-large-4']},
   {id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKeyEnvVar: 'DEEPSEEK_API_KEY', category: 'cloud', models: [
-    ['deepseek-v4-pro', 1_048_576, 393_216], ['deepseek-flash', 1_048_576, 393_216],
+    'deepseek-v4-pro', 'deepseek-flash',
   ]},
   {id: 'xai', name: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', apiKeyEnvVar: 'XAI_API_KEY', category: 'cloud', models: [
-    ['grok-4.7', 500_000, 500_000], ['grok-4.6', 500_000, 500_000],
+    'grok-4.7', 'grok-4.6',
   ]},
   {id: 'z-ai-api', name: 'Z.ai (General API)', baseUrl: 'https://api.z.ai/api/paas/v4/', apiKeyEnvVar: 'ZAI_API_KEY', category: 'cloud', models: [
-    ['glm-5.3', 1_000_000, 131_072], ['glm-5.3-flash', 1_000_000, 131_072],
+    'glm-5.3', 'glm-5.3-flash',
   ]},
   {id: 'z-ai-coding', name: 'Z.ai (Coding Plan)', baseUrl: 'https://api.z.ai/api/coding/paas/v4/', apiKeyEnvVar: 'ZAI_API_KEY', category: 'cloud', models: [
-    ['glm-5.3', 1_000_000, 131_072], ['glm-5.2-highspeed', 1_000_000, 131_072],
+    'glm-5.3', 'glm-5.2-highspeed',
   ]},
   {id: 'moonshot', name: 'Moonshot AI (Kimi API)', baseUrl: 'https://api.moonshot.ai/v1', apiKeyEnvVar: 'MOONSHOT_API_KEY', category: 'cloud', models: [
-    ['kimi-k3.1-pro', 1_048_576, 131_072], ['kimi-k3', 1_048_576, 131_072],
+    'kimi-k3.1-pro', 'kimi-k3',
   ]},
   {id: 'kimi-code', name: 'Kimi Code', baseUrl: 'https://api.kimi.com/coding/v1', apiKeyEnvVar: 'KIMI_API_KEY', category: 'cloud', models: [
-    ['k3', 1_048_576, 131_072], ['k3.1-pro', 1_048_576, 131_072], 'kimi-for-coding',
+    'k3', 'k3.1-pro', 'kimi-for-coding',
   ]},
   {id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiKeyEnvVar: 'GROQ_API_KEY', category: 'cloud', models: [
-    ['openai/gpt-oss-120b', 131_072, 65_536], ['qwen/qwen3.8-27b', 131_072, 16_384],
+    'openai/gpt-oss-120b', 'qwen/qwen3.8-27b',
   ]},
   {id: 'together', name: 'Together AI', baseUrl: 'https://api.together.ai/v1', apiKeyEnvVar: 'TOGETHER_API_KEY', category: 'cloud', models: [
-    ['deepseek-ai/DeepSeek-V4-Pro-0813', 1_048_576, 384_000], ['moonshotai/Kimi-K3.1-Pro', 1_048_576, 131_072],
+    'deepseek-ai/DeepSeek-V4-Pro-0813', 'moonshotai/Kimi-K3.1-Pro',
   ]},
   {id: 'ollama', name: 'Ollama (Local Server)', baseUrl: 'http://localhost:11434/v1', category: 'local'},
   {id: 'lmstudio', name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', category: 'local'},
@@ -158,13 +152,9 @@ function expandPreset(definition: ProviderPresetDefinition): ProviderPreset {
   const modelLimits: Record<string, PresetModelLimits> = {};
 
   for (const model of definition.models || []) {
-    if (typeof model === 'string') {
-      suggestedModels.push(model);
-    } else {
-      const [id, contextWindowTokens, maxOutputTokens] = model;
-      suggestedModels.push(id);
-      modelLimits[id] = { contextWindowTokens, maxOutputTokens };
-    }
+    suggestedModels.push(model);
+    const limits = endpointModelFacts(definition.baseUrl, model).limits;
+    if (limits) modelLimits[model] = limits;
   }
 
   return {
@@ -193,14 +183,12 @@ export function findPreset(id: string): ProviderPreset | undefined {
 
 /** Only copy limits for selected models and an unambiguous provider endpoint. */
 export function presetModelLimitsForModels(provider: {name?: string; url?: string}, models: readonly string[]): Record<string, PresetModelLimits> {
-  const normalize = (url: string) => url.replace(/\/+$/, '').toLowerCase();
   const named = PROVIDER_PRESETS.find(p => provider.name && (p.name.toLowerCase() === provider.name.toLowerCase() || p.id === provider.name));
-  const url = provider.url;
-  const matches = url ? PROVIDER_PRESETS.filter(p => normalize(p.baseUrl) === normalize(url)) : [];
-  const candidates = named && (!provider.url || matches.includes(named)) ? [named] : matches.length === 1 ? matches : [];
+  const endpoint = provider.url ?? named?.baseUrl;
   const out: Record<string, PresetModelLimits> = {};
+  if (!endpoint) return out;
   for (const model of models) {
-    const limits = candidates[0]?.modelLimits?.[model];
+    const limits = endpointModelFacts(endpoint, model).limits;
     if (limits) out[model] = limits;
   }
   return out;

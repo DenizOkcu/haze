@@ -1,9 +1,9 @@
 import type {HazeProviderSettings} from '../../../config/settings.js';
 import {setProviderAuth, removeProviderAuth} from '../../../config/providerAuth.js';
-import {findProvider, modelSelector, resolveModelSelector, upsertProvider} from '../../../config/providers.js';
+import {findProvider, modelSelector, providerApiKey, resolveModelSelector, upsertProvider} from '../../../config/providers.js';
 import {discoverProviderModels, ollamaModelLimits, type HarvestedModelLimits} from '../../../config/modelDiscovery.js';
-import {findPreset, presetModelLimitsForModels, PROVIDER_PRESETS} from '../../../config/providerPresets.js';
-import {isLocalProviderUrl} from '../../../llm/client.js';
+import {findPreset, PROVIDER_PRESETS} from '../../../config/providerPresets.js';
+import {isLocalProvider} from '../../../llm/client.js';
 import {FALLBACK_LOCAL_CONTEXT_TOKENS} from '../../../core/agent/contextBudget.js';
 import type {Mode} from '../../commands/chatModes.js';
 import {PROVIDER_ACTIONS, PROVIDER_CHOICES, MODEL_CHOICES, commaList, isYesConfirmation} from '../../commands/wizardFlow.js';
@@ -69,8 +69,7 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
         setMode('chat');
         return;
       }
-      const limits = presetModelLimitsForModels(input, input.models);
-      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models, ...(Object.keys(limits).length ? {modelLimits: limits} : {})};
+      const provider: HazeProviderSettings = {name: input.name, url: input.url, kind: 'chatgpt-codex', models: input.models};
       await ctx.applySettings({providers: upsertProvider(deps.settings, provider), provider: provider.name, model: undefined});
       setProviderDraft({});
       setSuggestedModels([]);
@@ -101,7 +100,8 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
       const listing = input.existing ? undefined : await discoverProviderModels({url: input.url, key});
       const offered = listing?.status === 'ok' ? input.models.filter(model => listing.models.includes(model)) : [];
       const models = input.existing ? input.models : offered.length ? offered : input.models.slice(0, 1);
-      const provider: HazeProviderSettings = {...input.existing, name: input.name, url: input.url, key, models};
+      const discovered = listing?.status === 'ok' ? Object.fromEntries(models.flatMap(model => listing.modelLimits?.[model] ? [[model, listing.modelLimits[model]]] : [])) : {};
+      const provider: HazeProviderSettings = {...input.existing, name: input.name, url: input.url, key, models, ...(Object.keys(discovered).length ? {discoveredModelLimits: discovered} : {})};
       if (input.existing) {
         await ctx.applySettings({providers: upsertProvider(deps.settings, provider)});
         setSelectedProviderName(undefined);
@@ -143,7 +143,7 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
     deps.setBusy(true);
     let result: Awaited<ReturnType<typeof discoverProviderModels>>;
     try {
-      result = await discoverProviderModels({url: target.url, key: target.key});
+      result = await discoverProviderModels({url: target.url, key: target.key ?? (existing?.url === target.url ? providerApiKey(deps.settings, existing) : undefined)});
     } finally {
       deps.setBusy(false);
       deps.setBusyLabel(deps.idleBusyLabel);
@@ -344,13 +344,13 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
    * Native Ollama enrichment at save time (the one place that knows the exact
    * model ids being added): /v1/models reports nothing for Ollama, but /api/ps
    * exposes the actually-loaded runtime context and /api/show the model's
-   * declared maximum. Probed only for the user's loopback server; the cap for
+   * declared maximum. Probed only for the user's local server; the cap for
    * a declared maximum (which may exceed the VRAM-sized effective window) is
    * the user's own local fallback setting, defaulting to 32K. Failures are
    * ignored — providers that are not Ollama simply 404 the /api/* paths.
    */
-  async function localNativeLimits(url: string | undefined, models: readonly string[]): Promise<HarvestedModelLimits> {
-    if (!url || !isLocalProviderUrl(url) || models.length === 0) return {};
+  async function localNativeLimits(url: string | undefined, models: readonly string[], location?: HazeProviderSettings['location']): Promise<HarvestedModelLimits> {
+    if (!url || !isLocalProvider({url, location}) || models.length === 0) return {};
     const conservativeCap = deps.settings.localContextWindowFallbackTokens ?? FALLBACK_LOCAL_CONTEXT_TOKENS;
     return await ollamaModelLimits({baseUrl: url, models, conservativeCap}).catch(() => ({}));
   }
@@ -358,7 +358,7 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
   async function appendModelsToProvider(modelsValue: string) {
     const provider = deps.wizard.selectedProviderName ? findProvider(deps.settings, deps.wizard.selectedProviderName) : undefined;
     if (provider) {
-      const native = await localNativeLimits(provider.url, commaList(modelsValue));
+      const native = await localNativeLimits(provider.url, commaList(modelsValue), provider.location);
       if (Object.keys(native).length > 0) lastDiscoveredLimits = {...lastDiscoveredLimits, ...native};
     }
     const result = providerAppendModels(deps.settings, deps.wizard.selectedProviderName, modelsValue, lastDiscoveredLimits);

@@ -55,7 +55,7 @@ function recordingDeps(over: Partial<SessionLifecycleDeps> = {}): SessionLifecyc
   });
 }
 
-const summarizer = {mode: 'ok' as 'ok' | 'fail', calls: 0};
+const summarizer = {mode: 'ok' as 'ok' | 'fail', calls: 0, gate: undefined as Promise<void> | undefined};
 
 describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
   beforeEach(() => {
@@ -65,6 +65,7 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
     // full run.
     summarizer.mode = 'ok';
     summarizer.calls = 0;
+    summarizer.gate = undefined;
     vi.resetModules();
     vi.doMock('../../../src/llm/client.js', () => ({
       providerRequestSettings: () => ({}),
@@ -74,6 +75,7 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
       const actual = await vi.importActual<typeof import('ai')>('ai');
       return {...actual, streamText: (config: {prompt?: string}) => ({text: (async () => {
         summarizer.calls++;
+        await summarizer.gate;
         if (!config.prompt?.includes('<older_conversation>')) throw new Error('unexpected generateText call');
         if (summarizer.mode === 'fail') throw new Error('provider down');
         return 'THE MODEL SUMMARY';
@@ -149,6 +151,22 @@ describe('sessionLifecycle LLM-summarized /compact (F-09)', () => {
     (deps2.sessionRef as {current: unknown}).current = {id: 's2'};
     await expect(pending2).resolves.toBe(false);
     expect(deps2.conversationRef.current).toBe(conversation2);
+  });
+
+  it.each(['ok', 'fail'] as const)('does not overwrite newer conversation after the summary stream %s', async mode => {
+    let release!: () => void;
+    summarizer.gate = new Promise<void>(resolve => { release = resolve; });
+    summarizer.mode = mode;
+    const conversation = history();
+    const deps = recordingDeps({conversationRef: {current: conversation}});
+    const lifecycle = await loadLifecycle(deps);
+    const pending = lifecycle.compactConversationWithModel();
+    await vi.waitFor(() => expect(summarizer.calls).toBe(1));
+    const newer: ModelMessage[] = [...conversation, {role: 'user', content: 'new request'}];
+    deps.conversationRef.current = newer;
+    release();
+    await expect(pending).resolves.toBe(false);
+    expect(deps.conversationRef.current).toBe(newer);
   });
 
   it('records a durable empty snapshot on clear so restore yields nothing (SU-02)', async () => {

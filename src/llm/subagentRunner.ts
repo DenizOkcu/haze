@@ -28,6 +28,7 @@ import {
   type WorkerTermination,
 } from '../core/subagent/contracts.js';
 import {COMPATIBILITY_PROFILE, type SubagentExecutionProfile} from '../core/subagent/executionProfiles.js';
+import {auxiliaryRequestOptions} from '../core/providerContracts.js';
 import {SubagentCoordinator} from '../core/subagent/subagentCoordinator.js';
 import {WorkspaceMutationPolicy} from '../core/subagent/workspaceMutationPolicy.js';
 import {type PromptSession} from './systemPrompt.js';
@@ -138,7 +139,7 @@ export async function runSubagent(
   if (mutationPolicy && mutationOwner && (task.mode === 'implement' || task.mode === 'validate') && !release) return terminalResult(task, runtime, profile, options.deadlineExpired?.() ? 'deadline_exceeded' : 'cancelled', 'Worker cancelled before workspace admission.', options.queueMs);
 
   try {
-    const {omitMaxOutputTokens, ...providerRequestOptions} = runtime.requestOptions;
+    const providerRequestOptions = auxiliaryRequestOptions(runtime.requestOptions, runtime.capabilities, 'worker', outputTokens);
     // Workers use the lowest supported reasoning effort. Session/main-turn reasoning
     // effort rides the inherited request options; on reasoning models its
     // hidden tokens count against the worker's bounded maxOutputTokens, so a
@@ -147,18 +148,6 @@ export async function runSubagent(
     // Applied only when the worker protocol supports the option; other
     // protocols cannot express it and must keep the runtime unchanged. Some
     // models have no off switch and use low instead of none.
-    const workerEffort = runtime.capabilities.workerReasoningEffort;
-    if (workerEffort && runtime.capabilities.reasoningTransport === 'openrouter') {
-      providerRequestOptions.providerOptions = {...providerRequestOptions.providerOptions, openrouter: {...providerRequestOptions.providerOptions?.openrouter, reasoning: {effort: workerEffort}}};
-    } else if (workerEffort) providerRequestOptions.reasoning = workerEffort;
-    else {
-      delete providerRequestOptions.reasoning;
-      if (runtime.capabilities.reasoningTransport === 'openrouter' && providerRequestOptions.providerOptions?.openrouter) {
-        const openrouter = {...providerRequestOptions.providerOptions.openrouter};
-        delete openrouter.reasoning;
-        providerRequestOptions.providerOptions = {...providerRequestOptions.providerOptions, openrouter};
-      }
-    }
     // Use the streaming model path even though workers return one collected
     // capsule. ChatGPT Codex's Responses endpoint requires `stream: true`;
     // `generateText` takes the non-streaming doGenerate path and is rejected.
@@ -168,7 +157,6 @@ export async function runSubagent(
       messages: [{role: 'user', content: workerTaskMessage(task)}],
       tools: budgetedTools,
       stopWhen: isStepCount(maxSteps),
-      ...(!omitMaxOutputTokens ? {maxOutputTokens: outputTokens} : {}),
       maxRetries: profile.maxRetries,
       ...providerRequestOptions,
       abortSignal: options.abortSignal,

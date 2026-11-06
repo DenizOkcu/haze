@@ -51,10 +51,10 @@ describe('OpenAI model reasoning restrictions', () => {
     expect(providerRequestSettings(runtime.config).reasoning).toBe('none');
   });
 
-  it.each(['custom-model', 'openai/gpt-6.1-sol'])('leaves SDK-unrestricted model %s unchanged', async model => {
+  it.each(['custom-model', 'openai/gpt-6.1-sol'])('omits reasoning for unrecognized model %s', async model => {
     for (const level of ['none', 'minimal'] as const) {
       const runtime = await runtimeFor(model, level);
-      expect(providerRequestSettings(runtime.config).reasoning).toBe(level);
+      expect(providerRequestSettings(runtime.config).reasoning).toBeUndefined();
     }
   });
 

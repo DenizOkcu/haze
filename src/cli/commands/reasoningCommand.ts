@@ -1,7 +1,7 @@
 import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, isReasoningLevel, isReasoningUnsetAlias, isStoredReasoning, resolveReasoningChoice, type ResolvedReasoningChoice, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import type {CommandContext, CommandResult} from './commands.js';
 import {activeModel} from '../../config/providers.js';
-import {reasoningLevelsForProvider} from '../../config/providerReasoning.js';
+import {reasoningCapabilitiesForProvider, reasoningLevelsForProvider} from '../../config/providerReasoning.js';
 
 /**
  * `/reasoning` — per-model, per-session reasoning-effort picker and direct
@@ -49,7 +49,10 @@ export function resolveReasoningCommand(args: string, input: {current: ResolvedR
   }
   if (value === REASONING_RESET) {
     const fallback = resolveReasoningChoice(undefined, input.stored);
-    return {action: 'reset', message: `Session reasoning override removed${scope}. ${describeChoice(fallback)} applies from the next turn.`};
+    const applied = fallback.level && input.supportedLevels && !input.supportedLevels.includes(fallback.level)
+      ? `${describeChoice(fallback)} is unsupported; provider default applies`
+      : `${describeChoice(fallback)} applies`;
+    return {action: 'reset', message: `Session reasoning override removed${scope}. ${applied} from the next turn.`};
   }
   if (isReasoningUnsetAlias(value)) {
     return {action: 'set', setting: REASONING_PROVIDER_DEFAULT, message: `Reasoning effort unset${scope}: no reasoning parameter is sent from the next turn; the provider default applies (this model, this session).`};
@@ -87,7 +90,7 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
   const current = resolveReasoningChoice(ctx.getSessionReasoning(modelSelector), stored);
   const active = activeModel(ctx.settings);
   if (active) {
-    const levels = reasoningLevelsForProvider(active.provider, active.model);
+    const {levels, support} = reasoningCapabilitiesForProvider(active.provider, active.model);
     const value = args.trim().toLowerCase() === 'off' ? 'none' : args.trim().toLowerCase();
     if (isReasoningLevel(value) && !levels.includes(value)) {
       ctx.addSystemMessage(levels.length ? `${active.model} supports reasoning levels: ${levels.join(', ')}. Use /reasoning unset for the provider default.` : `Reasoning levels are not documented for ${active.model}; use /reasoning unset for the provider default.`);
@@ -95,11 +98,11 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
     }
     if (value === 'status') {
       const applied = current.level && levels.includes(current.level) ? describeChoice(current) : 'provider default (no parameter sent)';
-      ctx.addSystemMessage(`Reasoning effort for ${modelSelector}: ${applied}. ${levels.length ? `Supported levels: ${levels.join(', ')}.` : 'No documented reasoning levels for this model.'}`);
+      ctx.addSystemMessage(`Reasoning effort for ${modelSelector}: ${applied}. ${levels.length ? `Supported levels: ${levels.join(', ')}.` : support === 'unknown' ? 'Reasoning support is unknown for this model.' : 'Reasoning effort is unsupported for this model.'}`);
       return 'handled';
     }
   }
-  const result = resolveReasoningCommand(args, {current, stored, modelSelector});
+  const result = resolveReasoningCommand(args, {current, stored, modelSelector, supportedLevels: active ? reasoningLevelsForProvider(active.provider, active.model) : []});
   if (result.action === 'set') ctx.setSessionReasoning(modelSelector, result.setting);
   else if (result.action === 'reset') ctx.setSessionReasoning(modelSelector, undefined);
   // Unreachable (args are non-empty here) but narrows the open-picker variant away.

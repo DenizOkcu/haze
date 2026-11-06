@@ -3,16 +3,19 @@ import {createOpenAICompatible} from '@ai-sdk/openai-compatible';
 import {createOpenRouter} from '@openrouter/ai-sdk-provider';
 import {discoverHazeBuildManifest, type HazeBuildManifest} from '../config/hazeBuild.js';
 import {createHazeBuildModel} from './hazeBuild.js';
-import {isMistralApi, reasoningLevelsForProvider} from '../config/providerReasoning.js';
+import {isMistralApi, reasoningLevelsForProvider, resolveProviderReasoning} from '../config/providerReasoning.js';
 import {mistralRequestBody} from './mistralReasoning.js';
 import crypto from 'node:crypto';
+import {isIP} from 'node:net';
 import {readSettings, type HazeProviderSettings} from '../config/settings.js';
-import {catalogLimitsFor} from '../config/modelCatalog.js';
-import {activeModel, modelSelector, resolveModelSelector} from '../config/providers.js';
+import {catalogLimitsFor} from '../config/providerModelFacts.js';
+import {ollamaModelLimits, type HarvestedModelLimits} from '../config/modelDiscovery.js';
+import {presetModelLimitsForModels} from '../config/providerPresets.js';
+import {activeModel, modelSelector, providerApiKey, resolveModelSelector} from '../config/providers.js';
 import {assertCredentialedEndpointSecure, isLoopbackHostname} from '../config/endpointSecurity.js';
 import type {ProviderCapabilities, ProviderRequestOptions} from '../core/providerContracts.js';
 import type {WorkerRuntime} from '../core/subagent/contracts.js';
-import {effectiveRequestedReasoning, isStoredReasoning, reasoningCallSetting, resolveAttemptReasoning, resolveReasoningPolicy, type ReasoningLevel, type ResolvedReasoningPolicy, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
+import {effectiveRequestedReasoning, isStoredReasoning, reasoningCallSetting, resolveAttemptReasoning, REASONING_LEVELS, type ReasoningLevel, type ResolvedReasoningPolicy, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';
 import {FALLBACK_CONTEXT_WINDOW_TOKENS, FALLBACK_LOCAL_CONTEXT_TOKENS} from '../core/agent/contextBudget.js';
 import {createChatGptCodexFetch} from './openaiCodex.js';
 export type {ProviderCapabilities, ProviderRequestOptions} from '../core/providerContracts.js';
@@ -27,6 +30,7 @@ export interface ModelRuntimeConfig {
   providerName: string;
   providerKind?: HazeProviderSettings['kind'];
   baseURL: string;
+  isLocal?: boolean;
   modelName: string;
   cacheKey: string;
   capabilities: ProviderCapabilities;
@@ -38,8 +42,8 @@ export interface ModelRuntimeConfig {
    * (128K hosted / 32K local) so `contextWindowSource` can flag the guess.
    */
   contextWindowTokens: number;
-  /** Where contextWindowTokens came from: per-model settings, the curated model catalog, a user-set fallback, or the built-in default. */
-  contextWindowSource: 'settings' | 'catalog' | 'user-fallback' | 'default-fallback' | 'deployment';
+  /** Where the context window came from. */
+  contextWindowSource: 'settings' | 'discovery' | 'preset' | 'catalog' | 'user-fallback' | 'default-fallback' | 'deployment';
   deployment?: HazeBuildManifest;
   warnings?: string[];
   /** Optional output-token limit metadata for request budgeting (RH-005). */
@@ -94,34 +98,34 @@ function capabilities(provider: HazeProviderSettings, modelName: string): Provid
     supportsTextVerbosity: directOpenAI,
     supportsReasoningEffort,
     ...(openRouter ? {reasoningTransport: 'openrouter' as const} : {}),
-    ...(supportsReasoningEffort && (!openRouter || provider.reasoningLevels || provider.modelReasoningLevels?.[modelName]) ? {workerReasoningEffort: levels[0]} : {}),
+    ...(supportsReasoningEffort && (!openRouter || provider.reasoningLevels || provider.modelReasoningLevels?.[modelName]) ? {workerReasoningEffort: REASONING_LEVELS.find(level => levels.includes(level))} : {}),
     ...(providerKind === 'haze-build' ? {supportsBinaryThinking: true} : {}),
   };
-}
-
-/** Validate the selected level against the endpoint-specific model profile. */
-function reasoningPolicyForModel(provider: HazeProviderSettings, modelName: string, requested: ReasoningLevel | undefined, caps: ProviderCapabilities): ResolvedReasoningPolicy {
-  const policy = resolveReasoningPolicy({requested, capabilities: caps});
-  if (policy.effective === 'disabled') return policy;
-  const levels = reasoningLevelsForProvider(provider, modelName);
-  if (requested && !levels.includes(requested)) return {requested, effective: 'disabled', reason: `${modelName} does not support reasoning effort ${requested}; parameter omitted (provider default). Choose ${levels.join(', ')}, or unset.`};
-  return policy;
 }
 
 /** True for loopback/local inference servers, whose effective window is server-configured (often far below the model's). */
 export function isLocalProviderUrl(url: string): boolean {
   try {
     const hostname = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, '');
-    return isLoopbackHostname(hostname) || hostname === '0.0.0.0' || hostname.endsWith('.local');
+    if (isLoopbackHostname(hostname) || hostname === '0.0.0.0' || hostname.endsWith('.local')) return true;
+    if (isIP(hostname) === 4) {
+      const [a, b] = hostname.split('.').map(Number);
+      return a === 10 || (a === 172 && b! >= 16 && b! <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+    }
+    return isIP(hostname) === 6 && /^(?:f[cd]|fe[89ab])/i.test(hostname);
   } catch {
     return false;
   }
 }
 
-function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting, sessionReasoningByModel?: Record<string, StoredReasoningSetting>, deployment?: HazeBuildManifest): ModelRuntimeSelection {
+export function isLocalProvider(provider: Pick<HazeProviderSettings, 'url' | 'location'>): boolean {
+  return provider.location ? provider.location === 'local' : isLocalProviderUrl(provider.url);
+}
+
+function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>, selection: {provider: HazeProviderSettings; model: string}, cwd?: string, reasoningOverride?: StoredReasoningSetting, sessionReasoningByModel?: Record<string, StoredReasoningSetting>, deployment?: HazeBuildManifest, freshLocalLimits?: HarvestedModelLimits): ModelRuntimeSelection {
   const baseURL = selection.provider.url;
   const providerKind = selection.provider.kind;
-  const configuredKey = providerKind === 'chatgpt-codex' ? undefined : selection.provider.key ?? settings.apiKey;
+  const configuredKey = providerKind === 'chatgpt-codex' ? undefined : providerApiKey(settings, selection.provider);
   assertCredentialedEndpointSecure(baseURL, configuredKey);
   const apiKey = configuredKey ?? 'not-needed';
   const name = selection.model;
@@ -143,7 +147,7 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   });
   const requestedReasoning = effectiveRequestedReasoning(storedReasoning);
 
-  const resolvedPolicy = reasoningPolicyForModel(selection.provider, name, requestedReasoning, caps);
+  const resolvedPolicy = resolveProviderReasoning(selection.provider, name, requestedReasoning);
   const reasoningPolicy = deployment && resolvedPolicy.effective !== 'disabled'
     ? {...resolvedPolicy, reason: `haze.build binary thinking ${requestedReasoning === 'none' ? 'off' : 'on'}; effort levels do not imply different compute budgets`}
     : resolvedPolicy;
@@ -175,16 +179,22 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
   // overrides the built-in default; the source tag distinguishes an
   // intentional guess (no warning) from the default guess (warned once per
   // session) (RH-005).
-  const isLocal = isLocalProviderUrl(baseURL);
+  const isLocal = isLocalProvider(selection.provider);
+  // Local loaded context can change on restart; a persisted discovery is only a
+  // hint to re-probe, never a safe runtime budget on its own.
+  const discovered = isLocal ? freshLocalLimits?.[name] : selection.provider.discoveredModelLimits?.[name];
+  const preset = isLocal ? undefined : presetModelLimitsForModels(selection.provider, [name])[name];
   const catalog = isLocal ? undefined : catalogLimitsFor(name);
   const userFallback = isLocal ? settings.localContextWindowFallbackTokens : settings.contextWindowFallbackTokens;
   const fallbackTokens = userFallback ?? (isLocal ? FALLBACK_LOCAL_CONTEXT_TOKENS : FALLBACK_CONTEXT_WINDOW_TOKENS);
   const contextWindowSource = limits.contextWindowTokens !== undefined
     ? 'settings' as const
+    : discovered?.contextWindowTokens !== undefined ? 'discovery' as const
+    : preset?.contextWindowTokens !== undefined ? 'preset' as const
     : catalog
       ? 'catalog' as const
       : userFallback !== undefined ? 'user-fallback' as const : 'default-fallback' as const;
-  const maxOutputTokens = limits.maxOutputTokens ?? catalog?.maxOutputTokens;
+  const maxOutputTokens = limits.maxOutputTokens ?? discovered?.maxOutputTokens ?? preset?.maxOutputTokens ?? catalog?.maxOutputTokens;
   return {
     model,
     selector,
@@ -192,11 +202,12 @@ function runtimeForSelection(settings: Awaited<ReturnType<typeof readSettings>>,
       providerName: selection.provider.name,
       providerKind,
       baseURL,
+      isLocal,
       modelName: name,
       cacheKey,
       capabilities: caps,
       reasoningPolicy,
-      contextWindowTokens: deployment ? Math.min(limits.contextWindowTokens ?? deployment.contextWindowTokens, deployment.contextWindowTokens) : limits.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
+      contextWindowTokens: deployment ? Math.min(limits.contextWindowTokens ?? deployment.contextWindowTokens, deployment.contextWindowTokens) : limits.contextWindowTokens ?? discovered?.contextWindowTokens ?? preset?.contextWindowTokens ?? catalog?.contextWindowTokens ?? fallbackTokens,
       contextWindowSource: deployment ? 'deployment' : contextWindowSource,
       ...(deployment ? {deployment, maxOutputTokens: Math.min(limits.maxOutputTokens ?? deployment.maxOutputTokens, deployment.maxOutputTokens),
         warnings: [
@@ -229,9 +240,16 @@ export async function modelWithConfig(session?: {cwd?: string; modelSelector?: s
     if (resolved.status === 'found') selection = {provider: resolved.provider, model: resolved.model};
   } else selection = activeModel(resolvedSettings);
   if (!selection) return undefined;
+  assertCredentialedEndpointSecure(selection.provider.url, selection.provider.kind === 'chatgpt-codex' ? undefined : providerApiKey(resolvedSettings, selection.provider));
   const deployment = selection.provider.kind === 'haze-build' ? await discoverHazeBuildManifest(selection.provider) : undefined;
   if (deployment && selection.model !== deployment.model) throw new Error(`haze.build currently serves ${deployment.model}; choose it explicitly via /model.`);
-  return runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride, session?.reasoningByModel, deployment);
+  const freshLocalLimits = await refreshLocalLimits(selection, resolvedSettings);
+  return runtimeForSelection(resolvedSettings, selection, session?.cwd, session?.reasoningOverride, session?.reasoningByModel, deployment, freshLocalLimits);
+}
+
+async function refreshLocalLimits(selection: {provider: HazeProviderSettings; model: string}, settings: Awaited<ReturnType<typeof readSettings>>): Promise<HarvestedModelLimits | undefined> {
+  if (!isLocalProvider(selection.provider) || selection.provider.kind === 'haze-build' || selection.provider.modelLimits?.[selection.model]?.contextWindowTokens !== undefined || !selection.provider.discoveredModelLimits?.[selection.model]) return undefined;
+  return ollamaModelLimits({baseUrl: selection.provider.url, models: [selection.model], conservativeCap: settings.localContextWindowFallbackTokens ?? FALLBACK_LOCAL_CONTEXT_TOKENS, timeoutMs: 1000}).catch(() => undefined);
 }
 
 export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection; settings: Awaited<ReturnType<typeof readSettings>>; selector?: string; cwd?: string}): Promise<{status: 'found'; runtime: WorkerRuntime} | {status: 'missing' | 'ambiguous'; message: string}> {
@@ -240,6 +258,7 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
   if (requested) {
     const resolved = resolveModelSelector(input.settings, requested);
     if (resolved.status !== 'found') return {status: resolved.status, message: resolved.status === 'ambiguous' ? `Worker model ${requested} is ambiguous; use provider:model.` : `Worker model ${requested} is not configured. Configure it via /provider or remove subagents.workerModel.`};
+    assertCredentialedEndpointSecure(resolved.provider.url, resolved.provider.kind === 'chatgpt-codex' ? undefined : providerApiKey(input.settings, resolved.provider));
     // The active deployment was fetched and validated for this attempt. An
     // explicit worker selecting that same provider/model can reuse it rather
     // than making a second network round trip; different endpoints still refresh.
@@ -252,7 +271,8 @@ export async function resolveWorkerRuntime(input: {active: ModelRuntimeSelection
       ? sameDeployment ? input.active.config.deployment : await discoverHazeBuildManifest(resolved.provider)
       : undefined;
     if (deployment && resolved.model !== deployment.model) return {status: 'missing', message: `haze.build currently serves ${deployment.model}.`};
-    selected = runtimeForSelection(input.settings, {provider: resolved.provider, model: resolved.model}, input.cwd, undefined, undefined, deployment);
+    const selection = {provider: resolved.provider, model: resolved.model};
+    selected = runtimeForSelection(input.settings, selection, input.cwd, undefined, undefined, deployment, await refreshLocalLimits(selection, input.settings));
   }
   return {status: 'found', runtime: {model: selected.model, selector: selected.selector, providerName: selected.config.providerName, capabilities: selected.config.capabilities, requestOptions: providerRequestSettings(selected.config), contextWindowTokens: selected.config.contextWindowTokens, maxOutputTokens: selected.config.maxOutputTokens, ...(selected.config.deployment ? {nativeMaxConcurrency: Math.min(2, selected.config.deployment.activeSequences)} : {})}};
 }

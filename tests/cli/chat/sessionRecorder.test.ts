@@ -3,12 +3,33 @@ import fs from '../../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {createSessionRecorder} from '../../../src/cli/chat/sessionRecorder.js';
-import {createSession, readSessionEntries} from '../../../src/core/session/sessionStore.js';
+import {createSession, readSessionEntries, restoreSessionState, vacuumSessionFileIfLarge} from '../../../src/core/session/sessionStore.js';
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map(dir => fs.remove(dir))); });
 
 describe('session recorder', () => {
+  it('persists a model boundary and its portable history together after pending snapshots', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-recorder-'));
+    dirs.push(tmp);
+    const cwd = path.join(tmp, 'workspace');
+    await fs.ensureDir(cwd);
+    const session = await createSession({cwd, sessionsDir: path.join(tmp, 'sessions')});
+    const recorder = createSessionRecorder(() => session);
+    const selection = {provider: 'new', model: 'm', endpointFingerprint: 'a'.repeat(64)};
+    recorder.recordConversation([{role: 'user', content: 'old'}]);
+    recorder.recordConversation([{role: 'user', content: 'superseded'}]);
+    recorder.recordModelTransition([{role: 'user', content: 'portable'}], selection);
+    await recorder.flush();
+    const {entries} = await readSessionEntries(session);
+    expect(entries).toContainEqual(expect.objectContaining({type: 'conversation_snapshot', selection, messages: [{role: 'user', content: 'portable'}]}));
+    expect(await restoreSessionState(session)).toMatchObject({modelSelection: selection, messages: [{role: 'user', content: 'portable'}]});
+    recorder.recordConversation([{role: 'user', content: 'later'}]);
+    await recorder.flush();
+    await vacuumSessionFileIfLarge(session, 1);
+    expect(await restoreSessionState(session)).toMatchObject({modelSelection: selection, messages: [{role: 'user', content: 'later'}]});
+  });
+
   it('preserves invocation order and flushes all queued entries', async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-recorder-'));
     dirs.push(tmp);

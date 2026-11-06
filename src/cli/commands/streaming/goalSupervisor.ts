@@ -1,5 +1,6 @@
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {agentEvent} from '../../../core/agent/events.js';
+import {transitionProviderConversation} from '../../../core/agent/providerTransition.js';
 import type {TurnCompletionEvidence} from '../../../core/agent/completionController.js';
 import {describeCompletionReadiness} from '../../../core/agent/completionController.js';
 import {checkKindsOfIds, type ValidationOutcome} from '../../../core/agent/workState.js';
@@ -141,13 +142,19 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     const selected = options.escalationModel?.trim();
     if (!selected || escalated || selected === activeModelOverride) return false;
     escalated = true;
+    const history = callbacks.getConversation();
+    if (history.length) {
+      const portable = transitionProviderConversation(history);
+      callbacks.setConversation(portable);
+      callbacks.onModelTransition?.(selected, portable);
+    }
     activeModelOverride = selected;
     noProgressCount = 0;
     prevSignature = undefined;
     // The model switch is a supervisor boundary like any other: it must reach
     // the durable ledger so a crash resume does not silently lose it.
     appendLedger('goal_continue');
-    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Continuing with explicitly configured escalation model ${selected} after ${reason}.`}));
+    callbacks.onEvent?.(agentEvent({type: 'goal_notice', text: `Continuing with explicitly configured escalation model ${selected} after ${reason}. Previous tool history was converted to text and provider reasoning state was cleared.`}));
     return true;
   };
 
@@ -182,6 +189,11 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
   callbacks.debugLog('goal supervisor enabled; automatic continuation across physical-turn budgets');
 
   const finish = (status: GoalRunResult['status'], stopReason: GoalStopReason, resume?: GoalRunResult['resume']): GoalRunResult => {
+    if (escalated && options.modelOverride) {
+      const portable = transitionProviderConversation(callbacks.getConversation());
+      callbacks.setConversation(portable);
+      callbacks.onModelTransition?.(options.modelOverride, portable);
+    }
     appendLedger('goal_end', {
       status,
       gateDecision: status === 'complete' ? 'ready' : ['no-progress', 'context-exhausted', 'goal-deadline'].includes(stopReason) ? checkpoint?.readiness : undefined,

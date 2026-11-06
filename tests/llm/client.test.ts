@@ -224,7 +224,7 @@ describe('modelWithConfig', () => {
     });
   });
 
-  it('falls back to settings.apiKey when the provider has no key', async () => {
+  it('does not send a legacy OpenRouter key to another provider', async () => {
     await writeSettings({
       providers: [{name: 'openai', url: 'https://api.openai.com/v1', models: ['gpt-4o']}],
       apiKey: 'legacy-key',
@@ -234,7 +234,7 @@ describe('modelWithConfig', () => {
     const {modelWithConfig} = await loadClient((options: {apiKey?: string} | undefined) => ({chat: () => options}));
     const runtime = await modelWithConfig();
     const modelArg = runtime!.model as unknown as {apiKey?: string};
-    expect(modelArg.apiKey).toBe('legacy-key');
+    expect(modelArg.apiKey).toBe('not-needed');
   });
 
   it('uses the not-needed placeholder when no key is available (local OpenAI-compatible)', async () => {
@@ -295,7 +295,7 @@ describe('modelWithConfig', () => {
       {name: 'my-mistral', url: 'https://api.mistral.ai/v1', expected: false},
       {name: 'mistral', url: 'https://gateway.example/v1', expected: false},
       {name: 'mistral-on', url: 'https://api.mistral.ai/v1', capabilities: {reasoningEffort: true}, expected: true},
-      {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', expected: true},
+      {name: 'chatgpt', url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', expected: false},
       // Loopback inference servers (LM Studio, Ollama) default off: their own
       // reasoning switches coerce unsupported levels — LM Studio maps any
       // non-'on'/'off' value (including 'none') to 'on'.

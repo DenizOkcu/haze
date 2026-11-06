@@ -2,9 +2,9 @@ import {z} from 'zod';
 import {assertCredentialedEndpointSecure} from './endpointSecurity.js';
 import type {HazeProviderSettings} from './settings.js';
 
-export const HAZE_BUILD_PROVIDER = 'haze.build';
+const HAZE_BUILD_PROVIDER = 'haze.build';
 export const HAZE_BUILD_MODEL = 'haze1.5-builder-flash';
-export const hazeBuildManifestSchema = z.object({
+const hazeBuildManifestSchema = z.object({
   schemaVersion: z.literal(1),
   provider: z.literal(HAZE_BUILD_PROVIDER),
   model: z.enum([HAZE_BUILD_MODEL, 'haze0.1-coder-flash']),

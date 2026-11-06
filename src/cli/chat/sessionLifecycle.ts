@@ -1,6 +1,7 @@
 import type {ModelMessage} from 'ai';
 import {streamText} from 'ai';
 import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
+import {transitionProviderConversation} from '../../core/agent/providerTransition.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import type {WorkState} from '../../core/agent/workState.js';
 import {buildLlmCompactionPrompt, compactModelMessages, compactModelMessagesWithSummary, splitForCompaction} from '../../core/agent/compaction.js';
@@ -8,6 +9,7 @@ import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js'
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS} from '../../core/agent/budgets.js';
 import {clearToolOutputs} from '../../core/agent/toolOutputStore.js';
 import {modelWithConfig, providerRequestSettings} from '../../llm/client.js';
+import {auxiliaryRequestOptions} from '../../core/providerContracts.js';
 import {createSession, findSession, forkSession, formatSession, latestSession, restoreSessionState, type GoalLedgerFrontier, type HazeSession, type SessionModelSelection} from '../../core/session/sessionStore.js';
 import {createLog as createLlmLog, endLog as endLlmLog, type LlmLog} from '../../core/log/llmLog.js';
 import type {Message} from '../commands/streaming.js';
@@ -117,20 +119,24 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     applyRedactionSetting(session);
     deps.sessionRef.current = session;
     deps.onModelSelection?.(modelSelection);
-    if (!modelSelection) {
+    const currentSelection = deps.modelSelection?.();
+    const endpointChanged = Boolean(currentSelection?.endpointFingerprint && (!modelSelection?.endpointFingerprint || modelSelection.endpointFingerprint !== currentSelection.endpointFingerprint));
+    const restoredConversation = endpointChanged ? transitionProviderConversation(conversation) : conversation;
+    if (!modelSelection && !endpointChanged) {
       const selection = deps.modelSelection?.();
       if (selection) deps.sessionRecorder()?.recordModelSelection(selection);
     }
-    deps.conversationRef.current = conversation;
+    deps.conversationRef.current = restoredConversation;
+    if (endpointChanged && currentSelection) deps.sessionRecorder()?.recordModelTransition(restoredConversation, currentSelection);
     deps.clearLiveMessages();
-    const restoredMessages = displayMessagesFromConversation(conversation);
+    const restoredMessages = displayMessagesFromConversation(restoredConversation);
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
     deps.workStateRef.current = workState;
     for (const error of parseErrors) {
       deps.debugLog(`Session parse error: ${error}`);
     }
     deps.setMessages(messages => {
-      const restored = [{role: 'system', text: `Resumed session: ${formatSession(session)}`} as Message, ...restoredMessages];
+      const restored = [{role: 'system', text: `Resumed session: ${formatSession(session)}${endpointChanged ? ' Provider endpoint changed or its previous identity was unknown; previous tool history was converted to text and provider reasoning state was cleared.' : ''}`} as Message, ...restoredMessages];
       return replaceTranscript ? restored : [...messages, ...restored];
     });
     // P1 resume path: a durable, unterminated goal frontier surfaces in the
@@ -273,28 +279,24 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       // A submission/session change while the summary was pending must not be
       // overwritten — the stale compaction is reported and discarded instead.
       const sessionAtStart = deps.sessionRef.current;
+      const isStale = () => deps.sessionRef.current !== sessionAtStart || deps.conversationRef.current !== messages;
+      const discardStale = () => {
+        deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the session or conversation changed while the summary was being written.'}]);
+        return false;
+      };
       try {
         const selection = deps.modelSelection?.();
         const runtime = await modelWithConfig({...(selection ? {modelSelector: `${selection.provider}:${selection.model}`} : {}), reasoningByModel: deps.reasoningByModel?.()});
         if (!runtime?.model) throw new Error('no model provider configured');
-        const providerSettings = providerRequestSettings(runtime.config);
-        delete providerSettings.omitMaxOutputTokens;
+        const providerSettings = auxiliaryRequestOptions(providerRequestSettings(runtime.config), runtime.config.capabilities, 'compaction', COMPACTION_LLM_MAX_OUTPUT_TOKENS);
         const summarization = streamText({
           model: runtime.model,
           ...providerSettings,
           prompt: buildLlmCompactionPrompt({older: split.older, instructions}),
-          maxOutputTokens: COMPACTION_LLM_MAX_OUTPUT_TOKENS,
           abortSignal: AbortSignal.timeout(COMPACT_SUMMARY_TIMEOUT_MS),
         });
-        if (deps.sessionRef.current !== sessionAtStart) {
-          deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the session changed while the summary was being written.'}]);
-          return false;
-        }
-        if (deps.conversationRef.current !== messages) {
-          deps.setMessages(m => [...m, {role: 'system', text: 'Compaction result discarded: the conversation changed while the summary was being written. Run /compact again.'}]);
-          return false;
-        }
         const summaryText = (await summarization.text).trim();
+        if (isStale()) return discardStale();
         if (!summaryText) throw new Error('model returned an empty summary');
         const result = compactModelMessagesWithSummary(messages, {summaryText, tokenBudget: FALLBACK_CONTEXT_WINDOW_TOKENS, instructions, workState: deps.workStateRef.current});
         if (!result.compacted) throw new Error('nothing older to compact');
@@ -305,6 +307,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
         deps.setMessages(m => [...m, {role: 'system', text: `Compacted context: replaced ${result.olderCount} older model messages with a model-written summary and kept the last ${result.keptCount}.`}]);
         return true;
       } catch (error) {
+        if (isStale()) return discardStale();
         deps.debugLog(`LLM compaction failed (${error instanceof Error ? error.message : String(error)}); falling back to the heuristic excerpt`);
         return compactConversationSync(instructions);
       }

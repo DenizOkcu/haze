@@ -346,7 +346,9 @@ describe('wizardDispatch provider creation discovery', () => {
     await createWizardDispatch(deps).dispatch('providerAddPreset', 'openai-subscription');
     const patch = mocks.updateSettings.mock.calls[0]?.[0] as HazeSettings;
     const provider = patch.providers?.find(p => p.name === 'OpenAI Subscription');
-    expect(provider).toMatchObject({url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex', modelLimits: {'gpt-6.1-sol': {contextWindowTokens: 500_000, maxOutputTokens: 128_000}}});
+    expect(provider).toMatchObject({url: 'https://chatgpt.com/backend-api/codex', kind: 'chatgpt-codex'});
+    const {presetModelLimitsForModels} = await import('../../../src/config/providerPresets.js');
+    expect(presetModelLimitsForModels(provider!, ['gpt-6.1-sol'])['gpt-6.1-sol']).toEqual({contextWindowTokens: 500_000, maxOutputTokens: 128_000});
   });
 
   it('checks new Vibe suggestions against account discovery without changing existing providers', async () => {

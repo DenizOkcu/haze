@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {ToolLoopAgent, streamText, isStepCount, type ModelMessage} from 'ai';
 import {agentEvent} from '../../../core/agent/events.js';
+import {auxiliaryRequestOptions} from '../../../core/providerContracts.js';
 import {type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {contextTokensFromUsage, estimateConversationTokens, estimateValueTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls} from '../../../core/agent/requestAssembly.js';
@@ -466,8 +467,7 @@ async function compactAtEpochBoundary(deps: AttemptStreamDeps, providerMessages:
     const summarization = streamText({
       model: setup.runtime.model,
       prompt,
-      ...setup.providerSettings,
-      maxOutputTokens: Math.min(COMPACTION_LLM_MAX_OUTPUT_TOKENS, setup.runtime.config.maxOutputTokens ?? COMPACTION_LLM_MAX_OUTPUT_TOKENS),
+      ...auxiliaryRequestOptions({...setup.providerSettings, omitMaxOutputTokens: setup.omitMaxOutputTokens}, setup.runtime.config.capabilities, 'compaction', Math.min(COMPACTION_LLM_MAX_OUTPUT_TOKENS, setup.runtime.config.maxOutputTokens ?? COMPACTION_LLM_MAX_OUTPUT_TOKENS)),
       abortSignal: abortController.signal,
     });
     const summaryText = (await summarization.text).trim();
