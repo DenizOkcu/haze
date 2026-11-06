@@ -12,27 +12,40 @@ describe('streaming assistant Markdown messages', () => {
     const first = partitionDisplayMessages([{
       id: 'assistant-1',
       role: 'assistant',
-      text: 'First paragraph.\n\nSecond paragraph is active',
+      text: 'First paragraph.\n\nSecond paragraph is active\n',
       streaming: true,
     }]);
     expect(first.staticItems).toHaveLength(1);
     expect(first.staticItems[0]).toMatchObject({kind: 'assistant-markdown', key: 'assistant-1-markdown-0', content: 'First paragraph.\n\n', first: true, final: false});
-    expect(first.streamingItems[0]).toMatchObject({key: 'assistant-1', showHeader: false, message: {text: 'Second paragraph is active'}});
+    expect(first.streamingItems[0]).toMatchObject({key: 'assistant-1', showHeader: false, message: {text: 'Second paragraph is active\n'}});
 
     const next = partitionDisplayMessages([{
       id: 'assistant-1',
       role: 'assistant',
-      text: 'First paragraph.\n\nSecond paragraph is complete.\n\nThird is active',
+      text: 'First paragraph.\n\nSecond paragraph is complete.\n\nThird is active\n',
       streaming: true,
     }]);
     expect(next.staticItems.map(item => item.key)).toEqual(['assistant-1-markdown-0', 'assistant-1-markdown-1']);
     expect(next.staticItems[0]).toMatchObject({content: 'First paragraph.\n\n'});
-    expect(next.streamingItems[0]).toMatchObject({showHeader: false, message: {text: 'Third is active'}});
+    expect(next.streamingItems[0]).toMatchObject({showHeader: false, message: {text: 'Third is active\n'}});
+  });
+
+  it('never commits a growing numbered list when a partial marker looks like a new block', () => {
+    const text = 'Intro.\n\n1. First\n   - ID: first\n\n2. Second\n   - ID: second\n\n3. Third\n   - ID: third\n\nEnd.\n';
+    let committed: string[] = [];
+    for (let end = 1; end <= text.length; end++) {
+      const result = partitionDisplayMessages([{id: 'reply', role: 'assistant', text: text.slice(0, end), streaming: true}]);
+      const current = result.staticItems.map(item => item.kind === 'assistant-markdown' ? item.content : item.message.text);
+      expect(current.slice(0, committed.length)).toEqual(committed);
+      committed = current;
+    }
+    const done = partitionDisplayMessages([{id: 'reply', role: 'assistant', text, streaming: false}]);
+    expect(done.staticItems.map(item => item.kind === 'assistant-markdown' ? item.content : item.message.text).slice(0, committed.length)).toEqual(committed);
   });
 
   it('keeps settled messages after the active tail dynamic to preserve terminal order', () => {
     const result = partitionDisplayMessages([
-      {id: 'assistant-1', role: 'assistant', text: 'Completed root.\n\nActive root', streaming: true, displayOrder: 1},
+      {id: 'assistant-1', role: 'assistant', text: 'Completed root.\n\nActive root\n', streaming: true, displayOrder: 1},
       {id: 'notice-1', role: 'system', text: 'Queued follow-up', streaming: false, displayOrder: 2},
     ]);
 

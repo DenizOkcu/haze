@@ -63,9 +63,15 @@ export function partitionDisplayMessages(messages: Message[]): {staticItems: Tra
       return;
     }
 
-    // Marked may still reclassify the final root while the stream grows. Keep
-    // only that root dynamic; every preceding root is now safe to append once.
-    const staticChunkCount = message.streaming ? Math.max(0, chunks.length - 1) : chunks.length;
+    // A partial first line of the last root can still join the previous root:
+    // for example, a bare "2" after a list becomes its next item when ". "
+    // arrives. Wait for that line to finish before committing the prior root.
+    const lastChunk = chunks.at(-1) ?? '';
+    const newline = lastChunk.indexOf('\n');
+    // Marked can synthesize a trailing newline for an unfinished list marker.
+    const lastChunkHasCompleteLine = newline >= 0 && (newline < lastChunk.length - 1 || message.text.endsWith('\n'));
+    const pendingChunks = lastChunkHasCompleteLine ? 1 : 2;
+    const staticChunkCount = message.streaming ? Math.max(0, chunks.length - pendingChunks) : chunks.length;
     for (let chunkIndex = 0; chunkIndex < staticChunkCount; chunkIndex++) {
       staticItems.push({
         kind: 'assistant-markdown',
@@ -80,7 +86,7 @@ export function partitionDisplayMessages(messages: Message[]): {staticItems: Tra
       reachedDynamicTail = true;
       streamingItems.push({
         key,
-        message: {...message, text: chunks.at(-1) ?? message.text},
+        message: {...message, text: chunks.slice(staticChunkCount).join('')},
         showHeader: staticChunkCount === 0,
       });
     }
