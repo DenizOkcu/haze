@@ -1,112 +1,26 @@
 # haze
 
-A minimal LLM harness for your terminal.
+haze is an open-source coding agent for your terminal. It works with local models and hosted providers.
+
+Run it in your project and ask it to fix a bug, add a feature, or explain the code. haze can read and edit files, run commands, and check the results. Connect Ollama, LM Studio, OpenRouter, OpenAI, or another OpenAI-compatible endpoint, then pick the model you want to use.
+
+[Quickstart](https://haze.build/quickstart.html) · [Documentation](https://haze.build/) · [Commands](https://haze.build/commands.html) · [Changelog](https://github.com/DenizOkcu/haze/blob/main/CHANGELOG.md)
 
 [![Known Vulnerabilities](https://snyk.io/test/github/DenizOkcu/haze/badge.svg)](https://snyk.io/test/github/DenizOkcu/haze)
 
-## What's new in 1.7.11
+## What haze does
 
-Fleet size now follows the deployment manifest's worker allowance, and long turns show live generation speed and fleet depth in the busy bar.
+haze manages context, retries, and continuation during longer tasks. For implementation work, it tracks validation results and can continue when tasks or checks are incomplete. You can follow its tool calls and edits in the terminal.
 
-### Changes in 1.7.10
+Sessions can be resumed later. For work you do often, save instructions as a Markdown skill. haze also supports MCP and LSP servers.
 
-This patch rebuilds the npm package with matching version and build metadata.
+In one [Harbor differential benchmark](https://github.com/DenizOkcu/haze/blob/main/benchmarks/harbor/results/20260816-224944-glm53-differential.html), haze 1.0.0 and three other harnesses each passed all 17 verifier tests using the same task, model, and backend. The report includes the runs and measurements. It covers one task and isn't a general ranking.
 
-### Changes in 1.7.9
-
-This release improves model deployment discovery for configured workers.
-
-### Changes in 1.7.8
-
-This release improves compatibility with updated model deployments and preserves explicitly configured deployment trust.
-
-### Changes in 1.7.5
-
-Improved recovery from malformed tool calls and more resilient retry handling for temporary provider errors.
-
-### Changes in 1.7.2
-
-This patch updates the AI SDK and development tooling, and moves the public website and documentation to maintainable Astro components.
-
-### Changes in 1.7.1
-
-This patch updates a provider preset's default endpoint.
-
-### Changes in 1.7.0
-
-haze 1.7.0 hardens the untrusted-content boundary: MCP tool results of every size now arrive inside escaped untrusted envelopes, one variant-tolerant escaper guards all untrusted container closers (including compaction summaries), project instructions discovered mid-turn no longer ride the engine control channel, terminal control sequences (including OSC 52 clipboard writes) are stripped from the Markdown transcript path, and the protected secret-file list extends to database/CLI credential stores, browser profiles, and `~/.haze/settings.json`/`auth.json` — with the shell-side prompt rule derived from the same list. It also fixes validation-evidence edge cases around trailing stderr redirects and repeated tool-call redirects.
-
-### Highlights from 1.6.0
-
-haze 1.6.0 stops mistaking patient local models for dead streams:
-
-- Idle-stream stall windows are now class-aware: hosted endpoints keep the 5-minute window, while loopback/local inference servers (LM Studio, Ollama) get 30 minutes — their prompt ingestion and hidden reasoning emit no stream output at all, so the old fixed window aborted healthy models mid-work and burned the retry pool re-doing prefill.
-- The new `streamIdleTimeoutMs` setting overrides the window explicitly (integer milliseconds, 1s–24h). The `timeout`/`retry` events and the stall system messages report the effective window.
-
-### Highlights from 1.5.1
-
-haze 1.5.1 improves terminal resizing and reasoning-effort compatibility:
-
-- On terminal width changes, haze replays the full settled transcript, including formatted Markdown, at the new width. The input draft and active turn stay mounted. Terminal scrollback is preserved, so older transcript copies can remain there after a replay.
-- Unknown local and hosted endpoints omit reasoning effort by default. Providers can configure their supported reasoning levels explicitly.
-- Unsupported `none`/`minimal` choices for GPT-6+ model names are omitted rather than promoted to a different effort; the provider default applies.
-
-### Highlights from 1.5.0
-
-haze 1.5.0 modernizes the terminal experience on Ink 8 — formatted streamed Markdown, native spinners and busy indicators, `$EDITOR`/`$PAGER` handoffs, and IME-aware cursor placement — and adds model steering for compact models, per-model session-scoped `/reasoning` (with the `/thinking` alias), pinned session model selections, and a metadata-only `haze report`.
-
-- Formatted streaming: assistant Markdown renders as formatted terminal rows while it streams, clamped to the viewport budget; clamped rows settle into the transcript verbatim, never lost.
-- Model steering: `steeringProfile: "compact"` lists nearby package-script names, asks for smaller working slices, reminds about validation earlier, and compacts history at 70% of the usual budget — completion evidence stays just as strict. `escalationModel` hands a stuck goal to one explicitly configured model, once, with the conversation and evidence intact.
-- Reasoning control: `/reasoning` (alias `/thinking`) keeps a per-model level for the session — `unset` sends no parameter, `reset` drops the override — and the status bar shows the effective level. Headless runs keep `--reasoning <level|unset>` as a run-scoped override.
-- Session model pinning: each session remembers its model selection on resume, continue, and fork; changing the global default never rewrites an active session. Headless `--resume` follows the saved selection unless `--model` is explicit.
-- `haze report [id] [--json]`: goal outcomes, tool/validation counts, context size, and evidence mismatches from session metadata — never prompts, commands, paths, or tool output.
-- Terminal modernization: Ink 8 with native bracketed paste, grapheme/cell-aware editing, one bounded shutdown path, suspended-terminal `$EDITOR`/`$PAGER` handoffs, and screen-reader-aware indicators. The implicit 30-minute per-turn cap is gone; `--timeout` remains the explicit opt-in goal budget.
-
-Previous releases:
-
-- `1.4.0`: per-run reasoning control (`--reasoning` for headless runs and a live status-bar indicator) on top of the 1.3.0 hardening pass — uniform secret/file boundaries, evidence that survives failed exits, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
-- `1.2.1`: edit-recovery instructs instead of restricting — the model is told which path to read and why, while the execution-time gate enforces the fresh read.
-- `1.2.0`: provider-usage context accounting, recoverable compact-and-retry overflow handling, model-written split-turn-aware compaction, `pipefail` validation truthfulness, and a configurable retry pool.
-- `1.1.1`: durable goal ledgers and crash-resume frontiers; headless `--until-done` relaunches with bounded notices and a no-progress guard; proportional task/validation completion gates; and smaller orchestration internals.
-- `1.1.0`: terminal theming with 14 built-in palettes and live `/themes` switching; hard secret-file protection across every file tool, including symlink, read-blessing, ignore-override, and grep-traversal defenses.
-- `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).
-- `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
-- `0.10.1`: OpenAI Subscription OAuth preset, SECURITY.md and the attended-use threat model, bounded completion recovery, compact colorized diffs, prompt-injection framing, hardened fetch/stdin/sessions, and a multi-page docs site.
-
-- `0.10.0`: image input, read-only path blessings, isolated fleet workers, managed background processes, session browsing and forking, model discovery, project skills, and rotating tips.
-- `0.9.0`: private home-state storage, authoritative turn status, collection-time byte bounds, hardened process teardown, stronger real-path and network boundaries, and ordered persistence.
-- `0.8.0`: AI SDK v7 runtime, live status with model, elapsed time, and tool labels; bounded bash output processing; lowercase `haze` naming.
-- `0.7.0`: headless `-p`, `--output json`, and `--output stream-json`; pinned-connection `fetch` safety; scoped instruction refresh; smaller sessions; startup context visibility.
-- `0.6.0`: AI SDK-native ToolLoopAgent core, optional LSP navigation, MCP support, unified configuration pickers, cleaner transcripts, `/context`, and startup update checks.
-- `0.5.0`: SSRF-protected public URL fetching, no provider environment variables, debug-only LLM logs, command-aware output reduction, CLI Markdown rendering, scoped nested context files, and automatic cleanup of completed tasks.
-- `0.4.0`: three-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, a smaller command surface, and docs site additions.
-- `0.3.0`: redesigned docs site, a relocated task bar, and automatic task cleanup between sessions.
-- `0.2.0`: more reliable recovery from failed edits and validation, structured bash classification, parsed validation summaries, and multiline input with vertical cursor movement.
-- `0.1.0`: bundled ripgrep, subagent delegation, and inline diffs.
-- `0.0.3`: durable sessions, context compaction, and provider management.
-- `0.0.2`: Markdown skills, autocomplete, and `listFiles` pagination.
-- `0.0.1`: initial release.
-
-haze works with OpenAI-compatible providers, including OpenRouter and local endpoints. Use `/provider` to choose or add one, then `/model` to select a model.
-
-```txt
-  _
- | |
- | |__   __ _ _______
- | '_ \ / _` |_  / _ \
- | | | | (_| |/ /  __/
- |_| |_|\__,_/___\___|
-```
-
-haze keeps guardrails light. The LLM can work from the terminal with access close to yours while staying scoped to the current project where possible. It is for developers who would rather supervise tool calls than work through a stack of permission dialogs. Keep an eye on what it does.
-
-### Supervision model
-
-There is **no sandbox and no permission layer**: the shell tool runs unsupervised in your login shell (its classification is informational only), and only the file tools are confined to the workspace. Claude Code gates tools behind permissions, plan mode, and hooks; Codex CLI runs in an OS sandbox with approval modes; haze, like pi, replaces those mechanisms with your supervision. That trade-off is deliberate and keeps the agent fast and transparent, but it also means haze is **not an unattended automation runtime** — run it where you would run a shell session yourself. If a CI job runs haze headless, treat the job the way you would treat any script with shell access. SECURITY.md documents the attended-use threat model in full.
+> **Supervise haze as you would a shell session.** haze has no sandbox or command approval layer. Shell commands run with your user permissions and can reach outside the project. File tools are scoped to the workspace. See the [safety model](#safety-model) and [SECURITY.md](https://github.com/DenizOkcu/haze/blob/main/SECURITY.md).
 
 ## Getting started
 
-haze runs on macOS and Linux with Node.js 22 or newer. Windows is not yet a supported platform (the toolchain assumes a POSIX shell); it is on the 1.x roadmap.
+haze requires Node.js 22.13 or newer and runs on macOS and Linux. Native Windows support is on the 1.x roadmap; the current toolchain assumes a POSIX shell.
 
 Install haze:
 
@@ -126,6 +40,16 @@ On first run, create or choose a provider, then choose your first model:
 /provider
 /model
 ```
+
+To use a local model, start Ollama or LM Studio and load a model. Choose the matching preset in `/provider`, then discover or enter the model in `/model`. You do not need an API key for a local server. For a hosted model, choose a provider preset and follow the sign-in or API-key prompts. The [quickstart](https://haze.build/quickstart.html) has setup examples.
+
+Then try a task in your project:
+
+```txt
+find a failing test, fix the cause, and run the relevant tests
+```
+
+Review the tool calls, changes, and test results as haze works. Results depend on the model, task, and available tools.
 
 `/provider` sets up any OpenAI-compatible endpoint, such as OpenRouter, OpenAI, LM Studio, Ollama, or a proxy. haze asks for a provider name, base URL, optional API key, and model names. The **OpenAI API Key** preset uses platform API billing. The **OpenAI Subscription** preset instead opens a ChatGPT browser login and uses the Codex Responses endpoint; no pasted session token is required. Its sign-in callback listens on a fixed localhost port (1455) required by the registered client, so a lingering process holding that port blocks sign-in until it exits; retry after freeing the port.
 
@@ -533,7 +457,7 @@ Shell classification is informational. haze does not ask for confirmation before
 
 With `--debug`, haze writes full request and message payloads to `~/.haze/logs/`. The files use private `0600` permissions on POSIX, but they can contain secrets and file contents. Do not share debug logs without reviewing and redacting them.
 
-See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability reporting.
+See [SECURITY.md](https://github.com/DenizOkcu/haze/blob/main/SECURITY.md) for supported versions and private vulnerability reporting.
 
 ## Local development
 
@@ -595,6 +519,94 @@ git tag vX.Y.Z
 git push origin main --tags
 npm publish --access public --provenance
 ```
+
+<details>
+<summary>Previous release highlights</summary>
+
+## What's new in 1.7.11
+
+Fleet size now follows the deployment manifest's worker allowance, and long turns show live generation speed and fleet depth in the busy bar.
+
+### Changes in 1.7.10
+
+This patch rebuilds the npm package with matching version and build metadata.
+
+### Changes in 1.7.9
+
+This release improves model deployment discovery for configured workers.
+
+### Changes in 1.7.8
+
+This release improves compatibility with updated model deployments and preserves explicitly configured deployment trust.
+
+### Changes in 1.7.5
+
+Improved recovery from malformed tool calls and more resilient retry handling for temporary provider errors.
+
+### Changes in 1.7.2
+
+This patch updates the AI SDK and development tooling, and moves the public website and documentation to maintainable Astro components.
+
+### Changes in 1.7.1
+
+This patch updates a provider preset's default endpoint.
+
+### Changes in 1.7.0
+
+haze 1.7.0 hardens the untrusted-content boundary: MCP tool results of every size now arrive inside escaped untrusted envelopes, one variant-tolerant escaper guards all untrusted container closers (including compaction summaries), project instructions discovered mid-turn no longer ride the engine control channel, terminal control sequences (including OSC 52 clipboard writes) are stripped from the Markdown transcript path, and the protected secret-file list extends to database/CLI credential stores, browser profiles, and `~/.haze/settings.json`/`auth.json` — with the shell-side prompt rule derived from the same list. It also fixes validation-evidence edge cases around trailing stderr redirects and repeated tool-call redirects.
+
+### Highlights from 1.6.0
+
+haze 1.6.0 stops mistaking patient local models for dead streams:
+
+- Idle-stream stall windows are now class-aware: hosted endpoints keep the 5-minute window, while loopback/local inference servers (LM Studio, Ollama) get 30 minutes — their prompt ingestion and hidden reasoning emit no stream output at all, so the old fixed window aborted healthy models mid-work and burned the retry pool re-doing prefill.
+- The new `streamIdleTimeoutMs` setting overrides the window explicitly (integer milliseconds, 1s–24h). The `timeout`/`retry` events and the stall system messages report the effective window.
+
+### Highlights from 1.5.1
+
+haze 1.5.1 improves terminal resizing and reasoning-effort compatibility:
+
+- On terminal width changes, haze replays the full settled transcript, including formatted Markdown, at the new width. The input draft and active turn stay mounted. Terminal scrollback is preserved, so older transcript copies can remain there after a replay.
+- Unknown local and hosted endpoints omit reasoning effort by default. Providers can configure their supported reasoning levels explicitly.
+- Unsupported `none`/`minimal` choices for GPT-6+ model names are omitted rather than promoted to a different effort; the provider default applies.
+
+### Highlights from 1.5.0
+
+haze 1.5.0 modernizes the terminal experience on Ink 8 — formatted streamed Markdown, native spinners and busy indicators, `$EDITOR`/`$PAGER` handoffs, and IME-aware cursor placement — and adds model steering for compact models, per-model session-scoped `/reasoning` (with the `/thinking` alias), pinned session model selections, and a metadata-only `haze report`.
+
+- Formatted streaming: assistant Markdown renders as formatted terminal rows while it streams, clamped to the viewport budget; clamped rows settle into the transcript verbatim, never lost.
+- Model steering: `steeringProfile: "compact"` lists nearby package-script names, asks for smaller working slices, reminds about validation earlier, and compacts history at 70% of the usual budget — completion evidence stays just as strict. `escalationModel` hands a stuck goal to one explicitly configured model, once, with the conversation and evidence intact.
+- Reasoning control: `/reasoning` (alias `/thinking`) keeps a per-model level for the session — `unset` sends no parameter, `reset` drops the override — and the status bar shows the effective level. Headless runs keep `--reasoning <level|unset>` as a run-scoped override.
+- Session model pinning: each session remembers its model selection on resume, continue, and fork; changing the global default never rewrites an active session. Headless `--resume` follows the saved selection unless `--model` is explicit.
+- `haze report [id] [--json]`: goal outcomes, tool/validation counts, context size, and evidence mismatches from session metadata — never prompts, commands, paths, or tool output.
+- Terminal modernization: Ink 8 with native bracketed paste, grapheme/cell-aware editing, one bounded shutdown path, suspended-terminal `$EDITOR`/`$PAGER` handoffs, and screen-reader-aware indicators. The implicit 30-minute per-turn cap is gone; `--timeout` remains the explicit opt-in goal budget.
+
+Previous releases:
+
+- `1.4.0`: per-run reasoning control (`--reasoning` for headless runs and a live status-bar indicator) on top of the 1.3.0 hardening pass — uniform secret/file boundaries, evidence that survives failed exits, durable session lifecycle fixes, credential-safe provider discovery, and honest output reduction.
+- `1.2.1`: edit-recovery instructs instead of restricting — the model is told which path to read and why, while the execution-time gate enforces the fresh read.
+- `1.2.0`: provider-usage context accounting, recoverable compact-and-retry overflow handling, model-written split-turn-aware compaction, `pipefail` validation truthfulness, and a configurable retry pool.
+- `1.1.1`: durable goal ledgers and crash-resume frontiers; headless `--until-done` relaunches with bounded notices and a no-progress guard; proportional task/validation completion gates; and smaller orchestration internals.
+- `1.1.0`: terminal theming with 14 built-in palettes and live `/themes` switching; hard secret-file protection across every file tool, including symlink, read-blessing, ignore-override, and grep-traversal defenses.
+- `1.0.0`: first stable release — the CLI flags, settings schema, `stream-json` event contract, session format, skill layout, and structured tool-result shape under the 1.x compatibility promise; a configurable model-retry pool; and four benchmark-driven reliability fixes (validated with the Harbor differential benchmark: 17/17 verifier tests, fewest input tokens of the reporting harnesses, zero stalls).
+- `0.11.0`: goal-level autonomy across physical-turn budgets (logical-goal supervisor, evidence-gated completion, `goal_*` stream events, cumulative goal envelope), runtime provenance and `haze doctor` (embedded build info, stale-build refusal, session build headers), model-aware context budgeting (per-preset limits, live discovery, 128K fallback, self-healing context overflow), headless `--timeout` with per-tool deadlines and abort-cause typing, performance work (batched ignore checks, LSP reuse, coalesced/vacuumed sessions, memoized estimates, incremental streaming, viewport-clamped live region), and model-written `/compact` summaries with a heuristic fallback.
+- `0.10.1`: OpenAI Subscription OAuth preset, SECURITY.md and the attended-use threat model, bounded completion recovery, compact colorized diffs, prompt-injection framing, hardened fetch/stdin/sessions, and a multi-page docs site.
+
+- `0.10.0`: image input, read-only path blessings, isolated fleet workers, managed background processes, session browsing and forking, model discovery, project skills, and rotating tips.
+- `0.9.0`: private home-state storage, authoritative turn status, collection-time byte bounds, hardened process teardown, stronger real-path and network boundaries, and ordered persistence.
+- `0.8.0`: AI SDK v7 runtime, live status with model, elapsed time, and tool labels; bounded bash output processing; lowercase `haze` naming.
+- `0.7.0`: headless `-p`, `--output json`, and `--output stream-json`; pinned-connection `fetch` safety; scoped instruction refresh; smaller sessions; startup context visibility.
+- `0.6.0`: AI SDK-native ToolLoopAgent core, optional LSP navigation, MCP support, unified configuration pickers, cleaner transcripts, `/context`, and startup update checks.
+- `0.5.0`: SSRF-protected public URL fetching, no provider environment variables, debug-only LLM logs, command-aware output reduction, CLI Markdown rendering, scoped nested context files, and automatic cleanup of completed tasks.
+- `0.4.0`: three-step skill wizard, language-agnostic skill intent extraction, model-managed tasks, a smaller command surface, and docs site additions.
+- `0.3.0`: redesigned docs site, a relocated task bar, and automatic task cleanup between sessions.
+- `0.2.0`: more reliable recovery from failed edits and validation, structured bash classification, parsed validation summaries, and multiline input with vertical cursor movement.
+- `0.1.0`: bundled ripgrep, subagent delegation, and inline diffs.
+- `0.0.3`: durable sessions, context compaction, and provider management.
+- `0.0.2`: Markdown skills, autocomplete, and `listFiles` pagination.
+- `0.0.1`: initial release.
+
+</details>
 
 ## License
 
