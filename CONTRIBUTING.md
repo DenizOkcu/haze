@@ -22,16 +22,6 @@ npm test             # Run unit tests
 npm run lint         # Check code style
 ```
 
-## AGENTS.md stamps
-
-Every nested `AGENTS.md` carries a `Last updated: YYYY-MM-DD` line. CI runs
-`scripts/check-agents-stamps.sh`, which compares the stamp against the date of
-the most recent commit touching that file. If you edit an `AGENTS.md`, refresh
-the stamp in the same commit — the check fails on drift.
-
-For uncommitted WIP, run `./scripts/check-agents-stamps.sh` locally before
-pushing.
-
 ## Project Structure
 
 ```

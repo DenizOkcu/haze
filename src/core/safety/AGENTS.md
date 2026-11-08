@@ -1,7 +1,5 @@
 # src/core/safety/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.11 release.
-
 Safety classifiers and guards.
 
 ## Shell classifier

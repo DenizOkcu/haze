@@ -1,7 +1,5 @@
 # src/core/agent/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.11 release.
-
 Agent request assembly, compaction, budgets, events, work state, and tool-result helpers.
 
 ## Module contracts
