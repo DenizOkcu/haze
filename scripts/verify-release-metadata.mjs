@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Read-only release-metadata consistency check (RH-011). Derives the package
 // version and validates that the lockfile root, README, changelog, SECURITY
-// supported series, static docs, and AGENTS stamps all agree. Reports every
+// supported series, and static docs all agree. Reports every
 // mismatch in one run and exits non-zero. Does not rewrite any file.
 //
 // Usage: node scripts/verify-release-metadata.mjs
@@ -77,34 +77,7 @@ if (fs.existsSync(docsDir) && series) {
   }
 }
 
-// 6. AGENTS.md stamps must target the current release. Only files tracked by
-// Git are release metadata: local worktrees and ignored checkouts (excluded
-// via .git/info/exclude, which the walker below would otherwise descend into)
-// are out of scope.
-const agentsStamp = new RegExp(`for the ${version.replace(/\./g, '\\.')} release`);
-function* walk(dir) {
-  for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
-    if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === '.git' || entry.name === '.kilo') continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(full);
-    else if (entry.name === 'AGENTS.md') yield full;
-  }
-}
-if (fs.existsSync(path.join(repoRoot, 'src'))) {
-  let checked = 0;
-  for (const file of walk(repoRoot)) {
-    const content = read(path.relative(repoRoot, file));
-    if (content && content.includes('Last updated:') && !agentsStamp.test(content)) {
-      problems.push(`${path.relative(repoRoot, file)}: stamp does not target release ${version}.`);
-    }
-    if (content && content.includes('Last updated:')) checked++;
-  }
-  if (checked === 0) {
-    problems.push('No AGENTS.md "Last updated:" stamps found to verify.');
-  }
-}
-
-// 7. Packed buildInfo must not leak the publisher's filesystem (SC-7). The
+// 6. Packed buildInfo must not leak the publisher's filesystem (SC-7). The
 // build step runs before this check in `prepublishOnly`, so dist/ exists at
 // publish time; when it does not (e.g. release:verify on a fresh checkout in
 // CI, which runs before `npm run build`), the check is skipped like the other
