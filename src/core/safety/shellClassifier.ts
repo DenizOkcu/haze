@@ -42,6 +42,15 @@ export function classifyShellCommand(command: string): ShellClassification {
     return {riskLevel: 'destructive', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'command can delete files or irreversibly change repository state'};
   }
 
+  // Windows deletion verbs: cmd `del`/`erase`, recursive `rd`/`rmdir /s`,
+  // and PowerShell `Remove-Item` (an alias target of `del`) all delete
+  // outright. Plain `rd`/`rmdir` only drop an empty directory and fall
+  // through to the mutating branch below.
+  if (has(lower, /(^|[;&|]\s*)(del|erase)\b/) || has(lower, /\bremove-item\b/) || has(lower, /(^|[;&|]\s*)(rd|rmdir)\b[^;&|]*\s\/s\b/)) {
+    traits.push('deletes_files');
+    return {riskLevel: 'destructive', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'Windows command can delete files'};
+  }
+
   if (has(lower, /(^|[;&|]\s*)(curl\b|wget\b|scp\b|ssh\b|npm\s+(install|i|add)\b|pnpm\s+(install|add)\b|yarn\s+(add|install)\b|pip\s+install\b|brew\s+install\b)/)) {
     traits.push('uses_network');
     if (has(lower, /\b(npm|pnpm|yarn|pip|brew)\b/)) traits.push('installs_dependencies', 'writes_files');
@@ -53,6 +62,13 @@ export function classifyShellCommand(command: string): ShellClassification {
     if (has(lower, /\bchmod\b/)) traits.push('changes_permissions');
     if (has(lower, /\bgit\b/)) traits.push('changes_git_state');
     return {riskLevel: 'mutating', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'command can modify files or repository state'};
+  }
+
+  // Windows file-modifying verbs: cmd `copy`/`move`/`md`/`rd` and PowerShell
+  // `Set-Content`/`New-Item`/`Copy-Item`/... write or restructure files.
+  if (has(lower, /(^|[;&|]\s*)(copy|xcopy|robocopy|move|ren|rename|md|rd|rmdir)\b/) || has(lower, /\b(set-content|add-content|out-file|clear-content|new-item|copy-item|move-item|rename-item)\b/) || has(lower, /(^|[;&|]\s*)reg\s+(add|delete)\b/) || has(lower, /(^|[;&|]\s*)setx\s/)) {
+    traits.push('writes_files');
+    return {riskLevel: 'mutating', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'Windows command can modify files'};
   }
 
   // `find -delete` removes matched files outright. `-delete` is a find-specific
@@ -88,6 +104,14 @@ export function classifyShellCommand(command: string): ShellClassification {
     if (has(lower, /build|tsc|typecheck|lint|eslint/)) traits.push('runs_build');
     if (traits.length === 0) traits.push('runs_tests');
     return {riskLevel: 'read_only', traits: uniq(traits), confidence: complex ? 'medium' : 'high', reason: 'validation command'};
+  }
+
+  // Windows read-only inspection: cmd `dir`/`type`/`where` and PowerShell
+  // `Get-*`/`Select-String`. The mutating branch above runs first, so `set`
+  // here cannot shadow `Set-Content`.
+  if (has(lower, /(^|[;&|]\s*)(dir|type|where|hostname|ver|systeminfo|tasklist|ipconfig|whoami|set)\b/) || has(lower, /\b(get-childitem|get-item|get-content|get-process|get-service|get-location|get-date|get-command|get-variable|select-string|measure-object)\b/)) {
+    traits.push('reads_files');
+    return {riskLevel: complex ? 'unknown' : 'read_only', traits: uniq(traits), confidence: complex ? 'low' : 'high', reason: complex ? 'read-like command with complex shell syntax' : 'read-only inspection command'};
   }
 
   if (has(lower, /(^|[;&|]\s*)(git\s+(status|diff|log|show|branch)\b|rg\b|grep\b|find\b|ls\b|pwd\b|cat\b|head\b|tail\b|node\s+--version|npm\s+--version|which\b)/)) {

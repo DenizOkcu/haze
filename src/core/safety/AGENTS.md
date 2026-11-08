@@ -1,6 +1,6 @@
 # src/core/safety/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.11 release.
+Last updated: 2026-11-08 for the 1.7.11 release.
 
 Safety classifiers and guards.
 
@@ -11,6 +11,7 @@ Current contract:
 - Shell classification is metadata for display, logging, validation parsing, and output reduction. It does not block execution by itself.
 
 - `shellClassifier.ts` classifies commands for display/metadata. It is not a permission gate.
+- Covers POSIX verbs plus Windows cmd.exe (`del`/`erase`/`rd /s`, `copy`/`move`/`md`, `dir`/`type`/`where`, `reg`, `setx`) and PowerShell cmdlets (`Remove-Item`, `Set-Content`, `New-Item`, `Get-*`, `Select-String`); cmdlet matching is case-insensitive via the lowered command text.
 - Keep classification conservative but non-blocking.
 - Traits/risk labels should be explainable from the command text and stable enough for tests.
 - Do not add interactive confirmation behavior here; that belongs in UI/extensions if ever added.
