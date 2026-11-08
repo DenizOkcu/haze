@@ -24,7 +24,43 @@ describe('user shell resolution', () => {
   it('falls back to /bin/bash without $SHELL', () => {
     vi.stubEnv('HAZE_SHELL', '');
     vi.stubEnv('SHELL', '');
-    expect(resolveUserShell()).toBe('/bin/bash');
+    expect(resolveUserShell({platform: 'linux'})).toBe('/bin/bash');
+  });
+});
+
+describe('windows shell fallback', () => {
+  const winEnv = (overrides: Record<string, string> = {}) => ({
+    PATH: 'C:/Program Files/PowerShell/7;C:/Windows/System32;C:/Program Files/Git/bin',
+    ComSpec: 'C:/Windows/System32/cmd.exe',
+    ...overrides,
+  });
+
+  it('prefers pwsh when it is on PATH', () => {
+    const pathExists = (candidate: string) => candidate === 'C:/Program Files/PowerShell/7/pwsh.exe';
+    expect(resolveUserShell({platform: 'win32', env: winEnv(), pathExists})).toBe('C:/Program Files/PowerShell/7/pwsh.exe');
+  });
+
+  it('falls back to Git Bash when pwsh is absent', () => {
+    const pathExists = (candidate: string) => candidate === 'C:/Program Files/Git/bin/bash.exe';
+    expect(resolveUserShell({platform: 'win32', env: winEnv(), pathExists})).toBe('C:/Program Files/Git/bin/bash.exe');
+  });
+
+  it('honors PATHEXT when probing', () => {
+    const pathExists = (candidate: string) => candidate === 'C:/Windows/System32/pwsh.EXE';
+    const env = winEnv({PATHEXT: '.EXE', PATH: 'C:/Windows/System32'});
+    expect(resolveUserShell({platform: 'win32', env, pathExists})).toBe('C:/Windows/System32/pwsh.EXE');
+  });
+
+  it('falls back to ComSpec, then cmd.exe, when no preferred shell is found', () => {
+    const pathExists = () => false;
+    expect(resolveUserShell({platform: 'win32', env: winEnv(), pathExists})).toBe('C:/Windows/System32/cmd.exe');
+    expect(resolveUserShell({platform: 'win32', env: winEnv({ComSpec: ''}), pathExists})).toBe('cmd.exe');
+  });
+
+  it('still honors HAZE_SHELL and SHELL on Windows', () => {
+    const pathExists = () => false;
+    expect(resolveUserShell({platform: 'win32', env: winEnv({HAZE_SHELL: 'C:/tools/nu.exe'}), pathExists})).toBe('C:/tools/nu.exe');
+    expect(resolveUserShell({platform: 'win32', env: winEnv({SHELL: 'C:/Program Files/Git/bin/bash.exe'}), pathExists})).toBe('C:/Program Files/Git/bin/bash.exe');
   });
 });
 

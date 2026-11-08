@@ -1,6 +1,6 @@
 # src/core/process/AGENTS.md
 
-Last updated: 2026-10-31 for the 1.7.11 release.
+Last updated: 2026-11-08.
 
 Bounded subprocess execution shared by `shell` and `grep`.
 
@@ -8,6 +8,7 @@ Bounded subprocess execution shared by `shell` and `grep`.
 
 - `runBoundedProcess.ts` spawns a child process with independent stdout/stderr byte budgets, a timeout, an optional abort signal, and process-tree termination. An optional `onStdoutChunk` interceptor lets callers inspect chunks as they arrive and request early termination (grep's match-cap early stop is built on this; CR-004).
 - `signalProcessTree` is the shared POSIX/Windows process-tree signaling helper used by bounded commands, registered background processes, and LSP teardown.
+- `userShell.ts` resolves the command shell: `HAZE_SHELL`/`SHELL` win on every platform; otherwise POSIX falls back to `/bin/bash`, while Windows probes PATH for `pwsh`, then Git Bash's `bash`, then `cmd.exe` via `ComSpec` (PATHEXT-aware). Dialect detection and per-dialect invocation/syntax guidance already cover powershell and cmd.
 - `backgroundRegistry.ts` owns main-turn dev servers/watchers. It enforces the concurrency cap, keeps a byte-bounded rolling output window behind dynamic output handles, publishes live-count changes, and tears down every owned tree on session reset or process exit.
 
 ## Contracts

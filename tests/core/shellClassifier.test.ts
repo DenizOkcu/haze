@@ -99,6 +99,67 @@ describe('shell classifier', () => {
     const result = classifyShellCommand('mytool -delete --force ./out');
     expect(result.traits).not.toContain('deletes_files');
   });
+
+  it('classifies Windows deletion commands as destructive', () => {
+    for (const command of [
+      'del file.txt',
+      'del /f /q file.txt',
+      'erase *.tmp',
+      'rd /s /q build',
+      'rmdir /s build',
+      'Remove-Item -Recurse dist',
+      'del a.txt & erase b.txt',
+    ]) {
+      const result = classifyShellCommand(command);
+      expect(result.riskLevel, command).toBe('destructive');
+      expect(result.traits, command).toContain('deletes_files');
+    }
+  });
+
+  it('classifies Windows file-modifying commands as mutating', () => {
+    for (const command of [
+      'copy a.txt b.txt',
+      'xcopy src dist /s /e',
+      'move a.txt b.txt',
+      'ren old.txt new.txt',
+      'md logs',
+      'rd emptydir',
+      'Set-Content -Path out.txt -Value hi',
+      'Add-Content log.txt "line"',
+      'New-Item -Type File x.txt',
+      'Copy-Item a.txt b.txt',
+      'Move-Item a.txt b.txt',
+      'reg add HKCU\\Software\\X /v Y /t REG_SZ /d 1',
+      'setx HAZE_DEBUG 1',
+    ]) {
+      const result = classifyShellCommand(command);
+      expect(result.riskLevel, command).toBe('mutating');
+      expect(result.traits, command).toContain('writes_files');
+    }
+  });
+
+  it('classifies Windows read-only inspection commands as read_only', () => {
+    for (const command of [
+      'dir',
+      'type README.md',
+      'where pwsh',
+      'hostname',
+      'Get-ChildItem src',
+      'Get-Content log.txt',
+      'Get-Process node',
+      'Select-String -Path src -Pattern TODO',
+    ]) {
+      const result = classifyShellCommand(command);
+      expect(result.riskLevel, command).toBe('read_only');
+      expect(result.traits, command).toContain('reads_files');
+    }
+  });
+
+  it('does not flag npm script names as Windows verbs', () => {
+    const result = classifyShellCommand('npm run format');
+    expect(result.riskLevel).not.toBe('destructive');
+    expect(result.traits).not.toContain('deletes_files');
+  });
 });
 
 describe('commandMasksValidationExit (exit provenance)', () => {
