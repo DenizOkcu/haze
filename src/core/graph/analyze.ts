@@ -1,7 +1,7 @@
 /**
  * Graph analysis: god nodes (degree hubs), import cycles (Tarjan SCC over
  * file-level import edges), communities (deterministic label propagation),
- * reverse blast radius, and the /map report renderer.
+ * reverse blast radius, and the /graph report renderer.
  *
  * Everything here is plain TS over the in-memory index — no dependencies, no
  * LLM, deterministic output (sorted iteration everywhere).
@@ -225,7 +225,14 @@ export interface AffectedEntry {
 export function affectedBySymbol(index: GraphIndex, symbolId: string, maxDepth = 3, limit = 40): AffectedEntry[] {
   const results = new Map<string, AffectedEntry>();
   const visited = new Set<string>([symbolId]);
-  let frontier = [{id: symbolId, depth: 0}];
+  // `imports` edges are file→file, so the one-hop importer surfacing is
+  // reachable only through the file that defines the queried symbol: seed
+  // that file alongside the symbol (never as a result itself).
+  const definingFiles = (index.in.get(symbolId) ?? [])
+    .filter(edge => edge.relation === 'defines')
+    .map(edge => edge.source);
+  for (const id of definingFiles) visited.add(id);
+  let frontier = [{id: symbolId, depth: 0}, ...definingFiles.map(id => ({id, depth: 0}))];
 
   while (frontier.length > 0 && results.size < limit) {
     const next: Array<{id: string; depth: number}> = [];
@@ -236,7 +243,10 @@ export function affectedBySymbol(index: GraphIndex, symbolId: string, maxDepth =
         visited.add(edge.source);
         const node = index.nodes.get(edge.source);
         if (!node) continue;
-        if (node.kind !== 'file') {
+        // Symbols are entries; files surface only as the documented one-hop
+        // importers of the defining file (the defining file itself is a
+        // pre-visited seed, never a result).
+        if (node.kind !== 'file' || edge.relation === 'imports') {
           results.set(edge.source, {
             id: edge.source, label: node.label, kind: node.kind, file: node.file,
             depth: current.depth + 1, viaRelation: edge.relation, confidence: edge.confidence,
@@ -253,10 +263,10 @@ export function affectedBySymbol(index: GraphIndex, symbolId: string, maxDepth =
 }
 
 // ---------------------------------------------------------------------------
-// /map report
+// /graph report
 // ---------------------------------------------------------------------------
 
-export interface MapReportInput {
+export interface GraphReportInput {
   graph: CodeGraph;
   files: number;
   parsedFiles: number;
@@ -265,12 +275,12 @@ export interface MapReportInput {
   stale: boolean;
 }
 
-/** Human-readable orientation report for /map: structure, hubs, risk areas. */
-export function renderMapReport(index: GraphIndex, input: MapReportInput): string {
+/** Human-readable orientation report for /graph: structure, hubs, risk areas. */
+export function renderGraphReport(index: GraphIndex, input: GraphReportInput): string {
   const lines: string[] = [];
   const cacheHint = input.cachedFiles > 0 ? `, ${input.cachedFiles} cached / ${input.parsedFiles} parsed` : '';
   lines.push(`Code graph: ${input.graph.nodes.length} nodes · ${input.graph.edges.length} edges · ${input.files} source files (${(input.durationMs / 1000).toFixed(1)}s${cacheHint})`);
-  if (input.stale) lines.push('Note: some files changed since this graph was built; run /map to refresh.');
+  if (input.stale) lines.push('Note: some files changed since this graph was built; run /graph to refresh.');
 
   const communities = communitySummaries(index, 8);
   if (communities.length > 0) {

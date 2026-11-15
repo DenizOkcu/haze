@@ -2,7 +2,7 @@
 
 Native code-graph intelligence: a persistent, deterministic symbol graph of the
 workspace (files, symbols, calls, imports, inheritance) built with tree-sitter
-WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/map`.
+WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/graph`.
 
 ## Layout
 
@@ -18,7 +18,7 @@ WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/map`.
 - `query.ts` — IDF scoring, per-term seed guarantee, hub-damped traversal,
   token-budgeted rendering, shortest path.
 - `analyze.ts` — communities (label propagation), god nodes, import cycles
-  (Tarjan SCC), blast radius, `/map` report.
+  (Tarjan SCC), blast radius, `/graph` report.
 - `digest.ts` — bounded structure digest for LLM compaction prompts.
 
 ## Contracts
@@ -37,7 +37,7 @@ WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/map`.
   (resolved cross-file). Preserve the labels end-to-end into tool output.
 - Staleness must be visible: results annotate `graph.stale`, and the manifest
   signature check (`computeStaleness`) is the source of truth.
-- No daemons: builds are explicit (`graphRebuild`, `/map`); queries are lazy.
+- No daemons: builds are explicit (`graphRebuild`, `/graph`) plus one non-blocking `ensureGraphInBackground()` at chat startup that creates or incrementally refreshes the graph on every start; queries are lazy.
 - web-tree-sitter must stay on the 0.23.x line — the vendored grammar builds
   (tree-sitter-wasms 0.1.13, emscripten side-modules) do not load on newer
   runtimes. See `assets/graph-grammars/NOTICE.md` for refresh instructions.

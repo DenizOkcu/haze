@@ -14,6 +14,7 @@ describe('graph extraction', () => {
       '  tick() { return 1; }',
       '}',
       'export const registry = {a: 1};',
+      'export const palette: Record<string, number> = {green: 1};',
       'const ignored = 5;',
     ].join('\n'));
     const names = extraction.symbols.map(symbol => `${symbol.kind}:${symbol.name}${symbol.owner ? `@${symbol.owner}` : ''}`);
@@ -25,6 +26,8 @@ describe('graph extraction', () => {
     expect(names).toContain('type:Options');
     expect(names).toContain('type:Id');
     expect(names).toContain('field:registry');
+    // A type annotation between name and value must not hide the declarator's symbol.
+    expect(names).toContain('field:palette');
     expect(names).not.toContain(expect.anything() && 'field:ignored');
     expect(extraction.symbols.filter(symbol => symbol.name === 'ignored')).toHaveLength(0);
   });

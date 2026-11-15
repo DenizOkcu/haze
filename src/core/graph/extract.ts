@@ -14,24 +14,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import Parser from 'web-tree-sitter';
+import {Language, Parser} from 'web-tree-sitter';
+import type {Node, Tree} from 'web-tree-sitter';
 import {symbolNodeId, type GraphNodeKind} from './model.js';
 
-export const EXTRACTOR_VERSION = 3;
+export const EXTRACTOR_VERSION = 4;
 
 /** Largest source file parsed; bigger files are reported as skipped instead. */
 export const MAX_SOURCE_BYTES = 1024 * 1024;
 
-type TreeSitterLanguage = import('web-tree-sitter').Language;
-type TreeSitterNode = import('web-tree-sitter').SyntaxNode;
-type TreeSitterTree = import('web-tree-sitter').Tree;
-type TreeSitterParser = import('web-tree-sitter');
+type TreeSitterNode = Node;
+type TreeSitterTree = Tree;
+type TreeSitterParser = Parser;
 
-/** The runtime attaches `Parser.Language` only after `init()`; the 0.23 typings omit that static. */
-function languageStatic(): {load(input: string): Promise<TreeSitterLanguage>} {
-  const attached = (Parser as unknown as {Language?: {load(input: string): Promise<TreeSitterLanguage>}}).Language;
-  if (!attached) throw new Error('tree-sitter runtime not initialized');
-  return attached;
+
+
+/** The 0.27.x runtime exposes `Language` as a named export with a static `.load()`.
+ * 0.23.x attached it as `Parser.Language` post-init — no longer needed. */
+function languageStatic(): {load(input: string): Promise<Language>} {
+  return Language;
 }
 
 let grammarsDir: string | undefined;
@@ -53,7 +54,7 @@ function resolveGrammarsDir(): string {
 }
 
 let parserInit: Promise<void> | undefined;
-const loadedLanguages = new Map<string, Promise<TreeSitterLanguage>>();
+const loadedLanguages = new Map<string, Promise<Language>>();
 const parsers = new Map<string, Promise<TreeSitterParser>>();
 
 const GRAMMAR_BY_EXTENSION: Record<string, string> = {
@@ -226,6 +227,9 @@ function declaratorValueKind(declarator: TreeSitterNode): 'function' | 'field' |
   const nameId = name?.id;
   for (const child of declarator.namedChildren) {
     if (child.id === nameId) continue;
+    // A type annotation (`const x: SomeType = {...}`) sits between the name
+    // and the value; skip it so typed declarators still yield their symbol.
+    if (child.type === 'type_annotation') continue;
     if (child.type === 'arrow_function' || child.type === 'function_expression') return 'function';
     if (VALUED_DECLARATOR_TYPES.has(child.type)) return 'field';
     return undefined;
@@ -413,7 +417,8 @@ function collectExports(root: TreeSitterNode, localNames: Set<string>): string[]
 export async function extractFile(file: string, content: string): Promise<FileExtraction> {
   const extension = path.extname(file).toLowerCase();
   const parser = await parserFor(extension);
-  const tree: TreeSitterTree = parser.parse(content);
+  const treeRaw = parser.parse(content);
+  const tree: TreeSitterTree = treeRaw ?? parser.parse('')!;
   try {
     const root = tree.rootNode;
     const definitions = collectDefinitions(root);

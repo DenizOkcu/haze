@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {affectedBySymbol, communitySummaries, detectCommunities, godNodes, importCycles, isTestPath, renderMapReport} from '../../../src/core/graph/analyze.js';
+import {affectedBySymbol, communitySummaries, detectCommunities, godNodes, importCycles, isTestPath, renderGraphReport} from '../../../src/core/graph/analyze.js';
 import {buildGraphIndex, GRAPH_SCHEMA_VERSION, type CodeGraph, type GraphEdge, type GraphNode} from '../../../src/core/graph/model.js';
 
 function graphFrom(nodes: GraphNode[], edges: GraphEdge[]): CodeGraph {
@@ -94,15 +94,37 @@ describe('graph analysis', () => {
     expect(affected[1]?.depth).toBe(2);
   });
 
-  it('renders a /map report with stats, hubs, and a staleness note', () => {
+  it('surfaces importing files one hop through the defining file (blast radius)', () => {
+    // Importers with no call/reference edge (dynamic use, barrels) must
+    // surface via the file-level `imports` hop, which is reachable only
+    // through the `defines` edge from the symbol's own file.
+    const nodes: GraphNode[] = [
+      {id: 'src/core.ts', label: 'core.ts', kind: 'file', file: 'src/core.ts', line: 1},
+      {id: 'src/core.ts#target', label: 'target', kind: 'function', file: 'src/core.ts', line: 5},
+      {id: 'src/consumer.ts', label: 'consumer.ts', kind: 'file', file: 'src/consumer.ts', line: 1},
+      {id: 'src/consumer.ts#dynamic', label: 'dynamic', kind: 'function', file: 'src/consumer.ts', line: 2},
+    ];
+    const edges: GraphEdge[] = [
+      {source: 'src/core.ts', target: 'src/core.ts#target', relation: 'defines', confidence: 'EXTRACTED'},
+      {source: 'src/consumer.ts', target: 'src/core.ts', relation: 'imports', confidence: 'EXTRACTED'},
+      {source: 'src/consumer.ts#dynamic', target: 'src/consumer.ts', relation: 'defines', confidence: 'EXTRACTED'},
+    ];
+    const affected = affectedBySymbol(buildGraphIndex(graphFrom(nodes, edges)), 'src/core.ts#target', 3);
+    const consumer = affected.find(entry => entry.id === 'src/consumer.ts');
+    expect(consumer).toMatchObject({kind: 'file', viaRelation: 'imports', depth: 1});
+    // The defining file itself is a traversal seed, never a result.
+    expect(affected.some(entry => entry.id === 'src/core.ts')).toBe(false);
+  });
+
+  it('renders a /graph report with stats, hubs, and a staleness note', () => {
     const nodes: GraphNode[] = [
       {id: 'src/a.ts', label: 'a.ts', kind: 'file', file: 'src/a.ts', line: 1},
       {id: 'src/a.ts#One', label: 'One', kind: 'function', file: 'src/a.ts', line: 2},
     ];
     const graph = graphFrom(nodes, [{source: 'src/a.ts', target: 'src/a.ts#One', relation: 'defines', confidence: 'EXTRACTED'}]);
-    const report = renderMapReport(buildGraphIndex(graph), {graph, files: 1, parsedFiles: 1, cachedFiles: 0, durationMs: 1200, stale: true});
+    const report = renderGraphReport(buildGraphIndex(graph), {graph, files: 1, parsedFiles: 1, cachedFiles: 0, durationMs: 1200, stale: true});
     expect(report).toContain('2 nodes');
     expect(report).toContain('Hub symbols');
-    expect(report).toContain('run /map to refresh');
+    expect(report).toContain('run /graph to refresh');
   });
 });

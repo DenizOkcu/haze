@@ -31,7 +31,7 @@ const EXTRACTION_CACHE_MAX_ENTRIES = 40_000;
 export interface GraphBuildOptions {
   /** Permit intentional shrink (mass deletion); otherwise a near-empty rebuild of a healthy graph is refused. */
   force?: boolean;
-  /** Progress callback per processed file (used by /map for user feedback). */
+  /** Progress callback per processed file (used by /graph for user feedback). */
   onProgress?: (processed: number, total: number) => void;
 }
 
@@ -46,6 +46,33 @@ export interface GraphBuildResult {
   durationMs: number;
   incremental: boolean;
   capped: boolean;
+}
+
+let backgroundBuildInFlight: Promise<GraphBuildResult | undefined> | undefined;
+
+/**
+ * One-shot, non-blocking graph ensure for startup: kick off a single
+ * incremental build in the background on every startup — creating the graph
+ * when none exists yet, refreshing it otherwise (content-hash cached, so an
+ * unchanged workspace only re-runs cheap cross-file resolution) — and return
+ * its promise; while one is running, return the same promise. Never rejects —
+ * on failure the graph tools still report `graph_not_built` with a rebuild
+ * hint. Not a daemon: one build per process, no watching.
+ */
+export function ensureGraphInBackground(deps: {build?: () => Promise<GraphBuildResult>; onActivity?: (building: boolean) => void} = {}): Promise<GraphBuildResult | undefined> {
+  if (backgroundBuildInFlight) return backgroundBuildInFlight;
+  const build = deps.build ?? (() => buildWorkspaceGraph());
+  backgroundBuildInFlight = (async () => {
+    deps.onActivity?.(true);
+    try {
+      return await build();
+    } finally {
+      deps.onActivity?.(false);
+    }
+  })().catch(() => undefined).finally(() => {
+    backgroundBuildInFlight = undefined;
+  });
+  return backgroundBuildInFlight;
 }
 
 /** Candidate path resolutions for a relative import specifier (extensionless, ESM `.js`-style rewriting, index files). */

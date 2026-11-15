@@ -178,7 +178,17 @@ export async function computeStaleness(
   return {stale: changed.length > 0 || added.length > 0 || removed.length > 0 || manifest.extractorVersion !== EXTRACTOR_VERSION, files: {changed, added, removed}};
 }
 
-/** Cheap existence + freshness check used by tool entry points and /map. */
+/**
+ * Delete the whole persisted graph for a workspace (graph.json, manifest,
+ * extraction cache). Returns true when a graph store existed and was removed.
+ */
+export async function deleteGraph(store: GraphStore): Promise<boolean> {
+  const existed = await fs.stat(store.graphPath).then(() => true, () => false);
+  await fs.rm(store.dir, {recursive: true, force: true});
+  return existed;
+}
+
+/** Cheap existence + freshness check used by tool entry points and /graph. */
 export async function graphStatus(store: GraphStore): Promise<{exists: boolean; stale: boolean; builtAt?: string; nodeCount: number; edgeCount: number; fileCount: number; graph?: CodeGraph}> {
   const graph = await readGraph(store);
   if (!graph) return {exists: false, stale: false, nodeCount: 0, edgeCount: 0, fileCount: 0};

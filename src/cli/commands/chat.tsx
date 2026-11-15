@@ -1,6 +1,6 @@
 import React, {useEffect, useReducer, useRef, useState} from 'react';
 import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
-import {StatusNotice} from '../../ui/components/NativeIndicators.js';
+import {ActivitySpinner, StatusNotice} from '../../ui/components/NativeIndicators.js';
 import {BusyBar} from '../chat/BusyBar.js';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
@@ -187,6 +187,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint; pauseReason?: 'no-progress' | 'goal-deadline' | 'context-exhausted'} | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
+  const [graphBuilding, setGraphBuilding] = useState(false);
   const shutdownRef = useRef<(() => Promise<void>) | undefined>(undefined);
   if (!shutdownRef.current) shutdownRef.current = createChatShutdown({
     stop: () => { stoppingRef.current = true; followUps.clear(); },
@@ -274,6 +275,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       initializeSession: () => sessionLifecycle.initializeSession(),
       refreshSkills,
       addSystemMessage: text => setMessages(m => [...m, {role: 'system', text}]),
+      onGraphActivity: setGraphBuilding,
     }).catch(() => undefined);
     readInputHistory().then(setInputHistory).catch(() => undefined);
     loadTasksFromStore().then(setVisibleTasks).catch(() => undefined);
@@ -811,6 +813,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
       </> : undefined,
       tasks: visibleTasks.length > 0 ? <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={Math.max(1, terminalRows - 8)} /> : undefined,
       activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} detail={busyDetail} tip={showingTip ? TIPS[tipIndex] : undefined} />
+        : graphBuilding ? <Box overflow="hidden"><ActivitySpinner /><Box flexShrink={0} width={1} /><Text color={theme.muted} wrap="truncate-end">Building code graph in the background…</Text></Box>
         : pausedResume ? <StatusNotice variant="warning">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</StatusNotice> : undefined,
       status: <>
         <Box width="100%" flexDirection="row" justifyContent="space-between" flexShrink={0}>

@@ -32,7 +32,7 @@ async function loadGraphIndex(): Promise<GraphLoad> {
         ok: false,
         reasonCode: 'graph_not_built',
         error: 'No code graph for this workspace yet.',
-        suggestedNextStep: 'Call graphRebuild first (deterministic tree-sitter extraction, no LLM cost, incremental on later runs), or ask the user to run /map.',
+        suggestedNextStep: 'Call graphRebuild first (deterministic tree-sitter extraction, no LLM cost, incremental on later runs), or ask the user to run /graph.',
       };
     }
     if (!status.graph) throw new Error('graph.json disappeared between reads');

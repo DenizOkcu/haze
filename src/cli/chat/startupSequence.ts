@@ -4,6 +4,7 @@ import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
 import {readSettings, type HazeSettings} from '../../config/settings.js';
 import {checkForUpdate} from '../../config/updateCheck.js';
 import {detectCheckoutMismatch, formatMismatchWarning, runtimeCapabilities} from '../../utils/buildInfo.js';
+import {ensureGraphInBackground} from '../../core/graph/buildGraph.js';
 import {startupContextInfo, startupProviderInfo} from './startupInfo.js';
 
 const execFile = promisify(execFileCallback);
@@ -36,6 +37,8 @@ export interface StartupSequenceOptions {
   /** Reloads the skill registry (also reports project-skill and error signatures). */
   refreshSkills: () => Promise<unknown>;
   addSystemMessage: (text: string) => void;
+  /** Notified only when the background graph build actually starts/finishes. */
+  onGraphActivity?: (building: boolean) => void;
 }
 
 /**
@@ -77,4 +80,9 @@ export async function runStartupSequence(options: StartupSequenceOptions): Promi
   } else if (!runtimeCapabilities().goalSupervisorAvailable) {
     options.addSystemMessage('Warning: this haze build lacks the goal supervisor module; exhausting a turn step/tool budget may pause the goal instead of continuing automatically. Reinstall or relink haze (npm run dev:link in the checkout).');
   }
+  // Keep the workspace code graph warm without blocking startup: a single
+  // background build on every startup — creating the graph when none exists
+  // yet, incrementally refreshing it afterwards. Failures are silent here;
+  // the graph tools surface `graph_not_built` with a hint.
+  void ensureGraphInBackground({onActivity: options.onGraphActivity});
 }

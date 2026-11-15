@@ -64,10 +64,10 @@ function toolCallSummaryText(toolName: string, input: unknown) {
   if ((toolName === 'lspFindSymbol' || toolName === 'lspRenameSymbol' || toolName === 'lspSafeDeleteSymbol' || toolName === 'lspDiagnosticsForSymbol') && typeof data?.namePath === 'string') return `${toolName} ${typeof data.path === 'string' ? `${data.path}:` : ''}${data.namePath}`;
   if (toolName === 'lspDiagnostics' && typeof data?.path === 'string') return `lspDiagnostics ${data.path}`;
   if ((toolName === 'lspDefinition' || toolName === 'lspTypeDefinition' || toolName === 'lspImplementation' || toolName === 'lspReferences') && typeof data?.path === 'string') return `${toolName} ${data.path}:${data.line}:${data.column}`;
-  if (toolName === 'graphQuery' && typeof data?.question === 'string') return `graphQuery "${compact(data.question, 60)}"`;
-  if ((toolName === 'graphExplain' || toolName === 'graphAffected') && typeof data?.symbol === 'string') return `${toolName} ${data.symbol}`;
-  if (toolName === 'graphPath' && typeof data?.from === 'string' && typeof data?.to === 'string') return `graphPath ${data.from} -> ${data.to}`;
-  if (toolName === 'graphRebuild') return 'graphRebuild';
+  if (toolName === 'graphQuery' && typeof data?.question === 'string') return `map: query "${compact(data.question, 60)}"`;
+  if ((toolName === 'graphExplain' || toolName === 'graphAffected') && typeof data?.symbol === 'string') return `map: ${toolName === 'graphExplain' ? 'explain' : 'affected'} ${data.symbol}`;
+  if (toolName === 'graphPath' && typeof data?.from === 'string' && typeof data?.to === 'string') return `map: path ${data.from} -> ${data.to}`;
+  if (toolName === 'graphRebuild') return 'map: rebuild';
   return `${toolName} ${compact(input)}`;
 }
 

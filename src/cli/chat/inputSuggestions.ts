@@ -23,6 +23,7 @@ const CHAT_COMMAND_SUGGESTIONS: TextInputSuggestion[] = [
   {value: '/session', description: 'Show current session path', kind: 'command'},
   {value: '/resume', description: 'Browse saved sessions for this workspace', kind: 'command'},
   {value: '/new', description: 'Start a new session', kind: 'command'},
+  {value: '/graph', description: 'Build or refresh the workspace code graph (deterministic, incremental) and show an orientation report', kind: 'command'},
   {value: '/logs', description: 'List recent LLM logs, or summarize one by id (--debug runs only)', kind: 'command'},
   {value: '/compact ', description: 'Summarize older context and keep recent messages', kind: 'command'},
   {value: '/clear', description: 'Clear conversation history', kind: 'command'},

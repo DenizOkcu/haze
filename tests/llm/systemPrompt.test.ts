@@ -135,6 +135,14 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt([], undefined, {model: {provider: 'openrouter', name: 'anthropic/claude-3.5-sonnet'}});
     expect(prompt).toContain('Active model: openrouter/anthropic/claude-3.5-sonnet');
   });
+
+  it('gives graph tools a strong first-navigation preference when available', () => {
+    const prompt = buildSystemPrompt([], undefined, {availableTools: new Set(['graphQuery', 'grep'])});
+    expect(prompt).toContain('primary navigation surface');
+    expect(prompt).toContain('start with graphQuery before any grep/readFile exploration');
+    expect(prompt).toContain('graph_not_built');
+    expect(buildSystemPrompt()).not.toContain('primary navigation surface');
+  });
 });
 
 describe('buildSubagentPrompt', () => {

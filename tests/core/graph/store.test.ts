@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {computeStaleness, graphStoreFor, pruneExtractionCache, readCachedExtraction, readGraph, readManifest, workspaceGraphKey, writeCachedExtraction, writeGraph, type GraphStore} from '../../../src/core/graph/store.js';
+import {computeStaleness, deleteGraph, graphStoreFor, pruneExtractionCache, readCachedExtraction, readGraph, readManifest, workspaceGraphKey, writeCachedExtraction, writeGraph, type GraphStore} from '../../../src/core/graph/store.js';
 import {parseCodeGraph, GRAPH_SCHEMA_VERSION, type CodeGraph} from '../../../src/core/graph/model.js';
 import {EXTRACTOR_VERSION, type FileExtraction} from '../../../src/core/graph/extract.js';
 
@@ -51,6 +51,16 @@ describe('graph store', () => {
     await expect(writeGraph(store, sampleGraph(10), {extractorVersion: EXTRACTOR_VERSION, workspaceRoot: '/w', files: {}})).rejects.toThrow(/Refusing to shrink/);
     await expect(writeGraph(store, sampleGraph(10), {extractorVersion: EXTRACTOR_VERSION, workspaceRoot: '/w', files: {}}, {force: true})).resolves.toBeUndefined();
     expect((await readGraph(store))?.nodes).toHaveLength(10);
+  });
+
+  it('deletes the persisted graph and reports whether one existed', async () => {
+    expect(await deleteGraph(store)).toBe(false);
+    await writeGraph(store, sampleGraph(10), {extractorVersion: EXTRACTOR_VERSION, workspaceRoot: '/w', files: {}});
+    await writeCachedExtraction(store, 'abc', {version: EXTRACTOR_VERSION} as unknown as FileExtraction);
+    expect(await deleteGraph(store)).toBe(true);
+    expect(await readGraph(store)).toBeUndefined();
+    expect(await readManifest(store)).toBeUndefined();
+    expect(await fs.stat(store.dir).catch(() => null)).toBeNull();
   });
 
   it('reports staleness from manifest signatures', async () => {
