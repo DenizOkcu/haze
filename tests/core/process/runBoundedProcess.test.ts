@@ -57,6 +57,22 @@ describe('sanitizeChildEnv (HZ-10)', () => {
   });
 });
 
+describe('runBoundedProcess natural exit with escaped descendant', () => {
+  it.runIf(process.platform !== 'win32')('settles on the child\'s exit when a disowned descendant keeps the stdio pipes open', async () => {
+    // `echo done; sleep 2 &` : the shell exits immediately, but the backgrounded
+    // sleeper inherits stdout, so the 'close' event only fires ~2s later. The
+    // bounded result must settle on the shell's exit within a short grace
+    // instead of waiting for the descendant (pre-fix: waited the full timeout).
+    const result = await runBoundedProcess({
+      command: '/bin/sh', args: ['-c', 'echo done; sleep 2 &'], cwd: process.cwd(), timeoutMs: 8000,
+      maxStdoutBytes: 1000, maxStderrBytes: 1000,
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout.text).toContain('done');
+    expect(result.durationMs).toBeLessThan(1500);
+  });
+});
+
 describe('runBoundedProcess env sanitizer (HZ-10)', () => {
   const probe = "process.stdout.write(process.env.HAZE_TEST_FAKE_API_KEY ?? 'ABSENT')";
 

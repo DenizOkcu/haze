@@ -120,12 +120,13 @@ export async function runBoundedProcess(input: {command: string; args: string[];
       resolve({code, signal, stdout: stdoutResult, stderr: stderrResult, timedOut, aborted, forced, durationMs: Date.now() - startedAt, ...(error ? {error} : {})});
     };
     const scheduleCloseFallback = () => {
-      // Only call after SIGKILL — running this after SIGTERM would resolve the
-      // promise before the forced-kill escalation, leaking processes that ignore
-      // SIGTERM. 50ms is enough for the kernel to deliver the signal and for an
-      // 'exit' event to fire; if 'close' still doesn't fire, the descendant is
-      // holding stdio (escaped grandchild) and we settle with whatever exit
-      // info we already captured.
+      // Safe after SIGKILL or after the child's own 'exit' (the direct child
+      // is dead; nothing else is pending for it). Never run this straight
+      // after SIGTERM: that would resolve the promise before the forced-kill
+      // escalation, leaking processes that ignore SIGTERM. 50ms is enough for
+      // the kernel to deliver a signal / for 'exit' to fire; if 'close' still
+      // doesn't fire, a descendant is holding stdio (escaped grandchild, e.g.
+      // `cmd & disown`) and we settle with whatever exit info we captured.
       closeTimer ??= setTimeout(() => settle(exitCode, exitSignal), 50);
       closeTimer.unref?.();
     };
@@ -156,6 +157,11 @@ export async function runBoundedProcess(input: {command: string; args: string[];
     child.once('exit', (code, signal) => {
       exitCode = code;
       exitSignal = signal;
+      // The direct child exited; if 'close' has not fired shortly after, an
+      // escaped descendant holds the stdio pipes (`sleep 300 & disown; echo
+      // done`). Settle on the captured exit info instead of waiting out the
+      // full timeout for a command that already finished.
+      scheduleCloseFallback();
     });
     child.once('close', (code, signal) => settle(code, signal));
   });
