@@ -15,7 +15,10 @@ export function createSessionRecorder(getSession: () => HazeSession | undefined)
   const appendEntry = (entry: SessionEntry) => {
     const session = getSession();
     if (!session) return;
-    void writer.append({session, entry});
+    // Per-call rejections are captured as the writer's sticky first error and
+    // surfaced once by flush()/error(); an unhandled rejection here would kill
+    // the process on Node >=22 (the sibling paths below do the same).
+    void writer.append({session, entry}).catch(() => undefined);
   };
 
   // Full-history snapshot coalescing (RH-008). conversation_snapshot and

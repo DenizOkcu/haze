@@ -56,7 +56,16 @@ export async function saveTasks(tasks: Task[]): Promise<void> {
   // Mutation guards fail closed: an escaped real path throws instead of writing.
   await assertWritablePathInsideWorkspace(filePath, filePath);
   await fs.mkdir(path.dirname(filePath), {recursive: true});
-  await fs.writeFile(filePath, JSON.stringify(tasks, null, 2), 'utf-8');
+  // Atomic temp-file-plus-rename (same directory) so a crash mid-write cannot
+  // leave truncated JSON that loadTasks would silently reset to an empty list.
+  const tempPath = `${filePath}.tmp-${randomUUID()}`;
+  await fs.writeFile(tempPath, JSON.stringify(tasks, null, 2), 'utf-8');
+  try {
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    await fs.rm(tempPath, {force: true}).catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function clearTasks(): Promise<void> {
