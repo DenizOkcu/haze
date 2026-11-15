@@ -14,7 +14,13 @@
  * One helper for all envelope producers: no ad-hoc per-site escapes.
  */
 
-const ENVELOPE_CLOSER = /<\/\s*(web_content|mcp_result|project_instructions|project_context|haze_compaction)\s*>/gi;
+const ENVELOPE_TAGS = ['web_content', 'mcp_result', 'project_instructions', 'project_context', 'haze_compaction'];
+const ENVELOPE_CLOSER = new RegExp(`<\\/\\s*(?:${ENVELOPE_TAGS.join('|')})\\s*>`, 'gi');
+
+/** Neutralize one matched closer by breaking the tag open (`<\/`). */
+function escapeCloserMatch(closer: string): string {
+  return closer.replace('</', '<\\/');
+}
 
 /**
  * Escape every envelope-closing-tag variant in `content` so the payload
@@ -23,5 +29,15 @@ const ENVELOPE_CLOSER = /<\/\s*(web_content|mcp_result|project_instructions|proj
  * the exact form keep working because the producer's own closer is intact.
  */
 export function escapeEnvelopeClosers(content: string): string {
-  return content.replace(ENVELOPE_CLOSER, closer => closer.replace('</', '<\\/'));
+  return content.replace(ENVELOPE_CLOSER, escapeCloserMatch);
+}
+
+/**
+ * Escape every closing-tag variant of one additional labeled container (e.g.
+ * `project_skill`) with the same variant tolerance as the five built-in
+ * kinds, so ad-hoc per-site `replaceAll` escapes cannot reappear.
+ */
+export function escapeTagCloserVariants(content: string, tag: string): string {
+  if (!/^[a-z0-9_]+$/i.test(tag)) throw new Error(`Invalid envelope tag: ${tag}`);
+  return content.replace(new RegExp(`<\\/\\s*${tag}\\s*>`, 'gi'), escapeCloserMatch);
 }
