@@ -82,9 +82,15 @@ export function handleToolResultPart(deps: ToolPartHandlerDeps, part: AttemptStr
   // the completion gates; a failed edit/write stays a hard tool failure even
   // when an earlier check also failed.
   loopState.lastFailedToolWasValidation = !ok && toolName === 'shell' && validationSummaryFromOutput(part.output) != null;
-  if (ok && part.toolName === loopState.unresolvedMalformedToolName) {
+  // A successful same-name call clears the unresolved flag only when it ran
+  // in a *later* step: a successful sibling within the same parallel batch
+  // (same completed-step count) must not mask the malformed call's failure.
+  if (ok && part.toolName === loopState.unresolvedMalformedToolName
+    && loopState.unresolvedMalformedAtStep != null
+    && loopState.completedSteps > loopState.unresolvedMalformedAtStep) {
     loopState.unresolvedMalformedToolName = undefined;
     loopState.unresolvedMalformedToolProblem = undefined;
+    loopState.unresolvedMalformedAtStep = undefined;
   }
   const finish: NativeToolFinish = {toolCall, success: ok, output: part.output, durationMs: Date.now() - startedAt};
   const item = toolDisplay.ensureToolItem(toolCall);

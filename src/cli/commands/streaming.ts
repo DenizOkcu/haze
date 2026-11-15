@@ -238,7 +238,15 @@ export async function runAgentTurn(
           callbacks.setAbortController?.(abortController);
         }
         if (result.retry.delayMs > 0) await abortableDelay(result.retry.delayMs, abortController.signal);
-        if (abortController.signal.aborted) { status = 'aborted'; break; }
+        if (abortController.signal.aborted) {
+          status = 'aborted';
+          // The abort landed during retry backoff, after the attempt result
+          // was classified: recover the cause from the shared holder so a
+          // turn-deadline abort reaches the supervisor as `turn-deadline`
+          // (goal-deadline checkpoint) instead of a plain user cancel.
+          abortReason = abortCause.kind === 'turn-deadline' ? 'turn-deadline' : 'user';
+          break;
+        }
         continue;
       }
       // Bounded recovery slice (length-continuation, rescue, or goal

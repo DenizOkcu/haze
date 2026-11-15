@@ -251,13 +251,15 @@ export async function runAgentGoal(options: GoalRunOptions): Promise<GoalRunResu
     const result: TurnResult = await runAgentTurn(request, continuing ? undefined : options.displayValue, contextFiles, callbacks, initialRetryAttempt, continuing, false, options.session, activeModelOverride, turnOptions, options.reasoningOverride);
     initialRetryAttempt = 0;
     cycle += 1;
-    if (cycle >= GOAL_MAX_CYCLES) {
-      return finish('failed', 'cycle-limit', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
-    }
     lastEvidence = result.evidence;
     if (result.checkpoint) checkpoint = result.checkpoint;
 
+    // Structured completion wins over the cycle bound: a goal that finishes
+    // on the limit cycle is a success, never a cycle-limit failure.
     if (result.status === 'complete') return finish('complete', 'completed');
+    if (cycle >= GOAL_MAX_CYCLES) {
+      return finish('failed', 'cycle-limit', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined);
+    }
     if (result.status === 'aborted') {
       return result.abortReason === 'turn-deadline'
         ? finish('failed', 'goal-deadline', checkpoint ? {kind: 'incomplete-goal', checkpoint} : undefined)

@@ -93,7 +93,7 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
   let stallGuard: StreamStallGuard | undefined;
   let setup: Awaited<ReturnType<typeof prepareAttempt>> | undefined;
   try {
-    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, overflowShrinkFactor: input.overflowShrinkFactor, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path), usageAnchor});
+    setup = await prepareAttempt({value, contextFiles, callbacks, retryingExistingRequest, overflowShrinkFactor: input.overflowShrinkFactor, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnState, turnBudget, globalBudget, sliceBudget, goal, onContextFileRead: path => toolDisplay.addContextFileRead(path), usageAnchor});
     if (!setup) return {status: 'failed'};
     const attemptSetupResult = setup;
     loadedMcp = setup.loadedMcp;
@@ -119,6 +119,16 @@ export async function runAgentAttempt(input: AgentAttemptInput): Promise<AgentAt
     });
 
     const stream = await runAttemptStream({setup, callbacks, abortController, retryAttempt, recoverySlice: turnOptions.recoverySlice, turnState, turnBudget, globalBudget, goal, stallGuard, loopState, toolDisplay, salvage, usageAnchor});
+    // An abort that lands in the epoch-boundary window — most easily during
+    // mid-turn LLM compaction, whose internal abort is caught — exits the
+    // stream loop normally instead of throwing. Route it through the same
+    // cause-aware failure classification as a thrown abort, so the recorded
+    // cause (user / turn-deadline / idle stall) decides retry, pause, or
+    // aborted; a finalize on an aborted controller would otherwise trust the
+    // last finish shape and could report a cancelled goal as complete.
+    if (abortController.signal.aborted) {
+      return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, progressSinceLastRetry: input.progressSinceLastRetry, overflowRetries: input.overflowRetries, abortCause, stallGuard, salvage, error: new Error('aborted between model steps'), maxRetries: attemptSetupResult.modelRetries, retryBaseDelayMs: attemptSetupResult.retryBaseDelayMs, idleTimeoutMs: attemptSetupResult.streamIdleTimeoutMs, goal, turnOptions});
+    }
     return finalizeAttemptOutcome({value, callbacks, abortController, turnOptions, turnState, turnBudget, goal, remainingTurnDeadlineMs, stream, retryAttempt, overflowRetries: input.overflowRetries});
   } catch (error) {
     return handleAttemptFailure({value, callbacks, abortController, turnState, retryAttempt, progressSinceLastRetry: input.progressSinceLastRetry, overflowRetries: input.overflowRetries, abortCause, stallGuard, salvage, error, maxRetries: setup?.modelRetries, retryBaseDelayMs: setup?.retryBaseDelayMs, idleTimeoutMs: setup?.streamIdleTimeoutMs, goal, turnOptions});

@@ -64,6 +64,7 @@ export function createRepairToolCall(deps: {callbacks: StreamCallbacks; loopStat
       loopState.pendingMalformedToolProblem = problem;
       loopState.unresolvedMalformedToolName = toolCall.toolName;
       loopState.unresolvedMalformedToolProblem = problem;
+      loopState.unresolvedMalformedAtStep = loopState.completedSteps;
     }
     // Truncated generated file content cannot be reconstructed safely here;
     // let the next agent step retry under the bounded tool-choice constraint.

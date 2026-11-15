@@ -1,7 +1,7 @@
 import type {ModelMessage, ToolSet} from 'ai';
 import type {ContextFile} from '../../../config/contextFiles.js';
 import {readSettings} from '../../../config/settings.js';
-import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, resolveStreamIdleTimeoutMs, usesPatientIdleWindow, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
+import {DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_RETRY_BASE_DELAY_MS, MAIN_STEP_LIMIT, MAIN_TOOL_CALL_LIMIT, SUBAGENT_TOOL_DEADLINE_MS, DEFAULT_TOOL_DEADLINE_MS, DEFAULT_MODEL_RETRIES, resolveStreamIdleTimeoutMs, remainingSteps, usesPatientIdleWindow, withToolExecutionBudget, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {agentEvent} from '../../../core/agent/events.js';
 import {goalDirectionPrompt, isPlanOnlyRequest} from '../../../core/agent/goalPolicy.js';
 import {projectPreflight} from '../../../core/agent/projectPreflight.js';
@@ -11,6 +11,7 @@ import {stripSyntheticControls, withSyntheticControl, withoutSystemMessages} fro
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
+import type {TurnExecutionState} from '../../../core/agent/completionController.js';
 import {userTurnMessage} from '../../../core/attachments/imageAttachments.js';
 import {WorkspaceMutationPolicy} from '../../../core/subagent/workspaceMutationPolicy.js';
 import {modelWithConfig, providerRequestSettings, isLocalProviderUrl, type ModelRuntimeSelection} from '../../../llm/client.js';
@@ -89,6 +90,8 @@ export interface AttemptSetupDeps {
   turnOptions: TurnExecutionOptions;
   turnScope: {executionScope?: TurnExecutionScope};
   turnBudget: TurnBudget;
+  /** Turn-wide execution state; the attempt's step cap is clamped against its cumulative usage. */
+  turnState: TurnExecutionState;
   globalBudget: ToolExecutionBudgetState;
   /** Shared slice execution state (see AgentAttemptInput.sliceBudget). */
   sliceBudget: ToolExecutionBudgetState;
@@ -106,7 +109,7 @@ export interface AttemptSetupDeps {
  * configured (the caller-reported failure path).
  */
 export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSetup | undefined> {
-  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead, usageAnchor} = deps;
+  const {value, contextFiles, callbacks, retryingExistingRequest, session, modelOverride, reasoningOverride, abortController, turnOptions, turnScope, turnState, turnBudget, goal, globalBudget, sliceBudget, onContextFileRead, usageAnchor} = deps;
   // Single choke point: one fresh settings read per attempt, shared by model
   // resolution and request assembly (CR-024, relaxed in Pillar 1.9 so a
   // provider/model switch mid-goal applies from the next attempt — the first
@@ -217,7 +220,11 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   };
 
   const recoverySlice = turnOptions.recoverySlice;
-  const stepCap = recoverySlice?.maxSteps ?? MAIN_STEP_LIMIT;
+  // The turn-wide step budget never resets (matching the tool-call execution
+  // boundary): a provider retry must not re-arm the main step cap, so clamp
+  // this attempt's cap to what the turn has left. Recovery slices were
+  // already clamped at admission; Math.min keeps them unchanged.
+  const stepCap = Math.min(recoverySlice?.maxSteps ?? MAIN_STEP_LIMIT, remainingSteps(turnState.stepsUsed, turnBudget));
   // Rescue exposes only mutation + validation-capable built-in tools so
   // discovery cannot be reopened near the boundary. Length-continuation keeps
   // the full tool set. When no built-in mutation/validation tool qualifies,

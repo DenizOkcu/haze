@@ -51,6 +51,8 @@ export interface AttemptLoopState {
   unresolvedMalformedToolName: string | undefined;
   /** Last known diagnosis for the unresolved malformed tool; rides the turn-end system note so later turns see the exact defect. */
   unresolvedMalformedToolProblem: string | undefined;
+  /** Attempt-local completed-step count when the unresolved malformed call was recorded; a same-name success clears the flag only from a later step. */
+  unresolvedMalformedAtStep: number | undefined;
   /** Per-attempt (not per-turn) recovery counter: a transient retry gets a fresh map. Bounded across the whole turn by MAIN_TOOL_CALL_LIMIT. */
   malformedRecoveryAttempts: Map<string, number>;
   toolResultState: ToolResultState;
@@ -96,6 +98,7 @@ export function createAttemptLoopState(previousAssistantText: string, contextFil
     pendingMalformedToolProblem: undefined,
     unresolvedMalformedToolName: undefined,
     unresolvedMalformedToolProblem: undefined,
+    unresolvedMalformedAtStep: undefined,
     malformedRecoveryAttempts: new Map<string, number>(),
     toolResultState: initialToolResultState(),
     inFlightTools: new Set<string>(),
