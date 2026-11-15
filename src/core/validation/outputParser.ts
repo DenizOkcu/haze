@@ -46,14 +46,16 @@ export function parseValidationOutput(input: {
     if (ts) {
       const [, file, lineNo, column, severity, message] = ts;
       diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: severity === 'warning' ? 'warning' : 'error', message: message ?? ''});
-      failedFiles.push(file ?? '');
+      if (severity !== 'warning') failedFiles.push(file ?? '');
       continue;
     }
     const eslint = line.match(/^(.+?\.(?:ts|tsx|js|jsx|mts|cts))\s*$/);
     if (eslint) {
       const currentFile = eslint[1] ?? '';
       const next = lines[index + 1];
-      if (next && /^\s*\d+:\d+\s+/.test(next)) failedFiles.push(currentFile);
+      // Only error-severity follow-up lines make this a failed file; a
+      // warnings-only run must not populate `failedFiles`.
+      if (next && /^\s*\d+:\d+\s+error\s/.test(next)) failedFiles.push(currentFile);
     }
     const eslintDiag = line.match(/^\s*(\d+):(\d+)\s+(error|warning)\s+(.+?)(?:\s{2,}\S+)?$/);
     if (eslintDiag) {
@@ -61,27 +63,31 @@ export function parseValidationOutput(input: {
       diagnostics.push({line: Number(lineNo), column: Number(column), severity: severity === 'warning' ? 'warning' : 'error', message: message ?? ''});
       continue;
     }
-    const vitestFile = line.match(/^\s*(?:FAIL|FAILED|✓|✗|❯)?\s*([^\s]+\.(?:test|spec)\.(?:ts|tsx|js|jsx))/i);
+    const vitestFile = line.match(/^\s*(?:FAIL|FAILED|✗|❯)?\s*([^\s]+\.(?:test|spec)\.(?:ts|tsx|js|jsx))/i);
     if (vitestFile) failedFiles.push(vitestFile[1] ?? '');
     const testName = line.match(/^\s*(?:FAIL|✗|×|●)\s+(.+)$/);
     if (testName && !/^(FAIL|FAILED)\s+\S+\.(?:test|spec)\./i.test(line.trim())) failedTests.push((testName[1] ?? '').trim());
     const genericFile = line.match(/([^\s()]+\.(?:ts|tsx|js|jsx|mts|cts)):(\d+):(\d+)/);
     if (genericFile) {
       const [, file, lineNo, column] = genericFile;
-      failedFiles.push(file ?? '');
-      diagnostics.push({file, line: Number(lineNo), column: Number(column), severity: /warn/i.test(line) ? 'warning' : 'error', message: line.trim()});
+      const severity = /warn/i.test(line) ? 'warning' : 'error';
+      diagnostics.push({file, line: Number(lineNo), column: Number(column), severity, message: line.trim()});
+      if (severity === 'error') failedFiles.push(file ?? '');
     }
   }
 
   const uniqueFiles = uniq(failedFiles).slice(0, 10);
   const uniqueTests = uniq(failedTests).slice(0, 10);
   const diagCount = diagnostics.length;
+  const errorDiagCount = diagnostics.filter(diagnostic => diagnostic.severity === 'error').length;
   const rawOutputTruncated = Boolean(input.stdoutTruncated || input.stderrTruncated);
   // Pipes (e.g. `npm test | tail`) and process substitutions can mask a
   // non-zero exit code behind the final command in the pipeline. Treat
-  // parsed failure evidence as authoritative over `code` so a green exit
-  // status does not override real failures the parser already found.
-  const hasFailureEvidence = uniqueTests.length > 0 || diagCount > 0;
+  // parsed *failure* evidence as authoritative over `code` so a green exit
+  // status does not override real failures the parser already found. Only
+  // error-severity diagnostics and failed tests count: warning diagnostics
+  // never fail an otherwise-green run (ESLint exits 0 on warnings only).
+  const hasFailureEvidence = uniqueTests.length > 0 || errorDiagCount > 0;
   const status: ValidationSummary['status'] = input.timedOut
     ? 'timed_out'
     : hasFailureEvidence

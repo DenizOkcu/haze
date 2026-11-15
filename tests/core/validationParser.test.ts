@@ -69,6 +69,37 @@ describe('validation output parser', () => {
     expect(summary.suggestedNextStep).toBeDefined();
   });
 
+  it('keeps a warnings-only lint run green (warnings are not failure evidence)', () => {
+    // ESLint exits 0 when only warn-level rules fire; warning diagnostics
+    // must not flip the status to failed nor populate failedFiles — that
+    // would feed the completion gate a false red and force spurious work.
+    const stdout = [
+      'src/a.ts',
+      '  3:9  warning  no-unused-vars  @typescript-eslint/no-unused-vars',
+      '',
+      '✖ 0 problems (0 errors, 1 warning)',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'npm run lint', code: 0, stdout, stderr: ''});
+    expect(summary.kind).toBe('lint');
+    expect(summary.status).toBe('passed');
+    expect(summary.failedFiles).toEqual([]);
+    expect(summary.diagnostics[0]).toMatchObject({severity: 'warning'});
+  });
+
+  it('does not list passing vitest files as failed files on a green run', () => {
+    const stdout = [
+      ' ✓ tests/core/sessionStore.test.ts (12 tests) 24ms',
+      ' ✓ tests/cli/formatters.test.ts (8 tests) 10ms',
+      '',
+      ' Test Files  2 passed (2)',
+      '      Tests  20 passed (20)',
+    ].join('\n');
+    const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
+    expect(summary.status).toBe('passed');
+    expect(summary.failedFiles).toEqual([]);
+    expect(summary.failedTests).toEqual([]);
+  });
+
   it('does not false-positive on a passing test suite that prints bullet points', () => {
     const stdout = 'PASS tests/foo.test.ts\n  - helper output for debugging\nTests: 5 passed\n';
     const summary = parseValidationOutput({command: 'npm test', code: 0, stdout, stderr: ''});
