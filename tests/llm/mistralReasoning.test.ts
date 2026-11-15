@@ -38,6 +38,14 @@ it('sends max for Mistral-hosted GLM through the real compatible SDK', async () 
   const model = 'zai-glm-5-3';
   const settings = {providers: [{name: 'mistral', url: 'https://api.mistral.ai/v1', key: 'test', models: [model]}], provider: 'mistral', model};
   const runtime = (await modelWithConfig({reasoningOverride: 'max'}, settings))!;
-  await streamText({model: runtime.model, prompt: 'Hi', ...providerRequestSettings(runtime.config)}).consumeStream();
+  // The fixture's stream carries only [DONE], so the SDK logs an expected
+  // "stream ended without a finish reason" error while flushing; silence it
+  // so expected fixture noise does not pollute the test output.
+  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  try {
+    await streamText({model: runtime.model, prompt: 'Hi', ...providerRequestSettings(runtime.config)}).consumeStream();
+  } finally {
+    errorSpy.mockRestore();
+  }
   expect(body.reasoning_effort).toBe('max');
 });
