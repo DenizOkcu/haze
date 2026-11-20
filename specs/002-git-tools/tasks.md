@@ -23,7 +23,7 @@ description: "Task list for the Dedicated Git Tools feature"
 
 **Purpose**: Skeleton the new module and register it in the built-in catalog
 
-- [ ] T001 Create `src/llm/tools/gitTools.ts` skeleton exporting an empty `gitTools` ToolSet and register it in `src/llm/hazeTools.ts` (`...gitTools`)
+- [x] T001 Create `src/llm/tools/gitTools.ts` skeleton exporting an empty `gitTools` ToolSet and register it in `src/llm/hazeTools.ts` (`...gitTools`)
 
 ---
 
@@ -31,9 +31,9 @@ description: "Task list for the Dedicated Git Tools feature"
 
 **Purpose**: Shared git execution plumbing every git tool depends on — MUST complete before any user story
 
-- [ ] T002 Implement bounded git runner in `src/llm/tools/gitTools.ts`: execute `git` via `core/process` `runBoundedProcess` with byte-bounded output, timeout/abort teardown, and structured metadata (mirror `shellTool.ts` patterns)
-- [ ] T003 Implement workspace confinement + repo resolution in `src/llm/tools/gitTools.ts`: resolve the workspace repo root, refuse with reasonCode `outside_workspace` anything outside it, return a clear `not_a_repository` structured result (recoverable: false) when cwd is not a git repo; inherit `core/safety` secret-file and git-internals protections (never read `.git/config`, credentials, hooks)
-- [ ] T004 Implement shared failure envelope helpers in `src/llm/tools/gitTools.ts` using `HazeToolError`/`structuredToolFailure` from `src/llm/tools/failures.ts` (`reasonCode`, `recoverable`, `suggestedNextStep`; terminal refusals `recoverable: false`)
+- [x] T002 Implement bounded git runner in `src/llm/tools/gitTools.ts`: execute `git` via `core/process` `runBoundedProcess` with byte-bounded output, timeout/abort teardown, and structured metadata (mirror `shellTool.ts` patterns)
+- [x] T003 Implement workspace confinement + repo resolution in `src/llm/tools/gitTools.ts`: resolve the workspace repo root, refuse with reasonCode `outside_workspace` anything outside it, return a clear `not_a_repository` structured result (recoverable: false) when cwd is not a git repo; inherit `core/safety` secret-file and git-internals protections (never read `.git/config`, credentials, hooks)
+- [x] T004 Implement shared failure envelope helpers in `src/llm/tools/gitTools.ts` using `HazeToolError`/`structuredToolFailure` from `src/llm/tools/failures.ts` (`reasonCode`, `recoverable`, `suggestedNextStep`; terminal refusals `recoverable: false`)
 
 **Checkpoint**: Foundation ready — user story implementation can begin
 
@@ -47,14 +47,14 @@ description: "Task list for the Dedicated Git Tools feature"
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Behavior tests for read-only git tools in `tests/hazeTools/gitTools.test.ts`: status shape (branch, staged/unstaged/untracked), log entries (hash/subject/author/relativeTime), diff stats+patch, branch list; assert `truncated` indicator and default bounds (~20 commits per data-model.md `GitLogEntry` list bound, ~200 diff lines per `GitDiffResult.patch` bound)
+- [x] T005 [P] [US1] Behavior tests for read-only git tools in `tests/hazeTools/gitTools.test.ts`: status shape (branch, staged/unstaged/untracked), log entries (hash/subject/author/relativeTime), diff stats+patch, branch list; assert `truncated` indicator and default bounds (~20 commits per data-model.md `GitLogEntry` list bound, ~200 diff lines per `GitDiffResult.patch` bound)
 
 ### Implementation for User Story 1
 
-- [ ] T006 [P] [US1] Implement `gitStatus` tool in `src/llm/tools/gitTools.ts` returning `GitStatusResult` per contracts/git-tools.md
-- [ ] T007 [P] [US1] Implement `gitLog` tool in `src/llm/tools/gitTools.ts` with `limit` (default ~20), `range`, `path` params per contracts/git-tools.md
-- [ ] T008 [P] [US1] Implement `gitDiff` tool in `src/llm/tools/gitTools.ts` with `path`, `range`, `staged`, `limit` (default ~200 lines) per contracts/git-tools.md
-- [ ] T009 [P] [US1] Implement `gitBranch` tool in `src/llm/tools/gitTools.ts` with `remotes` option per contracts/git-tools.md
+- [x] T006 [P] [US1] Implement `gitStatus` tool in `src/llm/tools/gitTools.ts` returning `GitStatusResult` per contracts/git-tools.md
+- [x] T007 [P] [US1] Implement `gitLog` tool in `src/llm/tools/gitTools.ts` with `limit` (default ~20), `range`, `path` params per contracts/git-tools.md
+- [x] T008 [P] [US1] Implement `gitDiff` tool in `src/llm/tools/gitTools.ts` with `path`, `range`, `staged`, `limit` (default ~200 lines) per contracts/git-tools.md
+- [x] T009 [P] [US1] Implement `gitBranch` tool in `src/llm/tools/gitTools.ts` with `remotes` option per contracts/git-tools.md
 
 ---
 
@@ -66,11 +66,11 @@ description: "Task list for the Dedicated Git Tools feature"
 
 ### Tests for User Story 2
 
-- [ ] T010 [US2] Prompt-sync test in `tests/llm/` asserting `buildSystemPrompt` output contains the git-tool steering rule and that the rule names the real registered tool names from `src/llm/hazeTools.ts`
+- [x] T010 [US2] Prompt-sync test in `tests/llm/` asserting `buildSystemPrompt` output contains the git-tool steering rule and that the rule names the real registered tool names from `src/llm/hazeTools.ts`
 
 ### Implementation for User Story 2
 
-- [ ] T011 [US2] Add concise steering rule to `src/llm/systemPrompt.ts` (keep synced with real tools per `src/llm/AGENTS.md`): use the dedicated git tools for git operations instead of `git` via `shell`; shell git only when the user explicitly asks for a raw command or an uncovered case
+- [x] T011 [US2] Add concise steering rule to `src/llm/systemPrompt.ts` (keep synced with real tools per `src/llm/AGENTS.md`): use the dedicated git tools for git operations instead of `git` via `shell`; shell git only when the user explicitly asks for a raw command or an uncovered case
 
 ---
 
@@ -82,22 +82,22 @@ description: "Task list for the Dedicated Git Tools feature"
 
 ### Tests for User Story 3
 
-- [ ] T012 [P] [US3] Refusal/edge tests in `tests/hazeTools/gitTools.test.ts`: `not_a_repository` in a non-git dir, `outside_workspace` refusal, truncation indicators on oversized log/diff, git-internals/secret protection honored
-- [ ] T013 [P] [US3] Mutating-op tests in `tests/hazeTools/gitTools.test.ts` against a temp git repo: `gitStage`, `gitCommit`, `gitBranchManage` (create/checkout/delete), `gitRebase`/`gitReset` guarded so destructive modes require explicit parameters; failure envelope has `reasonCode`/`recoverable`/`suggestedNextStep`
+- [x] T012 [P] [US3] Refusal/edge tests in `tests/hazeTools/gitTools.test.ts`: `not_a_repository` in a non-git dir, `outside_workspace` refusal, truncation indicators on oversized log/diff, git-internals/secret protection honored
+- [x] T013 [P] [US3] Mutating-op tests in `tests/hazeTools/gitTools.test.ts` against a temp git repo: `gitStage`, `gitCommit`, `gitBranchManage` (create/checkout/delete), `gitRebase`/`gitReset` guarded so destructive modes require explicit parameters; failure envelope has `reasonCode`/`recoverable`/`suggestedNextStep`
 
 ### Implementation for User Story 3
 
-- [ ] T014 [P] [US3] Implement `gitStage` and `gitCommit` in `src/llm/tools/gitTools.ts` per contracts/git-tools.md
-- [ ] T015 [P] [US3] Implement `gitBranchManage` (create/delete/rename/checkout) in `src/llm/tools/gitTools.ts` per contracts/git-tools.md
-- [ ] T016 [US3] Implement `gitRebase` and `gitReset` in `src/llm/tools/gitTools.ts` with explicit required target/mode params; destructive modes only on explicit user request (constitution Principle I: no confirmation gates)
+- [x] T014 [P] [US3] Implement `gitStage` and `gitCommit` in `src/llm/tools/gitTools.ts` per contracts/git-tools.md
+- [x] T015 [P] [US3] Implement `gitBranchManage` (create/delete/rename/checkout) in `src/llm/tools/gitTools.ts` per contracts/git-tools.md
+- [x] T016 [US3] Implement `gitRebase` and `gitReset` in `src/llm/tools/gitTools.ts` with explicit required target/mode params; destructive modes only on explicit user request (constitution Principle I: no confirmation gates)
 
 ---
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T017 Update CLI formatters (`src/cli/**/formatters.ts`) if git tool result summaries are displayed, and keep tool result shapes aligned with `src/llm/toolResultTypes.ts` (public contract per `src/AGENTS.md`)
-- [ ] T018 Run the full gate: `npm run typecheck && npm test && npm run lint` (plus `npm run build` before release) and fix any fallout
-- [ ] T019 Manual smoke per `specs/002-git-tools/quickstart.md` scenarios 1–6 via `npm run dev`
+- [x] T017 Update CLI formatters (`src/cli/**/formatters.ts`) if git tool result summaries are displayed, and keep tool result shapes aligned with `src/llm/toolResultTypes.ts` (public contract per `src/AGENTS.md`)
+- [x] T018 Run the full gate: `npm run typecheck && npm test && npm run lint` (plus `npm run build` before release) and fix any fallout
+- [x] T019 Manual smoke per `specs/002-git-tools/quickstart.md` scenarios 1–6 via `npm run dev`
 
 ---
 

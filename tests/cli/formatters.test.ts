@@ -41,6 +41,15 @@ describe('compact', () => {
 });
 
 describe('toolCallSummary', () => {
+  it('formats git tool calls with compact details', () => {
+    expect(toolCallSummary('gitStatus', {})).toBe('gitStatus');
+    expect(toolCallSummary('gitLog', {limit: 5})).toBe('gitLog');
+    expect(toolCallSummary('gitDiff', {path: 'src/a.ts'})).toBe('gitDiff src/a.ts');
+    expect(toolCallSummary('gitCommit', {message: 'fix bug'})).toBe('gitCommit "fix bug"');
+    expect(toolCallSummary('gitBranchManage', {action: 'checkout', name: 'topic'})).toBe('gitBranchManage checkout topic');
+    expect(toolCallSummary('gitStage', {paths: ['a.ts', 'b.ts']})).toBe('gitStage a.ts, b.ts');
+  });
+
   it('formats shell commands', () => {
     expect(toolCallSummary('shell', {command: 'ls -la'})).toBe('shell $ ls -la');
   });

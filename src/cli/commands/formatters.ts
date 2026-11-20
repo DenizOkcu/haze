@@ -31,6 +31,15 @@ function toolCallSummaryText(toolName: string, input: unknown) {
     return `shell $ ${data.command}${mode}`;
   }
   if (toolName === 'process' && typeof data?.action === 'string') return `process ${data.action}${typeof data.backgroundId === 'string' ? ` ${data.backgroundId}` : ''}`;
+  if (toolName.startsWith('git')) {
+    const detail = typeof data?.path === 'string' && data.path !== '.' ? ` ${data.path}`
+      : typeof data?.range === 'string' ? ` ${data.range}`
+      : toolName === 'gitBranchManage' && typeof data?.action === 'string' && typeof data?.name === 'string' ? ` ${data.action} ${data.name}`
+      : toolName === 'gitCommit' && typeof data?.message === 'string' ? ` "${compact(data.message, 60)}"`
+      : toolName === 'gitStage' && Array.isArray(data?.paths) ? ` ${data.paths.join(', ')}`
+      : '';
+    return `${toolName}${detail}`;
+  }
   if (toolName === 'grep' && typeof data?.pattern === 'string') {
     const path = typeof data.path === 'string' && data.path !== '.' ? ` in ${data.path}` : '';
     const glob = typeof data.glob === 'string' ? ` (${data.glob})` : '';
