@@ -523,7 +523,11 @@ npm publish --access public --provenance
 <details>
 <summary>Previous release highlights</summary>
 
-## What's new in 1.7.11
+## What's new in 1.7.12
+
+A deterministic workspace code graph (tree-sitter WASM) powers the new `graph*` tools and `/graph` command, with bounded reverse-dependency advisories after file edits; LSP/graph tools are now gated on request intent to cut context, plus several reliability fixes.
+
+### Changes in 1.7.11
 
 Fleet size now follows the deployment manifest's worker allowance, and long turns show live generation speed and fleet depth in the busy bar.
 

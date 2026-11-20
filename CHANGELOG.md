@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.7.12 - 2026-11-20
+
+### Added
+
+- Deterministic workspace code graph built with vendored tree-sitter WASM grammars, queried through `graph*` tools (also available to subagent workers), the `/graph` command, and compaction digests; file mutations attach a bounded reverse-dependency advisory.
+
+### Changed
+
+- LSP and graph tools are gated on request intent and prompt/schema duplication is trimmed to reduce per-request context.
+
+### Fixed
+
+- Bounded processes settle on child exit even when escaped descendants hold stdio pipes.
+- Project skill envelope closers are escaped variant-tolerantly.
+- Only error diagnostics count as validation failure evidence.
+- Durable-write failures surface once, and workspace tasks are written atomically.
+- Epoch-boundary aborts are classified by cause and turn budgets stay honest.
+
 ## 1.7.11 - 2026-11-06
 
 ### Changed
