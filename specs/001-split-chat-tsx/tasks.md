@@ -29,7 +29,7 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Baseline the current behavior before touching anything
 
-- [ ] T001 Record baseline: run `npm run typecheck && npm test && npm run lint` on branch `001-split-chat-tsx` and confirm all green; record `wc -l src/cli/commands/chat.tsx` (905)
+- [X] T001 Record baseline: run `npm run typecheck && npm test && npm run lint` on branch `001-split-chat-tsx` and confirm all green; record `wc -l src/cli/commands/chat.tsx` (905)
 
 ---
 
@@ -47,10 +47,10 @@ description: "Task list template for feature implementation"
 
 ### Implementation for User Story 1
 
-- [ ] T002 [US1] Extract `finalizeMessage` (chat.tsx ~lines 137-287) into new `src/cli/chat/messageFinalize.ts` as an exported function with explicit parameters; update `src/cli/commands/chat.tsx` to import and call it (pure code motion, no logic edits)
-- [ ] T003 [US1] Extract `submit` (chat.tsx ~lines 458-564) into new `src/cli/chat/submitPipeline.ts`; update `src/cli/commands/chat.tsx` call site
-- [ ] T004 [US1] Extract `runSingleAgentTurn` (chat.tsx ~lines 622-862) into new `src/cli/chat/agentTurnRunner.ts`; keep the `runAgentTurn` callback contract stable; update `src/cli/commands/chat.tsx` call site
-- [ ] T005 [US1] After all three extractions: verify `npm run typecheck && npm test && npm run lint` all pass, no test files modified, no `any` introduced, `.js` import extensions used, no new circular imports, and `wc -l src/cli/commands/chat.tsx` is well under half of 905 (SC-001)
+- [X] T002 [US1] Extract `finalizeMessage` (chat.tsx ~lines 137-287) into new `src/cli/chat/messageFinalize.ts` as an exported function with explicit parameters; update `src/cli/commands/chat.tsx` to import and call it (pure code motion, no logic edits)
+- [X] T003 [US1] Extract `submit` (chat.tsx ~lines 458-564) into new `src/cli/chat/submitPipeline.ts`; update `src/cli/commands/chat.tsx` call site
+- [X] T004 [US1] Extract `runSingleAgentTurn` (chat.tsx ~lines 622-862) into new `src/cli/chat/agentTurnRunner.ts`; keep the `runAgentTurn` callback contract stable; update `src/cli/commands/chat.tsx` call site
+- [X] T005 [US1] After all three extractions: verify `npm run typecheck && npm test && npm run lint` all pass, no test files modified, no `any` introduced, `.js` import extensions used, no new circular imports, and `wc -l src/cli/commands/chat.tsx` is well under half of 905 (SC-001)
 
 **Checkpoint**: User Story 1 complete — chat.tsx is orchestration glue, largest remaining module well under half the original size, all checks green.
 
@@ -64,9 +64,9 @@ description: "Task list template for feature implementation"
 
 ### Verification for User Story 2
 
-- [ ] T006 [US2] Run full gate `npm run typecheck && npm test && npm run lint` and confirm zero test-file changes vs. baseline (SC-002)
-- [ ] T007 [US2] Run `npm run build` to confirm `dist/` regenerates cleanly (never edit `dist/` directly)
-- [ ] T008 [US2] Interactive smoke via `npm run dev`: send a message, observe streaming settle into `<Static>`, run `/help`, resize terminal (Static replay with draft preserved), `/exit` — behavior identical to pre-refactor (SC-003)
+- [X] T006 [US2] Run full gate `npm run typecheck && npm test && npm run lint` and confirm zero test-file changes vs. baseline (SC-002)
+- [X] T007 [US2] Run `npm run build` to confirm `dist/` regenerates cleanly (never edit `dist/` directly)
+- [X] T008 [US2] Interactive smoke via `npm run dev`: send a message, observe streaming settle into `<Static>`, run `/help`, resize terminal (Static replay with draft preserved), `/exit` — behavior identical to pre-refactor (SC-003)
 
 **Checkpoint**: User Story 2 complete — zero user-visible change confirmed.
 
@@ -76,8 +76,8 @@ description: "Task list template for feature implementation"
 
 **Purpose**: Final conformance sweep
 
-- [ ] T009 Confirm transcript invariants intact per AGENTS.md: `<Static>` append-only prefix, width-keyed replay in `src/cli/chat/resizeGuard.ts`, dynamic-tail row budget in `src/cli/chat/liveRegion.ts` — covered by `tests/cli/chat/resizeBoundary.test.tsx` passing unmodified
-- [ ] T010 Final gate: `npm run typecheck && npm test && npm run lint && npm run build` all green (quickstart.md validation)
+- [X] T009 Confirm transcript invariants intact per AGENTS.md: `<Static>` append-only prefix, width-keyed replay in `src/cli/chat/resizeGuard.ts`, dynamic-tail row budget in `src/cli/chat/liveRegion.ts` — covered by `tests/cli/chat/resizeBoundary.test.tsx` passing unmodified
+- [X] T010 Final gate: `npm run typecheck && npm test && npm run lint && npm run build` all green (quickstart.md validation)
 
 ---
 

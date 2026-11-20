@@ -1,50 +1,42 @@
 import React, {useEffect, useReducer, useRef, useState} from 'react';
-import {Box, render, Static, Text, useApp, useWindowSize} from 'ink';
-import {ActivitySpinner, StatusNotice} from '../../ui/components/NativeIndicators.js';
-import {BusyBar} from '../chat/BusyBar.js';
+import {render, Text, useApp, useWindowSize} from 'ink';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
-import {readContextFiles, type ContextFile} from '../../config/contextFiles.js';
+import type {ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
-import {readSettings, updateSettings, type HazeSettings} from '../../config/settings.js';
-import {activeModel, providerEndpointFingerprint, resolveModelSelector} from '../../config/providers.js';
+import {readSettings, type HazeSettings} from '../../config/settings.js';
+import {activeModel, providerEndpointFingerprint} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
-import {Header} from '../../ui/components/Header.js';
-import {TextInput} from '../../ui/components/TextInput.js';
 import {setActiveTheme, resolveTheme, theme, DEFAULT_THEME_NAME} from '../../ui/theme.js';
 import {applyTerminalColors, resetTerminalColors} from '../../ui/terminalColors.js';
-import {handleSlashCommand, type CommandContext} from './commands.js';
-import {runAgentGoal} from './streaming/goalSupervisor.js';
-import type {GoalCheckpoint} from './streaming/goalCheckpoint.js';
 import {checkpointFromGoalFrontier} from './streaming/goalCheckpoint.js';
+import {finalizeMessage as finalizeMessageImpl} from '../chat/messageFinalize.js';
+import {submit as submitImpl} from '../chat/submitPipeline.js';
+import {runSingleAgentTurn as runSingleAgentTurnImpl} from '../chat/agentTurnRunner.js';
+import type {ChatScreenDeps, PausedResume, ResumeExisting} from '../chat/screenDeps.js';
 import {type Message} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
 import type {LoadedSkill} from '../../skills/types.js';
-import {formatSession, listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
+import {listSessions, type HazeSession, type SessionSummary} from '../../core/session/sessionStore.js';
 import type {WorkState} from '../../core/agent/workState.js';
-import {MAX_VISIBLE_TASKS, TaskBar} from '../chat/TaskBar.js';
-import {DynamicFrame} from '../chat/DynamicFrame.js';
+import {MAX_VISIBLE_TASKS} from '../chat/TaskBar.js';
 import {createChatShutdown, runTerminalSession} from '../chat/shutdown.js';
 import {installViewportResizeGuard} from '../chat/resizeGuard.js';
-import {createQuarantinableCallbacks} from './streaming/attemptLifecycle.js';
-import {AssistantMarkdownChunkView, MessageView} from '../chat/messages.js';
-import {partitionDisplayMessages, type TranscriptStaticItem} from '../chat/transcriptPartition.js';
+import {partitionDisplayMessages} from '../chat/transcriptPartition.js';
+import {ChatScreenView, type ChatStaticItem} from '../chat/ChatScreenView.js';
 import {useLiveMessages} from '../chat/liveMessages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../chat/wizardDispatch.js';
-import {buildContextReport} from '../chat/contextReport.js';
-import {TIPS, randomTipIndex, tipsEnabled} from '../chat/tips.js';
-import {fileMentionSuggestions} from '../chat/fileMentionSuggestions.js';
-import {busyDetailLabel, compactHomePath, nextFleetStatus, statusBarMetrics, type FleetStatus} from '../chat/chatMetrics.js';
-import {formatTokenCount} from '../../utils/format.js';
-import {accumulateTokenUsage, EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
-import {MASKED_MODES, PICKER_MODES, SUBMIT_EMPTY_MODES, placeholderForMode, type Mode} from './chatModes.js';
-import {contextFileSignatureMap, isPausedGoalRecoveryCommand, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
+import {randomTipIndex, tipsEnabled} from '../chat/tips.js';
+import {busyDetailLabel, compactHomePath, statusBarMetrics, type FleetStatus} from '../chat/chatMetrics.js';
+import {EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
+import {placeholderForMode, type Mode} from './chatModes.js';
+import {contextFileSignatureMap, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
 import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
 import {resolveProviderReasoning} from '../../config/providerReasoning.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
@@ -68,8 +60,6 @@ interface ChatOptions {
   resumeSessionId?: string;
   noSession?: boolean;
 }
-
-type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
 
 /** Latest Ink render metrics under --debug (module-level: render options are outside React). */
 let renderMetricsReader: (() => {at: number; renderTime: number} | undefined) | undefined;
@@ -135,10 +125,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 
   /** Finalize a formerly-live message into the append-only transcript and session record. */
   function finalizeMessage(message: Message) {
-    if (message.hidden || sealedRef.current) return;
-    const ordered = withDisplayOrder(message);
-    setMessages(m => [...m, ordered]);
-    sessionRecorderRef.current?.recordUiMessage(ordered);
+    finalizeMessageImpl(screenDeps(), message);
   }
 
   // Synchronous live-tail store (see chat/liveMessages.ts): stream callbacks
@@ -184,7 +171,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // model stream) — automatic continuation has already been attempted by the
   // goal supervisor. Carries what a one-key resume needs; any new submission
   // clears it.
-  const [pausedResume, setPausedResume] = useState<{kind: 'model-stream-idle' | 'incomplete-goal'; request: string; retryAttempt: number; checkpoint?: GoalCheckpoint; pauseReason?: 'no-progress' | 'goal-deadline' | 'context-exhausted'} | undefined>(undefined);
+  const [pausedResume, setPausedResume] = useState<PausedResume | undefined>(undefined);
   const [skills, setSkills] = useState<LoadedSkill[]>([]);
   const [branchName, setBranchName] = useState<string | undefined>();
   const [graphBuilding, setGraphBuilding] = useState(false);
@@ -377,8 +364,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     debugLog,
     showPersistenceWarning,
   });
-  const {clearConversation, compactConversation, compactConversationWithModel} = sessionLifecycle;
-
   async function openSessionPicker() {
     await sessionRecorderRef.current?.flush().catch(showPersistenceWarning);
     const next = await listSessions();
@@ -455,108 +440,10 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     },
   });
 
+  // The submit pipeline (exit shortcut, settings repair, busy queue, wizard,
+  // skill invocation, slash commands, agent turn) lives in chat/submitPipeline.ts.
   async function submit(value: string) {
-    if (stoppingRef.current) return;
-    if (mode === 'chat' && /^\/(?:exit|quit)\s*$/i.test(value)) return shutdown();
-    if (settingsError) {
-      try {
-        const repaired = await readSettings();
-        setSettings(repaired, {});
-        setSettingsError(undefined);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setSettingsError(message);
-        if (!/^\/(?:settings\s+(?:open|edit)|help|exit|quit)\b/i.test(value.trim())) {
-          setMessages(messages => [...messages, {role: 'system', text: `${message}\nRepair settings, then retry. /settings edit (or /settings open), /help, and /exit remain available.`}]);
-          return;
-        }
-      }
-    }
-    if (busy) {
-      if (mode === 'chat') followUps.queue(value);
-      return;
-    }
-    // A new goal or session reset supersedes the paused-goal resume affordance;
-    // recovery/configuration commands (compact, model, provider, settings,
-    // resume…) intentionally keep it — the pause notice tells the user to run
-    // exactly those and then press R (SU-04).
-    const isRecoveryCommand = isPausedGoalRecoveryCommand(mode, value);
-    if (pausedResume && !isRecoveryCommand) setPausedResume(undefined);
-
-    if (await wizard.dispatch(mode, value)) return;
-
-    const invokedSkill = skillInvocation(value);
-    if (invokedSkill) {
-      const argumentText = invokedSkill.args ? `\nUser-provided skill arguments: ${invokedSkill.args}` : '';
-      await doAgentTurn(`The user explicitly invoked the "${invokedSkill.skill.name}" skill. Call skill with name="${invokedSkill.skill.name}" and follow its returned instructions.${argumentText}`, value);
-      return;
-    }
-
-    const ctx: CommandContext = {
-      settings,
-      contextFiles,
-      setMode,
-      setModelProviderFilter: (filter: string | undefined) => updateWizard({type: 'set', key: 'modelProviderFilter', value: filter}),
-      addSystemMessage: text => setMessages(m => [...m, {role: 'system', text}]),
-      clearConversation,
-      newSession: async () => {
-        conversationRef.current = [];
-        lastAssistantTextRef.current = '';
-        clearLiveMessages();
-        setMessages([{role: 'system', text: 'Started fresh. The fog parts.'}]);
-        await sessionLifecycle.startNewSession('New session started.');
-      },
-      resumeSession: noSession ? undefined : async id => {
-        if (id) await sessionLifecycle.resumeSessionById(id);
-        else await openSessionPicker();
-      },
-      sessionInfo: () => sessionRef.current ? formatSession(sessionRef.current) : 'Session persistence is off.',
-      compactConversation,
-      compactConversationLlm: compactConversationWithModel,
-      runAgentTurn: (prompt, displayValue, options) => doAgentTurn(prompt, displayValue, options),
-      composeInEditor: async () => {
-        const text = await terminalControl.composeInEditor();
-        if (text === undefined) setMessages(m => [...m, {role: 'system', text: '/editor needs $EDITOR (or $VISUAL) set to an editor command.'}]);
-        return text;
-      },
-      viewInPager: terminalControl.viewInPager,
-      editFileInEditor: terminalControl.editFileInEditor,
-      refreshSkills,
-      openPluginPicker,
-      refreshContextFiles: async () => {
-        const files = await readContextFiles().catch(() => contextFiles);
-        setContextFiles(files);
-        contextFileSignaturesRef.current = contextFileSignatureMap(files);
-        return files;
-      },
-      updateSettings: async patch => {
-        const next = await updateSettings(patch);
-        setSettings(next, patch);
-        return settingsRef.current;
-      },
-      getSessionReasoning: modelSelector => currentPromptSession().reasoningByModel?.[modelSelector],
-      setSessionReasoning: setSessionReasoningOverride,
-      getContextReport: () => buildContextReport({sessionStart: sessionStartRef.current, contextFiles, conversation: conversationRef.current}),
-    };
-    let result;
-    try {
-      result = await handleSlashCommand(value, ctx);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setMessages(m => [...m, {role: 'system', text: `Command failed: ${text}`}]);
-      return;
-    }
-    if (result === 'exit') return shutdown();
-    if (result === 'handled') {
-      if (value === '/clear') {
-        loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
-      }
-      return;
-    }
-
-    const prepared = await prepareUserInput(value);
-    if (!prepared) return;
-    await doAgentTurn(prepared.value, prepared.displayValue, prepared.options);
+    return submitImpl(screenDeps(), value);
   }
 
   // F03: attachment gating and read blessings live in the pure helper
@@ -603,7 +490,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     if (!resume || busy) return;
     setPausedResume(undefined);
     setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished goal; completed work is preserved in the conversation.'}]);
-    await runSingleAgentTurn(resume.request, undefined, {}, resumeKindFor(resume) as Parameters<typeof runSingleAgentTurn>[3]);
+    await runSingleAgentTurn(resume.request, undefined, {}, resumeKindFor(resume) as ResumeExisting);
   }
 
   /**
@@ -619,104 +506,27 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     return promptSessionRef.current.value;
   }
 
-  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: {kind: 'model-stream-idle'; retryAttempt: number} | {kind: 'incomplete-goal'; checkpoint: GoalCheckpoint}) {
-    if (stoppingRef.current) return;
-    const sessionRecorder = sessionRecorderRef.current!;
-    const selection = currentModelSelection();
-    if (!selection) {
-      setMessages(m => [...m, {role: 'system', text: 'No model selected for this session. Run /model to choose one.'}]);
-      return;
-    }
-    sessionRecorder.recordModelSelection(selection);
+  /** Assemble the explicit deps bundle the extracted chat.tsx bodies receive. */
+  function screenDeps(): ChatScreenDeps {
+    return {
+      stoppingRef, sealedRef, quarantineRef, activeGoalRef, conversationRef, settingsRef,
+      sessionRef, sessionRecorderRef, sessionStartRef, workStateRef, lastAssistantTextRef,
+      abortControllerRef, llmLogRef, contextFileSignaturesRef,
+      settings, settingsError, contextFiles, mode, busy, pausedResume, visibleTasks,
+      setMessages, setSettings, setSettingsError, setMode, setContextFiles,
+      setBusy: setBusyWithHeartbeat, setBusyLabel, setTokenUsage, setFleet,
+      setVisibleTasks, setTaskBarPadding, setTasksExpanded, setPausedResume, updateWizard,
+      currentModelSelection, currentPromptSession, withDisplayOrder, finalizeMessage,
+      addStreaming, patchLiveMessage, drainLiveMessages, clearLiveMessages,
+      debugLog, showPersistenceWarning, skillInvocation, prepareUserInput, doAgentTurn,
+      openSessionPicker, openPluginPicker, refreshSkills, setSessionReasoningOverride,
+      shutdown, followUps, wizard, sessionLifecycle, terminalControl, noSession,
+    };
+  }
 
-    // The logical-goal supervisor owns this submission: recoverable-incomplete
-    // physical turns (including step/tool budget boundaries) continue
-    // automatically; per-turn limits stay safety boundaries. An explicit
-    // resumeFrom restarts a genuinely paused goal from its checkpoint/pool.
-    const goalOptions = {
-      request: value,
-      displayValue,
-      contextFiles,
-      session: currentPromptSession(),
-      modelOverride: `${selection.provider}:${selection.model}`,
-      escalationModel: settings.escalationModel,
-      callbacks: {
-      addMessage: msg => {
-        const ordered = withDisplayOrder(msg);
-        if (ordered.streaming) {
-          addStreaming(ordered);
-          return;
-        }
-        finalizeMessage(ordered);
-      },
-      updateMessage: (id, update) => {
-        if (patchLiveMessage(id, update)) return;
-        setMessages(m => m.map(msg => msg.id === id ? {...msg, ...update} : msg));
-      },
-      setConversation: msgs => {
-        conversationRef.current = msgs;
-        sessionRecorder.recordConversation(msgs);
-      },
-      onModelTransition: (selector, msgs) => {
-        const resolved = resolveModelSelector(settingsRef.current, selector);
-        if (resolved.status === 'found') sessionRecorder.recordModelTransition(msgs, {provider: resolved.provider.name, model: resolved.model, endpointFingerprint: providerEndpointFingerprint(resolved.provider)});
-      },
-      setBusy: setBusyWithHeartbeat,
-      setBusyLabel,
-      debugLog,
-      getConversation: () => conversationRef.current,
-      getLastAssistantText: () => lastAssistantTextRef.current,
-      setLastAssistantText: text => { lastAssistantTextRef.current = text; },
-      setAbortController: controller => {
-        abortControllerRef.current = controller;
-        if (stoppingRef.current) controller?.abort('Chat is exiting.');
-      },
-      setWorkState: state => {
-        workStateRef.current = state;
-        sessionRecorder.recordWorkState(state);
-      },
-      compactConversation,
-      recordCompaction: entry => sessionRecorder.recordCompactEntry(entry),
-      recordTokenUsage: usage => {
-        setTokenUsage(current => accumulateTokenUsage(current, usage));
-      },
-      onEvent: event => {
-        sessionRecorder.recordEvent(event);
-        if (event.type === 'subagent_state') setFleet(current => nextFleetStatus(current, event));
-        else if (event.type === 'goal_end') setFleet(undefined);
-      },
-      onTasksChanged: () => { loadTasksFromStore().then(t => {
-        if (stoppingRef.current) return;
-        setVisibleTasks(t); setTaskBarPadding(0);
-      }).catch(() => undefined); },
-      contextFileSignatures: contextFileSignaturesRef.current,
-      log: llmLogRef.current,
-    },
-    ...(resumeExisting ? {resumeFrom: resumeExisting} : {}),
-    // Durable goal ledger (P1): every supervisor boundary appends to the
-    // session JSONL so a crash or restart leaves a resumable frontier.
-    goalLedger: {append: entry => { if (!sealedRef.current) sessionRecorder.recordGoalEntry(entry); }},
-    ...(turnOptions.attachments || turnOptions.blessedPaths || turnOptions.ephemeralControl || turnOptions.subagentOverrides ? {turnOptions} : {})} satisfies Parameters<typeof runAgentGoal>[0];
-    const guarded = createQuarantinableCallbacks(goalOptions.callbacks);
-    quarantineRef.current = guarded.quarantine;
-    const goalPromise = runAgentGoal({...goalOptions, callbacks: guarded.callbacks});
-    activeGoalRef.current = goalPromise;
-    const goalResult = await goalPromise;
-    activeGoalRef.current = undefined;
-    if (stoppingRef.current) return goalResult;
-    await sessionRecorder.flush().catch(showPersistenceWarning);
-    await llmLogRef.current?.writer?.flush().catch(showPersistenceWarning);
-    // Turn boundary: an aborted or forcibly-settled attempt is quarantined
-    // before it can emit the finalizing update, so settle anything still in
-    // the live tail now; the streamed text is preserved verbatim in <Static>.
-    drainLiveMessages();
-    // Only a genuinely paused goal (supervisor already attempted automatic
-    // continuation) exposes the one-key resume affordance; it stays until the
-    // user submits something else.
-    if (goalResult.resume?.kind === 'model-stream-idle') setPausedResume({kind: 'model-stream-idle', request: goalResult.resume.request, retryAttempt: goalResult.resume.retryAttempt});
-    else if (goalResult.resume?.kind === 'incomplete-goal') setPausedResume({kind: 'incomplete-goal', request: goalResult.resume.checkpoint.request, retryAttempt: 0, checkpoint: goalResult.resume.checkpoint, pauseReason: goalResult.stopReason === 'context-exhausted' || goalResult.stopReason === 'goal-deadline' || goalResult.stopReason === 'no-progress' ? goalResult.stopReason : undefined});
-    else setPausedResume(undefined);
-    return goalResult;
+  // One physical agent turn under the goal supervisor lives in chat/agentTurnRunner.ts.
+  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
+    return runSingleAgentTurnImpl(screenDeps(), value, displayValue, turnOptions, resumeExisting);
   }
 
   const visible = messages.filter(message => !message.hidden);
@@ -775,89 +585,40 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   const horizontalPadding = width >= 12 ? 1 : 0;
   const contentWidth = Math.max(1, width - horizontalPadding * 2);
 
-  return <Box flexDirection="column" paddingX={horizontalPadding}>
-    {/* Replay settled history with fresh Markdown layout after the resize clear.
-        Only Static remounts: input drafts and active turns keep their state. */}
-    <Static key={width} items={staticItems}>
-      {item => item.kind === 'header'
-        ? <Header key={item.key} subtitle={item.subtitle} version={version} />
-        : item.kind === 'assistant-markdown'
-          ? <AssistantMarkdownChunkView key={item.key} message={item.message} content={item.content} width={contentWidth} first={item.first} final={item.final} />
-          : <MessageView key={item.key} message={item.message} width={contentWidth} />}
-    </Static>
-    <DynamicFrame rows={terminalRows} columns={contentWidth} sections={{
-      live: streamingItems.length > 0 ? rows => {
-        // Allocate the sum, not a positive minimum for every pending item.
-        const displayed = streamingItems.slice(0, Math.floor(rows / 2));
-        const itemRows = displayed.length > 0 ? Math.floor(rows / displayed.length) : 0;
-        return displayed.map(item => <Box key={item.key} maxHeight={itemRows} flexShrink={0} overflow="hidden">
-          <MessageView message={item.message} width={contentWidth} showHeader={item.showHeader}
-            maxVisibleLines={itemRows - 1} />
-        </Box>);
-      } : undefined,
-      debug: debug ? <>
-        {debugLogs.map((line, index) => <Text key={index} color={theme.muted} wrap="truncate-end">• {line}</Text>)}
-        {metrics.hasTokenBreakdown && <Text color={theme.muted} wrap="truncate-end">Tokens: in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)} logical={formatTokenCount(tokenUsage.logicalInputEstimate)}</Text>}
-        {renderMetricsReader && (() => {
-          const renderMetrics = renderMetricsReader();
-          if (!renderMetrics) return null;
-          const age = Date.now() - renderMetrics.at;
-          // Skip the reading once it is clearly stale; it refreshes on the
-          // next frame while anything animated keeps the debug panel alive.
-          return age < 5_000 ? <Text color={theme.muted} wrap="truncate-end">Ink render: {renderMetrics.renderTime.toFixed(1)}ms</Text> : null;
-        })()}
-      </> : undefined,
-      queue: followUps.queued.length > 0 ? <>
-        <Text color={theme.muted} wrap="truncate-end">Queued follow-ups: {followUps.queued.length}</Text>
-        {followUps.queued.map((item, index) => <Text key={`${index}-${item}`} color={theme.muted} wrap="truncate-end">{index + 1}. {item}</Text>)}
-      </> : undefined,
-      tasks: visibleTasks.length > 0 ? <TaskBar tasks={visibleTasks} width={contentWidth} expanded={tasksExpanded} padding={taskBarPadding} maxRows={Math.max(1, terminalRows - 8)} /> : undefined,
-      activity: busy ? <BusyBar label={busyLabel} elapsed={busyElapsed} detail={busyDetail} tip={showingTip ? TIPS[tipIndex] : undefined} />
-        : graphBuilding ? <Box overflow="hidden"><ActivitySpinner /><Box flexShrink={0} width={1} /><Text color={theme.muted} wrap="truncate-end">Building code graph in the background…</Text></Box>
-        : pausedResume ? <StatusNotice variant="warning">Press R to resume · unfinished goal paused{pausedResume.pauseReason ? ` (${pausedResume.pauseReason})` : ''}</StatusNotice> : undefined,
-      status: <>
-        <Box width="100%" flexDirection="row" justifyContent="space-between" flexShrink={0}>
-          <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
-          <Text color={theme.muted} wrap="truncate-start">{activeModelName}{reasoningSuffix}</Text>
-        </Box>
-        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
-      </>,
-    }} input={({width: inputWidth, inputRows, suggestionRows, onRowsChange}) => <TextInput
-      placeholder={placeholder}
-      disabled={busy && mode !== 'chat'}
-      mask={MASKED_MODES.has(mode)}
-      historyItems={inputHistory}
-      recordHistory={mode === 'chat'}
-      suggestions={inputSuggestions}
-      suggestionMode={PICKER_MODES.has(mode) ? 'always' : 'slash'}
-      submitOnEmpty={SUBMIT_EMPTY_MODES.has(mode)}
-      width={inputWidth}
-      inputRows={inputRows}
-      suggestionRows={suggestionRows}
-      onRowsChange={onRowsChange}
-      getMentionSuggestions={fileMentionSuggestions}
-      onHistoryAdd={persistInputHistory}
-      onToggleTasks={() => {
-        if (!tasksExpanded) {
-          setTaskBarPadding(0);
-          setTasksExpanded(true);
-        } else {
-          const expandedRows = visibleTasks.length + 1;
-          const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
-          setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
-          setTasksExpanded(false);
-        }
-      }}
-      onCancel={cancelThinking}
-      onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
-      onInterrupt={() => { void shutdown(); }}
-      onEscape={() => {
-        if (busy) cancelThinking();
-        else closeInputList();
-      }}
-      onSubmit={submit}
-    />} />
-  </Box>;
+  // The pure screen render (static transcript + dynamic frame) lives in chat/ChatScreenView.tsx.
+  return <ChatScreenView
+    version={version} debug={debug} width={width} terminalRows={terminalRows}
+    horizontalPadding={horizontalPadding} contentWidth={contentWidth}
+    staticItems={staticItems} streamingItems={streamingItems}
+    debugLogs={debugLogs} metrics={metrics} renderMetricsReader={renderMetricsReader}
+    tokenUsage={tokenUsage} followUps={followUps} visibleTasks={visibleTasks}
+    tasksExpanded={tasksExpanded} taskBarPadding={taskBarPadding}
+    busy={busy} busyLabel={busyLabel} busyElapsed={busyElapsed} busyDetail={busyDetail}
+    showingTip={showingTip} tipIndex={tipIndex} graphBuilding={graphBuilding}
+    pausedResume={pausedResume} workspaceLabel={workspaceLabel}
+    activeModelName={activeModelName} reasoningSuffix={reasoningSuffix}
+    placeholder={placeholder} mode={mode} inputHistory={inputHistory}
+    inputSuggestions={inputSuggestions}
+    onSubmit={submit} onCancel={cancelThinking}
+    onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
+    onInterrupt={() => { void shutdown(); }}
+    onEscape={() => {
+      if (busy) cancelThinking();
+      else closeInputList();
+    }}
+    onHistoryAdd={persistInputHistory}
+    onToggleTasks={() => {
+      if (!tasksExpanded) {
+        setTaskBarPadding(0);
+        setTasksExpanded(true);
+      } else {
+        const expandedRows = visibleTasks.length + 1;
+        const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
+        setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
+        setTasksExpanded(false);
+      }
+    }}
+  />;
 }
 
 export async function chatCommand(options: ChatOptions = {}) {
