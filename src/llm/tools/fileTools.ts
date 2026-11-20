@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {tool} from 'ai';
+import {tool, type ToolSet} from 'ai';
 import {z} from 'zod';
 import {walkDir, type WalkEntry} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
@@ -42,7 +42,7 @@ function mutationDiffFields(filePath: string, fullDiff: ToolDiffLine[]) {
   };
 }
 
-export const fileTools = {
+export const fileTools: ToolSet = {
   listFiles: tool({
     description: 'List workspace files/directories with pagination. Prefer this to shell for discovery.',
     contextSchema: hazeToolContextSchema,

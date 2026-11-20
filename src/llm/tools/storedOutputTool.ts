@@ -1,8 +1,8 @@
-import {tool} from 'ai';
+import {tool, type Tool} from 'ai';
 import {z} from 'zod';
 import {readToolOutput as readStoredToolOutput} from '../../core/agent/toolOutputStore.js';
 
-export const readToolOutputTool = tool({
+export const readToolOutputTool: Tool = tool({
   description: 'Read another page of oversized output previously returned by a tool handle.',
   inputSchema: z.object({
     handle: z.string().min(1).describe('Output handle from a prior tool result'),

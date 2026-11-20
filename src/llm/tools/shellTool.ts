@@ -1,4 +1,4 @@
-import {tool} from 'ai';
+import {tool, type Tool} from 'ai';
 import {z} from 'zod';
 import {classifyShellCommand, commandMasksValidationExit, isValidationClassification} from '../../core/safety/shellClassifier.js';
 import {detectMissingExecutable, missingExecutableFields} from '../../core/safety/missingExecutable.js';
@@ -21,7 +21,7 @@ function streamByteStats(stream: BoundedStream) {
 
 const userShell = resolveUserShell();
 
-export const shellTool = tool({
+export const shellTool: Tool = tool({
   description: 'Run workspace inspection or validation. Set purpose=validation for custom checks that should count as completion evidence; risk classification is informational. Commands that spawn new sessions (setsid/daemonize) escape process-tree teardown and may outlive haze.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({

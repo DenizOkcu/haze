@@ -1,4 +1,4 @@
-import {isStepCount, streamText, tool, type JSONValue, type ModelMessage} from 'ai';
+import {isStepCount, streamText, tool, type JSONValue, type ModelMessage, type Tool} from 'ai';
 import {calculateRequestTokenBudget, estimateMessagesTokens, estimateValueTokens} from '../core/agent/contextBudget.js';
 import {compactModelMessages} from '../core/agent/compaction.js';
 import {
@@ -273,7 +273,7 @@ export function createSubagentTool(options: {
   blockedReason?: string;
   forceMode?: 'inspect';
   session?: PromptSession;
-}) {
+}): Tool {
   const profile = options.profile ?? COMPATIBILITY_PROFILE;
   const runtime: WorkerRuntime = options.runtime ?? fallbackWorkerRuntime(options.model!);
   const coordinator = options.coordinator ?? new SubagentCoordinator(profile);

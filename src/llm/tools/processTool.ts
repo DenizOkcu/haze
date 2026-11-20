@@ -1,10 +1,10 @@
-import {tool} from 'ai';
+import {tool, type Tool} from 'ai';
 import {z} from 'zod';
 import {getBackgroundProcess, killBackgroundProcess, listBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {readToolOutput} from '../../core/agent/toolOutputStore.js';
 import {hazeContext, hazeToolContextSchema} from './toolContext.js';
 
-export const processTool = tool({
+export const processTool: Tool = tool({
   description: 'List, read output from, or kill background processes started by shell background=true. Kill servers and watchers when finished.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({

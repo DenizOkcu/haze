@@ -1,4 +1,4 @@
-import {tool} from 'ai';
+import {tool, type Tool} from 'ai';
 import {z} from 'zod';
 import {generateTaskId, saveTasks, type Task, type TaskStatus} from '../../core/tasks/taskStorage.js';
 
@@ -14,7 +14,7 @@ function truncate(value: string, max: number) {
   return trimmed.length <= max ? trimmed : trimmed.slice(0, max);
 }
 
-export const writeTasksTool = tool({
+export const writeTasksTool: Tool = tool({
   description: 'Replace the task list for substantial work. Update tasks at meaningful phase changes, blockers, and completion; pass the complete list.',
   inputSchema: z.object({
     tasks: z.array(z.object({

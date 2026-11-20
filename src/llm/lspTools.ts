@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {tool} from 'ai';
+import {tool, type ToolSet} from 'ai';
 import {z} from 'zod';
 import {readSettings} from '../config/settings.js';
 import {configuredLspServers, installedLspServers, type HazeLspServer} from '../config/lspSettings.js';
@@ -66,7 +66,7 @@ const symbolNameSchema = {
   namePath: z.string().min(1).describe('Symbol name or hierarchical name path, such as Class/method'),
 };
 
-export const lspTools = buildLspTools();
+export const lspTools: ToolSet = buildLspTools();
 export type LspTools = typeof lspTools;
 
 const AUTOMATIC_DIAGNOSTIC_FILE_LIMIT = 20;
@@ -104,7 +104,7 @@ export function createPostMutationDiagnostics(servers: HazeLspServer[], pool: Ls
 }
 
 /** Build the optional LSP tool set bound to one turn-scoped client pool. */
-export function buildLspTools(pool?: LspPool) {
+export function buildLspTools(pool?: LspPool): ToolSet {
   return {
     lspWorkspaceSymbols: tool({
       description: 'Use a configured language server to search workspace symbols by name. Read-only. Best first LSP tool when you do not know the defining file.',

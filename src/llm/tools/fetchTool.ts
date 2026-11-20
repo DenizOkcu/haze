@@ -1,4 +1,4 @@
-import {tool} from 'ai';
+import {tool, type Tool} from 'ai';
 import {z} from 'zod';
 import {reductionMetrics} from '../../core/toolOutput/reduction.js';
 import {fetchUrlContent, BlockedUrlError} from '../webFetch.js';
@@ -8,7 +8,7 @@ import {MAX_OUTPUT_CHARS} from '../../core/limits.js';
 import {wrapUntrustedOutput, type StoredOutputOrigin} from '../../core/agent/toolOutputStore.js';
 import {hazeToolContextSchema, runDedupedTool} from './toolContext.js';
 
-export const fetchTool = tool({
+export const fetchTool: Tool = tool({
   description: 'Fetch a public http(s) URL and return readable content. Use for current docs, API references, error lookups, or CI logs. Private/loopback/metadata hosts are blocked.',
   contextSchema: hazeToolContextSchema,
   inputSchema: z.object({

@@ -9,7 +9,7 @@
  * tree. Graph output is orientation and retrieval — never validation
  * evidence.
  */
-import {tool} from 'ai';
+import {tool, type ToolSet} from 'ai';
 import {z} from 'zod';
 import {workspaceRoot} from '../../utils/path.js';
 import {buildGraphIndex, type GraphEdge, type GraphIndex} from '../../core/graph/model.js';
@@ -62,7 +62,7 @@ function graphNotBuilt(toolName: string, loaded: Extract<GraphLoad, {ok: false}>
   return {ok: false, toolName, error: loaded.error, reasonCode: loaded.reasonCode, recoverable: true, suggestedNextStep: loaded.suggestedNextStep};
 }
 
-export const graphTools = {
+export const graphTools: ToolSet = {
   graphQuery: tool({
     description: 'Query the persistent workspace code graph with a natural-language question (architecture, relationships, "where does X live", "what surrounds Y"). Returns a token-budgeted subgraph; prefer this over grep loops for orientation on large codebases. Edges carry EXTRACTED/INFERRED confidence. Read-only.',
     inputSchema: z.object({
