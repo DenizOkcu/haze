@@ -73,6 +73,27 @@ describe('assembleRequestContext', () => {
     expect(result.systemPrompt).toContain('fetch reads');
   });
 
+  it('gates LSP and graph tool groups on request intent', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([{name: 'typescript', command: 'x', extensions: ['.ts']}]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+
+    const plain = await assembleRequestContext({request: 'Fix the off-by-one in the parser.', contextFiles: [], model: fakeModel});
+    expect(plain.availableTools.lspDefinition).toBeUndefined();
+    expect(plain.availableTools.graphQuery).toBeUndefined();
+    expect(plain.toolCategories.get('lspDefinition')).toBeUndefined();
+    expect(plain.systemPrompt).not.toContain('lspWorkspaceSymbols');
+    expect(plain.systemPrompt).not.toContain('primary navigation surface');
+
+    const semantic = await assembleRequestContext({request: 'Rename this function across all references and show the architecture of the module.', contextFiles: [], model: fakeModel});
+    expect(semantic.availableTools.lspDefinition).toBeDefined();
+    expect(semantic.availableTools.graphQuery).toBeDefined();
+    expect(semantic.toolCategories.get('lspDefinition')).toBe('lsp');
+    expect(semantic.systemPrompt).toContain('lspWorkspaceSymbols');
+    expect(semantic.systemPrompt).toContain('primary navigation surface');
+  });
+
   it('reuses a supplied turn execution scope across request retries', async () => {
     mocks.readSettings.mockResolvedValue(settings);
     mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});

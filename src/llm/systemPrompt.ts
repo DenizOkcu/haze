@@ -71,9 +71,9 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = [], session?: Pr
 
 ## Tool use
 ${lspToolRule}${mcpToolRule}${graphToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
-- grep locates text patterns and non-semantic matches. listFiles discovers structure. readFile returns bounded numbered lines with nextOffset for pagination.
-- editFile performs unique replacements. If an edit fails, read that exact file again before retrying; use replaceLines when current line numbers are safer. For repeated cross-file text changes, use replaceInFiles with a dry run and current occurrence IDs or an expected-count guard.
-- writeFile creates files and only overwrites when explicitly requested. Before a complete rewrite of a requested path that may already exist, read it, then use overwriteExisting=true. Keep each content payload within the tool's byte limit; for larger files, write the first chunk normally and continue the same file with append=true. Never split one logical file into imported part files merely to bypass the limit. shell runs inspection, scripts, and validation; set purpose=validation for custom assertion/check commands so their real exit result counts as completion evidence. Use background=true only when managed process tools are available${processRule}. readToolOutput retrieves omitted oversized command output.
+- grep finds text patterns and non-semantic matches; listFiles discovers structure; readFile returns bounded, paginated numbered lines.
+- editFile applies unique replacements (batch same-file edits; re-read the file and use replaceLines when a match fails or is stale); replaceInFiles applies guarded cross-file replacements (dry-run first); writeFile creates files, overwrites only when explicitly requested, and chunks large content via append.
+- shell runs inspection, scripts, and validation — set purpose=validation for custom checks so real exit results count as completion evidence; use background=true only when managed process tools are available${processRule}; readToolOutput retrieves omitted oversized output.
 ${fetchRule}${subagentRule}${coordinationRule ? `- ${coordinationRule}\n` : ''}
 - Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change. When several independent files are already known, read them together instead of discovering them one model step at a time.
 - Ignored files require explicit need. Keep file mutations separate from validation commands when practical.

@@ -48,14 +48,21 @@ function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
   const lower = request.toLowerCase();
   const includeFetch = /https?:\/\/|\b(web|online|fetch|current docs?|api docs?|library docs?|research)\b/.test(lower);
   const includeProcess = /\b(background|server|serve|daemon|watch(?:er)?|long-running|process|dev server)\b/.test(lower);
-  const includeSubagent = /\b(subagents?|agents?|fleet|parallel|delegate|orchestrat\w*|multi-agent|review|audit|compare)\b/.test(lower) || request.length > 1_200;
+  const includeSubagent = /\b(subagents?|agents?|fleet|parallel|delegate|orchestrat\w*|multi-agent|review|audit|compare)\b/.test(lower);
+  // Semantic-navigation tool groups only pay off for orientation/refactor requests;
+  // grep/readFile remain available for everything else.
+  const includeLsp = /\b(rename|refactor|move|symbols?|definitions?|references|usages?|impact|blast radius|navigate|navigation|semantic|callers?)\b/.test(lower);
+  const includeGraph = /\b(architecture|structure|where|how (?:does|do)|relationships?|dependenc\w*|affected|explore|understand|map|overview|graph|codebase|unfamiliar|orient\w*|large)\b/.test(lower);
+  const isConditionalBuiltin = (name: string) => ['fetch', 'process', 'subagent'].includes(name) || name.startsWith('lsp') || name.startsWith('graph');
   return Object.fromEntries(Object.entries(tools).filter(([name]) =>
     ALWAYS_AVAILABLE_TOOLS.has(name)
     || (name === 'fetch' && includeFetch)
     || (name === 'process' && includeProcess)
     || (name === 'subagent' && includeSubagent)
-    // Configured LSP/MCP tools are explicit user capabilities and remain available.
-    || !['fetch', 'process', 'subagent'].includes(name),
+    || (name.startsWith('lsp') && includeLsp)
+    || (name.startsWith('graph') && includeGraph)
+    // Configured MCP tools are explicit user capabilities and remain available.
+    || !isConditionalBuiltin(name),
   ));
 }
 
@@ -169,7 +176,7 @@ export async function assembleRequestContext(input: {
   const mcpAvailable = Boolean(loadedMcp && Object.keys(loadedMcp.tools).length > 0);
   const skillErrors = (skillRegistry.errors ?? []).map(error => `${error.source ? `${error.source}/` : ''}${error.directory}: ${error.message}`);
   const model = input.modelRuntime?.config ? {provider: input.modelRuntime.config.providerName, name: input.modelRuntime.config.modelName} : undefined;
-  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
+  const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp && 'lspWorkspaceSymbols' in availableTools, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {
     systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope,
