@@ -25,7 +25,7 @@ export {hazeContext} from './toolContextState.js';
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
-  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol']);
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol', 'gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset']);
   return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 
@@ -132,7 +132,7 @@ function isReadOnlyFileTool(toolName: string) {
 // turn (no side effects). Shell is deliberately excluded: commands can observe
 // external state changes between identical calls (CR-007).
 function isDeduplicableReadOnlyTool(toolName: string) {
-  return isReadOnlyFileTool(toolName) || toolName === 'fetch';
+  return isReadOnlyFileTool(toolName) || toolName === 'fetch' || toolName === 'gitStatus' || toolName === 'gitLog' || toolName === 'gitDiff' || toolName === 'gitBranch';
 }
 
 function stableJsonStringify(value: unknown, seen: WeakSet<object> = new WeakSet()): string {

@@ -28,6 +28,17 @@ const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   replaceInFiles: ['mutate'],
   lspRenameSymbol: ['mutate'],
   lspSafeDeleteSymbol: ['mutate'],
+  // Git mutation tools.
+  gitStage: ['mutate'],
+  gitCommit: ['mutate'],
+  gitBranchManage: ['mutate'],
+  gitRebase: ['mutate'],
+  gitReset: ['mutate'],
+  // Git read-only queries.
+  gitStatus: ['read'],
+  gitLog: ['read'],
+  gitDiff: ['read'],
+  gitBranch: ['read'],
   // Process execution. A shell call becomes validation only when its command is
   // a classifier-confirmed validation command (see work state); that runtime
   // fact is tracked separately as a validation event, not as a static trait.

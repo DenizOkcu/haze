@@ -31,6 +31,8 @@ export type ToolFailureReasonCode =
   | 'missing_executable'
   | 'graph_not_built'
   | 'graph_unavailable'
+  | 'not_a_repository'
+  | 'git_error'
   | 'scoped_instructions_discovered';
 
 export type ToolDiffLine =
