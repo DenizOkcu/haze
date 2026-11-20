@@ -47,6 +47,9 @@ export function buildSystemPrompt(contextFiles: ContextFile[] = [], session?: Pr
   const graphToolRule = options.availableTools?.has('graphQuery')
     ? '- Code-graph tools are your primary navigation surface: start with graphQuery before any grep/readFile exploration when you need architecture, orientation, relationships, "where does X live", or any unfamiliar/large codebase; use graphExplain for one symbol, graphPath to trace how two things connect, and graphAffected for change blast radius before risky edits. Do not run grep loops or read whole directories to discover structure the graph already maps — graphQuery first, grep only for exact-string lookups the graph cannot answer. If a graph tool answers graph_not_built, call graphRebuild once, then retry. Edges marked INFERRED are resolved leads, not facts. Graph output is advisory context, never validation evidence. A stale graph flag means files changed since it was built — graphRebuild refreshes it cheaply.\n'
     : '';
+  const gitToolRule = options.availableTools?.has('gitStatus')
+    ? '- Use the dedicated git tools (gitStatus, gitLog, gitDiff, gitBranch, and the mutating git tools gitStage/gitCommit/gitBranchManage/gitRebase/gitReset) for git operations instead of running git via shell; they return compact structured results. Use shell git only when the user explicitly asks for a raw command or a case the git tools do not cover.\n'
+    : '';
   const modelLine = options.model ? `\nActive model: ${options.model.provider}/${options.model.name}` : '';
   const hasTool = (name: string) => options.availableTools?.has(name) ?? true;
   const processRule = hasTool('process') ? ', inspect them with process/readToolOutput, and kill every process you start when done' : '';
@@ -74,7 +77,7 @@ ${lspToolRule}${mcpToolRule}${graphToolRule}- ${UNTRUSTED_TOOL_OUTPUT_RULE}
 - grep finds text patterns and non-semantic matches; listFiles discovers structure; readFile returns bounded, paginated numbered lines.
 - editFile applies unique replacements (batch same-file edits; re-read the file and use replaceLines when a match fails or is stale); replaceInFiles applies guarded cross-file replacements (dry-run first); writeFile creates files, overwrites only when explicitly requested, and chunks large content via append.
 - shell runs inspection, scripts, and validation — set purpose=validation for custom checks so real exit results count as completion evidence; use background=true only when managed process tools are available${processRule}; readToolOutput retrieves omitted oversized output.
-${fetchRule}${subagentRule}${coordinationRule ? `- ${coordinationRule}\n` : ''}
+  ${gitToolRule}${fetchRule}${subagentRule}${coordinationRule ? `- ${coordinationRule}\n` : ''}
 - Prefer targeted reads and checks. Do not repeat unchanged reads or failing validation without a relevant change. When several independent files are already known, read them together instead of discovering them one model step at a time.
 - Ignored files require explicit need. Keep file mutations separate from validation commands when practical.
 - File tools may surface scoped AGENTS.md/CLAUDE.md instructions for the target path. Review newly surfaced instructions before mutating that path; prefer the more specific path, and at the same scope AGENTS.md overrides CLAUDE.md.

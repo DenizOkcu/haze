@@ -143,6 +143,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('graph_not_built');
     expect(buildSystemPrompt()).not.toContain('primary navigation surface');
   });
+
+  it('steers the model to the dedicated git tools over shell git when they are available', () => {
+    const toolNames = ['gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset', 'shell'];
+    const prompt = buildSystemPrompt([], undefined, {availableTools: new Set(toolNames)});
+    expect(prompt).toContain('Use the dedicated git tools');
+    expect(prompt).toContain('instead of running git via shell');
+    for (const name of toolNames.slice(0, 9)) expect(prompt).toContain(name);
+    // Without git tools in the catalog the rule must stay absent.
+    expect(buildSystemPrompt([], undefined, {availableTools: new Set(['shell'])})).not.toContain('Use the dedicated git tools');
+  });
 });
 
 describe('buildSubagentPrompt', () => {
