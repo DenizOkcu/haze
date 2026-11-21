@@ -29,18 +29,18 @@ describe('git tools', () => {
     execFileSync('git', ['config', 'commit.gpgsign', 'false'], {cwd: tmp});
   }
 
-  async function call<K extends keyof typeof hazeTools>(name: K, input: Record<string, unknown>) {
-    const tool = hazeTools[name] as {execute: (input: unknown, context: {abortSignal?: AbortSignal}) => Promise<Record<string, unknown>>};
+  async function call<K extends keyof typeof hazeTools>(name: K, input: Record<string, unknown>, state?: object) {
+    const tool = hazeTools[name] as {execute: (input: unknown, context: {abortSignal?: AbortSignal; context?: object}) => Promise<Record<string, unknown>>};
     process.chdir(tmp);
     try {
-      return await tool.execute(input, {});
+      return await tool.execute(input, state ? {context: state} : {});
     } finally {
       process.chdir(originalCwd);
     }
   }
 
   it('registers the git tools in the built-in catalog', () => {
-    for (const name of ['gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset']) {
+    for (const name of ['gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitFetch', 'gitPull', 'gitClone', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset']) {
       expect(hazeTools).toHaveProperty(name);
     }
   });
@@ -167,6 +167,66 @@ describe('git tools', () => {
     const reset = await call('gitReset', {mode: 'hard', target: 'HEAD'});
     expect(reset.ok).toBe(true);
     expect(await fs.readFile(path.join(tmp, 'a.txt'), 'utf8')).toBe('a');
+  });
+
+  it('fetches and fast-forward pulls a configured remote without caching stale status', async () => {
+    initRepo();
+    await fs.outputFile(path.join(tmp, 'a.txt'), 'initial');
+    execFileSync('git', ['add', '.'], {cwd: tmp});
+    execFileSync('git', ['commit', '-qm', 'initial'], {cwd: tmp});
+    const remote = path.join(tmp, 'remote.git');
+    execFileSync('git', ['clone', '-q', '--bare', tmp, remote]);
+    const writer = path.join(tmp, 'writer');
+    execFileSync('git', ['clone', '-q', remote, writer]);
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], {cwd: writer});
+    execFileSync('git', ['config', 'user.name', 'Test'], {cwd: writer});
+    await fs.outputFile(path.join(writer, 'a.txt'), 'updated');
+    execFileSync('git', ['add', 'a.txt'], {cwd: writer});
+    execFileSync('git', ['commit', '-qm', 'update'], {cwd: writer});
+    execFileSync('git', ['push', '-q'], {cwd: writer});
+    execFileSync('git', ['remote', 'add', 'origin', remote], {cwd: tmp});
+    const branch = execFileSync('git', ['branch', '--show-current'], {cwd: tmp, encoding: 'utf8'}).trim();
+    execFileSync('git', ['config', `branch.${branch}.remote`, 'origin'], {cwd: tmp});
+    execFileSync('git', ['config', `branch.${branch}.merge`, `refs/heads/${branch}`], {cwd: tmp});
+    const state = {};
+    expect((await call('gitStatus', {}, state)).behind).toBeUndefined();
+    expect((await call('gitFetch', {remote: 'origin'}, state)).ok).toBe(true);
+    expect((await call('gitStatus', {}, state)).behind).toBe(1);
+    expect((await call('gitPull', {}, state)).ok).toBe(true);
+    expect((await call('gitStatus', {}, state)).behind).toBeUndefined();
+    expect(await fs.readFile(path.join(tmp, 'a.txt'), 'utf8')).toBe('updated');
+    await fs.outputFile(path.join(tmp, 'local.txt'), 'local');
+    execFileSync('git', ['add', 'local.txt'], {cwd: tmp});
+    execFileSync('git', ['commit', '-qm', 'local'], {cwd: tmp});
+    await fs.outputFile(path.join(writer, 'remote.txt'), 'remote');
+    execFileSync('git', ['add', 'remote.txt'], {cwd: writer});
+    execFileSync('git', ['commit', '-qm', 'remote'], {cwd: writer});
+    execFileSync('git', ['push', '-q'], {cwd: writer});
+    const failed = await call('gitPull', {}, state);
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain('cannot be fast-forwarded');
+    expect(await fs.pathExists(path.join(tmp, 'remote.txt'))).toBe(false);
+  });
+
+  it('clones into the workspace and refuses escaping or credential-bearing destinations', async () => {
+    initRepo();
+    await fs.outputFile(path.join(tmp, 'source.txt'), 'source');
+    execFileSync('git', ['add', 'source.txt'], {cwd: tmp});
+    execFileSync('git', ['commit', '-qm', 'initial'], {cwd: tmp});
+    const previous = {...process.env};
+    process.env.GIT_CONFIG_COUNT = '1';
+    process.env.GIT_CONFIG_KEY_0 = `url.${tmp}.insteadOf`;
+    process.env.GIT_CONFIG_VALUE_0 = 'https://example.invalid/source';
+    try {
+      const result = await call('gitClone', {url: 'https://example.invalid/source', path: 'checkout'});
+      expect(result.ok).toBe(true);
+      expect(await fs.readFile(path.join(tmp, 'checkout/source.txt'), 'utf8')).toBe('source');
+      expect((await call('gitClone', {url: 'https://example.invalid/source', path: 'checkout'})).ok).toBe(false);
+      expect((await call('gitClone', {url: 'https://example.invalid/source', path: '../outside'})).ok).toBe(false);
+      expect((await call('gitClone', {url: 'https://user:secret@example.invalid/source', path: 'other'})).ok).toBe(false);
+      await fs.symlink(os.tmpdir(), path.join(tmp, 'escape'));
+      expect((await call('gitClone', {url: 'https://example.invalid/source', path: 'escape/other'})).ok).toBe(false);
+    } finally { process.env = previous; }
   });
 
   it('reports git failures as recoverable structured git_error results', async () => {

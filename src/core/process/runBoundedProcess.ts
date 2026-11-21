@@ -82,7 +82,7 @@ function collector(limit: number) {
   };
 }
 
-export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number; onStdoutChunk?: (chunk: Buffer) => boolean | void; sanitizeEnv?: SanitizeEnvOptions}): Promise<BoundedProcessResult> {
+export async function runBoundedProcess(input: {command: string; args: string[]; cwd: string; timeoutMs: number; signal?: AbortSignal; maxStdoutBytes: number; maxStderrBytes: number; killGraceMs?: number; onStdoutChunk?: (chunk: Buffer) => boolean | void; sanitizeEnv?: SanitizeEnvOptions; env?: NodeJS.ProcessEnv}): Promise<BoundedProcessResult> {
   const startedAt = Date.now();
   const stdout = collector(input.maxStdoutBytes);
   const stderr = collector(input.maxStderrBytes);
@@ -92,7 +92,7 @@ export async function runBoundedProcess(input: {command: string; args: string[];
   const detached = process.platform !== 'win32';
   // Absent `sanitizeEnv` means the child inherits process.env exactly (no
   // `env` option at all) — the pre-sanitizer behavior.
-  const child = spawn(input.command, input.args, {cwd: input.cwd, detached, stdio: ['ignore', 'pipe', 'pipe'], ...(input.sanitizeEnv ? {env: sanitizeChildEnv(process.env, input.sanitizeEnv)} : {})});
+  const child = spawn(input.command, input.args, {cwd: input.cwd, detached, stdio: ['ignore', 'pipe', 'pipe'], ...(input.env ? {env: input.env} : input.sanitizeEnv ? {env: sanitizeChildEnv(process.env, input.sanitizeEnv)} : {})});
   let timedOut = false;
   let aborted = false;
   let forced = false;

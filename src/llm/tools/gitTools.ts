@@ -1,6 +1,8 @@
 import {tool, type ToolSet} from 'ai';
 import {z} from 'zod';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import {prepareWorkspaceWritePath} from './workspaceFile.js';
 import {runBoundedProcess} from '../../core/process/runBoundedProcess.js';
 import {SHELL_STREAM_BYTES} from '../../core/limits.js';
 import {workspaceRoot} from '../../utils/path.js';
@@ -117,6 +119,40 @@ const diffInput = z.object({
 const branchInput = z.object({
   remotes: z.boolean().default(false).describe('Include remote branches.'),
 });
+
+const remoteInput = z.object({
+  remote: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).optional().describe('Configured remote name; omit to use Git defaults.'),
+});
+const pullInput = remoteInput.extend({
+  mode: z.enum(['ff-only', 'rebase', 'merge']).default('ff-only').describe('Integration policy; defaults to fast-forward only.'),
+});
+const cloneInput = z.object({
+  url: z.string().min(1).describe('Remote repository URL (HTTPS, SSH, or git://); do not include credentials.'),
+  path: z.string().min(1).describe('New workspace-relative destination directory.'),
+});
+
+async function runNetworkGit(cwd: string, args: string[], signal?: AbortSignal) {
+  const result = await runBoundedProcess({
+    command: 'git', args: ['-c', 'credential.interactive=never', '-c', 'protocol.ext.allow=never', ...args], cwd,
+    timeoutMs: 120_000, signal, maxStdoutBytes: 8192, maxStderrBytes: 8192,
+    env: {...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_MERGE_AUTOEDIT: 'no', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes'},
+  });
+  return result;
+}
+
+function networkFailure(toolName: string, timedOut: boolean) {
+  return {ok: false as const, toolName, reasonCode: 'git_error' as const, recoverable: true,
+    error: timedOut ? 'Git network operation timed out.' : 'Git network operation failed.',
+    suggestedNextStep: 'Check the remote, network, credentials, and repository state; authentication must be non-interactive.'};
+}
+
+function validCloneUrl(value: string) {
+  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$/.test(value)) return true;
+  try {
+    const url = new URL(value);
+    return ['https:', 'ssh:', 'git:'].includes(url.protocol) && !!url.hostname && !url.password && (url.protocol === 'ssh:' || !url.username);
+  } catch { return false; }
+}
 
 const stageInput = z.object({
   paths: z.array(z.string().min(1)).min(1).describe('Workspace-relative paths to stage.'),
@@ -267,6 +303,63 @@ export const gitTools: ToolSet = {
       } catch (error) {
         return gitFailure('gitBranch', error, 'Retry gitBranch.');
       }
+    }),
+  }),
+
+  gitFetch: tool({
+    description: 'Fetch updates from a configured Git remote without interactive authentication. Updates remote-tracking refs; does not integrate changes.',
+    contextSchema: hazeToolContextSchema,
+    inputSchema: remoteInput,
+    execute: async (input, context) => runDedupedTool('gitFetch', input, context, async () => {
+      try {
+        const root = await resolveRepoRoot();
+        const run = await runNetworkGit(root, ['fetch', '--no-recurse-submodules', ...(input.remote ? ['--', input.remote] : [])], context.abortSignal);
+        if (run.aborted) return abortedResult('gitFetch');
+        if (run.code !== 0) return networkFailure('gitFetch', run.timedOut);
+        return {ok: true, toolName: 'gitFetch', summary: 'Fetched remote updates.'};
+      } catch (error) { return gitFailure('gitFetch', error, 'Check the repository and remote, then retry.'); }
+    }),
+  }),
+
+  gitPull: tool({
+    description: 'Fetch and integrate remote changes into the current branch. Defaults to fast-forward only; use rebase or merge only when requested.',
+    contextSchema: hazeToolContextSchema,
+    inputSchema: pullInput,
+    execute: async (input, context) => runDedupedTool('gitPull', input, context, async () => {
+      try {
+        const root = await resolveRepoRoot();
+        const mode = input.mode ?? 'ff-only';
+        const flag = mode === 'merge' ? '--no-rebase' : mode === 'rebase' ? '--rebase' : '--ff-only';
+        const run = await runNetworkGit(root, ['pull', flag, '--no-recurse-submodules', ...(input.remote ? ['--', input.remote] : [])], context.abortSignal);
+        if (run.aborted) return abortedResult('gitPull');
+        if (run.code !== 0) {
+          const output = `${run.stdout.text}\n${run.stderr.text}`;
+          const reason = /not possible to fast-forward|cannot fast-forward/i.test(output) ? 'The branch cannot be fast-forwarded.'
+            : /CONFLICT|merge conflict/i.test(output) ? 'Pull stopped with conflicts.' : undefined;
+          return {...networkFailure('gitPull', run.timedOut), ...(reason && !run.timedOut ? {error: reason} : {}), suggestedNextStep: 'Inspect repository status and upstream; resolve any conflicts or choose an appropriate integration policy before retrying.'};
+        }
+        return {ok: true, toolName: 'gitPull', summary: `Pulled using ${mode}.`};
+      } catch (error) { return gitFailure('gitPull', error, 'Check the repository and upstream, then retry.'); }
+    }),
+  }),
+
+  gitClone: tool({
+    description: 'Clone a remote repository into a new workspace-relative directory so its code can be inspected. Authentication is non-interactive.',
+    contextSchema: hazeToolContextSchema,
+    inputSchema: cloneInput,
+    execute: async (input, context) => runDedupedTool('gitClone', input, context, async () => {
+      try {
+        if (!validCloneUrl(input.url)) throw new HazeToolError('Use an HTTPS, SSH, or git:// repository URL without embedded credentials.', 'git_error', {recoverable: false});
+        const target = await prepareWorkspaceWritePath('gitClone', input.path, false, context);
+        if (target.scopedStop) return target.scopedStop;
+        await target.assertWritableInsideWorkspace();
+        try { await fs.lstat(target.absolutePath); return {ok: false as const, toolName: 'gitClone', error: 'Destination already exists.', reasonCode: 'git_error' as const, recoverable: true, suggestedNextStep: 'Choose a new destination.'}; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        const run = await runNetworkGit(workspaceRoot(), ['clone', '--no-recurse-submodules', '--', input.url, target.absolutePath], context.abortSignal);
+        if (run.aborted) return abortedResult('gitClone');
+        if (run.code !== 0) return networkFailure('gitClone', run.timedOut);
+        return {ok: true, toolName: 'gitClone', path: input.path, summary: `Cloned into ${input.path}.`};
+      } catch (error) { return gitFailure('gitClone', error, 'Check the destination and repository URL, then retry.'); }
     }),
   }),
 

@@ -38,6 +38,12 @@ All tools are registered in `src/llm/hazeTools.ts` via a `gitTools` export from 
 - Input: required explicit target/mode parameters (e.g. `onto`, `mode` enum `soft`|`mixed`|`hard`)
 - Output: `ok` + summary, or structured failure
 
+### `gitFetch`, `gitPull`, `gitClone`
+- `gitFetch`: optional configured remote name; updates remote-tracking refs.
+- `gitPull`: optional remote name and integration mode (`ff-only` by default, `rebase`, or `merge`).
+- `gitClone`: remote HTTPS, SSH, or git URL and new workspace-relative destination; rejects embedded credentials and paths outside the workspace.
+- All network operations are bounded and use non-interactive authentication.
+
 ## Failure envelope (all tools)
 
 - `reasonCode`: `not_a_repository` | `outside_workspace` | `git_internals_protected` | `secret_file_protected` | `git_error` | ...

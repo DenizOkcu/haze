@@ -29,6 +29,9 @@ const CAPABILITY_MAP: Readonly<Record<string, readonly ToolCapability[]>> = {
   lspRenameSymbol: ['mutate'],
   lspSafeDeleteSymbol: ['mutate'],
   // Git mutation tools.
+  gitFetch: ['mutate'],
+  gitPull: ['mutate'],
+  gitClone: ['mutate'],
   gitStage: ['mutate'],
   gitCommit: ['mutate'],
   gitBranchManage: ['mutate'],

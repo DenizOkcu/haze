@@ -25,7 +25,7 @@ export {hazeContext} from './toolContextState.js';
 export const hazeToolContextSchema = z.custom<HazeToolContext>(isHazeToolContext, 'Invalid haze tool context');
 
 export function toolsContextFor<T extends Record<string, unknown>>(tools: T, context: HazeToolContext): Partial<Record<keyof T, HazeToolContext>> {
-  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol', 'gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset']);
+  const hazeToolNames = new Set(['listFiles', 'readFile', 'grep', 'replaceInFiles', 'replaceLines', 'writeFile', 'editFile', 'shell', 'process', 'fetch', 'lspRenameSymbol', 'lspSafeDeleteSymbol', 'gitStatus', 'gitLog', 'gitDiff', 'gitBranch', 'gitFetch', 'gitPull', 'gitClone', 'gitStage', 'gitCommit', 'gitBranchManage', 'gitRebase', 'gitReset']);
   return Object.fromEntries(Object.keys(tools).filter(name => hazeToolNames.has(name)).map(name => [name, context])) as Partial<Record<keyof T, HazeToolContext>>;
 }
 
@@ -222,6 +222,8 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
   try {
     const result = await promise;
     if (isFailedToolOutput(result)) {
+      // Network Git may update refs or files before failing (e.g. conflicts).
+      if (['gitFetch', 'gitPull', 'gitClone'].includes(toolName)) ctx.mutationEpoch += 1;
       if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(result)) {
         ctx.failedMutationPaths.add(mutationPathKey);
         const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as import('../toolResultTypes.js').ToolFailureReasonCode | undefined : undefined;
