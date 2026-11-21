@@ -10,6 +10,10 @@ const toc = [
     "label": "Write"
   },
   {
+    "id": "git",
+    "label": "Git"
+  },
+  {
     "id": "shell",
     "label": "Shell"
   },
@@ -33,7 +37,7 @@ const toc = [
 ---
 <DocPage page="tools" title="Tool reference — haze docs" description="Every tool the haze model can call: file discovery, editing, shell, background processes, fetch, tasks, skills, subagents, plus LSP and MCP integration." eyebrow="Docs / Reference" toc={toc}>
   <Fragment slot="heading">Tool <span class="em">reference.</span></Fragment>
-  <Fragment slot="intro">Fourteen built-in tools across five groups, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</Fragment>
+  <Fragment slot="intro">Built-in tools for files, Git, processes, networks, and agent state, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</Fragment>
 
           <section id="read">
             <h2><span class="em">Read</span> · 5 tools</h2>
@@ -59,6 +63,11 @@ const toc = [
                 <tr><td>writeFile</td><td>Create files and parent directories. Overwriting an existing file requires an explicit flag.</td></tr>
               </tbody>
             </table>
+          </section>
+
+          <section id="git">
+            <h2><span class="em">Git</span></h2>
+            <p>Dedicated tools inspect status, history, diffs, and branches; stage and commit changes; manage branches, rebase, and reset; fetch and pull configured remotes; and clone a remote repository into a new workspace directory. Pull defaults to fast-forward only. Network Git authentication must work without interactive prompts. Haze selects relevant Git, graph, and LSP groups for clear requests; the agent can load more when needed during a goal, and shell stays available.</p>
           </section>
 
           <section id="shell">

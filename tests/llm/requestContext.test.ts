@@ -60,6 +60,45 @@ describe('assembleRequestContext', () => {
     expect(result.systemPrompt).not.toContain('fetch reads');
   });
 
+  it('loads Git groups for clear requests and keeps unrelated schemas deferred', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+    const plain = await assembleRequestContext({request: 'Fix the parser.', contextFiles: [], model: fakeModel});
+    expect(plain.availableTools.loadToolGroup).toBeDefined();
+    expect(plain.availableTools.gitStatus).toBeUndefined();
+    expect(plain.availableTools.gitClone).toBeUndefined();
+    const review = await assembleRequestContext({request: 'Review my changes', contextFiles: [], model: fakeModel});
+    expect(review.availableTools.gitStatus).toBeDefined();
+    expect(review.availableTools.gitDiff).toBeDefined();
+    expect(review.availableTools.gitCommit).toBeUndefined();
+    expect(review.availableTools.gitClone).toBeUndefined();
+    expect(review.systemPrompt).not.toContain('gitCommit');
+    const commit = await assembleRequestContext({request: 'Commit the changes', contextFiles: [], model: fakeModel});
+    expect(commit.availableTools.gitCommit).toBeDefined();
+    expect(commit.availableTools.gitStatus).toBeDefined();
+    const clone = await assembleRequestContext({request: 'Clone the remote repository', contextFiles: [], model: fakeModel});
+    expect(clone.availableTools.gitClone).toBeDefined();
+    expect(clone.availableTools.gitCommit).toBeUndefined();
+  });
+
+  it('loads deferred groups on request and preserves them across retries', async () => {
+    mocks.readSettings.mockResolvedValue(settings);
+    mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});
+    mocks.installedLspServers.mockResolvedValue([]);
+    mocks.configuredMcpServers.mockReturnValue([]);
+    const first = await assembleRequestContext({request: 'Investigate the problem', contextFiles: [], model: fakeModel});
+    const loader = first.availableTools.loadToolGroup as {execute: (input: {group: string}, context: object) => Promise<Record<string, unknown>>};
+    expect(await loader.execute({group: 'git-read'}, {})).toMatchObject({ok: true, group: 'git-read', tools: expect.arrayContaining(['gitStatus'])});
+    expect(first.availableTools.gitStatus).toBeUndefined(); // exposed at the next step, not the current batch
+    expect(await loader.execute({group: 'lsp'}, {})).toMatchObject({ok: false});
+    const retry = await assembleRequestContext({request: 'Investigate the problem', contextFiles: [], model: fakeModel, executionScope: first.executionScope});
+    expect(retry.availableTools.gitStatus).toBeDefined();
+    expect(retry.availableTools.gitCommit).toBeUndefined();
+    expect(retry.executionScope).toBe(first.executionScope);
+  });
+
   it('enables optional tools only when the request calls for them', async () => {
     mocks.readSettings.mockResolvedValue(settings);
     mocks.loadSkillRegistry.mockResolvedValue({skills: new Map()});

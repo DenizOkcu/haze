@@ -303,6 +303,7 @@ interface AgentEpochResult {
  */
 async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMessage[]): Promise<AgentEpochResult> {
   const {setup, callbacks, loopState, turnState, globalBudget, stallGuard, salvage, retryAttempt, abortController} = deps;
+  const toolsActivated = setup.activateToolGroups?.() ?? false;
   const {sliceTools, systemPrompt, inputBreakdown, providerSettings, omitMaxOutputTokens, toolExecutionContext} = setup;
   const prepare = createPrepareStep(deps);
   const completedBefore = loopState.completedSteps;
@@ -339,7 +340,7 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
       if (completedBefore > 0) {
         const messagesPreserved = requestMessages.length <= preparedMessages.length
           && requestMessages.every((message, index) => preparedMessages[index] === message);
-        const requestPolicyStable = prepared?.activeTools == null
+        const requestPolicyStable = !toolsActivated && prepared?.activeTools == null
           && prepared?.toolChoice == null
           && prepared?.model == null
           && prepared?.providerOptions == null;

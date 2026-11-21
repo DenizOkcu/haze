@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- On-demand Git, code graph, and LSP tool groups: clear requests load relevant groups automatically, and the agent can load additional groups during a goal.
+- Dedicated Git tools for repository inspection and local mutations, plus non-interactive fetch, pull, and workspace-confined clone. Pull defaults to fast-forward only.
+
 ## 1.7.12 - 2026-11-20
 
 ### Added

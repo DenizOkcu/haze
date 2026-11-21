@@ -17,6 +17,7 @@ import {WorkspaceMutationPolicy} from '../../../core/subagent/workspaceMutationP
 import {modelWithConfig, providerRequestSettings, isLocalProviderUrl, type ModelRuntimeSelection} from '../../../llm/client.js';
 import type {StoredReasoningSetting} from '../../../core/agent/reasoningPolicy.js';
 import {assembleRequestContext, type ToolCategory, type TurnExecutionScope} from '../../../llm/requestContext.js';
+import {toolsInLoadedGroups} from '../../../llm/toolGroups.js';
 import type {LoadedMcpTools} from '../../../llm/mcp.js';
 import type {LspPool} from '../../../llm/lsp/pool.js';
 import type {PromptSession} from '../../../llm/systemPrompt.js';
@@ -56,6 +57,7 @@ export interface AttemptSetup {
   omitMaxOutputTokens: boolean | undefined;
   /** Tools visible to this attempt: rescue-restricted, budget-clamped, and deadline-wrapped. */
   sliceTools: ToolSet;
+  activateToolGroups?: () => boolean;
   stepCap: number;
   /** A rescue slice with no qualifying tools must synthesize, never reopen discovery (F-08). */
   rescueWithoutTools: boolean;
@@ -253,6 +255,24 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     return [name, {...definition, execute: (...args: unknown[]) => withToolDeadline(() => execute(...args), deadlineMs, abortController.signal)}];
   })) as typeof budgetedTools;
 
+  const activateToolGroups = () => {
+    if (recoverySlice?.kind === 'rescue' || !assembled.deferredTools) return false;
+    const candidates = toolsInLoadedGroups(assembled.deferredTools, assembled.executionScope.loadedToolGroups ?? new Set());
+    const added = Object.fromEntries(Object.entries(candidates).filter(([name]) => !(name in deadlineWrappedTools)));
+    if (Object.keys(added).length === 0) return false;
+    const budgeted = withToolExecutionBudget(added, {state: globalBudget, limit: turnBudget.toolCallLimit}, {state: sliceBudget, limit: sliceToolCallCap});
+    for (const [name, definition] of Object.entries(budgeted)) {
+      const execute = definition.execute as unknown as (...args: unknown[]) => Promise<unknown>;
+      deadlineWrappedTools[name] = typeof definition.execute !== 'function' ? definition : {...definition, execute: (...args: unknown[]) => withToolDeadline(() => execute(...args), DEFAULT_TOOL_DEADLINE_MS, abortController.signal)};
+      toolCategories.set(name, name.startsWith('lsp') ? 'lsp' : 'builtin');
+    }
+    Object.assign(requestBudget, calculateRequestTokenBudget({contextWindowTokens: runtime.config.contextWindowTokens, requestedOutputTokens, system: systemPrompt, tools: deadlineWrappedTools}));
+    Object.assign(inputBreakdown, estimateInputBreakdown({system: systemPrompt, contextFiles: activeContextFiles, messages: requestMessages, tools: deadlineWrappedTools}));
+    usageAnchor.current = undefined;
+    callbacks.debugLog(`Loaded tool groups: ${Object.keys(added).join(', ')}`);
+    return true;
+  };
+
   return {
     runtime,
     thinkingLabel,
@@ -263,6 +283,7 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
     providerSettings,
     omitMaxOutputTokens,
     sliceTools: deadlineWrappedTools,
+    activateToolGroups,
     stepCap,
     rescueWithoutTools,
     toolExecutionContext,

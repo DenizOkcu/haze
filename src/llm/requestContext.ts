@@ -1,4 +1,5 @@
 import type {ToolSet} from 'ai';
+import {createToolGroupLoader, groupsForRequest, toolGroup, type ToolGroup} from './toolGroups.js';
 import {hazeTools} from './hazeTools.js';
 import {buildLspTools, createPostMutationDiagnostics} from './lspTools.js';
 import {LspPool} from './lsp/pool.js';
@@ -36,6 +37,7 @@ export interface SubagentOverrides {
 }
 
 export interface TurnExecutionScope {
+  loadedToolGroups?: Set<ToolGroup>;
   coordinator: SubagentCoordinator;
   mutationPolicy: WorkspaceMutationPolicy;
 }
@@ -43,7 +45,7 @@ export interface TurnExecutionScope {
 const ALWAYS_AVAILABLE_TOOLS = new Set(['listFiles', 'readFile', 'grep', 'replaceLines', 'writeFile', 'editFile', 'shell', 'writeTasks', 'readToolOutput', 'skill']);
 
 /** Keep the common coding path lean while preserving explicitly relevant capabilities. */
-function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
+function selectToolsForRequest(tools: ToolSet, request?: string, groups: ReadonlySet<ToolGroup> = new Set()): ToolSet {
   if (request === undefined) return tools;
   const lower = request.toLowerCase();
   const includeFetch = /https?:\/\/|\b(web|online|fetch|current docs?|api docs?|library docs?|research)\b/.test(lower);
@@ -53,7 +55,7 @@ function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
   // grep/readFile remain available for everything else.
   const includeLsp = /\b(rename|refactor|move|symbols?|definitions?|references|usages?|impact|blast radius|navigate|navigation|semantic|callers?)\b/.test(lower);
   const includeGraph = /\b(architecture|structure|where|how (?:does|do)|relationships?|dependenc\w*|affected|explore|understand|map|overview|graph|codebase|unfamiliar|orient\w*|large)\b/.test(lower);
-  const isConditionalBuiltin = (name: string) => ['fetch', 'process', 'subagent'].includes(name) || name.startsWith('lsp') || name.startsWith('graph');
+  const isConditionalBuiltin = (name: string) => ['fetch', 'process', 'subagent'].includes(name) || toolGroup(name) != null;
   return Object.fromEntries(Object.entries(tools).filter(([name]) =>
     ALWAYS_AVAILABLE_TOOLS.has(name)
     || (name === 'fetch' && includeFetch)
@@ -61,6 +63,7 @@ function selectToolsForRequest(tools: ToolSet, request?: string): ToolSet {
     || (name === 'subagent' && includeSubagent)
     || (name.startsWith('lsp') && includeLsp)
     || (name.startsWith('graph') && includeGraph)
+    || (toolGroup(name) != null && groups.has(toolGroup(name)!))
     // Configured MCP tools are explicit user capabilities and remain available.
     || !isConditionalBuiltin(name),
   ));
@@ -79,6 +82,7 @@ export interface AssembledRequestContext {
   /** Reverse-dependency graph advisory attached to successful file-mutation results. */
   postMutationGraph?: PostMutationGraphAdvisory;
   executionScope: TurnExecutionScope;
+  deferredTools: ToolSet;
 }
 
 /**
@@ -165,7 +169,15 @@ export async function assembleRequestContext(input: {
     addCapabilityTools({availableTools, toolCategories, loaded: {category: 'mcp', tools: loadedMcp.tools}, skipCollisions: true});
   }
 
-  const selectedTools = selectToolsForRequest(availableTools, input.request);
+  const deferredTools = {...availableTools};
+  const loadedGroups = executionScope.loadedToolGroups ??= new Set<ToolGroup>();
+  if (input.request !== undefined) for (const group of groupsForRequest(input.request)) loadedGroups.add(group);
+  const selectedTools = selectToolsForRequest(availableTools, input.request, loadedGroups);
+  if (input.request !== undefined) {
+    selectedTools.loadToolGroup = createToolGroupLoader(deferredTools, loadedGroups);
+    toolCategories.set('loadToolGroup', 'builtin');
+    availableTools.loadToolGroup = selectedTools.loadToolGroup;
+  }
   for (const name of Object.keys(availableTools)) {
     if (!(name in selectedTools)) {
       delete availableTools[name];
@@ -179,7 +191,7 @@ export async function assembleRequestContext(input: {
   const systemPrompt = `${buildSystemPrompt(input.contextFiles, input.session, {lspAvailable: hasInstalledLsp && 'lspWorkspaceSymbols' in availableTools, mcpAvailable, model, availableTools: new Set(Object.keys(availableTools))})}${skillErrors.length ? `\n\n<skill-load-errors>\nInvalid skills were isolated:\n${skillErrors.map(error => `- ${error}`).join('\n')}\n</skill-load-errors>` : ''}`;
 
   return {
-    systemPrompt, availableTools, toolCategories, loadedMcp, lspPool, executionScope,
+    systemPrompt, availableTools, deferredTools, toolCategories, loadedMcp, lspPool, executionScope,
     ...(lspPool ? {postMutationDiagnostics: createPostMutationDiagnostics(installedLsp, lspPool)} : {}),
     postMutationGraph: createPostMutationGraphAdvisory(),
   };

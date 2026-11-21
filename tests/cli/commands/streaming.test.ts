@@ -1,6 +1,9 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {RESCUE_BOUNDARY} from '../../../src/core/agent/completionController.js';
 import {restrictToRescueTools} from '../../../src/cli/commands/streaming/attemptSetup.js';
+import {createToolGroupLoader, type ToolGroup} from '../../../src/llm/toolGroups.js';
+import {tool} from 'ai';
+import {z} from 'zod';
 
 interface FakeFullStreamPart {
   type: string;
@@ -25,6 +28,7 @@ interface FakeModelHandle {
 
 interface MocksConfig {
   modelHandle: FakeModelHandle | undefined;
+  executeAtEpoch?: Record<number, {name: string; input: unknown}>;
   contextOverflow?: boolean;
   retryable?: boolean;
   streamParts?: FakeFullStreamPart[];
@@ -59,6 +63,8 @@ const mocks = vi.hoisted(() => {
     assembledCalls: [] as unknown[],
     streamedMessages: [] as unknown[][],
     agentOptions: [] as Array<Record<string, unknown>>,
+    agentToolNames: [] as string[][],
+    executedToolResults: [] as unknown[],
     closeMcpCalls: [] as unknown[],
     generateTextCalls: [] as unknown[],
     generateTextFails: false,
@@ -66,6 +72,8 @@ const mocks = vi.hoisted(() => {
     assembleContextResult: null as null | {
       systemPrompt: string;
       availableTools: Record<string, unknown>;
+      deferredTools?: Record<string, unknown>;
+      executionScope?: unknown;
       toolCategories: Map<string, string>;
       loadedMcp?: {clients: Array<{close: () => Promise<void>} | {close: () => Promise<void>}>; tools: Record<string, unknown>; errors: string[]};
     },
@@ -137,6 +145,7 @@ async function loadStreaming(config: MocksConfig) {
       constructor(options: Record<string, unknown>) {
         this.options = options;
         mocks.agentOptions.push(options);
+        mocks.agentToolNames.push(Object.keys(options.tools as object));
         this.prepareStep = options.prepareStep as never;
         this.onStepEnd = options.onStepEnd as never;
         this.onEnd = options.onEnd as never;
@@ -145,6 +154,12 @@ async function loadStreaming(config: MocksConfig) {
       async stream({messages, abortSignal}: {messages: unknown[]; abortSignal: AbortSignal}) {
         agentCallCount += 1;
         const isFirstCall = agentCallCount === 1;
+        const scheduled = config.executeAtEpoch?.[agentCallCount];
+        if (scheduled) {
+          const currentTool = (this.options.tools as Record<string, {execute: (input: unknown, context: unknown) => Promise<unknown>}>)[scheduled.name];
+          if (!currentTool) throw new Error(`Tool ${scheduled.name} was not exposed in epoch ${agentCallCount}`);
+          mocks.executedToolResults.push(await currentTool.execute(scheduled.input, {abortSignal}));
+        }
         const prepared = await this.prepareStep?.({steps: [], messages});
         const preparedMessages = typeof prepared === 'object' && prepared != null && 'messages' in prepared && Array.isArray(prepared.messages)
           ? prepared.messages
@@ -356,6 +371,8 @@ beforeEach(() => {
   mocks.assembledCalls.length = 0;
   mocks.streamedMessages.length = 0;
   mocks.agentOptions.length = 0;
+  mocks.agentToolNames.length = 0;
+  mocks.executedToolResults.length = 0;
   mocks.closeMcpCalls.length = 0;
   mocks.generateTextCalls.length = 0;
   mocks.generateTextFails = false;
@@ -806,6 +823,44 @@ describe('runAgentTurn: stream handling', () => {
       expect.objectContaining({prefixPreserved: true, completedSteps: 1, toolCalls: 1}),
     ]);
     expect(cb.events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+  });
+
+  it('activates a loaded group in the next epoch, wrapped in the tool budget', async () => {
+    const groups = new Set<ToolGroup>();
+    const gitStatus = tool({description: 'status', inputSchema: z.object({}), execute: async () => ({ok: true, branch: 'main'})});
+    const deferredTools = {gitStatus};
+    const loader = createToolGroupLoader(deferredTools, groups);
+    mocks.assembleContextResult = {
+      systemPrompt: 'You are haze.',
+      availableTools: {loadToolGroup: loader, shell: tool({inputSchema: z.object({}), execute: async () => ({ok: true})})},
+      deferredTools,
+      executionScope: {loadedToolGroups: groups, mutationPolicy: {scope: 'shared'}, coordinator: {scope: 'shared'}},
+      toolCategories: new Map([['loadToolGroup', 'builtin'], ['shell', 'builtin']]),
+    };
+    const firstResponse = [
+      {role: 'assistant', content: [{type: 'tool-call', toolCallId: 't1', toolName: 'loadToolGroup', input: {group: 'git-read'}}]},
+      {role: 'tool', content: [{type: 'tool-result', toolCallId: 't1', toolName: 'loadToolGroup', output: {type: 'json', value: {ok: true}}}]},
+    ];
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      executeAtEpoch: {1: {name: 'loadToolGroup', input: {group: 'git-read'}}, 2: {name: 'gitStatus', input: {}}},
+      callStepEnds: [
+        [{stepNumber: 0, text: '', toolCalls: [{toolCallId: 't1', toolName: 'loadToolGroup', input: {group: 'git-read'}}], toolResults: [{}], finishReason: 'tool-calls', response: {messages: firstResponse}}],
+        [{stepNumber: 0, text: 'Done.', toolCalls: [], finishReason: 'stop', response: {messages: [{role: 'assistant', content: 'Done.'}]}}],
+      ],
+      callStreams: [
+        [{type: 'tool-input-start', id: 't1', toolName: 'loadToolGroup'}, {type: 'tool-call', toolCallId: 't1', toolName: 'loadToolGroup', input: {group: 'git-read'}}, {type: 'tool-result', toolCallId: 't1', toolName: 'loadToolGroup', output: {ok: true}}, {type: 'finish', finishReason: 'tool-calls'}],
+        [{type: 'text-delta', text: 'Done.'}, {type: 'finish', finishReason: 'stop'}],
+      ],
+      callResponseMessages: [firstResponse, [{role: 'assistant', content: 'Done.'}]],
+    });
+    const cb = makeCallbacks();
+    const outcome = await runAgentTurn('Investigate this problem', undefined, [], cb);
+    expect(outcome.status).toBe('complete');
+    expect(mocks.agentToolNames[0]).not.toContain('gitStatus');
+    expect(mocks.agentToolNames[1]).toContain('gitStatus');
+    expect(mocks.executedToolResults).toEqual([expect.objectContaining({ok: true, group: 'git-read'}), {ok: true, branch: 'main'}]);
+    expect(cb.events.filter(event => event.type === 'resource_rollover')).toContainEqual(expect.objectContaining({prefixPreserved: false, reason: 'request-policy-change'}));
   });
 
   it('records tool_start, tool_call, and tool_result events with status changes', async () => {
