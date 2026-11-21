@@ -1,0 +1,6 @@
+configuration,tools,tool_count,schema_per_request,requests,schema_total,projected_gross_saved,partial_delta_excluding_repeated_history,unmodeled_tools
+Shell only,,0,0,10083,0,0,0,
+Status,gitStatus,1,104,10083,1048632,9513,-1039119,
+Inspection,"gitStatus,gitLog,gitDiff,gitBranch",4,553,10083,5575899,9513,-5566386,"gitLog,gitDiff,gitBranch"
+Common workflow,"gitStatus,gitLog,gitDiff,gitBranch,gitStage,gitCommit",6,784,10083,7905072,9513,-7895559,"gitLog,gitDiff,gitBranch,gitStage,gitCommit"
+Full,"gitStatus,gitLog,gitDiff,gitBranch,gitFetch,gitPull,gitClone,gitStage,gitCommit,gitBranchManage,gitRebase,gitReset",12,1591,10083,16042053,9513,-16032540,"gitLog,gitDiff,gitBranch,gitFetch,gitPull,gitClone,gitStage,gitCommit,gitBranchManage,gitRebase,gitReset"
