@@ -1,7 +1,5 @@
 # src/llm/tools/AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release (grep bundled-binary fallback note).
-
 Implementation helpers for haze built-in tools.
 
 ## Shared filesystem/path rules

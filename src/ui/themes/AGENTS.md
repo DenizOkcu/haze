@@ -1,7 +1,5 @@
 # src/ui/themes/AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release.
-
 Instructions for coding agents converting themes into haze. All themes live as
 data entries in the single `registry.ts` (`THEMES` map), exactly like
 oh-my-zsh's `themes/` folder holds one `.zsh-theme` per theme. Haze's `default`

@@ -1,7 +1,5 @@
 # AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release.
-
 Project instructions for haze coding agents. Keep this root file concise; nested `AGENTS.md` files carry precise subtree contracts.
 
 ## Project overview
@@ -14,8 +12,6 @@ Core shape:
 - Vercel AI SDK with OpenAI-compatible providers.
 - Local tools for file discovery/read/search/edit/write, public URL fetch, foreground and managed background processes, LSP/MCP integration, global/project skills, image attachments, subagents/fleet, task tracking, session browsing/forking, and compaction.
 - Source lives in `src/`; generated `dist/` must not be edited.
-
-Verify current package version in `package.json` before release work.
 
 ## Common commands
 

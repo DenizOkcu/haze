@@ -1,7 +1,5 @@
 # tests/AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release.
-
 Vitest test suite instructions.
 
 ## General rules

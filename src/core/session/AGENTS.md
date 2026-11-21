@@ -1,7 +1,5 @@
 # src/core/session/AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release (round-2 review fixes).
-
 Durable session storage.
 
 ## Storage contract

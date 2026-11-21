@@ -1,7 +1,5 @@
 # src/cli/AGENTS.md
 
-Last updated: 2026-11-20 for the 1.7.12 release (`/settings edit` editor handoff).
-
 CLI and terminal UI orchestration instructions.
 
 ## Responsibilities
