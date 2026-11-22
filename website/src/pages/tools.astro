@@ -14,6 +14,10 @@ const toc = [
     "label": "Git"
   },
   {
+    "id": "graph",
+    "label": "Code graph"
+  },
+  {
     "id": "shell",
     "label": "Shell"
   },
@@ -37,7 +41,7 @@ const toc = [
 ---
 <DocPage page="tools" title="Tool reference — haze docs" description="Every tool the haze model can call: file discovery, editing, shell, background processes, fetch, tasks, skills, subagents, plus LSP and MCP integration." eyebrow="Docs / Reference" toc={toc}>
   <Fragment slot="heading">Tool <span class="em">reference.</span></Fragment>
-  <Fragment slot="intro">Built-in tools for files, Git, processes, networks, and agent state, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</Fragment>
+  <Fragment slot="intro">Built-in tools for files, Git, the code graph, processes, networks, and agent state, plus optional LSP and MCP servers. All file tools are confined to the workspace by default; output is bounded but retrievable.</Fragment>
 
           <section id="read">
             <h2><span class="em">Read</span> · 5 tools</h2>
@@ -66,8 +70,29 @@ const toc = [
           </section>
 
           <section id="git">
-            <h2><span class="em">Git</span></h2>
-            <p>Dedicated tools inspect status, history, diffs, and branches; stage and commit changes; manage branches, rebase, and reset; fetch and pull configured remotes; and clone a remote repository into a new workspace directory. Pull defaults to fast-forward only. Network Git authentication must work without interactive prompts. Haze selects relevant Git, graph, and LSP groups for clear requests; the agent can load more when needed during a goal, and shell stays available.</p>
+            <h2><span class="em">Git</span> · 12 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>gitStatus · gitLog · gitDiff · gitBranch</td><td>Inspect working-tree status, history, diffs, and branches with bounded output.</td></tr>
+                <tr><td>gitStage · gitCommit · gitBranchManage · gitRebase · gitReset</td><td>Stage and commit changes, manage branches, rebase, and reset. Mutations are workspace-confined like every write tool.</td></tr>
+                <tr><td>gitFetch · gitPull · gitClone</td><td>Fetch and pull configured remotes (pull defaults to fast-forward only), or clone a remote repository into a new workspace directory. Network Git authentication must work without interactive prompts.</td></tr>
+              </tbody>
+            </table>
+            <p>Git, graph, and LSP tools load on demand: haze seeds the relevant group for clear requests, the model can load more mid-goal with the <code>loadToolGroup</code> meta-tool, and <code>shell</code> always stays available.</p>
+          </section>
+
+          <section id="graph">
+            <h2>Code <span class="em">graph</span> · 5 tools</h2>
+            <table>
+              <tbody>
+                <tr><td>graphQuery</td><td>Ask a natural-language question of the persistent workspace code graph — architecture, relationships, "where does X live" — and get a token-budgeted subgraph. Prefer it over grep loops for orientation on large codebases.</td></tr>
+                <tr><td>graphExplain</td><td>Explain one symbol or file: definition site, community, degree, and its neighbors grouped by relation (calls, imports, inherits).</td></tr>
+                <tr><td>graphPath</td><td>Trace the shortest relationship path between two symbols or files, hop by hop with relations and confidence — "how does a request get from A to B".</td></tr>
+                <tr><td>graphAffected</td><td>Reverse blast radius of a symbol: who calls, inherits, or imports it, transitively, with relation sites. Use it to choose which files and tests a risky change must cover. Advisory context only — never validation evidence.</td></tr>
+                <tr><td>graphRebuild</td><td>Build or incrementally refresh the graph: deterministic tree-sitter extraction, no LLM cost; incremental rebuilds re-parse only changed files.</td></tr>
+              </tbody>
+            </table>
+            <p>The graph is a persistent, deterministic symbol map for JavaScript/TypeScript (tree-sitter WASM with vendored grammars), stored under <code>~/.haze/graphs/&lt;workspace-key&gt;</code> — never inside your repository. Build it with <code>/graph</code> or <code>/init</code>. Edges carry <code>EXTRACTED</code>/<code>INFERRED</code> confidence, stale results are annotated until rebuilt, file mutations attach a bounded reverse-dependency advisory, and read-only graph tools also reach fleet workers.</p>
           </section>
 
           <section id="shell">

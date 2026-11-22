@@ -18,6 +18,10 @@ const toc = [
     "label": "Context files"
   },
   {
+    "id": "graph",
+    "label": "Code graph"
+  },
+  {
     "id": "processes",
     "label": "Background processes"
   },
@@ -89,6 +93,16 @@ recreate the chart in @mockups/analytics.png with recharts</pre>
             </ul>
             <p>Run <code class="cmd">/init</code> to generate a compact, budget-aware <code>AGENTS.md</code> for the current repo. Check context cost any time with <code class="cmd">/context</code>.</p>
             <p>Type <code class="cmd">@</code> to browse workspace files, or mention a path containing <code>/</code> to bless an outside file for read-only access during that turn. Mutating tools always stay inside the workspace. Protected secret files (SSH keys, shell histories, <code>.env</code>, credentials) are never readable, even when explicitly mentioned.</p>
+          </section>
+
+          <section id="graph">
+            <h2>Code <span class="em">graph</span></h2>
+            <p>For large or unfamiliar repositories, run <code class="cmd">/graph</code> once: haze builds a persistent, deterministic symbol map with tree-sitter and reports subsystems, hub symbols, and import cycles. It is stored under <code>~/.haze/graphs/</code> — never inside your repo — and incremental rebuilds re-parse only changed files.</p>
+            <ul>
+              <li>Ask orientation questions — "where does session eviction live?", "how does a request reach the store?" — and the model answers from the graph instead of grep loops.</li>
+              <li>Before risky edits the model can consult the reverse blast radius of a symbol; after file mutations, haze attaches a bounded reverse-dependency advisory automatically.</li>
+              <li>Graph results are advisory orientation, never validation evidence, and stale results are annotated until rebuilt. <code>/init</code> refreshes the graph alongside <code>AGENTS.md</code>.</li>
+            </ul>
           </section>
 
           <section id="processes">
