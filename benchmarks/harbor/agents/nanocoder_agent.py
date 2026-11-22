@@ -142,6 +142,20 @@ class NanocoderAgent(BaseInstalledAgent):
                 ],
             }
         }
+        if self._get_env("HARBOR_REASONING_OFF") == "1":
+            # The compatible provider's OpenRouter escape hatch forwards extraBody
+            # to Z.ai; the base URL remains the Z.ai Coding endpoint.
+            config["nanocoder"]["providers"][0]["openrouter"] = {
+                "extraBody": {"thinking": {"type": "disabled"}}
+            }
+        if self._get_env("HARBOR_REASONING_LOW") == "1":
+            config["nanocoder"]["providers"][0]["openrouter"] = {
+                "extraBody": {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+            }
+        if self._get_env("HARBOR_REASONING_HIGH") == "1":
+            config["nanocoder"]["providers"][0]["openrouter"] = {
+                "extraBody": {"thinking": {"type": "enabled"}, "reasoning_effort": "high"}
+            }
         config_json = json.dumps(config)
         return (
             "mkdir -p \"$HOME/.config/nanocoder\" && "
@@ -324,4 +338,4 @@ class NanocoderAgent(BaseInstalledAgent):
         usage = result.get("usage") or {}
         context.n_input_tokens = usage.get("inputTokens") or 0
         context.n_output_tokens = usage.get("outputTokens") or 0
-        context.n_cache_tokens = 0
+        context.n_cache_tokens = usage.get("cacheReadTokens")

@@ -119,6 +119,27 @@ class HazeAgent(BaseInstalledAgent):
                 "HAZE_BASE_URL is not set. Load it with Harbor --env-file."
             )
 
+        # haze refuses credentialed plaintext HTTP to non-loopback hosts. For
+        # host bridges (e.g. a benchmark proxy on host.docker.internal) start
+        # an in-container TCP forwarder on 127.0.0.1 and point settings at it.
+        prefix = ""
+        forwarded = re.match(r"^http://host\.docker\.internal:(\d+)(/.*)?$", base_url)
+        if forwarded:
+            port, path = forwarded.group(1), forwarded.group(2) or ""
+            forwarder_js = (
+                "const net=require('net');"
+                "net.createServer({allowHalfOpen:true},(c)=>{"
+                "const u=net.connect(%s,'host.docker.internal',()=>{c.pipe(u);u.pipe(c);});"
+                "u.on('error',()=>c.destroy());c.on('error',()=>u.destroy());"
+                "}).listen(%s,'127.0.0.1');" % (port, port)
+            )
+            prefix = (
+                ". ~/.nvm/nvm.sh; "
+                f"nohup node -e {shlex.quote(forwarder_js)} >/dev/null 2>&1 & "
+                "sleep 0.5; "
+            )
+            base_url = f"http://127.0.0.1:{port}{path}"
+
         model = self.model_name or self.DEFAULT_MODEL
         config = {
             "providers": [
@@ -130,8 +151,18 @@ class HazeAgent(BaseInstalledAgent):
                 }
             ]
         }
+        if self._get_env("HARBOR_REASONING_OFF") == "1":
+            config["reasoning"] = "none"
+            config["providers"][0]["reasoningFormat"] = "thinking"
+        if self._get_env("HARBOR_REASONING_LOW") == "1":
+            config["reasoning"] = "low"
+            config["providers"][0]["reasoningLevels"] = ["low"]
+        if self._get_env("HARBOR_REASONING_HIGH") == "1":
+            config["reasoning"] = "high"
+            config["providers"][0]["reasoningLevels"] = ["high"]
         config_json = json.dumps(config)
         return (
+            f"{prefix}"
             "mkdir -p \"$HOME/.haze\" && "
             f"echo {shlex.quote(config_json)} > \"$HOME/.haze/settings.json\""
         )
@@ -162,7 +193,6 @@ class HazeAgent(BaseInstalledAgent):
 
         command = (
             ". ~/.nvm/nvm.sh; "
-            "cd /app && "
             f"haze -p {shlex.quote(instruction)} "
             f"--model {shlex.quote(f'{_PROVIDER_NAME}:{model}')} "
             f"--output {output_mode} "

@@ -1,88 +1,73 @@
 # Harbor agent benchmark
 
-A single-task [Harbor](https://github.com/harbor-framework/harbor) benchmark
-that pits four agent harnesses installed on this machine against each other:
+A reproducible Harbor comparison of haze, Pi, nanocoder and Claude Code on
+`local/csv-query`. The runner uses GLM-5.3 through the Z.ai Coding endpoint by
+default. Every agent receives the same task and requested model, but differences
+in provider protocol, model configuration, token accounting and sampling still
+limit what can be attributed to the harness.
 
-- **Claude Code** (built-in `claude-code` harbor adapter)
-- **nanocoder** (custom adapter: `agents/nanocoder_agent.py`)
-- **pi** (built-in `pi` harbor adapter)
-- **haze** (custom adapter: `agents/haze_agent.py`)
+## Task and verifier
 
-All harnesses run the **same model** (`glm-5.2` via the Z.ai Coding
-Subscription key already configured on this machine), so the comparison
-isolates the agent harness rather than the model.
+The task asks for a dependency-free Node.js CSV filtering CLI. The verifier
+checks exact output, filtering, column selection, errors and byte-wise stable
+sorting. The current suite has **19 tests**; two were added after the 2026-08-16
+runs below, so scores across these suite versions are not directly equivalent.
+Harbor directory checksums cover the task directory, including incidental files; see the latest report for a cache-related checksum difference.
 
-## Task: `local/csv-query`
+## Run a comparison
 
-Implement a dependency-free Node.js CSV filtering CLI
-(`--where` / `--select` / `--sort`) with RFC-4180-style quoted fields
-(escaped quotes, embedded commas and newlines), exact output formatting,
-and exit-code contracts. 17 deterministic pytest cases verify behavior
-(edge cases: quoted commas, `""` escapes, `=` in values, stable
-lexicographic sort, unknown-column and malformed-CSV errors).
-
-## Layout
-
-```
-benchmarks/harbor/
-├── agents/nanocoder_agent.py   # custom harbor adapter (nanocoder CLI)
-├── agents/haze_agent.py        # custom harbor adapter (haze CLI)
-├── tasks/csv-query/            # the benchmark task
-│   ├── task.toml
-│   ├── instruction.md          # prompt given to the agent
-│   ├── environment/            # Dockerfile + task fixture files
-│   ├── solution/solve.sh       # reference solution (oracle)
-│   └── tests/                  # verifier (pytest via uv)
-├── run-benchmark.sh            # runs all harnesses and prints a summary
-└── jobs/                       # harbor job output (gitignored)
-```
-
-## Prerequisites
-
-- `harbor` 0.20.x (`uv tool install harbor`) and Docker
-- `claude` and `nanocoder` CLIs installed on the host (used only as the
-  source of truth for versions/auth; the benchmark itself runs both
-  harnesses inside Docker)
-
-## Run
+Prerequisites: Docker running, Harbor 0.27.0 (the runner prefers
+`benchmarks/harbor/.run/harbor-0.27/bin/harbor`, then `.venv/bin/harbor`;
+set `HARBOR_BIN` to choose another), and access to the
+Z.ai Coding API. The CLIs are installed inside the trial containers, not taken
+from the host. Configure `ZAI_API_KEY` in the environment or a Z.ai provider in
+the local nanocoder config. Credentials are stored in a unique mode-0600
+file for the duration of the run and removed on exit; do not publish raw jobs
+without reviewing them for secrets and private information.
 
 ```bash
 cd benchmarks/harbor
-./run-benchmark.sh            # defaults to glm-5.2; runs all four harnesses
-HARBOR_ATTEMPTS=3 ZAI_API_KEY=... ./run-benchmark.sh glm-5.2
-# Optional lowest-observer-overhead haze run (final envelope only):
-HAZE_OUTPUT=json ./run-benchmark.sh glm-5.2
+# Install Harbor 0.27.0 in an isolated environment:
+uv venv .run/harbor-0.27 --python 3.12
+uv pip install --python .run/harbor-0.27/bin/python 'harbor==0.27.0'
+# Haze, Pi and Claude Code, one attempt apiece, GLM-5.3:
+./run-benchmark.sh
+# Choose agents and repeat each trial (serial execution):
+HARBOR_AGENTS=haze,pi,claude-code HARBOR_ATTEMPTS=3 ./run-benchmark.sh glm-5.3
+# Explicit low reasoning for the selected agents:
+HARBOR_REASONING_LOW=1 ./run-benchmark.sh glm-5.3
+# Run just one agent:
+HARBOR_AGENTS=pi ./run-benchmark.sh glm-5.3
+python3 -m unittest discover -s tests -v
 ```
 
-The script resolves the Z.ai key from `$ZAI_API_KEY` or from the local
-nanocoder config (`~/Library/Preferences/nanocoder/agents.config.json`).
-The script writes credentials to a mode-`0600` temporary `.run/benchmark.env`, passes only its path through Harbor's `--env-file` option, and deletes it on exit. Secrets never enter process arguments or tracked files (`.run/` and `jobs/` are gitignored).
+Defaults pinned for this refresh: Claude Code 2.1.330, nanocoder 1.32.0,
+Pi 0.73.1, and the haze version in the repository's `package.json` (installed
+from npm). Override with `CLAUDE_CODE_VERSION`, `NANOCODER_VERSION`,
+`PI_VERSION`, or `HAZE_VERSION`; use published versions that actually exist.
+The Pi adapter forwards `ZAI_API_KEY` to the agent container. Claude uses the Anthropic-compatible endpoint; haze and nanocoder use
+the OpenAI-compatible endpoint; Pi uses its `zai` provider. Custom endpoint
+overrides are available via `ANTHROPIC_BASE_URL`, `NANOCODER_BASE_URL`, and
+`HAZE_BASE_URL` and must refer to the same backend for a comparison.
 
-Per-harness endpoints on Z.ai: Claude Code uses the Anthropic-compatible
-`/api/anthropic`, nanocoder and haze the OpenAI-compatible
-`/api/coding/paas/v4/`, and pi its built-in `zai` provider. Agent versions are
-pinned by default and can be overridden with `CLAUDE_CODE_VERSION`,
-`NANOCODER_VERSION`, `PI_VERSION`, and `HAZE_VERSION`. `HARBOR_ATTEMPTS`
-controls repeated trials (default 1). Each attempt has a 15-minute agent
-timeout; reward is 1 (all tests pass) or 0.
+Each selected agent gets a separate job and a 15-minute agent timeout. The
+runner continues after a failed Harbor command and prints results from only
+this invocation. A reward of 1 means all verifier tests passed; an agent error
+and a verifier result are separate facts. The job directories contain the
+full trial results, trajectories and verifier reports. `harbor view jobs/<job>`
+opens a trajectory. Missing telemetry is shown as `n/a`, never as zero.
 
-## Why the same model for both harnesses?
+Before replacing the website numbers, review each trial's verifier, errors,
+actual served model and telemetry. Run multiple attempts, report pass counts and
+the distribution of durations and tokens, and disclose missing or incompatible
+measurements. Do not mix telemetry from different attempts into one row. The
+website source is `website/src/pages/index.astro`; regenerate the public `docs/`
+with `npm run sync --prefix website` after editing. Historical reports remain
+unchanged as records of their original runs.
 
-Benchmarking "Claude Code with Claude" against "nanocoder with GLM" would
-measure model quality as much as harness quality. Routing Claude Code at
-Z.ai's Anthropic-compatible endpoint (`https://api.z.ai/api/anthropic`) and
-nanocoder at the OpenAI-compatible one (`/api/coding/paas/v4/`) keeps the
-backend identical, so differences in reward/tokens come from the harness.
+## Latest run
 
-To benchmark Claude Code against its native subscription instead, run:
-
-```bash
-claude setup-token   # once; prints a long-lived OAuth token
-export CLAUDE_CODE_OAUTH_TOKEN=<token>
-export CLAUDE_FORCE_OAUTH=1
-PYTHONPATH=agents harbor run --path tasks/csv-query \
-  --agent claude-code -m claude-sonnet-4-5 --ae ANTHROPIC_API_KEY= -y -o jobs
-```
+[2026-11-21 GLM-5.3 comparison](results/20261121-glm53.md): all four agents passed 19/19 tests in one trial each. The [low-reasoning run on Harbor 0.27.0](results/20261121-glm53-low-harbor027.md) reports separate results.
 
 ## The haze findings (2026-08-16)
 
@@ -156,7 +141,7 @@ Caveats worth reading before drawing conclusions:
   flaky providers can be given more headroom. The glm-5.3 differential run
   above completed with zero stalls at the default.
   Token counts for haze are summed from its NDJSON stream.
-- Published-package runs use the pinned adapter versions. Set `HAZE_LOCAL_TARBALL` (haze) or `NANOCODER_LOCAL_TARBALL` (nanocoder) and provide the corresponding Harbor mount when testing an uncommitted local build.
+- Historical local-build runs used explicit Harbor mounts and tarballs; the runner above installs published packages.
 - **Input-token accounting differs per harness** (cache reads included for
   claude-code/pi/haze; nanocoder's local-build telemetry reports totals
   without a cache breakdown — published 1.29.0 reports nothing), so the token
@@ -173,3 +158,47 @@ Caveats worth reading before drawing conclusions:
 harbor view jobs/<job-name>          # web UI over trajectories
 cat jobs/<job-name>/*/agent/nanocoder-output.json
 ```
+
+## Small coding-task pilot
+
+Run three fixed Harbor task revisions with haze and GLM-5.3, low reasoning:
+
+```bash
+cd benchmarks/harbor
+./run-coding-pilot.sh
+# Optional: run the same set with haze, Pi and Claude Code:
+HARBOR_AGENTS=haze,pi,claude-code ./run-coding-pilot.sh
+```
+
+The pilot downloads `aider/polyglot_javascript_resistor-color-trio@1`,
+`aider/polyglot_javascript_rectangles@1`, and
+`swe-bench/django__django-11728@1` into `.run/coding-pilot-pinned/`. Each task
+is run serially in Docker with one attempt and the normal 13-minute haze goal
+deadline. SWE-bench's x86 image uses `linux/amd64` emulation on Apple Silicon;
+image tags and external dependencies can still change. Each trial reports
+verifier reward and agent errors separately. The pilot prints live haze tool
+names, step token counts, and cumulative token counts by reading the active
+container's log every five seconds; this monitoring has some overhead. The
+final aggregate reports missing usage and agent errors rather than treating
+those as successful runs. The existing runner supports the same progress view
+with `HARBOR_PROGRESS=1`.
+
+The upstream Aider task revisions currently ship tests marked skipped: this
+pilot observed only one active verifier case per JavaScript task. Their
+rewards do not establish that the whole exercise works. See the
+[pilot report](results/20261121-coding-pilot.md) before using its scores.
+
+## Real JavaScript repository pilot
+
+`./run-js-plugin-pilot.sh` downloads a content-hash-pinned NodeBB plugin-ID
+validation task from SWE-bench Pro and runs haze, Pi and Claude Code
+serially, using GLM-5.3-Flash with low reasoning. Set `HARBOR_AGENTS=haze` to
+run only haze. Progress prints tool events and available usage as it arrives;
+nanocoder's JSON mode buffers its token totals until exit. The default
+13-minute agent limit applies; the verifier runs separately afterward. Docker
+uses x86 emulation on Apple Silicon. Codex and Gemini CLI join the same
+comparison through local bridges: `./run-codex-nodebb.sh` starts a LiteLLM
+proxy that exposes the OpenAI Responses API and forwards to the Z.ai chat
+endpoint, and `./run-gemini-nodebb.sh` starts `gemini_bridge.py`, a
+dependency-free generateContent-to-chat translator for Gemini CLI's native
+protocol (`python3 gemini_bridge.py --selftest` checks the translators).

@@ -1,238 +1,162 @@
 #!/usr/bin/env bash
-# Run the harbor csv-query benchmark against four agent harnesses:
-#   1. claude-code (built-in harbor adapter)
-#   2. nanocoder  (custom adapter in agents/nanocoder_agent.py)
-#   3. pi         (built-in harbor adapter)
-#   4. haze       (custom adapter in agents/haze_agent.py)
-#
-# All harnesses run the SAME model (glm-5.2 via the Z.ai Coding Subscription
-# key already configured on this machine), so the comparison isolates the
-# agent harness, not the model.
-#
-# Usage:
-#   ./run-benchmark.sh [model]        # default: glm-5.2
-#
-# Required env (auto-filled from the local nanocoder config when possible):
-#   ZAI_API_KEY   Z.ai Coding Subscription API key
-
+# Run comparable Z.ai trials; select agents with HARBOR_AGENTS (comma-separated).
 set -euo pipefail
-
-MODEL="${1:-glm-5.2}"
-ATTEMPTS="${HARBOR_ATTEMPTS:-1}"
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.233}"
-NANOCODER_VERSION="${NANOCODER_VERSION:-1.29.0}"
-PI_VERSION="${PI_VERSION:-0.73.1}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HAZE_VERSION="${HAZE_VERSION:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$SCRIPT_DIR/../../package.json")}"
 cd "$SCRIPT_DIR"
-
-JOBS_DIR="$SCRIPT_DIR/jobs"
-mkdir -p "$JOBS_DIR"
-if ! [[ "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "error: HARBOR_ATTEMPTS must be a positive integer" >&2
-  exit 1
+MODEL="${1:-glm-5.3}"
+ATTEMPTS="${HARBOR_ATTEMPTS:-1}"
+TASK_PATH="${HARBOR_TASK_PATH:-$SCRIPT_DIR/tasks/csv-query}"
+TASK_LABEL="${HARBOR_TASK_LABEL:-csv-query}"
+[[ "$TASK_LABEL" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'error: invalid HARBOR_TASK_LABEL' >&2; exit 1; }
+[[ -d "$TASK_PATH" ]] || { echo "error: task path not found: $TASK_PATH" >&2; exit 1; }
+AGENTS="${HARBOR_AGENTS:-haze,pi,claude-code,codex}"
+if [[ -n "${HARBOR_BIN:-}" ]]; then
+  HARBOR="$HARBOR_BIN"
+elif [[ -x "$SCRIPT_DIR/.run/harbor-0.27/bin/harbor" ]]; then
+  HARBOR="$SCRIPT_DIR/.run/harbor-0.27/bin/harbor"
+elif [[ -x "$SCRIPT_DIR/.venv/bin/harbor" ]]; then
+  HARBOR="$SCRIPT_DIR/.venv/bin/harbor"
+else
+  HARBOR=harbor
 fi
-
-# ---------------------------------------------------------------------------
-# Resolve the Z.ai API key (never printed).
-# ---------------------------------------------------------------------------
+[[ "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || { echo 'error: HARBOR_ATTEMPTS must be a positive integer' >&2; exit 1; }
+IFS=',' read -r -a selected <<< "$AGENTS"
+[[ ${#selected[@]} -gt 0 ]] || { echo 'error: select at least one agent' >&2; exit 1; }
+seen=","; for agent in "${selected[@]}"; do
+  case "$agent" in haze|pi|nanocoder|claude-code|codex|gemini-cli) ;; *) echo "error: unknown agent: $agent" >&2; exit 1;; esac
+  [[ "$seen" != *",$agent,"* ]] || { echo "error: duplicate agent: $agent" >&2; exit 1; }
+  seen+="$agent,"
+done
 if [[ -z "${ZAI_API_KEY:-}" ]]; then
-  ZAI_API_KEY="$(python3 - <<'EOF'
+  ZAI_API_KEY="$(python3 - <<'PYKEY'
 import json, os
-path = os.path.expanduser(
-    "~/Library/Preferences/nanocoder/agents.config.json"
-)
 try:
-    cfg = json.load(open(path))
-    for p in cfg.get("nanocoder", {}).get("providers", []):
-        url = p.get("baseUrl", "")
-        if "z.ai" in url:
-            print(p.get("apiKey", ""))
-            break
-except Exception:
+    with open(os.path.expanduser('~/Library/Preferences/nanocoder/agents.config.json')) as f:
+        providers = json.load(f).get('nanocoder', {}).get('providers', [])
+    print(next((p.get('apiKey', '') for p in providers if 'z.ai' in p.get('baseUrl', '') and p.get('apiKey')), ''))
+except (OSError, ValueError):
     pass
-EOF
+PYKEY
 )"
 fi
-
-if [[ -z "$ZAI_API_KEY" ]]; then
-  echo "error: ZAI_API_KEY not set and no Z.ai provider found in the local nanocoder config" >&2
+if [[ -z "${ZAI_API_KEY:-}" ]]; then
+  echo 'error: export ZAI_API_KEY for the Z.ai Coding endpoint' >&2
   exit 1
 fi
-
-# Keep credentials out of process arguments. Harbor loads this private file into
-# its host environment; built-in and custom adapters resolve their own variables
-# from there and inject only what their agent process needs.
 export ZAI_API_KEY
-RUN_DIR="$SCRIPT_DIR/.run"
-ENV_FILE="$RUN_DIR/benchmark.env"
-mkdir -p "$RUN_DIR"
+reasoning_modes=0
+for value in "${HARBOR_REASONING_OFF:-0}" "${HARBOR_REASONING_LOW:-0}" "${HARBOR_REASONING_HIGH:-0}"; do
+  if [[ "$value" == 1 ]]; then reasoning_modes=$((reasoning_modes + 1)); fi
+done
+if (( reasoning_modes > 1 )); then
+  echo 'error: select only one reasoning mode' >&2
+  exit 1
+fi
+if [[ "${HARBOR_REASONING_LOW:-0}" == 1 || "${HARBOR_REASONING_HIGH:-0}" == 1 ]]; then
+  export HARBOR_REASONING_LOW="${HARBOR_REASONING_LOW:-0}"
+  export HARBOR_REASONING_HIGH="${HARBOR_REASONING_HIGH:-0}"
+  export NANOCODER_PROVIDER_NAME=openrouter
+fi
+if [[ "${HARBOR_REASONING_OFF:-0}" == 1 ]]; then
+  export HARBOR_REASONING_OFF=1
+  export NANOCODER_PROVIDER_NAME=openrouter
+  export CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1
+fi
+export ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.z.ai/api/anthropic}"
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$ZAI_API_KEY}"
+export NANOCODER_BASE_URL="${NANOCODER_BASE_URL:-https://api.z.ai/api/coding/paas/v4/}"
+export NANOCODER_API_KEY="${NANOCODER_API_KEY:-$ZAI_API_KEY}"
+export HAZE_BASE_URL="${HAZE_BASE_URL:-https://api.z.ai/api/coding/paas/v4/}"
+export HAZE_API_KEY="${HAZE_API_KEY:-$ZAI_API_KEY}"
+mkdir -p .run jobs
 umask 077
-rm -f "$ENV_FILE"
+ENV_FILE="$(mktemp "$SCRIPT_DIR/.run/benchmark.XXXXXXXX")"
 trap 'rm -f "$ENV_FILE"' EXIT
-export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-export ANTHROPIC_API_KEY="$ZAI_API_KEY"
-export NANOCODER_BASE_URL="https://api.z.ai/api/coding/paas/v4/"
-export NANOCODER_API_KEY="$ZAI_API_KEY"
-export HAZE_BASE_URL="https://api.z.ai/api/coding/paas/v4/"
-export HAZE_API_KEY="$ZAI_API_KEY"
-python3 - "$ENV_FILE" <<'EOF'
-import json
-import os
-import sys
-
-keys = (
-    "ZAI_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_API_KEY",
-    "NANOCODER_BASE_URL",
-    "NANOCODER_API_KEY",
-    "HAZE_BASE_URL",
-    "HAZE_API_KEY",
-    "HAZE_LOCAL_TARBALL",
-    "HAZE_TIMEOUT",
-    "HAZE_OUTPUT",
-)
-with open(sys.argv[1], "w", encoding="utf-8") as stream:
+python3 - "$ENV_FILE" <<'PY'
+import json, os, sys
+keys = ('ZAI_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY',
+        'NANOCODER_BASE_URL', 'NANOCODER_API_KEY', 'HAZE_BASE_URL', 'HAZE_API_KEY',
+        'HAZE_TIMEOUT', 'HAZE_OUTPUT', 'HARBOR_REASONING_OFF', 'HARBOR_REASONING_LOW', 'HARBOR_REASONING_HIGH',
+        'NANOCODER_PROVIDER_NAME', 'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING',
+        'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'GEMINI_API_KEY', 'GOOGLE_GEMINI_BASE_URL')
+with open(sys.argv[1], 'w', encoding='utf-8') as f:
     for key in keys:
-        if value := os.environ.get(key):
-            stream.write(f"{key}={json.dumps(value)}\n")
-EOF
-chmod 600 "$ENV_FILE"
-
-TASK="$SCRIPT_DIR/tasks"
-AGENT_PATH="$SCRIPT_DIR/agents"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-FAILURES=()
-
-# ---------------------------------------------------------------------------
-# 1. Claude Code harness (Anthropic-compatible endpoint on Z.ai)
-# ---------------------------------------------------------------------------
-echo "=== [1/4] claude-code on $MODEL ==="
-if ! PYTHONPATH="$AGENT_PATH" harbor run \
-  --path "$TASK" \
-  --agent claude-code \
-  --model "$MODEL" \
-  --ak "version=$CLAUDE_CODE_VERSION" \
-  --env-file "$ENV_FILE" \
-  --n-attempts "$ATTEMPTS" \
-  --jobs-dir "$JOBS_DIR" \
-  --job-name "csv-query-claude-code-$STAMP" \
-  --n-concurrent 1 \
-  --yes \
-  --delete; then
-  FAILURES+=("claude-code")
-fi
-
-# ---------------------------------------------------------------------------
-# 2. nanocoder harness (OpenAI-compatible endpoint on Z.ai)
-# ---------------------------------------------------------------------------
-echo "=== [2/4] nanocoder on $MODEL ==="
-if ! PYTHONPATH="$AGENT_PATH" harbor run \
-  --path "$TASK" \
-  --agent nanocoder_agent:NanocoderAgent \
-  --model "$MODEL" \
-  --ak "version=$NANOCODER_VERSION" \
-  --env-file "$ENV_FILE" \
-  --n-attempts "$ATTEMPTS" \
-  --jobs-dir "$JOBS_DIR" \
-  --job-name "csv-query-nanocoder-$STAMP" \
-  --n-concurrent 1 \
-  --yes \
-  --delete; then
-  FAILURES+=("nanocoder")
-fi
-
-# ---------------------------------------------------------------------------
-# 3. Pi harness (built-in adapter; Z.ai via the zai provider)
-# ---------------------------------------------------------------------------
-echo "=== [3/4] pi on $MODEL ==="
-if ! PYTHONPATH="$AGENT_PATH" harbor run \
-  --path "$TASK" \
-  --agent pi \
-  --model "zai/$MODEL" \
-  --ak "version=$PI_VERSION" \
-  --env-file "$ENV_FILE" \
-  --n-attempts "$ATTEMPTS" \
-  --jobs-dir "$JOBS_DIR" \
-  --job-name "csv-query-pi-$STAMP" \
-  --n-concurrent 1 \
-  --yes \
-  --delete; then
-  FAILURES+=("pi")
-fi
-
-# ---------------------------------------------------------------------------
-# 4. haze harness (OpenAI-compatible endpoint on Z.ai)
-# ---------------------------------------------------------------------------
-echo "=== [4/4] haze on $MODEL ==="
-if ! PYTHONPATH="$AGENT_PATH" harbor run \
-  --path "$TASK" \
-  --agent haze_agent:HazeAgent \
-  --model "$MODEL" \
-  --ak "version=$HAZE_VERSION" \
-  --env-file "$ENV_FILE" \
-  --n-attempts "$ATTEMPTS" \
-  --jobs-dir "$JOBS_DIR" \
-  --job-name "csv-query-haze-$STAMP" \
-  --n-concurrent 1 \
-  --yes \
-  --delete; then
-  FAILURES+=("haze")
-fi
-
-# ---------------------------------------------------------------------------
-# 5. Summary
-# ---------------------------------------------------------------------------
-echo
-echo "=== Results ==="
-python3 - "$JOBS_DIR" <<'EOF'
-import json
-import sys
-from datetime import datetime
-from pathlib import Path
-
-jobs = Path(sys.argv[1])
-rows = []
-for job_dir in sorted(jobs.glob("csv-query-*")):
-    if not job_dir.is_dir() or job_dir.name.endswith("-latest"):
-        continue
-    for result_file in job_dir.glob("*/result.json"):
-        result = json.loads(result_file.read_text())
-        agent = result.get("agent_info") or {}
-        verifier = result.get("verifier_result") or {}
-        reward = verifier.get("rewards", {}).get("reward")
-        execution = result.get("agent_execution") or {}
-        duration = "?"
-        try:
-            started = datetime.fromisoformat(execution["started_at"].replace("Z", "+00:00"))
-            finished = datetime.fromisoformat(execution["finished_at"].replace("Z", "+00:00"))
-            duration = f"{(finished - started).total_seconds():.0f}s"
-        except (KeyError, ValueError):
-            pass
-        trajectory_file = result_file.parent / "agent" / "trajectory.json"
-        agent_result = result.get("agent_result") or {}
-        in_tok = agent_result.get("n_input_tokens") or "n/a"
-        out_tok = agent_result.get("n_output_tokens") or "n/a"
-        if trajectory_file.exists():
-            trajectory = json.loads(trajectory_file.read_text())
-            metrics = trajectory.get("final_metrics") or {}
-            in_tok = metrics.get("total_prompt_tokens") or in_tok
-            out_tok = metrics.get("total_completion_tokens") or out_tok
-        harness = job_dir.name.removeprefix("csv-query-").rsplit("-", 2)[0]
-        rows.append((harness, reward, duration, in_tok, out_tok,
-                     agent.get("model_info", {}).get("name"), agent.get("version")))
-
-if not rows:
-    print("no completed trials found")
-    sys.exit(0)
-
-print(f"{'harness':<12} {'reward':<7} {'agent time':<11} {'in tok':<10} {'out tok':<9} {'model':<9} {'agent ver':<10}")
-for harness, reward, duration, in_tok, out_tok, model, version in rows:
-    print(f"{harness:<12} {str(reward):<7} {duration:<11} {str(in_tok):<10} {str(out_tok):<9} {str(model):<9} {str(version):<10}")
-EOF
-
-if (( ${#FAILURES[@]} > 0 )); then
-  printf '\nInfrastructure failures: %s\n' "${FAILURES[*]}" >&2
+        if os.environ.get(key):
+            f.write(f'{key}={json.dumps(os.environ[key])}\n')
+PY
+STAMP="$(date +%Y%m%d-%H%M%S)-$$"
+failures=()
+job_names=()
+for agent in "${selected[@]}"; do
+  case "$agent" in
+    haze) adapter=haze_agent:HazeAgent; version="${HAZE_VERSION:-$(python3 -c 'import json; print(json.load(open("../../package.json"))["version"])')}"; model="$MODEL" ;;
+    nanocoder) adapter=nanocoder_agent:NanocoderAgent; version="${NANOCODER_VERSION:-1.32.0}"; model="$MODEL" ;;
+    pi) adapter=pi_zai_agent:PiZai; version="${PI_VERSION:-0.73.1}"; model="zai/$MODEL" ;;
+    codex) adapter=codex; version="${CODEX_VERSION:-0.171.0}"; model="$MODEL" ;;
+    gemini-cli) adapter=gemini-cli; version="${GEMINI_VERSION:-0.70.0}"; model="$MODEL" ;;
+    claude-code) adapter=claude-code; version="${CLAUDE_CODE_VERSION:-2.1.330}"; model="$MODEL" ;;
+  esac
+  mode=""
+  [[ "${HARBOR_REASONING_HIGH:-0}" != 1 ]] || mode="high-"
+  [[ "${HARBOR_REASONING_LOW:-0}" != 1 ]] || mode="low-"
+  [[ "${HARBOR_REASONING_OFF:-0}" != 1 ]] || mode="off-"
+  job="$TASK_LABEL-$agent-$mode$STAMP"
+  job_names+=("$job")
+  if [[ -n "${HARBOR_JOB_LIST_FILE:-}" ]]; then
+    printf '%s\n' "$job" >> "$HARBOR_JOB_LIST_FILE"
+  fi
+  echo "=== $agent / $MODEL / $ATTEMPTS attempt(s) ==="
+  extra_args=()
+  if [[ "${HARBOR_REASONING_OFF:-0}" == 1 ]]; then
+    case "$agent" in
+      pi) extra_args+=(--ak thinking=off) ;;
+      claude-code) extra_args+=(--ak max_thinking_tokens=0) ;;
+    esac
+  fi
+  if [[ "${HARBOR_REASONING_LOW:-0}" == 1 ]]; then
+    case "$agent" in
+      pi) extra_args+=(--ak thinking=low) ;;
+      claude-code|codex|gemini-cli) extra_args+=(--ak reasoning_effort=low) ;;
+    esac
+  fi
+  if [[ "${HARBOR_REASONING_HIGH:-0}" == 1 ]]; then
+    case "$agent" in
+      pi) extra_args+=(--ak thinking=high) ;;
+      claude-code|codex|gemini-cli) extra_args+=(--ak reasoning_effort=high) ;;
+    esac
+  fi
+  if [[ "$agent" == codex && -n "${CODEX_CONFIG_PATH:-}" ]]; then
+    extra_args+=(--ak "config=$CODEX_CONFIG_PATH")
+  fi
+  if [[ -n "${HARBOR_EXTRA_AK:-}" ]]; then
+    IFS=',' read -r -a extra_aks <<< "$HARBOR_EXTRA_AK"
+    for ak in "${extra_aks[@]}"; do
+      extra_args+=("--ak" "$ak")
+    done
+  fi
+  if [[ -n "${HARBOR_AGENT_TIMEOUT_MULTIPLIER:-}" ]]; then
+    extra_args+=(--agent-timeout-multiplier "$HARBOR_AGENT_TIMEOUT_MULTIPLIER")
+  fi
+  PYTHONPATH="$SCRIPT_DIR/agents${PYTHONPATH:+:$PYTHONPATH}" "$HARBOR" run \
+    --path "$TASK_PATH" --agent "$adapter" --model "$model" \
+    --ak "version=$version" ${extra_args[@]+"${extra_args[@]}"} --env-file "$ENV_FILE" --n-attempts "$ATTEMPTS" \
+    --jobs-dir "$SCRIPT_DIR/jobs" --job-name "$job" --n-concurrent 1 --yes --delete &
+  harbor_pid=$!
+  monitor_pid=""
+  if [[ "${HARBOR_PROGRESS:-0}" == 1 ]]; then
+    python3 "$SCRIPT_DIR/live-progress.py" "$SCRIPT_DIR/jobs/$job" "$harbor_pid" "$agent" &
+    monitor_pid=$!
+  fi
+  if ! wait "$harbor_pid"; then
+    failures+=("$agent")
+  fi
+  if [[ -n "$monitor_pid" ]]; then
+    kill "$monitor_pid" 2>/dev/null || true
+    wait "$monitor_pid" 2>/dev/null || true
+  fi
+done
+python3 "$SCRIPT_DIR/summarize.py" "$SCRIPT_DIR/jobs" "${job_names[@]}"
+if (( ${#failures[@]} )); then
+  printf 'Harbor command failures: %s\n' "${failures[*]}" >&2
   exit 1
 fi
