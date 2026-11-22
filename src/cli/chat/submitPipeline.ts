@@ -116,7 +116,7 @@ export async function submit(deps: ChatScreenDeps, value: string) {
   }
   if (result === 'exit') return shutdown();
   if (result === 'handled') {
-    if (value === '/clear') {
+    if (value === '/clear' || value === '/new') {
       loadTasksFromStore().then(t => { setVisibleTasks(t); setTaskBarPadding(0); }).catch(() => undefined);
     }
     return;

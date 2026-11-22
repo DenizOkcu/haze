@@ -376,12 +376,15 @@ describe('handleSlashCommand', () => {
     const ctx = mockContext({newSession});
     expect(await handleSlashCommand('/new', ctx)).toBe('handled');
     expect(newSession).toHaveBeenCalled();
+    expect(ctx.clearConversation).toHaveBeenCalledOnce();
+    expect(vi.mocked(ctx.clearConversation).mock.invocationCallOrder[0]).toBeLessThan(newSession.mock.invocationCallOrder[0]!);
   });
 
   it('reports session persistence unavailable for /new without a callback', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/new', ctx)).toBe('handled');
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('unavailable'));
+    expect(ctx.clearConversation).not.toHaveBeenCalled();
   });
 
   it('compacts the conversation for /compact when wired, forwarding args', async () => {

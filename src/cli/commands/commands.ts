@@ -70,20 +70,25 @@ function exactOrArgs(command: string): SlashCommand['match'] {
   return value => value === command ? {args: ''} : value.startsWith(`${command} `) ? {args: value.slice(command.length).trim()} : false;
 }
 
+async function clearChat(ctx: CommandContext) {
+  await ctx.clearConversation();
+  await clearTasks();
+}
+
 const SLASH_COMMANDS: SlashCommand[] = [
   {match: value => value === '/exit' || value === '/quit' ? {args: ''} : false, run: () => 'exit'},
   {match: exact('/help'), run: (_args, ctx) => { ctx.addSystemMessage(formatCommandHelp(COMMAND_HELP_ENTRIES)); return HANDLED; }},
   {match: exact('/context'), run: async (_args, ctx) => { ctx.addSystemMessage(ctx.getContextReport ? await ctx.getContextReport() : 'Context overview is unavailable.'); return HANDLED; }},
   {match: exact('/session'), run: (_args, ctx) => { ctx.addSystemMessage(ctx.sessionInfo?.() ?? 'Session persistence is unavailable.'); return HANDLED; }},
   {match: exactOrArgs('/resume'), run: async (args, ctx) => { if (ctx.resumeSession) await ctx.resumeSession(args || undefined); else ctx.addSystemMessage('Session persistence is unavailable.'); return HANDLED; }},
-  {match: exact('/new'), run: async (_args, ctx) => { if (ctx.newSession) await ctx.newSession(); else ctx.addSystemMessage('Session persistence is unavailable.'); return HANDLED; }},
+  {match: exact('/new'), run: async (_args, ctx) => { if (ctx.newSession) { await clearChat(ctx); await ctx.newSession(); } else ctx.addSystemMessage('Session persistence is unavailable.'); return HANDLED; }},
   {match: exactOrArgs('/compact'), run: async (args, ctx) => {
     if (ctx.compactConversationLlm) await ctx.compactConversationLlm(args || undefined);
     else if (ctx.compactConversation) ctx.compactConversation(args || undefined);
     else ctx.addSystemMessage('Compaction is unavailable.');
     return HANDLED;
   }},
-  {match: exact('/clear'), run: async (_args, ctx) => { await ctx.clearConversation(); await clearTasks(); return HANDLED; }},
+  {match: exact('/clear'), run: async (_args, ctx) => { await clearChat(ctx); return HANDLED; }},
   {match: exactOrArgs('/logs'), run: async (args, ctx) => await handleLogsCommand(args, ctx)},
   {match: exact('/editor'), run: async (_args, ctx) => {
     if (!ctx.composeInEditor) {
