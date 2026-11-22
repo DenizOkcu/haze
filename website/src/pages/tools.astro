@@ -92,7 +92,7 @@ const toc = [
                 <tr><td>graphRebuild</td><td>Build or incrementally refresh the graph: deterministic tree-sitter extraction, no LLM cost; incremental rebuilds re-parse only changed files.</td></tr>
               </tbody>
             </table>
-            <p>The graph is a persistent, deterministic symbol map for JavaScript/TypeScript (tree-sitter WASM with vendored grammars), stored under <code>~/.haze/graphs/&lt;workspace-key&gt;</code> — never inside your repository. Build it with <code>/graph</code> or <code>/init</code>. Edges carry <code>EXTRACTED</code>/<code>INFERRED</code> confidence, stale results are annotated until rebuilt, file mutations attach a bounded reverse-dependency advisory, and read-only graph tools also reach fleet workers.</p>
+            <p>The graph is a persistent, deterministic, language-agnostic symbol map (tree-sitter WASM with vendored grammars — JS/TS, Python, Go, Rust, Java, C/C++, C#, Ruby, PHP, Kotlin, Lua, Bash), stored under <code>~/.haze/graphs/&lt;workspace-key&gt;</code> — never inside your repository. Build it with <code>/graph</code> or <code>/init</code>. Edges carry <code>EXTRACTED</code>/<code>INFERRED</code> confidence, stale results are annotated until rebuilt, file mutations attach a bounded reverse-dependency advisory, and read-only graph tools also reach fleet workers.</p>
           </section>
 
           <section id="shell">

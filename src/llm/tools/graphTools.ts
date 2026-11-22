@@ -177,7 +177,7 @@ export const graphTools: ToolSet = {
       try {
         const result = await buildWorkspaceGraph({force});
         if (result.graph.nodes.length === 0) {
-          return {ok: true, toolName: 'graphRebuild', files: 0, nodes: 0, edges: 0, note: 'No supported source files found (js/ts/tsx/jsx only for now). Nothing to map.'};
+          return {ok: true, toolName: 'graphRebuild', files: 0, nodes: 0, edges: 0, note: 'No supported source files found in the workspace (js/ts, python, go, rust, java, c/c++, c#, ruby, php, kotlin, lua, bash). Nothing to map.'};
         }
         return {
           ok: true,

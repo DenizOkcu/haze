@@ -19,7 +19,7 @@ import {walkDir} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {createIgnoreClassifier} from '../../llm/tools/gitIgnore.js';
 import {isProtectedSecretPath} from '../safety/secretPaths.js';
-import {contentHash, extractFile, isGraphSupportedExtension, EXTRACTOR_VERSION, MAX_SOURCE_BYTES, type FileExtraction} from './extract.js';
+import {contentHash, extractFile, isGraphSupportedExtension, resolveImportSpecifier, EXTRACTOR_VERSION, MAX_SOURCE_BYTES, type FileExtraction} from './extract.js';
 import {detectCommunities} from './analyze.js';
 import {GRAPH_SCHEMA_VERSION, symbolNodeId, type CodeGraph, type GraphEdge, type GraphNode} from './model.js';
 import {graphStoreFor, pruneExtractionCache, readCachedExtraction, writeCachedExtraction, writeGraph, type GraphStore} from './store.js';
@@ -73,32 +73,6 @@ export function ensureGraphInBackground(deps: {build?: () => Promise<GraphBuildR
     backgroundBuildInFlight = undefined;
   });
   return backgroundBuildInFlight;
-}
-
-/** Candidate path resolutions for a relative import specifier (extensionless, ESM `.js`-style rewriting, index files). */
-function resolveImportSpecifier(fromFile: string, specifier: string, fileSet: Set<string>): string | undefined {
-  if (!specifier.startsWith('.')) return undefined; // package imports carry no workspace edge
-  const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), specifier));
-  if (fileSet.has(base)) return base;
-  const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'];
-  // NodeNext ESM rewrites: `./foo.js` may name foo.ts; strip the emitted
-  // extension and try every source extension (including the extensionless file).
-  for (const emitted of ['.js', '.mjs', '.cjs', '.jsx']) {
-    if (base.endsWith(emitted)) {
-      const stem = base.slice(0, -emitted.length);
-      if (fileSet.has(stem)) return stem;
-      for (const extension of extensions) {
-        if (fileSet.has(`${stem}${extension}`)) return `${stem}${extension}`;
-      }
-    }
-  }
-  for (const extension of extensions) {
-    if (fileSet.has(`${base}${extension}`)) return `${base}${extension}`;
-  }
-  for (const index of ['/index.ts', '/index.tsx', '/index.js']) {
-    if (fileSet.has(`${base}${index}`)) return `${base}${index}`;
-  }
-  return undefined;
 }
 
 /** Attribute a source line to the nearest preceding symbol (call/heritage site), else the file node. */
@@ -247,7 +221,7 @@ export function resolveGraph(extractions: Map<string, FileExtraction>): {nodes: 
     const importedBindingToSymbol = new Map<string, string>();
 
     for (const entry of extraction.imports) {
-      if (!entry.specifier.startsWith('.')) continue;
+      // Per-language resolution: package/namespace/system specifiers return undefined.
       const targetFile = resolveImportSpecifier(file, entry.specifier, fileSet);
       if (!targetFile) continue;
       edges.push({source: file, target: targetFile, relation: 'imports', confidence: 'EXTRACTED', file, line: entry.line});
