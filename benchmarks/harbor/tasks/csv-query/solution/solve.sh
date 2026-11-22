@@ -138,7 +138,7 @@ function main() {
   }
   if (sortIdx >= 0) {
     const keyed = data.map((r, i) => [r[sortIdx] !== undefined ? r[sortIdx] : "", i, r]);
-    keyed.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+    keyed.sort((a, b) => (Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])) || a[1] - b[1]));
     data = keyed.map((k) => k[2]);
   }
 

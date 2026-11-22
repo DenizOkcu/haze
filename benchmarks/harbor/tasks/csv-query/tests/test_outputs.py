@@ -4,16 +4,17 @@ Runs `node /app/csv-query.js ...` as a subprocess for each case and asserts
 exact stdout, stderr routing, and exit codes.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
 
-APP = Path("/app")
+APP = Path(os.environ.get("CSV_QUERY_APP", "/app"))
 CLI = APP / "csv-query.js"
 DATA = APP / "data.csv"
 
 
-def run(*args: str, cwd: str = "/tests") -> subprocess.CompletedProcess:
+def run(*args: str, cwd: str = "/tmp") -> subprocess.CompletedProcess:
     return subprocess.run(
         ["node", str(CLI), *args],
         capture_output=True,
@@ -172,3 +173,19 @@ def test_malformed_csv_unclosed_quote_exits_2() -> None:
     result = run(path)
     assert result.returncode == 2
     assert result.stderr.strip() != ""
+
+
+def test_sort_stability_and_utf8_byte_order(tmp_path: Path) -> None:
+    path = tmp_path / "sort.csv"
+    path.write_text("key,id\n\ue000,first\n😀,second\n\ue000,third\n", encoding="utf-8")
+    result = run("--sort", "key", str(path))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "key\tid\n\ue000\tfirst\n\ue000\tthird\n😀\tsecond\n"
+
+
+def test_no_final_newline_and_empty_field(tmp_path: Path) -> None:
+    path = tmp_path / "last.csv"
+    path.write_text('a,b\nx,', encoding="utf-8")
+    result = run("--where", "b=", str(path))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "a\tb\nx\t\n"
