@@ -290,6 +290,21 @@
       background: var(--panel);
     }
 
+    .benchmark-intro {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.35rem 1rem;
+      padding: 0.9rem 1.25rem;
+      border-bottom: 1px solid var(--rule-strong);
+    }
+
+    .benchmark-intro p { margin: 0; color: var(--ink); font-size: 0.8rem; }
+    .benchmark-intro span { color: var(--ink-3); font-size: 0.7rem; }
+
+    .bench-track .bench-timeout { opacity: 0.35; }
+
     .benchmark-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -301,6 +316,8 @@
       background: var(--panel);
       padding: 1.1rem 1.25rem 1.25rem;
     }
+
+    .benchmark-cell:last-child { grid-column: 1 / -1; }
 
     .benchmark-cell h3 {
       margin: 0 0 0.2rem;
@@ -317,7 +334,7 @@
 
     .bench-row {
       display: grid;
-      grid-template-columns: 6.2rem 1fr 4.6rem;
+      grid-template-columns: 6.2rem minmax(0, 1fr) 5.6rem;
       align-items: center;
       gap: 0.7rem;
       margin: 0.55rem 0;
