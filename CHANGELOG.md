@@ -6,6 +6,7 @@
 
 - On-demand Git, code graph, and LSP tool groups: clear requests load relevant groups automatically, and the agent can load additional groups during a goal.
 - Dedicated Git tools for repository inspection and local mutations, plus non-interactive fetch, pull, and workspace-confined clone. Pull defaults to fast-forward only.
+- The workspace code graph is now language-agnostic: in addition to JavaScript/TypeScript it extracts Python, Go, Rust, Java, C, C++, C#, Ruby, PHP, Kotlin, Lua, and Bash from vendored tree-sitter WASM grammars, with per-language cross-file import resolution (Python relative imports, C/C++ quoted includes, Rust `crate::` paths, Java package paths, Ruby/PHP/Bash/Lua require-style imports) where the language has a file-based import system.
 
 ## 1.7.12 - 2026-11-20
 

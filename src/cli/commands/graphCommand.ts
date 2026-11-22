@@ -43,7 +43,7 @@ export async function handleGraphCommand(args: string, ctx: CommandContext): Pro
   try {
     const result = await buildWorkspaceGraph({force});
     if (result.graph.nodes.length === 0) {
-      ctx.addSystemMessage('No supported source files found (js/ts/tsx/jsx). Nothing to map.');
+      ctx.addSystemMessage('No supported source files found in the workspace (js/ts, python, go, rust, java, c/c++, c#, ruby, php, kotlin, lua, bash). Nothing to map.');
       return 'handled';
     }
     const report = renderGraphReport(buildGraphIndex(result.graph), {

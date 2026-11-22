@@ -10,7 +10,8 @@
     "jscpd",
     "linkedom",
     "turndown",
-    "tree-sitter-wasms"
+    "@vscode/tree-sitter-wasm",
+    "tree-sitter-wasm"
   ],
   "rules": {
     "types": "off"
