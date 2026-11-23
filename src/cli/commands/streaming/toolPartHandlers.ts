@@ -4,7 +4,7 @@ import {DEFAULT_TOOL_DEADLINE_MS, SUBAGENT_TOOL_DEADLINE_MS, isToolBudgetBlocked
 import {isToolDeadlineExceeded} from '../../../core/deadline.js';
 import {isDuplicateSkippedOutput, safeToolFailureDetails, toolOutputOk} from '../../../core/agent/toolResults.js';
 import {validationSummaryFromOutput} from '../../../core/agent/workState.js';
-import {toolResultSummary} from '../formatters.js';
+import {toolResultSummary} from '../../chat/toolSummaries.js';
 import {toolDiffFromResult, type NativeToolCall, type ToolGroupRenderer} from './toolGroupRenderer.js';
 import {isMalformedToolInputError, toolInputProblemFromError} from './toolCallRecovery.js';
 import {logEntry, rememberContextFilesFromToolOutput, subagentTokenEstimate} from './turnRuntime.js';

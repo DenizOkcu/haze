@@ -12,7 +12,7 @@ import {type TurnExecutionState} from '../../../core/agent/completionController.
 import {isValidationRerunToolCall} from '../../../core/agent/turnPolicy.js';
 import {COMPACTION_LLM_MAX_OUTPUT_TOKENS, COMPACTION_LLM_MIN_OLDER_TOKENS, type ToolExecutionBudgetState, type TurnBudget} from '../../../core/agent/budgets.js';
 import {toolsContextFor} from '../../../llm/tools/toolContext.js';
-import {busyToolLabel, toolCallSummary} from '../formatters.js';
+import {busyToolLabel, toolCallSummary} from '../../chat/toolSummaries.js';
 import type {StreamCallbacks, TurnExecutionOptions} from '../streaming.js';
 import {sanitizeAssistantText, assistantDisplayText, normalizeAssistantText, shouldStartAssistantStream} from './assistantText.js';
 import {finalizeAssistantSegment, finalizePendingAssistantBeforeTool} from './assistantSegments.js';

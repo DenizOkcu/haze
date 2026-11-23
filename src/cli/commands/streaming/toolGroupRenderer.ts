@@ -1,6 +1,6 @@
 import {agentEvent, type AgentEventSink} from '../../../core/agent/events.js';
 import {appendLogEntry as logAppend, type LlmLog, type LlmLogEntry} from '../../../core/log/llmLog.js';
-import {toolCallSummary, compact} from '../formatters.js';
+import {toolCallSummary, compact} from '../../chat/toolSummaries.js';
 import {stripTerminalControlSequences} from '../../../ui/terminalSanitize.js';
 import {formatElapsedTimeWhole, formatSeconds} from '../../../utils/format.js';
 

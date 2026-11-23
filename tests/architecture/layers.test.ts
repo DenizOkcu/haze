@@ -20,6 +20,11 @@ function allSourceFiles(): string[] {
   return fs.readdirSync(srcRoot, {withFileTypes: true}).flatMap(entry => entry.isDirectory() ? sourceFiles(entry.name) : []);
 }
 
+/** Every import specifier (`from '…'` or `import('…')`) in a source file. */
+function importSpecifiers(file: string): string[] {
+  return [...fs.readFileSync(file, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)].map(match => match[1]!);
+}
+
 /** Layers that files under `fromLayer` reach through relative imports (`./x`, ../y/z). */
 function importedLayers(fromLayer: string): Array<{file: string; layer: string; specifier: string}> {
   const edges: Array<{file: string; layer: string; specifier: string}> = [];
@@ -60,5 +65,13 @@ describe('layer boundaries', () => {
 
   it('core never imports from llm (the tool layer sits above core, never below it)', () => {
     expect(importedLayers('core').filter(edge => edge.layer === 'llm')).toEqual([]);
+  });
+
+  it('the turn engine does not import the transcript formatters (ARCH-03)', () => {
+    const engine = path.join(srcRoot, 'cli', 'commands', 'streaming');
+    const offenders = sourceFiles('cli/commands/streaming')
+      .filter(file => importSpecifiers(file).some(specifier => /(^|\/)formatters\.js$/.test(specifier)))
+      .map(file => path.relative(engine, file));
+    expect(offenders).toEqual([]);
   });
 });
