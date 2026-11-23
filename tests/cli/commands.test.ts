@@ -246,6 +246,19 @@ describe('handleSlashCommand', () => {
     expect(unsetCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('provider default (no parameter sent)'));
   });
 
+  it('documents that off means none while unset sends no parameter (UX-09)', async () => {
+    const helpCtx = mockContext();
+    await handleSlashCommand('/help', helpCtx);
+    expect(helpCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/reasoning <level|off|unset|reset|status>'));
+    expect(helpCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('off = none'));
+    const statusCtx = mockContext();
+    await handleSlashCommand('/reasoning status', statusCtx);
+    expect(statusCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('off = none'));
+    const pickerCtx = mockContext();
+    await handleSlashCommand('/reasoning', pickerCtx);
+    expect(pickerCtx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('off = none'));
+  });
+
 
   it('treats /create-skill as an unknown command now that skills use the picker', async () => {
     const ctx = mockContext();

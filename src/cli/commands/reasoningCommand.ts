@@ -45,7 +45,7 @@ export function resolveReasoningCommand(args: string, input: {current: ResolvedR
   const scope = input.modelSelector ? ` for ${input.modelSelector}` : '';
   if (!value) return {action: 'open-picker'};
   if (value === 'status') {
-    return {action: 'status', message: `Reasoning effort${scope}: ${describeChoice(input.current)}. Set with /reasoning <level> (this model, this session), /reasoning unset to send no reasoning parameter, or /reasoning reset to fall back to the saved/default level. Levels: ${LEVELS_LIST}.`};
+    return {action: 'status', message: `Reasoning effort${scope}: ${describeChoice(input.current)}. Set with /reasoning <level> (this model, this session), /reasoning unset to send no reasoning parameter, or /reasoning reset to fall back to the saved/default level. Levels: ${LEVELS_LIST} (off = none).`};
   }
   if (value === REASONING_RESET) {
     const fallback = resolveReasoningChoice(undefined, input.stored);
@@ -78,7 +78,7 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
     if (selected && reasoningLevelsForProvider(selected.provider, selected.model).length === 0) {
       ctx.addSystemMessage(`No adjustable reasoning levels are known for ${selected.model}. Choose a supported model via /model or configure its reasoning levels; unset sends no parameter.`);
     } else {
-      ctx.addSystemMessage('Choose a reasoning effort level for the active model, for this session. unset sends no reasoning parameter (provider default); reset falls back to the saved or default level.');
+      ctx.addSystemMessage('Choose a reasoning effort level for the active model, for this session. off = none; unset sends no reasoning parameter (provider default); reset falls back to the saved or default level.');
     }
     return 'handled';
   }
@@ -98,7 +98,7 @@ export async function handleReasoningCommand(args: string, ctx: CommandContext):
     }
     if (value === 'status') {
       const applied = current.level && levels.includes(current.level) ? describeChoice(current) : 'provider default (no parameter sent)';
-      ctx.addSystemMessage(`Reasoning effort for ${modelSelector}: ${applied}. ${levels.length ? `Supported levels: ${levels.join(', ')}.` : support === 'unknown' ? 'Reasoning support is unknown for this model.' : 'Reasoning effort is unsupported for this model.'}`);
+      ctx.addSystemMessage(`Reasoning effort for ${modelSelector}: ${applied}. ${levels.length ? `Supported levels: ${levels.join(', ')} (off = none); unset sends no parameter (provider default).` : support === 'unknown' ? 'Reasoning support is unknown for this model.' : 'Reasoning effort is unsupported for this model.'}`);
       return 'handled';
     }
   }
