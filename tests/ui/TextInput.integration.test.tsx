@@ -100,3 +100,56 @@ it('keeps masked Unicode/paste content out of display and history', async () => 
     expect(history).not.toHaveBeenCalled();
   } finally { await fixture.close(); }
 });
+
+it('closes the suggestion list with Esc before clearing the draft, and keeps a cleared draft recoverable with Up (UX-02)', async () => {
+  const submit = vi.fn();
+  const escape = vi.fn();
+  const rows = vi.fn();
+  const fixture = inkHarness(<TextInput placeholder="Ask haze" onSubmit={submit} onEscape={escape} onRowsChange={rows}
+    historyItems={['earlier']} suggestions={[{value: '/help', description: 'Show commands'}, {value: '/themes', description: 'Themes'}]} />);
+  try {
+    await fixture.app.waitUntilRenderFlush();
+    // Autocomplete list open: the first Esc only closes it; the draft is submitted as typed.
+    fixture.stdin.write('/he');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('/help');
+    fixture.stdin.write('\x1b');
+    await expect.poll(() => rows.mock.calls.at(-1)).toEqual([{input: 1, suggestions: 0}]);
+    expect(escape).not.toHaveBeenCalled();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['/he']]);
+    // No list open: Esc clears the draft (placeholder shows, onEscape fires) but Up brings it back.
+    fixture.stdin.write('abc');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('abc');
+    fixture.stdin.write('\x1b');
+    await expect.poll(() => escape.mock.calls.length).toBe(1);
+    await expect.poll(() => fixture.stdout.writes.join('').slice(-400)).toContain('Ask haze');
+    fixture.stdin.write('\x1b[A');
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['/he'], ['abc']]);
+    // Once the restored draft is left with Up again, history navigation continues as before.
+    fixture.stdin.write('xyz');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('xyz');
+    fixture.stdin.write('\x1b');
+    await expect.poll(() => escape.mock.calls.length).toBe(2);
+    fixture.stdin.write('\x1b[A\x1b[A');
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['/he'], ['abc'], ['abc']]);
+  } finally { await fixture.close(); }
+});
+
+it('consumes the bare-R resume key without typing it (FE-18)', async () => {
+  const submit = vi.fn();
+  const resume = vi.fn();
+  const fixture = inkHarness(<TextInput onSubmit={submit} onResumeKey={resume} />);
+  try {
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('r');
+    await expect.poll(() => resume.mock.calls.length).toBe(1);
+    fixture.stdin.write('x');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('x');
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['x']]);
+  } finally { await fixture.close(); }
+});

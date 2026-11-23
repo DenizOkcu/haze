@@ -141,6 +141,10 @@ export function TextInput({
   const history = useRef<string[]>(historyItems);
   const historyIndex = useRef<number | null>(null);
   const draft = useRef('');
+  // Draft removed by Esc, restorable with Up before history navigation (UX-02).
+  const clearedDraft = useRef<{value: string; pasteBlocks: PasteBlock[]} | null>(null);
+  // `cursor:value` the autocomplete list was dismissed for; it returns once either changes.
+  const [dismissedListFor, setDismissedListFor] = useState<string>();
   const nextPasteId = useRef(1);
   const preferredColumn = useRef<number | null>(null);
   const inputRef = useRef({value, cursor, pasteBlocks});
@@ -163,8 +167,11 @@ export function TextInput({
 
   const suggestionLayers = useInputSuggestions({value, cursor, suggestions, suggestionMode, mask, getMentionSuggestions});
   const {detectedMention, inMentionMode, filteredSuggestions, mentionList, activeMentionIndex, activeSuggestionIndex, activeSuggestion} = suggestionLayers;
+  // Wizard pickers (`always` mode) are exited with Esc, so only chat-mode autocomplete lists absorb the first press.
+  const listDismissed = suggestionMode === 'slash' && dismissedListFor === `${cursor}:${value}`;
 
   function setInput(next: string, nextCursor = next.length, nextPasteBlocks: PasteBlock[] = []) {
+    if (next.length > 0) clearedDraft.current = null;
     preferredColumn.current = null;
     const clampedCursor = Math.max(0, Math.min(nextCursor, next.length));
     inputRef.current = {value: next, cursor: clampedCursor, pasteBlocks: nextPasteBlocks};
@@ -248,6 +255,13 @@ export function TextInput({
     }
 
     if (key.escape) {
+      // An open autocomplete list takes the first Esc: close it and keep the draft.
+      if (suggestionMode === 'slash' && !listDismissed && (inMentionMode ? mentionList.length : filteredSuggestions.length) > 0) {
+        setDismissedListFor(`${cursor}:${value}`);
+        suggestionLayers.resetSelection();
+        return;
+      }
+      if (value.length > 0) clearedDraft.current = {value, pasteBlocks: inputRef.current.pasteBlocks};
       setInput('');
       historyIndex.current = null;
       draft.current = '';
@@ -261,7 +275,7 @@ export function TextInput({
       return;
     }
 
-    if (key.tab && activeSuggestion) {
+    if (key.tab && !listDismissed && activeSuggestion) {
       if (inMentionMode && detectedMention) {
         // Partial replacement of the `@token` range, not the whole input —
         // mention completion fires mid-prompt.
@@ -285,11 +299,11 @@ export function TextInput({
       // submits `read @package.json` (matches slash-command behavior).
       let submittedValue: string;
       let submittedSuggestion: TextInputSuggestion | undefined;
-      if (inMentionMode && detectedMention && activeSuggestion && activeSuggestion.value !== detectedMention.token) {
+      if (!listDismissed && inMentionMode && detectedMention && activeSuggestion && activeSuggestion.value !== detectedMention.token) {
         submittedValue = value.slice(0, detectedMention.start) + activeSuggestion.value + value.slice(detectedMention.end);
         submittedSuggestion = activeSuggestion;
       } else {
-        const shouldUseSuggestion = !!activeSuggestion && activeSuggestion.value !== value.trim() && (suggestionMode === 'always' || value.startsWith('/'));
+        const shouldUseSuggestion = !listDismissed && !!activeSuggestion && activeSuggestion.value !== value.trim() && (suggestionMode === 'always' || value.startsWith('/'));
         submittedValue = shouldUseSuggestion && activeSuggestion ? activeSuggestion.value : value;
         submittedSuggestion = shouldUseSuggestion ? activeSuggestion : undefined;
       }
@@ -298,6 +312,7 @@ export function TextInput({
       setInput('');
       historyIndex.current = null;
       draft.current = '';
+      clearedDraft.current = null;
       nextPasteId.current = 1;
       if (submitted || submitOnEmpty) submitValue(submitted, historyValue);
       return;
@@ -316,9 +331,16 @@ export function TextInput({
     }
 
     if (key.upArrow) {
-      if (suggestionLayers.moveSelection(-1)) return;
-      if (filteredSuggestions.length === 0 && !inMentionMode && moveCursorVertically(-1)) return;
+      if (!listDismissed && suggestionLayers.moveSelection(-1)) return;
+      if ((listDismissed || (filteredSuggestions.length === 0 && !inMentionMode)) && moveCursorVertically(-1)) return;
       preferredColumn.current = null;
+      if (value.length === 0 && historyIndex.current === null && clearedDraft.current) {
+        const restored = clearedDraft.current;
+        clearedDraft.current = null;
+        nextPasteId.current = Math.max(1, ...restored.pasteBlocks.map(block => block.id + 1));
+        setInput(restored.value, restored.value.length, restored.pasteBlocks);
+        return;
+      }
       if (history.current.length === 0) return;
       if (historyIndex.current === null) {
         draft.current = value;
@@ -330,8 +352,8 @@ export function TextInput({
     }
 
     if (key.downArrow) {
-      if (suggestionLayers.moveSelection(1)) return;
-      if (filteredSuggestions.length === 0 && !inMentionMode && moveCursorVertically(1)) return;
+      if (!listDismissed && suggestionLayers.moveSelection(1)) return;
+      if ((listDismissed || (filteredSuggestions.length === 0 && !inMentionMode)) && moveCursorVertically(1)) return;
       preferredColumn.current = null;
       if (historyIndex.current === null) return;
       if (historyIndex.current < history.current.length - 1) {
@@ -400,7 +422,7 @@ export function TextInput({
     }
   }
   setCursorPosition(imeCursor);
-  const displayList = inMentionMode ? mentionList : filteredSuggestions;
+  const displayList = listDismissed ? [] : inMentionMode ? mentionList : filteredSuggestions;
   const displayActiveIndex = inMentionMode ? activeMentionIndex : activeSuggestionIndex;
   const suggestionStart = Math.max(0, displayActiveIndex - Math.max(0, suggestionRows - 1));
   const visibleSuggestions = displayList.slice(suggestionStart, suggestionStart + suggestionRows);
