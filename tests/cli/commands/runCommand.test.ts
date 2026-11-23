@@ -233,6 +233,28 @@ describe('runHeadless: output', () => {
     expect(JSON.parse(writes.join('')).status).toBe('failed');
     expect(code).toBe(1);
   });
+
+  it('strips terminal control sequences from --output text (FE-01)', async () => {
+    const writes = captureStdout();
+    captureStderr();
+    const {runHeadless} = await loadRunCommand({
+      runAgentTurnImpl: (cb) => cb.addMessage({id: 'a1', role: 'assistant', text: 'Answer \u001b]0;pwned\u0007\u001b[2J\u009b31m done \u001b]52;c;QUJD\u0007', streaming: false}),
+    });
+    expect(await runHeadless({prompt: 'do it', output: 'text'})).toBe(0);
+    // No OSC title/clipboard write, no CSI clear screen, no C1 CSI reaches the terminal.
+    expect(writes.join('')).toBe('Answer  done \n');
+  });
+
+  it('strips terminal control sequences from the failed-turn stderr report (FE-01)', async () => {
+    captureStdout();
+    const errs = captureStderr();
+    const {runHeadless} = await loadRunCommand({
+      status: 'failed',
+      runAgentTurnImpl: (cb) => cb.addMessage({role: 'assistant', text: 'Model call failed: \u001b]0;pwned\u0007boom'}),
+    });
+    expect(await runHeadless({prompt: 'do it', output: 'text'})).toBe(1);
+    expect(errs.join('')).toBe('Model call failed: boom\n');
+  });
 });
 
 describe('runHeadless: debug output', () => {

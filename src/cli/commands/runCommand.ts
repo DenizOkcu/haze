@@ -18,6 +18,7 @@ import {FALLBACK_CONTEXT_WINDOW_TOKENS} from '../../core/agent/contextBudget.js'
 import {teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {MAX_TURN_DEADLINE_MS} from '../../core/agent/budgets.js';
 import {NdjsonSink, queueNdjsonWrite} from './ndjsonSink.js';
+import {stripTerminalControlSequences} from '../../ui/terminalSanitize.js';
 
 export type HeadlessOutput = 'text' | 'json' | 'stream-json';
 
@@ -427,9 +428,12 @@ export async function runHeadless(options: HeadlessOptions): Promise<number> {
       return 1;
     }
   } else if (status === 'complete') {
-    process.stdout.write(result + (result.endsWith('\n') ? '' : '\n'));
+    // The model answer can quote control sequences from fetched pages or tool
+    // output; never let them reach the terminal (JSON modes escape them).
+    const text = stripTerminalControlSequences(result);
+    process.stdout.write(text + (text.endsWith('\n') ? '' : '\n'));
   } else {
-    process.stderr.write(`${result || `Turn ${status}.`}\n`);
+    process.stderr.write(`${stripTerminalControlSequences(result) || `Turn ${status}.`}\n`);
   }
   return status === 'complete' ? 0 : 1;
 }
