@@ -35,18 +35,33 @@ function oscRgb(color: string): string | undefined {
   return `${r.toLowerCase()}/${g.toLowerCase()}/${b.toLowerCase()}`;
 }
 
-/** Adopt a theme's foreground/background as the terminal defaults (OSC 10 + 11). Malformed parts are skipped; no-op off-TTY. */
-export function applyTerminalColors(foreground: string, background: string, stream: TerminalColorStream = process.stdout): void {
-  if (!stream.isTTY) return;
+/**
+ * OSC 10/11 are written raw (chalk never sees them), so they need their own
+ * capability gate: only on a TTY that reports truecolor (COLORTERM) or forced
+ * color, and never under NO_COLOR. Terminals without the capability ignore
+ * the sequences anyway, but a dumb/CI capture would otherwise keep the bytes
+ * (FE-13).
+ */
+function oscCapable(env: NodeJS.ProcessEnv): boolean {
+  if (env.NO_COLOR != null && env.NO_COLOR !== '') return false;
+  if (env.TERM === 'dumb') return false;
+  if (env.FORCE_COLOR != null && env.FORCE_COLOR !== '' && env.FORCE_COLOR !== '0' && env.FORCE_COLOR !== 'false') return true;
+  const colorterm = env.COLORTERM?.toLowerCase();
+  return colorterm === 'truecolor' || colorterm === '24bit';
+}
+
+/** Adopt a theme's foreground/background as the terminal defaults (OSC 10 + 11). Malformed parts are skipped; no-op off-TTY or without colour capability. */
+export function applyTerminalColors(foreground: string, background: string, stream: TerminalColorStream = process.stdout, env: NodeJS.ProcessEnv = process.env): void {
+  if (!stream.isTTY || !oscCapable(env)) return;
   const fg = oscRgb(foreground);
   const bg = oscRgb(background);
   if (fg) stream.write(`\u001B]10;rgb:${fg}\u0007`);
   if (bg) stream.write(`\u001B]11;rgb:${bg}\u0007`);
 }
 
-/** Restore the terminal's own default colors (OSC 110 + 111). No-op off-TTY. */
-export function resetTerminalColors(stream: TerminalColorStream = process.stdout): void {
-  if (!stream.isTTY) return;
+/** Restore the terminal's own default colors (OSC 110 + 111). No-op off-TTY or without colour capability. */
+export function resetTerminalColors(stream: TerminalColorStream = process.stdout, env: NodeJS.ProcessEnv = process.env): void {
+  if (!stream.isTTY || !oscCapable(env)) return;
   stream.write('\u001B]110\u0007');
   stream.write('\u001B]111\u0007');
 }
