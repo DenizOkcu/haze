@@ -9,7 +9,8 @@ import {basename} from 'node:path';
  */
 
 function titleEscape(label: string): string {
-  return `\u001B]0;${label}\u0007`;
+  // Emit both BEL- and ST-terminated forms: some terminals only honor one (FE-12).
+  return `\u001B]0;${label}\u0007\u001B]0;${label}\u001B\\`;
 }
 
 export function terminalTitleLabel(cwd: string): string {
@@ -25,7 +26,7 @@ export function terminalTitleLabel(cwd: string): string {
 export function installTerminalTitle(label: string): void {
   if (!process.stdout.isTTY) return;
   process.stdout.write(titleEscape(label));
-  process.once('exit', () => {
+  const restore = () => {
     // Re-check at exit time: the terminal may no longer be attached.
     if (!process.stdout.isTTY) return;
     try {
@@ -33,5 +34,10 @@ export function installTerminalTitle(label: string): void {
     } catch {
       // Best effort only: title restoration must never break shutdown.
     }
-  });
+  };
+  process.once('exit', restore);
+  // FE-12: 'exit' alone misses fatal paths that keep the loop alive or bail
+  // before the normal handler chain; restore on the monitor hooks too.
+  process.on('uncaughtExceptionMonitor', restore);
+  process.on('unhandledRejection', restore);
 }
