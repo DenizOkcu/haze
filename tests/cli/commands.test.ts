@@ -149,9 +149,13 @@ describe('handleSlashCommand', () => {
     expect(ctx.setMode).toHaveBeenCalledWith('model');
   });
 
-  it('sets model directly with /model <name>', async () => {
+  it('rejects a bare unknown model instead of persisting it, and registers an explicit provider:model (UX-10)', async () => {
     const ctx = mockContext();
     expect(await handleSlashCommand('/model gpt-4', ctx)).toBe('handled');
+    expect(ctx.updateSettings).not.toHaveBeenCalled();
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/model provider:model'));
+
+    expect(await handleSlashCommand('/model openrouter:gpt-4', ctx)).toBe('handled');
     expect(ctx.updateSettings).toHaveBeenCalledWith(expect.objectContaining({provider: 'openrouter', model: 'gpt-4'}));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('~/.haze/settings.json'));
   });

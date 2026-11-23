@@ -1,4 +1,4 @@
-import {activeProvider, configuredProviders, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
+import {configuredProviders, modelSelector, resolveModelSelector, upsertProvider} from '../../config/providers.js';
 import type {CommandContext, CommandResult} from './commands.js';
 
 export async function handleModelCommand(value: string, ctx: CommandContext): Promise<CommandResult | undefined> {
@@ -22,14 +22,18 @@ export async function handleModelCommand(value: string, ctx: CommandContext): Pr
     return 'handled';
   }
   if (resolved.status === 'missing') {
-    const provider = activeProvider(ctx.settings);
-    if (!provider) {
-      ctx.addSystemMessage('No provider configured. Run /provider to choose or add a provider before setting a model.');
+    // UX-10: a bare typo must not be silently registered and persisted — only
+    // an explicit `provider:model` selector registers a new model.
+    const colon = selector.indexOf(':');
+    const namedProvider = colon > 0 ? configuredProviders(ctx.settings).find(candidate => candidate.name === selector.slice(0, colon)) : undefined;
+    if (!namedProvider || colon === selector.length - 1) {
+      ctx.addSystemMessage(`Unknown model "${selector}". Pick one with /model, list all with /model list, or register a new one explicitly as /model provider:model.`);
       return 'handled';
     }
-    const nextProvider = provider.models.includes(selector) ? provider : {...provider, models: [...provider.models, selector]};
-    await ctx.updateSettings({provider: provider.name, model: selector, providers: upsertProvider(ctx.settings, nextProvider)});
-    ctx.addSystemMessage(`Model set to ${selector} on ${provider.name}. Saved to ~/.haze/settings.json.`);
+    const model = selector.slice(colon + 1);
+    const nextProvider = namedProvider.models.includes(model) ? namedProvider : {...namedProvider, models: [...namedProvider.models, model]};
+    await ctx.updateSettings({provider: namedProvider.name, model, providers: upsertProvider(ctx.settings, nextProvider)});
+    ctx.addSystemMessage(`Model set to ${model} on ${namedProvider.name}. Saved to ~/.haze/settings.json.`);
     return 'handled';
   }
   await ctx.updateSettings({provider: resolved.provider.name, model: resolved.model});

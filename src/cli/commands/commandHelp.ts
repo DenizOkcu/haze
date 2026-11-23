@@ -7,7 +7,7 @@ export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/help', description: 'Show all available slash commands and what they do.'},
   {usage: '/provider', description: 'Choose a provider, then use it, add/remove models, set API key, toggle image input, or remove it.'},
   {usage: '/model', description: 'Choose a model, or add models from a provider\'s models endpoint.'},
-  {usage: '/model <name-or-provider:name>', description: 'Set a model directly. Selecting a model also sets its provider.'},
+  {usage: '/model <name-or-provider:name>', description: 'Set a configured model, or register a new one explicitly as provider:model (a bare unknown name is rejected). Selecting a model also sets its provider.'},
   {usage: '/model list', description: 'List all configured models across providers.'},
   {usage: '/settings', description: 'Show the configured provider, model, API key status, LSP/MCP servers, skills, and loaded context files.'},
   {usage: '/settings open', description: 'Open ~/.haze/settings.json with the OS default app.'},
