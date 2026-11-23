@@ -1,4 +1,4 @@
-import React, {useEffect, useReducer, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {render, Text, useApp, useWindowSize} from 'ink';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
@@ -529,13 +529,17 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     return runSingleAgentTurnImpl(screenDeps(), value, displayValue, turnOptions, resumeExisting);
   }
 
-  const visible = messages.filter(message => !message.hidden);
-  const activeLiveMessages = liveMessages.filter(message => !message.hidden);
+  // The heavy per-render work below is memoised on the identity of its inputs
+  // (FE-03): the 1 Hz busy heartbeat and every stream delta re-render the
+  // screen, but only changed messages may re-run Markdown root chunking.
+  const activeLiveMessages = useMemo(() => liveMessages.filter(message => !message.hidden), [liveMessages]);
   // Recomputed each busy heartbeat (1 Hz) alongside the elapsed label; the
   // streaming-rate estimate rides the already-live message text, so no extra
   // timer or token bookkeeping is introduced.
   const busyDetail = busy ? busyDetailLabel({messages: activeLiveMessages, fleet}) : undefined;
-  const {staticItems: staticTranscriptItems, streamingItems} = partitionDisplayMessages([...visible, ...activeLiveMessages]);
+  const {staticItems: staticTranscriptItems, streamingItems} = useMemo(
+    () => partitionDisplayMessages([...messages, ...liveMessages].filter(message => !message.hidden)),
+    [messages, liveMessages]);
   const activeSelection = activeModel(settings);
   const placeholder = placeholderForMode(mode, busy);
   const selectedModel = currentModelSelection();
@@ -575,9 +579,15 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     </Text>
   );
   const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
-  const enabledSkillCount = new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size;
-  const metrics = statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount});
-  const inputSuggestions = inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning});
+  const enabledSkillCount = useMemo(
+    () => new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size,
+    [skills, settings]);
+  const metrics = useMemo(
+    () => statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount}),
+    [messages, liveMessages, tokenUsage, enabledSkillCount, backgroundCount]);
+  const inputSuggestions = useMemo(
+    () => inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning}),
+    [mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning]);
   const staticItems: ChatStaticItem[] = [
     {kind: 'header', key: 'header', subtitle: headerSubtitle},
     ...staticTranscriptItems,
