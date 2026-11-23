@@ -292,6 +292,31 @@ describe('git internals protection across tools', () => {
     }
   });
 
+  it("readFile refuses '.git/config.lock', 'config.worktree' and a bare repo's config (SEC-03)", async () => {
+    await seedGitDir();
+    // A config.lock holds the same content as config while git holds the lock.
+    for (const protectedPath of ['.git/config.lock', '.git/config.worktree', '.git/modules/vendor/config.worktree']) {
+      await fs.outputFile(path.join(tmp, ...protectedPath.split('/')), GIT_CONFIG);
+      const result = await run(() => hazeTools.readFile.execute({path: protectedPath}, {abortSignal: undefined}));
+      expect(result, protectedPath).toMatchObject({ok: false, reasonCode: 'git_internals_protected', recoverable: false});
+      expect(JSON.stringify(result), protectedPath).not.toContain('repositoryformatversion');
+    }
+    // A bare repository reachable through the bless set carries the same remote credentials.
+    const bare = path.join(outer, 'backup.git');
+    await fs.ensureDir(bare);
+    await fs.outputFile(path.join(bare, 'config'), GIT_CONFIG);
+    const blessed = (file: string) => ({context: {blessedPaths: [{realPath: file, isDirectory: false}]}});
+    const configRealPath = await fs.realpath(path.join(bare, 'config'));
+    const result = await run(() => hazeTools.readFile.execute({path: path.join(bare, 'config')}, {abortSignal: undefined, context: blessed(configRealPath)}));
+    expect(result).toMatchObject({ok: false, reasonCode: 'git_internals_protected', recoverable: false});
+    expect(JSON.stringify(result)).not.toContain('repositoryformatversion');
+    // Other bare-repo files (HEAD) stay readable.
+    await fs.ensureDir(path.join(tmp, 'local.git'));
+    await fs.outputFile(path.join(tmp, 'local.git', 'HEAD'), 'ref: refs/heads/main\n');
+    const head = await run(() => hazeTools.readFile.execute({path: 'local.git/HEAD'}, {abortSignal: undefined}));
+    expect(head.content).toContain('refs/heads/main');
+  });
+
   it("editing '.gitignore' (the file, not the dir) still works", async () => {
     await seedGitDir();
     await fs.outputFile(path.join(tmp, '.gitignore'), 'node_modules\n');

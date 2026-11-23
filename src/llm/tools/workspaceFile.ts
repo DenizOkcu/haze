@@ -28,8 +28,12 @@ async function assertNotSecretPath(absolutePath: string, realPath: string, input
 const GIT_DIR_NAME = '.git';
 /** Bare-repo directory names (`backup.git/`, `repo.git/`) hold hook-bearing git internals too. */
 const BARE_GIT_DIR_NAME = /\.git$/;
-/** Basenames inside a git directory that stay refused for reads too; hook execution makes all of `hooks/**` sensitive. */
-const PROTECTED_GIT_READ_BASENAMES = new Set(['config', 'credentials']);
+/**
+ * Basenames inside a git directory that stay refused for reads too; hook
+ * execution makes all of `hooks/**` sensitive. `config.lock` holds the config
+ * content while git holds the lock, `config.worktree` the per-worktree config (SEC-03).
+ */
+const PROTECTED_GIT_READ_BASENAMES = new Set(['config', 'config.lock', 'config.worktree', 'credentials']);
 
 function isInsideDirectory(candidate: string, directory: string): boolean {
   if (candidate === directory) return true;
@@ -135,9 +139,10 @@ async function assertNotGitInternals(absolutePath: string, realPath: string, inp
   // Reads: only the credential-bearing and hook entries are refused; other
   // `.git` object reads (e.g. `.git/HEAD`) stay allowed. Submodule gitdirs
   // live under `modules/**`, where config/credentials carry remote URLs at
-  // any depth.
+  // any depth. Bare repos (`backup.git/`) count as git roots for reads too:
+  // their config is reachable through the bless set and carries the same credentials.
   for (const candidate of [absolutePath, realPath]) {
-    const root = gitInternalsRoot(candidate, gitDirs);
+    const root = gitInternalsRoot(candidate, gitDirs, true);
     if (!root) continue;
     const entry = path.relative(root, candidate);
     const [head] = entry.split(path.sep);
