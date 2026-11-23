@@ -65,7 +65,7 @@ text — haze adopts both as the terminal defaults via OSC 10/11 on startup and
 restores them (OSC 110/111) on exit (terminals without support simply ignore
 it). Because unstyled text inherits the terminal foreground, the two MUST be
 themed as a pair: a light background demands dark text and vice versa — the
-test suite enforces WCAG >= 3:1 between them per theme. Keep layering in
+test suite enforces WCAG >= 3:1 between them per theme. The suite also enforces WCAG >= 3:1 for every text role (`accent`, `info`, `muted`, `foreground`, `command`, `success`, `danger`, `warning`) on `background` and for the `success`/`successBg`, `danger`/`dangerBg`, `warning`/`codeBg` pairs (FE-15/UX-18). `accentDim` and `border` are decorative chrome (rules, panel edges) and deliberately exempt from the 3:1 floor. When a source color fails the floor, adjust the role in `registry.ts` and note the deviation in the entry comment and in the port-fidelity test.
 mind: `background` < `surfaceBg`/`codeBg` so surfaces stay visible on the
 canvas. oh-my-zsh themes assume a dark terminal
 and never set backgrounds, so dark ports reuse the established near-black

@@ -99,6 +99,24 @@ describe('theme registry', () => {
     }
   });
 
+  it('keeps every text role readable on its background and on its paired surface (WCAG >= 3:1, FE-15/UX-18)', () => {
+    // Text roles must be readable on the canvas; diff/inline-code pairs must
+    // be readable on their tinted surface. `accentDim` and `border` are
+    // decorative chrome (rules, panel edges) and are deliberately exempt —
+    // documented in src/ui/themes/AGENTS.md.
+    const textRoles = ['accent', 'info', 'muted', 'foreground', 'command', 'success', 'danger', 'warning'] as const;
+    const pairs = [['success', 'successBg'], ['danger', 'dangerBg'], ['warning', 'codeBg']] as const;
+    for (const name of Object.keys(BUILT_IN_THEME_SPECS)) {
+      const t = resolveTheme(name);
+      for (const role of textRoles) {
+        expect(contrast(t[role], t.background), `${name}: ${role} ${t[role]} on background ${t.background}`).toBeGreaterThanOrEqual(3);
+      }
+      for (const [fg, bg] of pairs) {
+        expect(contrast(t[fg], t[bg]), `${name}: ${fg} ${t[fg]} on ${bg} ${t[bg]}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
   it('resolves every built-in theme to a complete #rrggbb palette', () => {
     for (const [name, spec] of Object.entries(BUILT_IN_THEME_SPECS)) {
       const resolved = resolveTheme(name);
@@ -150,7 +168,7 @@ describe('oh-my-zsh theme ports', () => {
     expect(t.accent).toBe('#8787ff');  // ${FG[105]}
     expect(t.command).toBe('#0087d7'); // ${FG[032]}
     expect(t.warning).toBe('#ffaf00'); // ${FG[214]}
-    expect(t.muted).toBe('#3a3a3a');   // ${FG[237]}
+    expect(t.muted).toBe('#8a8a8a');   // ${FG[245]} — lightened from ${FG[237]} for WCAG >= 3:1 (FE-15)
   });
 
   it('agnoster inherits its segment colors (green clean, blue dir, yellow dirty, red retval) over a Solarized palette', () => {
@@ -175,7 +193,7 @@ describe('oh-my-zsh theme ports', () => {
 
   it('bira, dst, clean, bureau keep their defining hues', () => {
     expect(resolveTheme('bira').accent).toBe(ZSH_NAMED_COLORS.green);      // $fg[green]%n@%m
-    expect(resolveTheme('dst').accent).toBe(ZSH_NAMED_COLORS.magenta);     // $fg[magenta]%n
+    expect(resolveTheme('dst').accent).toBe('#ff00ff');                    // ${FG[201]} — brightened from $fg[magenta] for WCAG >= 3:1 (FE-15)
     expect(resolveTheme('clean').accent).toBe(ZSH_NAMED_COLORS.white);     // $fg_bold[white]%n
     expect(resolveTheme('bureau').accent).toBe(ZSH_NAMED_COLORS.green);    // $fg_bold[green]±
     expect(resolveTheme('bureau').command).toBe(ZSH_NAMED_COLORS.white);   // $fg_bold[white]%~
@@ -185,25 +203,32 @@ describe('oh-my-zsh theme ports', () => {
     const dark = resolveTheme('solarized-dark');
     const light = resolveTheme('solarized-light');
     // Same accent → role mapping in both modes (Solarized's design), one accent per role.
-    for (const t of [dark, light]) {
+    // solarized-light substitutes darker accents where the shared one fails
+    // WCAG >= 3:1 on the light canvas (FE-15) — asserted below.
+    for (const t of [dark]) {
       expect(t.accent).toBe('#268bd2');    // blue
       expect(t.accentDim).toBe('#6c71c4'); // violet
-      expect(t.command).toBe('#b58900');   // yellow
-      expect(t.info).toBe('#2aa198');      // cyan
-      expect(t.success).toBe('#859900');   // green
+      expect(t.command).toBe('#b58900');   // yellow (solarized-dark only)
+      expect(t.info).toBe('#2aa198');      // cyan (solarized-dark only)
+      expect(t.success).toBe('#859900');   // green (solarized-dark only)
       expect(t.warning).toBe('#cb4b16');   // orange
       expect(t.danger).toBe('#dc322f');    // red
     }
-    // Dark mode: base0 body, base01 comments, base02 surfaces over base03 canvas.
+    // solarized-light darkens the accents that fail WCAG >= 3:1 on base3 (FE-15).
+    expect(light.command).toBe('#d33682'); // magenta instead of yellow
+    expect(light.info).toBe('#6c71c4');    // violet instead of cyan
+    expect(light.success).toBe('#008700'); // xterm 28 instead of green
+    // Dark mode: base0 body, base00 comments, base02 surfaces over base03 canvas.
+    // muted/codeBg/dangerBg moved to base00/base03 where the source tone fails WCAG >= 3:1 (FE-15).
     expect(dark.background).toBe('#002b36');
     expect(dark.foreground).toBe('#839496');
-    expect(dark.muted).toBe('#586e75');
-    expect(dark.codeBg).toBe('#073642');
+    expect(dark.muted).toBe('#657b83');
+    expect(dark.codeBg).toBe('#002b36');
     expect(dark.surfaceBg).toBe('#073642');
-    // Light mode: full Solarized Light — base3 canvas, base00 body, base1 comments, base2 surfaces.
+    // Light mode: full Solarized Light — base3 canvas, base00 body, base01 comments, base2 surfaces.
     expect(light.background).toBe('#fdf6e3');
     expect(light.foreground).toBe('#657b83');
-    expect(light.muted).toBe('#93a1a1');
+    expect(light.muted).toBe('#586e75');
     expect(light.codeBg).toBe('#eee8d5');
     expect(light.surfaceBg).toBe('#eee8d5');
   });

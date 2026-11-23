@@ -39,18 +39,18 @@ const light: HazeThemeSpec = {
   roles: {
     // Pure white terminal background; layered surfaces stay slightly off-white.
     background: '#ffffff',
-    accent: '#a78bfa',
+    accent: '#7c3aed',    // darkened from #a78bfa for WCAG >= 3:1 on white (FE-15)
     accentDim: '#c4b5fd',
     border: '#6b7280',
     info: '#3b82f6',
     muted: '#6b7280',
     foreground: '#1e293b',
-    command: '#f59e0b',
-    success: '#10b981',
+    command: '#0e7490',   // darkened from #f59e0b (FE-15)
+    success: '#059669',   // darkened from #10b981 (FE-15)
     successBg: '#f0fdf4',
     danger: '#ef4444',
     dangerBg: '#fef2f2',
-    warning: '#f59e0b',
+    warning: '#b45309',   // darkened from #f59e0b so warning/codeBg also passes (FE-15)
     surfaceBg: '#f8fafc',
     codeBg: '#f1f5f9',
   },
@@ -74,9 +74,9 @@ const robbyrussell: HazeThemeSpec = {
     foreground: 'default',
     command: 'cyan',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '234',
@@ -96,13 +96,13 @@ const afMagic: HazeThemeSpec = {
     accentDim: '61',
     border: '237',
     info: '75',
-    muted: '237',
+    muted: '245', // lightened from 237 for WCAG >= 3:1 on the canvas (FE-15)
     foreground: '251',
     command: '32',
     success: '78',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: '214',
     surfaceBg: '234',
     codeBg: '234',
@@ -141,9 +141,9 @@ const agnoster: HazeThemeSpec = {
     foreground: 'default',
     command: 'blue',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '#073642', // base02
     codeBg: '#073642',     // base02
@@ -170,9 +170,9 @@ const bira: HazeThemeSpec = {
     foreground: 'default',
     command: 'blue',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '234',
@@ -199,9 +199,9 @@ const bureau: HazeThemeSpec = {
     foreground: 'default',
     command: 'white',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '235',
@@ -227,9 +227,9 @@ const clean: HazeThemeSpec = {
     foreground: 'default',
     command: 'blue',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '234',
@@ -252,9 +252,9 @@ const cloud: HazeThemeSpec = {
     foreground: 'default',
     command: 'green',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '234',
@@ -273,7 +273,7 @@ const dst: HazeThemeSpec = {
   roles: {
     // Classic dark-terminal canvas, one step under the xterm-256 234 surfaces.
     background: '#121212',
-    accent: 'magenta',
+    accent: '201', // bright magenta: source 'magenta' fails WCAG >= 3:1 on the canvas (FE-15)
     accentDim: 'magenta',
     border: '236',
     info: 'green',
@@ -281,9 +281,9 @@ const dst: HazeThemeSpec = {
     foreground: 'default',
     command: 'blue',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '234',
@@ -307,9 +307,9 @@ const fishy: HazeThemeSpec = {
     foreground: 'default',
     command: 'green',
     success: 'green',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: 'red',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: 'yellow',
     surfaceBg: '234',
     codeBg: '235',
@@ -337,9 +337,9 @@ const steeef: HazeThemeSpec = {
     foreground: 'default',
     command: '118',
     success: '118',
-    successBg: '22',
+    successBg: '16', // black: keeps the source fg (green) at WCAG >= 3:1 on the diff surface (FE-15)
     danger: '161',
-    dangerBg: '52',
+    dangerBg: '16',  // black: keeps the source fg (red) at WCAG >= 3:1 on the diff surface (FE-15)
     warning: '166',
     surfaceBg: '234',
     codeBg: '235',
@@ -378,16 +378,16 @@ const solarizedDark: HazeThemeSpec = {
     accentDim: '#6c71c4', // violet
     border: '#586e75',    // base01 — chrome structure
     info: 'cyan',
-    muted: '#586e75',     // base01 — dark-mode comments
+    muted: '#657b83',     // base00 — base01 fails WCAG >= 3:1 on base03 (FE-15)
     foreground: 'default',
     command: 'yellow',
     success: 'green',
     successBg: '#073642', // base02
     danger: 'red',
-    dangerBg: '#073642',  // base02
+    dangerBg: '#002b36',  // base03 — red on base02 fails WCAG >= 3:1 (FE-15)
     warning: '#cb4b16',   // orange
     surfaceBg: '#073642', // base02
-    codeBg: '#073642',    // base02
+    codeBg: '#002b36',    // base03 — orange on base02 fails WCAG >= 3:1 (FE-15)
   },
 };
 
@@ -418,11 +418,11 @@ const solarizedLight: HazeThemeSpec = {
     accent: 'blue',
     accentDim: '#6c71c4', // violet
     border: '#93a1a1',    // base1 — chrome structure on light
-    info: 'cyan',
-    muted: '#93a1a1',     // base1 — light-mode comments
+    info: '#6c71c4',      // violet — cyan fails WCAG >= 3:1 on base3 (FE-15)
+    muted: '#586e75',     // base01 — base1 fails WCAG >= 3:1 on base3 (FE-15)
     foreground: 'default',
-    command: 'yellow',
-    success: 'green',
+    command: '#d33682',   // magenta — yellow fails WCAG >= 3:1 on base3 (FE-15)
+    success: '28',        // dark green — solarized green fails WCAG >= 3:1 on base3 (FE-15)
     successBg: '#eee8d5', // base2
     danger: 'red',
     dangerBg: '#eee8d5',  // base2
