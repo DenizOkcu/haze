@@ -1,5 +1,6 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {StringDecoder} from 'node:string_decoder';
+import {looksLikeSecret} from '../safety/redaction.js';
 
 export interface BoundedStream {text: string; totalBytes: number; retainedBytes: number; omittedBytes: number}
 export interface BoundedProcessResult {code: number | null; signal: NodeJS.Signals | null; stdout: BoundedStream; stderr: BoundedStream; timedOut: boolean; aborted: boolean; forced: boolean; durationMs: number; error?: string}
@@ -25,11 +26,13 @@ export interface SanitizeEnvOptions {
 }
 
 /**
- * Build a child environment that omits secret-shaped keys: anything matching
+ * Build a child environment that omits secret-shaped entries: keys matching
  * TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL (case-insensitive) plus the caller's
- * extra substrings. Everything else — PATH, HOME, LANG, TERM, TZ, etc. — is
- * passed through untouched. Opt-in only; callers that do not ask for this keep
- * the child inheriting the full environment exactly as before.
+ * extra substrings, and values that are URLs with embedded credentials or
+ * have a known token shape (`DATABASE_URL=postgres://u:p@host`). Everything
+ * else — PATH, HOME, LANG, TERM, TZ, etc. — is passed through untouched.
+ * Opt-in only; callers that do not ask for this keep the child inheriting the
+ * full environment exactly as before.
  */
 export function sanitizeChildEnv(env: NodeJS.ProcessEnv, options: SanitizeEnvOptions = {}): NodeJS.ProcessEnv {
   const extra = (options.extra ?? []).map(marker => marker.trim().toLowerCase()).filter(marker => marker.length > 0);
@@ -37,6 +40,7 @@ export function sanitizeChildEnv(env: NodeJS.ProcessEnv, options: SanitizeEnvOpt
   for (const [key, value] of Object.entries(env)) {
     if (SECRET_ENV_KEY_PATTERN.test(key)) continue;
     if (extra.some(marker => key.toLowerCase().includes(marker))) continue;
+    if (value !== undefined && looksLikeSecret(value)) continue;
     child[key] = value;
   }
   return child;

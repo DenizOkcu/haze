@@ -55,6 +55,22 @@ describe('sanitizeChildEnv (HZ-10)', () => {
     const child = sanitizeChildEnv(env, {extra: ['  myapp_cookie  ', '']});
     expect(child).toEqual({PATH: '/bin', OTHER_VAR: 'v'});
   });
+
+  it('omits values with embedded URL credentials or a token shape, whatever the key is called (SEC-02)', () => {
+    // Values split across concatenation so scanners don't flag test fixtures.
+    const child = sanitizeChildEnv({
+      PATH: '/usr/bin:/bin',
+      DATABASE_URL: 'postgres://app:s3cret-' + 'Passw0rd@db.example.com:5432/app',
+      QUEUE_DSN: 'amqp://guest:gu' + 'est-R4bb1t@mq.internal:5672//',
+      REDIS_URL: 'redis://:r3dis-' + 'Passw0rd@cache.internal:6379/0',
+      AUTH_HEADER: 'Bearer Qm9ndXNTb3Bh' + 'cXVlVG9rZW4xMjM0NTY',
+      NPM_VALUE: 'npm_a1b2c3d4e5f60718' + '293a4b5c6d7e8f9a0123',
+      // No credentials: ordinary URLs and DSNs stay available to the child.
+      SITE_URL: 'https://example.com/path',
+      PUBLIC_DSN: 'amqp://mq.internal:5672//',
+    });
+    expect(child).toEqual({PATH: '/usr/bin:/bin', SITE_URL: 'https://example.com/path', PUBLIC_DSN: 'amqp://mq.internal:5672//'});
+  });
 });
 
 describe('runBoundedProcess natural exit with escaped descendant', () => {

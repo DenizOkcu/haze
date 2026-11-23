@@ -63,6 +63,14 @@ export function redactSecrets(text: string): string {
   return result;
 }
 
+/** URLs with embedded credentials (`scheme://user:password@host`, user may be empty) are secrets whatever the variable is called (SEC-02). */
+const CREDENTIAL_URL_PATTERN = /\/\/[^\s/?#]*:[^\s@/?#]+@/;
+
+/** True when `value` has a known token shape (the same list as `redactSecrets`) or is a URL with embedded credentials (SEC-02). */
+export function looksLikeSecret(value: string): boolean {
+  return CREDENTIAL_URL_PATTERN.test(value) || redactSecrets(value) !== value;
+}
+
 /**
  * Deep redaction for JSON-serializable values: every nested string is passed
  * through `redactSecrets`. Cycles collapse to a marker (same convention as
