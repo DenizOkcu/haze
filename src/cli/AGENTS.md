@@ -20,7 +20,7 @@ CLI and terminal UI orchestration instructions.
 
 Maintainability focus:
 
-- Treat `commands/chat.tsx` as a stateless entrypoint and `chat/ChatScreen.tsx` as orchestration glue; session and wizard behavior belong in `chat/sessionLifecycle.ts` / `chat/wizardDispatch.ts` (+ `chat/wizard/` handler families). New wizard steps are added as one entry in the `WIZARD_STEPS` table in `wizardFlow.ts` (plus a submit handler in the matching `chat/wizard/*Handlers.ts` when the step mutates anything), not as inline branches in `submit()`.
+- Treat `commands/chat.tsx` as a stateless entrypoint and `chat/ChatScreen.tsx` as orchestration glue; session and wizard behavior belong in `chat/sessionLifecycle.ts` / `chat/wizardDispatch.ts` (+ `chat/wizard/` handler families). New wizard steps are added as one entry in the `WIZARD_STEPS` table in `wizardFlow.ts` (plus a submit handler in the matching `chat/wizard/*Handlers.ts` when the step mutates anything), not as inline branches in `submit()`. Wizard steps keep a navigation trail (`chat/wizardTrail.ts`, `useWizardNavigation`): every `setMode` away from a wizard step pushes it, Esc pops one step with the wizard state intact, and only a trail-less step exits to chat; entering `chat` clears the trail (UX-03).
 - Avoid dead React state. If a value is not rendered or passed to durable logic, remove it rather than keeping setter-only state.
 
 - Do not put durable business state only in React state. Sessions, settings, history, tasks, and logs must persist via their `config/` or `core/` modules.

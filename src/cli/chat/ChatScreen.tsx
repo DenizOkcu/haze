@@ -45,6 +45,7 @@ import {loadSkillsWithNotices, initialSkillNoticeState, type SkillNoticeState} f
 import {createPickerOpeners} from './pickerOpeners.js';
 import {useSettingsSelection} from './settingsSelection.js';
 import {useLiveTheme} from './liveTheme.js';
+import {useWizardNavigation} from './wizardTrail.js';
 import {usePromptSession} from './promptSessionState.js';
 import {type Message, type TurnExecutionOptions} from '../commands/streaming.js';
 
@@ -124,7 +125,9 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
-  const [mode, setMode] = useState<Mode>('chat');
+  const [mode, setModeRaw] = useState<Mode>('chat');
+  // Wizard steps keep a trail so Esc goes back one step (chat/wizardTrail.ts).
+  const {setMode, goBack} = useWizardNavigation(setModeRaw);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   // Busy indicator with a one-second heartbeat: ticks while haze is working so
   // the developer always sees rolling activity (elapsed turn time) even when
@@ -322,11 +325,11 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   }
 
   function closeInputList() {
-    if (mode !== 'chat') {
-      setMode('chat');
-      setSessions([]);
-      updateWizard({type: 'reset'});
-    }
+    if (mode === 'chat') return;
+    if (goBack()) return;
+    setMode('chat');
+    setSessions([]);
+    updateWizard({type: 'reset'});
   }
 
   function showWizardMessage(message: string | undefined) {
