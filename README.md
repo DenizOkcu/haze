@@ -250,13 +250,22 @@ for official sources, layouts, support limits and cross-agent setup.
 /model list
 /settings
 /settings open
+/settings edit
+/editor
 /themes
 /themes <name>
-/reasoning [level|unset|reset|status]
+/reasoning [level|off|unset|reset|status]
+/thinking [level|off|unset|reset|status]
 /logs [id]
+/logs <id> view
 /lsp
 /mcp
+/plugin [inspect|install|list|remove]
+/kit
 /init
+/graph
+/graph status
+/graph delete
 /context
 /session
 /resume [id]
@@ -264,11 +273,16 @@ for official sources, layouts, support limits and cross-agent setup.
 /compact [instructions]
 /clear
 /exit
+/quit
 
 /skills
 /tips
 /fleet [--review] [--profile <name>] [--workers <provider:model>] [--concurrency <n>] <prompt>
 ```
+
+`/quit`, `/kit` and `/thinking` are aliases of `/exit`, `/plugin` and `/reasoning`. `off` means reasoning
+level `none`; `unset` sends no reasoning parameter (provider default). `/logs <id> view` pages a raw log
+through `$PAGER`; `/graph status` and `/graph delete` inspect or remove the persisted code graph.
 
 Skill management is a single interactive picker, mirroring `/provider`, `/lsp`, and `/mcp`: generate a custom skill from a description, then show info, enable/disable, validate, or remove. Disabled skills drop out of the model catalog and the `/<name>` command list until re-enabled.
 
@@ -279,6 +293,9 @@ haze --debug         # show model/tool debug logs and write detailed JSONL logs 
 haze --continue      # resume the latest saved session for this workspace
 haze --resume <id>   # resume an exact session id for this workspace
 haze --no-session    # run without durable session storage
+haze --verbose --version   # also print the commit, runtime/executable paths, and the capability registry
+haze -p "prompt" --reasoning xhigh   # one print-mode run with a reasoning effort override (off = none, unset = provider default)
+haze doctor                # print runtime provenance, verify build integrity, show the capability registry
 ```
 
 Non-interactive / print mode:
