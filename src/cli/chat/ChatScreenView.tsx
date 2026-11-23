@@ -10,6 +10,7 @@ import {BusyBar} from './BusyBar.js';
 import {DynamicFrame} from './DynamicFrame.js';
 import {AssistantMarkdownChunkView, MessageView} from './messages.js';
 import {partitionDisplayMessages, type TranscriptStaticItem} from './transcriptPartition.js';
+import {LiveTail} from './LiveTail.js';
 import {statusBarMetrics} from './chatMetrics.js';
 import {inputSuggestionsForState} from './inputSuggestions.js';
 import {fileMentionSuggestions} from './fileMentionSuggestions.js';
@@ -87,15 +88,7 @@ export function ChatScreenView(props: {
           : <MessageView key={item.key} message={item.message} width={replay.contentWidth} />}
     </Static>
     <DynamicFrame rows={terminalRows} columns={contentWidth} sections={{
-      live: streamingItems.length > 0 ? rows => {
-        // Allocate the sum, not a positive minimum for every pending item.
-        const displayed = streamingItems.slice(0, Math.floor(rows / 2));
-        const itemRows = displayed.length > 0 ? Math.floor(rows / displayed.length) : 0;
-        return displayed.map(item => <Box key={item.key} maxHeight={itemRows} flexShrink={0} overflow="hidden">
-          <MessageView message={item.message} width={contentWidth} showHeader={item.showHeader}
-            maxVisibleLines={itemRows - 1} />
-        </Box>);
-      } : undefined,
+      live: streamingItems.length > 0 ? rows => <LiveTail items={streamingItems} width={contentWidth} rows={rows} /> : undefined,
       debug: debug ? <>
         {debugLogs.map((line, index) => <Text key={index} color={theme.muted} wrap="truncate-end">• {line}</Text>)}
         {metrics.hasTokenBreakdown && <Text color={theme.muted} wrap="truncate-end">Tokens: in={formatTokenCount(metrics.effectiveInput)} out={formatTokenCount(metrics.effectiveOutput)} logical={formatTokenCount(tokenUsage.logicalInputEstimate)}</Text>}
