@@ -15,6 +15,11 @@ function sourceFiles(layer: string): string[] {
   return walk(path.join(srcRoot, layer));
 }
 
+/** Every `.ts`/`.tsx` file under `src/`, keyed by workspace-relative path. */
+function allSourceFiles(): string[] {
+  return fs.readdirSync(srcRoot, {withFileTypes: true}).flatMap(entry => entry.isDirectory() ? sourceFiles(entry.name) : []);
+}
+
 /** Layers that files under `fromLayer` reach through relative imports (`./x`, ../y/z). */
 function importedLayers(fromLayer: string): Array<{file: string; layer: string; specifier: string}> {
   const edges: Array<{file: string; layer: string; specifier: string}> = [];
@@ -43,5 +48,13 @@ describe('layer boundaries', () => {
         expect(fs.readFileSync(file, 'utf8'), path.relative(srcRoot, file)).not.toMatch(/from\s*['"](react|ink)['"]/);
       }
     }
+  });
+
+  it('the shared tool-result types live in core, so no layer needs the tool layer for them (ARCH-01)', () => {
+    expect(fs.existsSync(path.join(srcRoot, 'core', 'toolResultTypes.ts'))).toBe(true);
+    const offenders = allSourceFiles()
+      .filter(file => fs.readFileSync(file, 'utf8').includes('llm/toolResultTypes.js'))
+      .map(file => path.relative(srcRoot, file));
+    expect(offenders).toEqual([]);
   });
 });

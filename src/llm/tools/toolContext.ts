@@ -226,7 +226,7 @@ export async function runDedupedTool<T>(toolName: string, input: unknown, contex
       if (['gitFetch', 'gitPull', 'gitClone'].includes(toolName)) ctx.mutationEpoch += 1;
       if (isMutatingTool(toolName) && mutationPathKey && requiresReadFileRecovery(result)) {
         ctx.failedMutationPaths.add(mutationPathKey);
-        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as import('../toolResultTypes.js').ToolFailureReasonCode | undefined : undefined;
+        const reasonCode = typeof result === 'object' && result != null && 'reasonCode' in result ? result.reasonCode as import('../../core/toolResultTypes.js').ToolFailureReasonCode | undefined : undefined;
         ctx.failedMutationReasons.set(mutationPathKey, reasonCode);
         ctx.pathsReadAfterFailedMutation.delete(mutationPathKey);
       }

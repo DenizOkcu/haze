@@ -6,7 +6,7 @@ import {pathExists} from '../../utils/fs.js';
 import type {ModelMessage} from 'ai';
 import {HAZE_DIR} from '../../config/paths.js';
 import type {WorkState} from '../agent/workState.js';
-import type {ValidationKind} from '../../llm/toolResultTypes.js';
+import type {ValidationKind} from '../../core/toolResultTypes.js';
 import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';
 import {decodeSnapshotMessages, encodeSnapshotMessages} from './snapshotCodec.js';
 import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';

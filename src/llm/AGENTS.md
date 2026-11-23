@@ -13,7 +13,7 @@ Model client, prompts, built-in tools, LSP/MCP integration, and tool result type
 - `tools/**` contains implementation helpers split out of `hazeTools.ts`, including managed background-process registration/control.
 - `lsp/` (client/pool/protocol/requests/symbols/workspaceEdit) with `lspTools.ts` provides optional workspace-safe stdio LSP navigation and refactoring: `client.ts` owns JSON-RPC framing and process lifecycle, `pool.ts` owns server selection and turn-scoped client reuse (RH-009), `protocol.ts` owns pure URI/range/symbol/diagnostic shaping, and `requests.ts` owns the workspace-safe request facades the tools layer and its tests program against.
 - `mcp.ts` loads tools from configured MCP servers and skips collisions rather than shadowing built-ins.
-- `toolResultTypes.ts` contains structured result types and guards shared by tools, formatters, and tests.
+- `core/toolResultTypes.ts` contains the structured result types and guards shared by tools, formatters, and tests. It lives in `core/` (not here) so the completion policy, work state and session store can consume it without importing the tool layer (ARCH-01).
 - `webFetch.ts` implements public URL fetching and content extraction behind the `fetch` tool.
 
 ## Built-in tool contract

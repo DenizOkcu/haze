@@ -5,7 +5,7 @@ import {z} from 'zod';
 import {walkDir, type WalkEntry} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
 
-import type {ToolDiffLine} from '../toolResultTypes.js';
+import type {ToolDiffLine} from '../../core/toolResultTypes.js';
 import {storeToolOutput} from '../../core/agent/toolOutputStore.js';
 import {reductionMetrics} from '../../core/toolOutput/reduction.js';
 import {HazeToolError, structuredToolFailure} from './failures.js';

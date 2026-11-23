@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type {CompletionReadiness, TurnExecutionState} from '../../../core/agent/completionController.js';
 import type {RequestIntent} from '../../../core/agent/goalPolicy.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress} from '../../../core/agent/workState.js';
-import type {ValidationKind} from '../../../llm/toolResultTypes.js';
+import type {ValidationKind} from '../../../core/toolResultTypes.js';
 import type {GoalLedgerFrontier} from '../../../core/session/sessionStore.js';
 
 /**

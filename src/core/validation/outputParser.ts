@@ -1,5 +1,5 @@
 import {stripQuotedSpans, type ShellClassification} from '../safety/shellClassifier.js';
-import type {ValidationKind, ValidationSummary} from '../../llm/toolResultTypes.js';
+import type {ValidationKind, ValidationSummary} from '../../core/toolResultTypes.js';
 import {capOutputForProcessing} from '../toolOutput/reduction.js';
 
 function uniq(values: string[]) {

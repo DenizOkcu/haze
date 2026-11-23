@@ -23,6 +23,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
 - `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.
+- `toolResultTypes.ts` — structured tool-result types and guards (`ToolFailureReasonCode`, `ValidationKind`, `ValidationSummary`, `ToolDiffLine`) shared by tools, formatters, the completion policy and the session store. Keep it free of `llm`/`cli` imports: it is what lets `core` consume tool-result contracts without depending on the tool layer (ARCH-01).
 
 ## Contracts
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type {ToolFailureReasonCode} from '../toolResultTypes.js';
+import type {ToolFailureReasonCode} from '../../core/toolResultTypes.js';
 import {resolveWorkspacePath, workspaceRelativePath, workspaceRoot} from '../../utils/path.js';
 import {isGitIgnored} from './fileToolShared.js';
 import {HazeToolError} from './failures.js';

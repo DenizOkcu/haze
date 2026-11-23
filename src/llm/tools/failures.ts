@@ -1,4 +1,4 @@
-import type {ToolFailureReasonCode} from '../toolResultTypes.js';
+import type {ToolFailureReasonCode} from '../../core/toolResultTypes.js';
 
 /**
  * Error thrown by built-in tools to carry a structured failure reason and an

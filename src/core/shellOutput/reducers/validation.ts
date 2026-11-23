@@ -1,4 +1,4 @@
-import type {ValidationSummary} from '../../../llm/toolResultTypes.js';
+import type {ValidationSummary} from '../../../core/toolResultTypes.js';
 
 function groupDiagnostics(summary: ValidationSummary) {
   const grouped = new Map<string, ValidationSummary['diagnostics']>();

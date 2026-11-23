@@ -1,5 +1,5 @@
 import type {ShellClassification} from '../safety/shellClassifier.js';
-import type {ValidationSummary} from '../../llm/toolResultTypes.js';
+import type {ValidationSummary} from '../../core/toolResultTypes.js';
 import type {ReductionContentKind, ReductionParseTier} from '../toolOutput/reduction.js';
 
 type ParseTier = ReductionParseTier;

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type {RequestIntent} from './goalPolicy.js';
-import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../llm/toolResultTypes.js';
+import {isValidationSummary, type ValidationKind, type ValidationSummary} from '../../core/toolResultTypes.js';
 import {toolInputField, toolOutputOk} from './toolResults.js';
 import {workspacePathKey} from '../../utils/path.js';
 import {isSingleForegroundCommand, stripQuotedSpans} from '../safety/shellClassifier.js';

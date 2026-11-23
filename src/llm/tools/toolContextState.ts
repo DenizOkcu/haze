@@ -1,5 +1,5 @@
 import type {ContextFile} from '../../config/contextFiles.js';
-import type {ToolFailureReasonCode} from '../toolResultTypes.js';
+import type {ToolFailureReasonCode} from '../../core/toolResultTypes.js';
 import type {BlessedPath} from '../../core/attachments/readBlessings.js';
 import type {WorkspaceMutationOwner, WorkspaceMutationPolicy} from '../../core/subagent/workspaceMutationPolicy.js';
 import type {PostMutationGraphAdvisory} from './graphAdvisory.js';

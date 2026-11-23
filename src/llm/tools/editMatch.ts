@@ -1,4 +1,4 @@
-import type {ToolDiffLine} from '../toolResultTypes.js';
+import type {ToolDiffLine} from '../../core/toolResultTypes.js';
 
 /**
  * Pure text-matching and diff helpers for the `editFile` / `replaceLines` tools.

@@ -8,7 +8,7 @@ import type {TurnCompletionEvidence} from '../../core/agent/completionController
 import {createSessionGoal} from '../../core/agent/goalPolicy.js';
 import {seedCarriedGoalEvidence, unresolvedFailedCheckIds} from '../../core/agent/workState.js';
 import type {RedEvidence, ValidationOutcome, WorkTaskProgress, WorkState} from '../../core/agent/workState.js';
-import type {ValidationKind} from '../../llm/toolResultTypes.js';
+import type {ValidationKind} from '../../core/toolResultTypes.js';
 import {createToolExecutionBudget, mainTurnBudget, OVERFLOW_SHRINK_FACTOR} from '../../core/agent/budgets.js';
 import {createAbsoluteDeadline, type AbsoluteDeadline} from '../../core/deadline.js';
 import type {ContextUsageAnchor} from '../../core/agent/contextBudget.js';
