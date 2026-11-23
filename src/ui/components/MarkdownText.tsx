@@ -1,6 +1,6 @@
 import React from 'react';
 import {Box, Text} from 'ink';
-import {marked, type Tokens} from 'marked';
+import {Lexer, marked, type Tokens} from 'marked';
 import {cellWidth} from '../textGeometry.js';
 import {wrapDisplayValue} from '../inputBuffer.js';
 import {theme} from '../theme.js';
@@ -128,7 +128,7 @@ function MarkdownBlock({token, width, source, textOverride, compactAfter}: {
     case 'space':
       return <Text> </Text>;
     case 'hr':
-      return <Text color={theme.accentDim}>────────────────────────────────────────</Text>;
+      return <Text color={theme.accentDim}>{'─'.repeat(Math.max(1, width))}</Text>;
     case 'blockquote': {
       const quote = token as Tokens.Blockquote;
       return <Box flexDirection="column" marginY={1}>
@@ -316,18 +316,24 @@ function InlineMarkdown({text}: {text: string}) {
   return <Text>{parts.map((part, index) => renderInlinePart(part, index))}</Text>;
 }
 
-function renderInlinePart(part: {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}, index: number | string) {
-  if (part.kind === 'code') return <Text key={index} color={theme.warning} backgroundColor={theme.codeBg}>{part.text}</Text>;
-  if (part.kind === 'strong') return <Text key={index} bold>{part.text}</Text>;
-  if (part.kind === 'em') return <Text key={index} italic>{part.text}</Text>;
-  if (part.kind === 'link') return <Text key={index} color={theme.accent}>{part.text}</Text>;
-  return <Text key={index}>{part.text}</Text>;
-}
-
-type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'link';
+type InlineKind = 'text' | 'code' | 'strong' | 'em' | 'strongem' | 'del' | 'link';
+type InlinePart = {kind: InlineKind; text: string};
 type InlineAtom = {type: 'word'; kind: InlineKind; text: string} | {type: 'space'};
 
-function splitInlineIntoAtoms(parts: {kind: InlineKind; text: string}[]): InlineAtom[] {
+function renderInlinePart(part: InlinePart, index: number | string) {
+  const key = index;
+  switch (part.kind) {
+    case 'code': return <Text key={key} color={theme.warning} backgroundColor={theme.codeBg}>{part.text}</Text>;
+    case 'strong': return <Text key={key} bold>{part.text}</Text>;
+    case 'em': return <Text key={key} italic>{part.text}</Text>;
+    case 'strongem': return <Text key={key} bold italic>{part.text}</Text>;
+    case 'del': return <Text key={key} strikethrough>{part.text}</Text>;
+    case 'link': return <Text key={key} color={theme.accent}>{part.text}</Text>;
+    default: return <Text key={key}>{part.text}</Text>;
+  }
+}
+
+function splitInlineIntoAtoms(parts: InlinePart[]): InlineAtom[] {
   const atoms: InlineAtom[] = [];
   for (const part of parts) {
     for (const piece of part.text.split(/(\s+)/)) {
@@ -374,8 +380,64 @@ function wrapInlineAtoms(atoms: InlineAtom[], maxWidth: number): InlineAtom[][] 
   return lines.length > 0 ? lines : [[]];
 }
 
-function tokenizeInline(text: string): {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}[] {
-  const out: {kind: 'text' | 'code' | 'strong' | 'em' | 'link'; text: string}[] = [];
+/**
+ * Inline tokens come from marked's inline lexer (FE-08/FE-19), so the
+ * rendered text follows the same GFM rules as the block parse: nested
+ * emphasis, `~~strike~~`, autolinks, images and escapes. Inline HTML is
+ * dropped; links stay plain `text (url)` text (no OSC 8). Falls back to the
+ * hand-rolled tokenizer if the lexer throws on malformed input.
+ */
+export function tokenizeInline(text: string): InlinePart[] {
+  try {
+    return flattenInlineTokens(Lexer.lexInline(text));
+  } catch {
+    return tokenizeInlineFallback(text);
+  }
+}
+
+function flattenInlineTokens(tokens: Tokens.Generic[], inherited: InlineKind = 'text'): InlinePart[] {
+  const out: InlinePart[] = [];
+  const nested = (kind: InlineKind): InlineKind => {
+    if (kind === 'text' || inherited === kind) return inherited;
+    if ((inherited === 'strong' && kind === 'em') || (inherited === 'em' && kind === 'strong')) return 'strongem';
+    return kind;
+  };
+  for (const token of tokens) {
+    switch (token.type) {
+      case 'text':
+      case 'escape':
+        out.push({kind: inherited, text: (token as Tokens.Text).text});
+        break;
+      case 'codespan':
+        out.push({kind: 'code', text: (token as Tokens.Codespan).text});
+        break;
+      case 'strong':
+      case 'em':
+      case 'del':
+        out.push(...flattenInlineTokens((token as Tokens.Strong).tokens ?? [{type: 'text', raw: '', text: (token as Tokens.Strong).text} as Tokens.Text], nested(token.type as 'strong' | 'em' | 'del')));
+        break;
+      case 'link':
+      case 'image': {
+        const {href} = token as Tokens.Link;
+        const label = flattenInlineTokens((token as Tokens.Link).tokens ?? []).map(part => part.text).join('');
+        // An autolink's label is its URL; repeating it would double the text.
+        out.push({kind: 'link', text: label === href ? label : `${label} (${href})`});
+        break;
+      }
+      case 'br':
+        out.push({kind: inherited, text: ' '});
+        break;
+      default:
+        // Inline HTML and anything unrecognised: drop the markup, keep text.
+        if ('text' in token && typeof token.text === 'string' && token.type !== 'html') out.push({kind: inherited, text: token.text});
+        break;
+    }
+  }
+  return out;
+}
+
+function tokenizeInlineFallback(text: string): InlinePart[] {
+  const out: InlinePart[] = [];
   const regex = /`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*|\[([^\]]+)\]\(([^)]+)\)/g;
   let last = 0;
   for (const match of text.matchAll(regex)) {

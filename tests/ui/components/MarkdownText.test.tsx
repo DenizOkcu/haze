@@ -215,3 +215,18 @@ describe('MarkdownText terminal-control sanitization (R2-HZ-4)', () => {
     expect(stripAnsi(raw)).toContain('cmd');
   });
 });
+
+describe('MarkdownText inline fidelity and rule width (FE-08/FE-19)', () => {
+  const text = (content: string, width: number) => stripAnsi(render(<MarkdownText content={content} width={width} />).lastFrame() ?? '').trimEnd();
+
+  it('renders strikethrough, images and nested emphasis without their markup', () => {
+    expect(text('~~x~~ ![a](b) **a *b* c**', 60)).toBe('x a (b) a b c');
+  });
+
+  it('sizes the horizontal rule to the content width', () => {
+    // MarkdownText keeps a two-column margin, so the rule is `width - 2`.
+    // (the test renderer's terminal is 100 columns wide)
+    expect(text('---', 60)).toBe('─'.repeat(58));
+    expect(text('---', 90)).toBe('─'.repeat(88));
+  });
+});

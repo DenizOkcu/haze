@@ -30,6 +30,7 @@ Maintainability focus:
 - Preserve support for headings, lists, blockquotes, code fences with syntax highlighting, inline emphasis/links/code, horizontal rules, and width-aware tables.
 - Treat the final parsed root as unstable while streaming because later text may reclassify it as a setext heading, table, list, or fenced block. Commit only preceding roots; keep source-path leads grouped with their following code fence.
 - Do not assume browser CSS/layout; Ink layout and terminal widths are the source of truth.
+- Inline spans come from marked's inline lexer (`tokenizeInline` → `Lexer.lexInline`, FE-08/FE-19), flattened into `text`/`code`/`strong`/`em`/`strongem`/`del`/`link` parts so the inline pass follows the same GFM rules as the block parse (nested emphasis, `~~strike~~`, autolinks, images as `alt (src)`, escapes). Inline HTML markup is dropped, links stay plain `text (url)` (no OSC 8), and `<hr>` is sized to the content width.
 - Avoid adding dependencies for small Markdown features unless clearly justified.
 
 ## Tests

@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {marked, type Tokens} from 'marked';
-import {markdownRootChunks, renderMarkdownTable} from '../../src/ui/components/MarkdownText.js';
+import {markdownRootChunks, renderMarkdownTable, tokenizeInline} from '../../src/ui/components/MarkdownText.js';
 
 describe('streaming Markdown root chunks', () => {
   it('keeps the active root block live and commits earlier blocks exactly', () => {
@@ -76,5 +76,26 @@ describe('MarkdownText table rendering', () => {
     expect(lines.every(line => line.length <= 50)).toBe(true);
     expect(lines).toContain('│ react   │ ^19.0.0 │ Core hooks used directly   │');
     expect(lines).toContain('│         │         │ across App and detail      │');
+  });
+});
+
+describe('Markdown inline tokens come from marked (FE-08/FE-19)', () => {
+  const plain = (source: string) => tokenizeInline(source).map(part => part.text).join('');
+
+  it.each([
+    ['**a *b* c**', [['strong', 'a '], ['strongem', 'b'], ['strong', ' c']]],
+    ['~~x~~', [['del', 'x']]],
+    ['[t](u)', [['link', 't (u)']]],
+    ['![a](b)', [['link', 'a (b)']]],
+    ['https://x.y', [['link', 'https://x.y']]],
+    ['a_b_c', [['text', 'a_b_c']]],
+  ])('tokenizes %s', (source, expected) => {
+    expect(tokenizeInline(source)).toEqual(expected.map(([kind, text]) => ({kind, text})));
+  });
+
+  it('drops inline HTML markup but keeps its text', () => {
+    expect(plain('\\*not emph\\*')).toBe('*not emph*');
+    expect(plain('x <b>raw</b> y')).toBe('x raw y');
+    expect(plain('see [**docs**](https://d.example)')).toBe('see docs (https://d.example)');
   });
 });
