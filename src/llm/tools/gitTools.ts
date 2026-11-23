@@ -64,6 +64,24 @@ function confinePath(repoRoot: string, inputPath: string): string {
   return path.relative(repoRoot, resolved) || '.';
 }
 
+/** Longest revision, branch, or range accepted in ref-shaped tool inputs. */
+const MAX_REF_LENGTH = 256;
+
+/**
+ * Ref-shaped inputs must name a revision. A leading dash would make git parse
+ * the value as an option (`--exec=…`, `-c key=value`, `-D`), so such inputs
+ * are refused before anything is spawned (SEC-06).
+ */
+function assertRefName(toolName: string, field: string, value: string | undefined): void {
+  if (value === undefined) return;
+  if (value.length > MAX_REF_LENGTH || value.startsWith('-') || /[\s\p{Cc}]/u.test(value)) {
+    throw new HazeToolError(`${field} must be a plain commit, branch, or range, not a git option: ${JSON.stringify(value.slice(0, 80))}.`, 'invalid_argument', {
+      recoverable: true,
+      suggestedNextStep: `Retry ${toolName} with a revision that has no leading dash, whitespace, or control characters.`,
+    });
+  }
+}
+
 interface GitRun {
   code: number | null;
   stdout: string;
@@ -239,6 +257,7 @@ export const gitTools: ToolSet = {
     inputSchema: logInput,
     execute: async (input, context) => runDedupedTool('gitLog', input, context, async () => {
       try {
+        assertRefName('gitLog', 'range', input.range);
         const root = await resolveRepoRoot();
         const confined = input.path ? confinePath(root, input.path) : undefined;
         const limit = input.limit ?? GIT_LOG_DEFAULT_LIMIT;
@@ -263,6 +282,7 @@ export const gitTools: ToolSet = {
     inputSchema: diffInput,
     execute: async (input, context) => runDedupedTool('gitDiff', input, context, async () => {
       try {
+        assertRefName('gitDiff', 'range', input.range);
         const root = await resolveRepoRoot();
         const confined = input.path ? confinePath(root, input.path) : undefined;
         const staged = input.staged ?? false;
@@ -414,6 +434,9 @@ export const gitTools: ToolSet = {
     inputSchema: branchManageInput,
     execute: async (input, context) => runDedupedTool('gitBranchManage', input, context, async () => {
       try {
+        assertRefName('gitBranchManage', 'name', input.name);
+        assertRefName('gitBranchManage', 'newName', input.newName);
+        assertRefName('gitBranchManage', 'startPoint', input.startPoint);
         const root = await resolveRepoRoot();
         const args = (() => {
           switch (input.action) {
@@ -439,6 +462,7 @@ export const gitTools: ToolSet = {
     inputSchema: rebaseInput,
     execute: async (input, context) => runDedupedTool('gitRebase', input, context, async () => {
       try {
+        assertRefName('gitRebase', 'onto', input.onto);
         const root = await resolveRepoRoot();
         const run = await runGit(root, ['rebase', input.onto], context.abortSignal);
         if (run.aborted) return abortedResult('gitRebase');
@@ -456,6 +480,7 @@ export const gitTools: ToolSet = {
     inputSchema: resetInput,
     execute: async (input, context) => runDedupedTool('gitReset', input, context, async () => {
       try {
+        assertRefName('gitReset', 'target', input.target);
         const root = await resolveRepoRoot();
         const run = await runGit(root, ['reset', `--${input.mode}`, input.target], context.abortSignal);
         if (run.aborted) return abortedResult('gitReset');

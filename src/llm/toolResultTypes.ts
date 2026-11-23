@@ -17,6 +17,7 @@ export type ToolFailureReasonCode =
   | 'conflicting_write_modes'
   | 'append_target_missing'
   | 'invalid_line_range'
+  | 'invalid_argument'
   | 'io_error'
   | 'file_too_large'
   | 'blocked_url'

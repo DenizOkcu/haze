@@ -1,9 +1,10 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {hazeTools} from '../../src/llm/hazeTools.js';
+import * as boundedProcess from '../../src/core/process/runBoundedProcess.js';
 import {GIT_LOG_DEFAULT_LIMIT, GIT_DIFF_DEFAULT_LINES, classifyPullFailure} from '../../src/llm/tools/gitTools.js';
 
 // Git tools resolve the repo from process.cwd(); run each call inside a temp
@@ -239,6 +240,36 @@ describe('git tools', () => {
     }
     expect(classifyPullFailure('fatal: unable to access \'https://example.invalid/\': Could not resolve host')).toBeUndefined();
     expect(classifyPullFailure('')).toBeUndefined();
+  });
+
+  it('rejects option-shaped revisions before spawning git (SEC-06)', async () => {
+    initRepo();
+    await fs.outputFile(path.join(tmp, 'a.txt'), 'a');
+    execFileSync('git', ['add', '.'], {cwd: tmp});
+    execFileSync('git', ['commit', '-qm', 'init'], {cwd: tmp});
+    const spawn = vi.spyOn(boundedProcess, 'runBoundedProcess');
+    try {
+      const cases: Array<[Parameters<typeof call>[0], Record<string, unknown>]> = [
+        ['gitReset', {mode: 'hard', target: '--pathspec-from-file=/etc/passwd'}],
+        ['gitReset', {mode: 'mixed', target: '-q'}],
+        ['gitBranchManage', {action: 'delete', name: '-D'}],
+        ['gitBranchManage', {action: 'create', name: 'topic', startPoint: '--force'}],
+        ['gitBranchManage', {action: 'rename', name: 'main', newName: '-m'}],
+        ['gitRebase', {onto: '-c core.pager=true'}],
+        ['gitLog', {range: '--exec=sh'}],
+        ['gitDiff', {range: '--output=/tmp/x'}],
+        ['gitReset', {mode: 'soft', target: 'HEAD extra'}],
+        ['gitRebase', {onto: 'x'.repeat(300)}],
+      ];
+      for (const [name, input] of cases) {
+        const result = await call(name, input);
+        expect(result, `${name} ${JSON.stringify(input)}`).toMatchObject({ok: false, reasonCode: 'invalid_argument', recoverable: true});
+      }
+      // The guard runs before anything is spawned, not after git parses the argument.
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      spawn.mockRestore();
+    }
   });
 
   it('clones into the workspace and refuses escaping or credential-bearing destinations', async () => {
