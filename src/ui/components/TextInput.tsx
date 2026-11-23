@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, useCursor, useInput, useIsScreenReaderEnabled, usePaste, type DOMElement} from 'ink';
-import {cellWidth, graphemes, nextBoundary, offsetAtColumn, previousBoundary, safeInputDisplay} from '../textGeometry.js';
+import {cellWidth, graphemes, nextBoundary, offsetAtColumn, previousBoundary, previousWordBoundary, safeInputDisplay} from '../textGeometry.js';
 import {theme} from '../theme.js';
 import {
   compactPasteBlocksForDisplay,
@@ -391,6 +391,41 @@ export function TextInput({
 
     if (key.ctrl && input === 'o') {
       onToggleTasks?.();
+      return;
+    }
+
+    // Readline-style line editing (UX-13): Ctrl+W deletes the word before the
+    // cursor, Ctrl+U clears to the start of the line, Ctrl+K to the end.
+    // Ink parses a lone control byte as ctrl+letter, but batched bytes arrive
+    // raw in `input` — handle both forms. \x03/\x09/\x0d are excluded: Ink
+    // flags them as interrupt/tab/return before this point.
+    const isRawControl = (ch: string) => {
+      const code = ch.charCodeAt(0);
+      return (code >= 0x01 && code <= 0x1a) && code !== 0x03 && code !== 0x09 && code !== 0x0d;
+    };
+    const rawControls = [...input].filter(isRawControl);
+    const effective = (letter: string, raw: string) => (key.ctrl === true && input === letter) || rawControls.includes(raw);
+    if (effective('w', '\u0017') || effective('u', '\u0015') || effective('k', '\u000b') || effective('a', '\u0001') || effective('e', '\u0005')) {
+      const valueNow = inputRef.current.value;
+      const cursorNow = inputRef.current.cursor;
+      if (effective('w', '\u0017')) {
+        const start = previousWordBoundary(valueNow, cursorNow);
+        if (start < cursorNow) replaceInput(start, cursorNow, '');
+      } else if (effective('u', '\u0015')) {
+        if (cursorNow > 0) replaceInput(0, cursorNow, '');
+      } else if (effective('k', '\u000b')) {
+        if (cursorNow < valueNow.length) replaceInput(cursorNow, valueNow.length, '');
+      } else if (effective('a', '\u0001')) {
+        preferredColumn.current = null;
+        moveValueCursor(0);
+      } else if (effective('e', '\u0005')) {
+        preferredColumn.current = null;
+        moveValueCursor(valueNow.length);
+      }
+      if (rawControls.length > 0) {
+        const printable = [...input].filter(ch => !isRawControl(ch)).join('');
+        if (printable) replaceInput(inputRef.current.cursor, inputRef.current.cursor, printable);
+      }
       return;
     }
 

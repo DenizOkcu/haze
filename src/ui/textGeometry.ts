@@ -10,6 +10,12 @@ export function previousBoundary(text: string, cursor: number): number {
 export function nextBoundary(text: string, cursor: number): number {
   return graphemes(text).find(part => part.end > cursor)?.end ?? text.length;
 }
+/** Start offset of the word before `cursor` (readline Ctrl+W semantics): skip trailing whitespace, then the word. */
+export function previousWordBoundary(text: string, cursor: number): number {
+  const before = text.slice(0, cursor);
+  const word = /\S+\s*$/.exec(before);
+  return word ? word.index : /\s+$/.exec(before)?.index ?? 0;
+}
 /** UTF-16 offsets stay distinct from terminal-cell columns. */
 export function offsetAtColumn(text: string, column: number): number {
   let cells = 0;

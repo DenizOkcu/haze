@@ -139,6 +139,42 @@ it('closes the suggestion list with Esc before clearing the draft, and keeps a c
   } finally { await fixture.close(); }
 });
 
+it('supports readline Ctrl+W/U/K line editing (UX-13)', async () => {
+  const submit = vi.fn();
+  const fixture = inkHarness(<TextInput onSubmit={submit} />);
+  try {
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('hello world');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('hello world');
+    fixture.stdin.write('\u0017'); // Ctrl+W: delete word before cursor
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['hello']]);
+    await fixture.app.waitUntilRenderFlush();
+
+    fixture.stdin.write('abc');
+    await expect.poll(() => fixture.stdout.writes.join('')).toContain('abc');
+    fixture.stdin.write('\u0015'); // Ctrl+U: clear to start
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('q');
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['hello'], ['q']]);
+    await fixture.app.waitUntilRenderFlush();
+
+    fixture.stdin.write('abc');
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\u0001'); // Ctrl+A: cursor to start
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\u000b'); // Ctrl+K: delete to end
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('xy');
+    await fixture.app.waitUntilRenderFlush();
+    fixture.stdin.write('\r');
+    await expect.poll(() => submit.mock.calls).toEqual([['hello'], ['q'], ['xy']]);
+  } finally { await fixture.close(); }
+});
+
 it('consumes the bare-R resume key without typing it (FE-18)', async () => {
   const submit = vi.fn();
   const resume = vi.fn();
