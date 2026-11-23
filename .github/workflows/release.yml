@@ -11,6 +11,12 @@ on:
         required: true
         type: string
 
+# Releases never cancel each other: a publish in progress only queues a later
+# run for the same ref. Different tags are different refs, so they run in parallel (OPS-01).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 # `id-token: write` is required for npm provenance attestations / OIDC trusted
 # publishing (SC-2). Everything else stays read-only.
 permissions:
@@ -20,6 +26,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # SHA-pinned like ci.yml (SC-1); comments record the verified release.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
