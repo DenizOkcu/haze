@@ -23,6 +23,7 @@ program
   .addOption(new Option('--resume <id>', 'resume an exact saved session id for this workspace').conflicts(['continue', 'session']))
   .option('--no-session', 'run without saving or resuming a durable session')
   .option('-p, --prompt <text>', 'print mode: run a single non-interactive turn and print the result (falls back to piped stdin)')
+  .option('--print <text>', 'alias of --prompt: run one non-interactive turn and print the result')
   .option('-m, --model <selector>', 'override the model for this run only — a registered model name or provider:name')
   .addOption(new Option('--reasoning <level>', 'print-mode reasoning effort for this run only — none, minimal, low, medium, high, xhigh, max, or unset (off = none; unset sends no parameter, provider default)').choices(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'unset', 'off']))
   .addOption(new Option('--output <format>', 'print-mode output: plain text, a single JSON result envelope, or a stream-json NDJSON event stream').choices(['text', 'json', 'stream-json']).default('text'))
@@ -45,7 +46,7 @@ Examples:
 Print mode (-p):
   Runs a single agentic turn with the full toolset and guardrails, prints the final assistant
   text, then exits (0 = complete; non-zero = aborted/failed, so CI can gate on the exit code).
-  The prompt comes from -p, otherwise from piped stdin. Piped prompts over 256 KiB are rejected;
+  The prompt comes from -p/--prompt (--print is an alias), otherwise from piped stdin. Piped prompts over 256 KiB are rejected;
   pass a file path and ask haze to read it instead. With --output json the reply is wrapped in a
   single-line { type, status, result, usage } envelope. With --output stream-json haze streams
   one NDJSON agent event per line (turn_start, step_*, message_*, tool_*, retry, turn_end) as the
@@ -138,7 +139,7 @@ program.command('report [id]')
   });
 
 program.action(async () => {
-  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; model?: string; reasoning?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
+  const opts = program.opts<{debug?: boolean; continue?: boolean; resume?: string; session?: boolean; prompt?: string; print?: string; model?: string; reasoning?: string; output?: string; timeout?: string; untilDone?: boolean; version?: boolean; verbose?: boolean}>();
   if (opts.version) {
     // Handled here (not via commander's built-in .version()) so --verbose can
     // enrich it and the bin launcher can answer without loading dist.
@@ -148,12 +149,14 @@ program.action(async () => {
   // Name the terminal tab for the run; no-op unless stdout is a real TTY.
   installTerminalTitle(terminalTitleLabel(process.cwd()));
   // -p takes precedence; otherwise fall back to piped stdin. An empty stdin yields no prompt.
-  const prompt = opts.prompt?.trim() ? opts.prompt : await readStdinPrompt();
+  const promptOption = opts.prompt ?? opts.print;
+  const prompt = promptOption?.trim() ? promptOption : await readStdinPrompt();
   if (opts.resume && !await findSession(opts.resume)) {
     throw new Error(`No session named ${opts.resume} exists for this workspace.`);
   }
   if (prompt) {
     // One-shot runs are always fresh and non-durable; --continue is ignored in this mode.
+    if (opts.continue) process.stderr.write('haze: --continue is ignored in print mode (one-shot runs are non-durable).\n');
     const {runHeadless} = await import('./commands/runCommand.js');
     const code = await runHeadless({
       prompt,
