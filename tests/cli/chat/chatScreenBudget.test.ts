@@ -12,4 +12,8 @@ describe('ChatScreen hygiene (ARCH-05)', () => {
   it('declares every type through a top-level import, never an inline import() type expression', () => {
     expect(screen).not.toMatch(/import\(\s*['"]/);
   });
+
+  it('stays within the ARCH-05 size criterion (at most 450 lines)', () => {
+    expect(lineCount).toBeLessThanOrEqual(450);
+  });
 });

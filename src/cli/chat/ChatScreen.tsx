@@ -1,27 +1,24 @@
 import React, {useEffect, useReducer, useRef, useState} from 'react';
 import {useApp, useWindowSize} from 'ink';
 import {type ModelMessage} from 'ai';
-import type {PromptSession} from '../../llm/systemPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
 import {addInputHistoryItem, readInputHistory} from '../../config/inputHistory.js';
 import {loadTasks as loadTasksFromStore, clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import type {Task} from '../../core/tasks/taskStorage.js';
 import type {HazeSettings} from '../../config/settings.js';
-import {activeModel, providerEndpointFingerprint} from '../../config/providers.js';
+import {activeModel} from '../../config/providers.js';
 import {isSkillEnabled} from '../../config/skillSettings.js';
-import {setActiveTheme, resolveTheme, theme, DEFAULT_THEME_NAME} from '../../ui/theme.js';
-import {applyTerminalColors} from '../../ui/terminalColors.js';
 import {checkpointFromGoalFrontier} from '../commands/streaming/goalCheckpoint.js';
 import {finalizeMessage as finalizeMessageImpl} from './messageFinalize.js';
 import {submit as submitImpl} from './submitPipeline.js';
-import {runSingleAgentTurn as runSingleAgentTurnImpl} from './agentTurnRunner.js';
-import type {ChatScreenDeps, PausedResume, ResumeExisting} from './screenDeps.js';
+import {runAgentTurnWithFollowUps, resumePausedGoal} from './agentTurnRunner.js';
+import type {ChatScreenDeps, PausedResume} from './screenDeps.js';
 import type {HazeSession, SessionSummary} from '../../core/session/sessionStore.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import type {LoadedSkill} from '../../skills/types.js';
 import type {WorkState} from '../../core/agent/workState.js';
-import {MAX_VISIBLE_TASKS} from './TaskBar.js';
+import {taskBarCollapsePadding} from './TaskBar.js';
 import {createChatShutdown} from './shutdown.js';
 import {createResizeSettler} from './resizeGuard.js';
 import {useChatViewModel} from './chatViewModel.js';
@@ -34,20 +31,21 @@ import {createSessionLifecycle} from './sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from './wizardDispatch.js';
 import {randomTipIndex, tipsEnabled} from './tips.js';
 import type {FleetStatus} from './chatMetrics.js';
-import {EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from './turnState.js';
+import {EMPTY_TOKEN_USAGE} from './turnState.js';
 import type {Mode} from '../commands/chatModes.js';
-import {contextFileSignatureMap, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from './userInput.js';
-import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
+import {contextFileSignatureMap, prepareUserInput as prepareUserInputPolicy} from './userInput.js';
 import {currentBranchName, runStartupSequence} from './startupSequence.js';
 import {useFollowUpQueue} from './followUpQueue.js';
 import {useBusyIndicator} from './busyIndicator.js';
 import {useTerminalControl} from './terminalControl.js';
 import {modelThinkingLabel} from '../../utils/modelName.js';
-import {transitionProviderConversation} from '../../core/agent/providerTransition.js';
 import {commandParts} from '../commands/wizardFlow.js';
 import {backgroundProcessCount, subscribeBackgroundProcesses, teardownBackgroundProcesses} from '../../core/process/backgroundRegistry.js';
 import {loadSkillsWithNotices, initialSkillNoticeState, type SkillNoticeState} from './skillNotices.js';
 import {createPickerOpeners} from './pickerOpeners.js';
+import {useSettingsSelection} from './settingsSelection.js';
+import {useLiveTheme} from './liveTheme.js';
+import {usePromptSession} from './promptSessionState.js';
 import {type Message, type TurnExecutionOptions} from '../commands/streaming.js';
 
 export interface ChatOptions {
@@ -96,35 +94,6 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     if (stoppingRef.current) return;
     setMessagesRaw(previous => withDisplayOrders(typeof updater === 'function' ? updater(previous) : updater));
   };
-  const [settings, setSettingsRaw] = useState<HazeSettings>({});
-  const settingsRef = useRef<HazeSettings>({});
-  const defaultSelectionRef = useRef<{provider?: string; model?: string}>({});
-  function setSettings(next: HazeSettings, patch?: HazeSettings) {
-    const previousSelection = currentModelSelection();
-    const previousProvider = activeModel(settingsRef.current)?.provider;
-    // The ref records the global default from `next` (what updateSettings
-    // returned) before the patch merge; unrelated settings writes must not
-    // replace a resumed session's model (merge policy in chat/userInput.ts).
-    defaultSelectionRef.current = {provider: next.provider, model: next.model};
-    settingsRef.current = patch ? mergeSettingsSelection(next, settingsRef.current, patch) : next;
-    const selected = currentModelSelection();
-    const selectedProvider = activeModel(settingsRef.current)?.provider;
-    const changedEndpoint = selectedProvider && (!previousProvider || previousProvider.url !== selectedProvider.url || previousProvider.kind !== selectedProvider.kind);
-    if (patch && previousSelection && selected && (previousSelection.provider !== selected.provider || previousSelection.model !== selected.model || changedEndpoint) && conversationRef.current.length) {
-      conversationRef.current = transitionProviderConversation(conversationRef.current);
-      sessionRecorderRef.current?.recordModelTransition(conversationRef.current, selected);
-      setMessages(messages => [...messages, {role: 'system', text: 'Model changed: previous tool history was converted to text and provider reasoning state was cleared.'}]);
-    }
-    setSettingsRaw(settingsRef.current);
-    if (patch && ('provider' in patch || 'model' in patch)) {
-      if (selected) sessionRecorderRef.current?.recordModelSelection(selected);
-    }
-  }
-  function currentModelSelection() {
-    const {provider, model} = settingsRef.current;
-    const selected = activeModel(settingsRef.current);
-    return provider && model ? {provider, model, ...(selected ? {endpointFingerprint: providerEndpointFingerprint(selected.provider)} : {})} : undefined;
-  }
   const [settingsError, setSettingsError] = useState<string | undefined>();
   const conversationRef = useRef<ModelMessage[]>([]);
   const lastAssistantTextRef = useRef('');
@@ -132,6 +101,8 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   const sessionRef = useRef<HazeSession | undefined>(undefined);
   const sessionRecorderRef = useRef<SessionRecorder | undefined>(undefined);
   if (!sessionRecorderRef.current) sessionRecorderRef.current = createSessionRecorder(() => sessionRef.current);
+  // Settings state and the session-pinned model selection live in chat/settingsSelection.ts.
+  const {settings, settingsRef, defaultSelectionRef, setSettings, setSettingsRaw, currentModelSelection} = useSettingsSelection({conversationRef, sessionRecorderRef, setMessages});
 
   /** Finalize a formerly-live message into the append-only transcript and session record. */
   function finalizeMessage(message: Message) {
@@ -142,14 +113,8 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   // that land inside one React batch window must route against fresh state.
   const {liveMessages, addStreaming, patch: patchLiveMessage, drain: drainLiveMessages, clear: clearLiveMessages} = useLiveMessages(finalizeMessage);
   const sessionStartRef = useRef<Date>(new Date());
-  // Stable PromptSession object across turns so per-session flags (the
-  // context-fallback warning key) persist; rebuilt when a new session starts,
-  // detected by sessionStartRef identity (the lifecycle controller replaces
-  // the Date on new/resume/continue).
-  const promptSessionRef = useRef<{identity: Date | undefined; value: PromptSession}>({identity: undefined, value: {cwd: process.cwd()}});
-  // Session per-model reasoning overrides live on the stable PromptSession
-  // object; this counter only forces a re-render so the status bar updates.
-  const [reasoningOverrideCounter, setReasoningOverrideCounter] = useState(0);
+  // The stable PromptSession and its per-model reasoning overrides live in chat/promptSessionState.ts.
+  const {currentPromptSession, setSessionReasoningOverride, reasoningOverrideCounter} = usePromptSession(sessionStartRef);
   const workStateRef = useRef<WorkState | undefined>(undefined);
   const llmLogRef = useRef<LlmLog | undefined>(undefined);
   const persistenceWarningShownRef = useRef(false);
@@ -236,24 +201,10 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     currentBranchName().then(setBranchName).catch(() => setBranchName(undefined));
   }, [busy]);
 
-  // Live theme switching: whenever the settings'
-  // theme name changes (/themes), re-resolve and adopt it so the whole UI
-  // repaints without a restart. Ink <Static> history stays as-rendered, so
-  // already-printed text keeps its old colors; the terminal defaults (OSC
-  // 10/11) follow the new theme. Skipped until settings have loaded once —
-  // chatCommand() already resolved the theme before the first render, and the
-  // pre-load {} state would briefly flash the default theme.
+  // Live theme switching (/themes) lives in chat/liveTheme.ts.
   const settingsThemeLoadedRef = useRef(false);
-  const activeThemeName = settings.theme ?? DEFAULT_THEME_NAME;
-  useEffect(() => {
-    if (!settingsThemeLoadedRef.current || stoppingRef.current) return;
-    try {
-      setActiveTheme(resolveTheme(activeThemeName));
-      applyTerminalColors(theme.foreground, theme.background);
-    } catch {
-      // Malformed theme names were reported at startup; keep the resolved default.
-    }
-  }, [activeThemeName]);
+  useLiveTheme(settings, stoppingRef, settingsThemeLoadedRef);
+
 
   useEffect(() => {
     void runStartupSequence({
@@ -382,18 +333,6 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     if (message) setMessages(m => [...m, {role: 'system', text: message}]);
   }
 
-  // Session per-model reasoning overrides live on the stable PromptSession
-  // object; the counter only forces a re-render so the status bar updates.
-  function setSessionReasoningOverride(modelSelector: string, setting: StoredReasoningSetting | undefined) {
-    const session = currentPromptSession();
-    if (setting === undefined) {
-      if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
-    } else {
-      session.reasoningByModel = {...session.reasoningByModel, [modelSelector]: setting};
-    }
-    setReasoningOverrideCounter(count => count + 1);
-  }
-
   // Wizard/picker submit dispatch lives in one table-driven module with a
   // shared settings-patch applier (CR-006). Rebuilt every render so handlers
   // see current state without new React state.
@@ -431,52 +370,14 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     return prepared;
   }
 
-  async function doAgentTurn(value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}) {
-    if (stoppingRef.current) return;
-    setDebugLogs([]);
-    // When every task is already completed, start the new turn with a clean
-    // slate: the task bar clears (nothing shown for simple questions) and the
-    // model may create fresh todos via writeTasks if the new question warrants.
-    if (shouldClearCompletedTasks(visibleTasks)) {
-      setVisibleTasks([]);
-      setTasksExpanded(false);
-      setTaskBarPadding(0);
-      await clearTasksFromStore().catch(() => undefined);
-    }
-    await runSingleAgentTurn(value, displayValue, turnOptions);
-    for (let next = followUps.takeNext(); !stoppingRef.current && next !== undefined; next = followUps.takeNext()) {
-      const preparedFollowUp = await prepareUserInput(next);
-      if (!preparedFollowUp) continue;
-      await runSingleAgentTurn(preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
-    }
+  // Turn submission (follow-up drain) and the one-key paused-goal resume live
+  // in chat/agentTurnRunner.ts.
+  function doAgentTurn(value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}) {
+    return runAgentTurnWithFollowUps(screenDeps(), value, displayValue, turnOptions);
   }
 
-  /**
-   * Explicitly resume a genuinely paused goal (automatic continuation already
-   * ran): an idle-stall resume continues the bounded retry pool; an
-   * incomplete-goal resume restarts the supervisor from the stored checkpoint
-   * (kind selection in chat/userInput.ts). Both ride the preserved
-   * conversation — no completed mutations are replayed.
-   */
-  async function resumePausedTask() {
-    const resume = pausedResume;
-    if (!resume || busy) return;
-    setPausedResume(undefined);
-    setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished goal; completed work is preserved in the conversation.'}]);
-    await runSingleAgentTurn(resume.request, undefined, {}, resumeKindFor(resume) as ResumeExisting);
-  }
-
-  /**
-   * The PromptSession shared by every turn of the active session. Returning a
-   * stable object (not a fresh literal per turn) is what makes once-per-session
-   * affordances actually once-per-session; a new session identity yields a
-   * fresh object so they fire again at its start.
-   */
-  function currentPromptSession(): PromptSession {
-    if (promptSessionRef.current.identity !== sessionStartRef.current) {
-      promptSessionRef.current = {identity: sessionStartRef.current, value: {start: sessionStartRef.current, cwd: process.cwd()}};
-    }
-    return promptSessionRef.current.value;
+  function resumePausedTask() {
+    return resumePausedGoal(screenDeps());
   }
 
   /** Assemble the explicit deps bundle the extracted ChatScreen bodies receive. */
@@ -488,18 +389,13 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
       settings, settingsError, contextFiles, mode, busy, pausedResume, visibleTasks,
       setMessages, setSettings, setSettingsError, setMode, setContextFiles,
       setBusy: setBusyWithHeartbeat, setBusyLabel, setTokenUsage, setFleet,
-      setVisibleTasks, setTaskBarPadding, setTasksExpanded, setPausedResume, updateWizard,
+      setVisibleTasks, setTaskBarPadding, setTasksExpanded, setPausedResume, setDebugLogs, updateWizard,
       currentModelSelection, currentPromptSession, withDisplayOrder, finalizeMessage,
       addStreaming, patchLiveMessage, drainLiveMessages, clearLiveMessages,
       debugLog, showPersistenceWarning, skillInvocation, prepareUserInput, doAgentTurn,
       openSessionPicker, openPluginPicker, refreshSkills, setSessionReasoningOverride,
       shutdown, followUps, wizard, sessionLifecycle, terminalControl, noSession,
     };
-  }
-
-  // One physical agent turn under the goal supervisor lives in chat/agentTurnRunner.ts.
-  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
-    return runSingleAgentTurnImpl(screenDeps(), value, displayValue, turnOptions, resumeExisting);
   }
 
   // Derived render values (memoised on the identity of their inputs, FE-03)
@@ -542,9 +438,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
         setTaskBarPadding(0);
         setTasksExpanded(true);
       } else {
-        const expandedRows = visibleTasks.length + 1;
-        const collapsedRows = Math.min(visibleTasks.length, MAX_VISIBLE_TASKS) + 1;
-        setTaskBarPadding(Math.max(0, expandedRows - collapsedRows));
+        setTaskBarPadding(taskBarCollapsePadding(visibleTasks.length));
         setTasksExpanded(false);
       }
     }}

@@ -77,6 +77,7 @@ export interface ChatScreenDeps {
   setTaskBarPadding: React.Dispatch<React.SetStateAction<number>>;
   setTasksExpanded: React.Dispatch<React.SetStateAction<boolean>>;
   setPausedResume: React.Dispatch<React.SetStateAction<PausedResume | undefined>>;
+  setDebugLogs: React.Dispatch<React.SetStateAction<string[]>>;
   updateWizard: Parameters<typeof createWizardDispatch>[0]['updateWizard'];
 
   // Component-scope helpers.

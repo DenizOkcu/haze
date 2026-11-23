@@ -7,6 +7,45 @@ import {accumulateTokenUsage} from './turnState.js';
 import {nextFleetStatus} from './chatMetrics.js';
 import type {TurnExecutionOptions} from '../commands/streaming.js';
 import type {ChatScreenDeps, ResumeExisting} from './screenDeps.js';
+import {clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
+import {shouldClearCompletedTasks} from './turnState.js';
+import {resumeKindFor} from './userInput.js';
+
+/** A user submission: one turn, then every follow-up queued while it ran (ARCH-05). */
+export async function runAgentTurnWithFollowUps(deps: ChatScreenDeps, value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}) {
+  if (deps.stoppingRef.current) return;
+  deps.setDebugLogs([]);
+  // When every task is already completed, start the new turn with a clean
+  // slate: the task bar clears (nothing shown for simple questions) and the
+  // model may create fresh todos via writeTasks if the new question warrants.
+  if (shouldClearCompletedTasks(deps.visibleTasks)) {
+    deps.setVisibleTasks([]);
+    deps.setTasksExpanded(false);
+    deps.setTaskBarPadding(0);
+    await clearTasksFromStore().catch(() => undefined);
+  }
+  await runSingleAgentTurn(deps, value, displayValue, turnOptions);
+  for (let next = deps.followUps.takeNext(); !deps.stoppingRef.current && next !== undefined; next = deps.followUps.takeNext()) {
+    const preparedFollowUp = await deps.prepareUserInput(next);
+    if (!preparedFollowUp) continue;
+    await runSingleAgentTurn(deps, preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
+  }
+}
+
+/**
+ * Explicitly resume a genuinely paused goal (automatic continuation already
+ * ran): an idle-stall resume continues the bounded retry pool; an
+ * incomplete-goal resume restarts the supervisor from the stored checkpoint
+ * (kind selection in chat/userInput.ts). Both ride the preserved
+ * conversation — no completed mutations are replayed.
+ */
+export async function resumePausedGoal(deps: ChatScreenDeps) {
+  const resume = deps.pausedResume;
+  if (!resume || deps.busy) return;
+  deps.setPausedResume(undefined);
+  deps.setMessages(m => [...m, {role: 'system', text: 'Resuming the unfinished goal; completed work is preserved in the conversation.'}]);
+  await runSingleAgentTurn(deps, resume.request, undefined, {}, resumeKindFor(resume) as ResumeExisting);
+}
 
 /**
  * Run one physical agent turn under the logical-goal supervisor. Extracted
@@ -15,7 +54,7 @@ import type {ChatScreenDeps, ResumeExisting} from './screenDeps.js';
  * goal from its checkpoint/retry pool. Behavior is unchanged — pure code
  * motion over the explicit deps bundle.
  */
-export async function runSingleAgentTurn(deps: ChatScreenDeps, value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
+async function runSingleAgentTurn(deps: ChatScreenDeps, value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
   const {
     stoppingRef, sealedRef, quarantineRef, activeGoalRef, conversationRef, settingsRef,
     sessionRecorderRef, contextFiles, settings, withDisplayOrder, addStreaming, patchLiveMessage,

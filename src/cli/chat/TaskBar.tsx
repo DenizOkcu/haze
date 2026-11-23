@@ -19,6 +19,11 @@ function taskStatusColor(status: TaskStatus): string {
 
 export const MAX_VISIBLE_TASKS = 5;
 
+/** Rows the transcript gains when an expanded task bar collapses back to `MAX_VISIBLE_TASKS` rows. */
+export function taskBarCollapsePadding(visibleTasks: number): number {
+  return Math.max(0, visibleTasks + 1 - (Math.min(visibleTasks, MAX_VISIBLE_TASKS) + 1));
+}
+
 export function TaskBar({tasks, width, expanded, padding, maxRows}: {tasks: Task[]; width: number; expanded: boolean; padding: number; maxRows?: number}) {
   const maxTitleWidth = Math.max(10, width - 6);
   const inProgress = tasks.filter(t => t.status === 'in_progress');
