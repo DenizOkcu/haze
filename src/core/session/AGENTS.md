@@ -30,7 +30,7 @@ The `haze report` projection in `sessionReport.ts` reads only bounded metadata a
 
 ## Size policy
 
-- `appendSessionEntry` is the choke point for durable writes; keep session-size policy centralized there or in `sessionSlimming.ts`.
+- `appendSessionEntry` is the choke point for durable writes; keep session-size policy centralized there or in `sessionSlimming.ts`. Its auto-vacuum compares bytes, not UTF-16 length, and after a declined rewrite skips the full re-parse for entries a vacuum cannot drop until a snapshot or goal row is appended (BE-01).
 - Do not persist streaming `message_update` events by default. They are UI progress, not durable resume state.
 - Keep completed messages, tool lifecycle events, work-state snapshots, and conversation snapshots useful for resume.
 - Conversation snapshots preserve tool outputs and file data; separate tool lifecycle events remain bounded previews. Opt-in redaction may intentionally change saved strings.

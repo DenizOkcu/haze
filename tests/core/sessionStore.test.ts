@@ -1,9 +1,10 @@
-import {afterEach, beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import fs from '../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
 import {modelMessageSchema, type ModelMessage, type ToolResultPart} from 'ai';
 import {createWorkState} from '../../src/core/agent/workState.js';
+import * as boundedRead from '../../src/core/io/boundedRead.js';
 import {appendSessionEntry, clearSessionSummaryCacheForTests, createSession, findSession, forkSession, GOAL_LEDGER_KEEP_PER_GOAL, GOAL_LEDGER_TRIM_BYTES, latestSession, listSessions, readGoalLedgerFrontier, readSessionEntries, restoreConversation, restoreSessionState, restoreWorkState, SESSION_LIST_LATENCY_BUDGET_MS, SESSION_VACUUM_THRESHOLD_BYTES, setSessionVacuumThresholdForTests, vacuumSessionFileIfLarge} from '../../src/core/session/sessionStore.js';
 import {JSONL_LINE_BYTES} from '../../src/core/limits.js';
 
@@ -638,6 +639,47 @@ describe('sessionStore', () => {
     const before = await fs.stat(session.file);
     await expect(vacuumSessionFileIfLarge(session)).resolves.toBe(false);
     expect((await fs.stat(session.file)).size).toBe(before.size);
+  });
+
+  it('re-parses a snapshot-dominated file at most once for a burst of small appends (BE-01)', async () => {
+    const lines = vi.spyOn(boundedRead, 'iterateBoundedUtf8Lines');
+    try {
+      const session = await createSession({cwd, sessionsDir});
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: 'x'.repeat(256 * 1024)}] as ModelMessage[]});
+      setSessionVacuumThresholdForTests(64 * 1024);
+      const parses = () => lines.mock.calls.filter(([file]) => file === session.file).length;
+      // The first append above the threshold measures the file once and declines.
+      await appendSessionEntry(session, {type: 'event', at: '2', name: 'tool_start'});
+      expect(parses()).toBe(1);
+      for (let index = 0; index < 50; index++) {
+        await appendSessionEntry(session, {type: 'event', at: String(index), name: 'tool_end', text: 'y'.repeat(120)});
+      }
+      // Entries a rewrite cannot drop never change that outcome, so the whole
+      // file is not parsed and re-serialized again for each of them.
+      expect(parses()).toBeLessThanOrEqual(1);
+      // A superseding snapshot is droppable content: the append re-measures (the
+      // first one is still kept, as the events keep it just under half the file) ...
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: '9', messages: [{role: 'user', content: 'z'.repeat(256 * 1024)}] as ModelMessage[]});
+      expect(parses()).toBe(2);
+      // ... and the second superseding snapshot makes superseded snapshots dominate, so it rewrites.
+      await appendSessionEntry(session, {type: 'conversation_snapshot', at: '10', messages: [{role: 'user', content: 'w'.repeat(256 * 1024)}] as ModelMessage[]});
+      expect(parses()).toBe(3);
+      const {entries} = await readSessionEntries(session);
+      expect(entries.filter(entry => entry.type === 'conversation_snapshot')).toHaveLength(1);
+      expect(entries.filter(entry => entry.type === 'event')).toHaveLength(51);
+    } finally {
+      lines.mockRestore();
+    }
+  });
+
+  it('measures the halving check in bytes, so multi-byte content is not rewritten in place (BE-01)', async () => {
+    const session = await createSession({cwd, sessionsDir});
+    // 6,000 content bytes but only 2,000 UTF-16 units: kept bytes exceed half
+    // of the file, so a rewrite could not halve it.
+    await appendSessionEntry(session, {type: 'conversation_snapshot', at: '1', messages: [{role: 'user', content: '界'.repeat(2_000)}] as ModelMessage[]});
+    const before = (await fs.stat(session.file)).size;
+    await expect(vacuumSessionFileIfLarge(session, 1)).resolves.toBe(false);
+    expect((await fs.stat(session.file)).size).toBe(before);
   });
 });
 

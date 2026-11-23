@@ -78,6 +78,13 @@ export interface HazeSession {
   redactSecrets?: boolean;
   /** Internal: the existing JSONL tail has been checked before appending. */
   tailChecked?: boolean;
+  /**
+   * Internal: file size at the last auto-vacuum attempt that declined to
+   * rewrite (BE-01). Appending entries a rewrite cannot drop grows the kept
+   * bytes and the file alike, so that outcome cannot change; such appends skip
+   * the full re-parse until droppable content (a snapshot or goal row) arrives.
+   */
+  vacuumDeclinedBytes?: number;
 }
 
 const DEFAULT_SESSIONS_DIR = path.join(HAZE_DIR, 'sessions');
@@ -222,6 +229,8 @@ export async function appendSessionEntry(session: HazeSession, entry: SessionEnt
   session.tailChecked = true;
   // Snapshot deduplication runs inside the same serialized writer as the
   // append, so ordering with subsequent entries is preserved (F-03).
+  const droppable = prepared.type === 'conversation_snapshot' || prepared.type === 'work_state_snapshot' || prepared.type === 'goal';
+  if (session.vacuumDeclinedBytes !== undefined && !droppable) return;
   await vacuumSessionFileIfLarge(session).catch(() => undefined);
 }
 
@@ -252,7 +261,11 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   const file = validatedSessionFile(session);
   if (session.deferredWrite) return false;
   const stat = await fs.stat(file).catch(() => undefined);
-  if (!stat || stat.size < thresholdBytes) return false;
+  if (!stat || stat.size < thresholdBytes) {
+    // Not a declined rewrite: the next append must still get its attempt once the file crosses the threshold.
+    session.vacuumDeclinedBytes = undefined;
+    return false;
+  }
   const {entries} = await readSessionEntries(session);
   let lastConversation = -1;
   let lastWorkState = -1;
@@ -291,7 +304,13 @@ export async function vacuumSessionFileIfLarge(session: HazeSession, thresholdBy
   // Only rewrite when it meaningfully shrinks the file (otherwise a single
   // dominant snapshot would trigger a full rewrite on every append), or when
   // the goal-ledger trim alone has accumulated enough to amortize the rewrite.
-  if (serialized.length > stat.size / 2 && droppedGoalBytes < GOAL_LEDGER_TRIM_BYTES) return false;
+  // Both sides are bytes: the file size is, and UTF-16 length undercounts
+  // multi-byte content (BE-01).
+  if (Buffer.byteLength(serialized, 'utf8') > stat.size / 2 && droppedGoalBytes < GOAL_LEDGER_TRIM_BYTES) {
+    session.vacuumDeclinedBytes = stat.size;
+    return false;
+  }
+  session.vacuumDeclinedBytes = undefined;
   await writePrivateFileAtomic(file, serialized);
   return true;
 }
