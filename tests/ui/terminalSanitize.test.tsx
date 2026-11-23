@@ -58,6 +58,19 @@ describe('stripTerminalControlSequences', () => {
     expect(stripTerminalControlSequences('ünïcödé ✓ 中文')).toBe('ünïcödé ✓ 中文');
   });
 
+  it('strips DEL, U+FEFF, and bidi override/isolate controls (SEC-08/FE-17)', () => {
+    expect(stripTerminalControlSequences('a\x7fb')).toBe('ab');
+    expect(stripTerminalControlSequences('a\ufeffb')).toBe('ab');
+    // U+202A–U+202E (LRE/RLE/PDF/LRO/RLO) and U+2066–U+2069 (LRI/RLI/FSI/PDI).
+    expect(stripTerminalControlSequences('a\u202ab\u202e')).toBe('ab');
+    expect(stripTerminalControlSequences('a\u2066b\u2069')).toBe('ab');
+  });
+
+  it('strips ESC X (SOS) string sequences (SEC-08)', () => {
+    expect(stripTerminalControlSequences('a\x1bXpayload\x1b\\b')).toBe('ab');
+    expect(stripTerminalControlSequences('a\x1bXpayload\x07b')).toBe('ab');
+  });
+
   it('leaves plain text unchanged', () => {
     const plain = 'const value = "unsafe <script>"; ünïcödé ✓';
     expect(stripTerminalControlSequences(plain)).toBe(plain);

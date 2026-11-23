@@ -50,7 +50,12 @@ export function stripTerminalControlSequences(text: string): string {
       index += 1 + consumeStringSequence(text, index + 1);
       continue;
     }
-    if ((code >= 0x80 && code <= 0x9f) || (code < 0x20 && code !== 0x09 && code !== 0x0a)) {
+    // C0/C1 controls except \t/\n, plus DEL (0x7F), zero-width no-break space
+    // (U+FEFF), and the bidi override/isolate controls (U+202A–U+202E,
+    // U+2066–U+2069) that can visually reorder untrusted quoted text (SEC-08/FE-17).
+    if ((code >= 0x80 && code <= 0x9f) || code === 0x7f || code === 0xfeff
+      || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+      || (code < 0x20 && code !== 0x09 && code !== 0x0a)) {
       index += 1;
       continue;
     }
@@ -66,8 +71,8 @@ function consumeEscape(text: string, index: number): number {
   const next = index + 1 < length ? text.charCodeAt(index + 1) : undefined;
   if (next === undefined) return 1; // trailing lone ESC: drop it
   if (next === 0x5b) return 2 + consumeCsi(text, index + 2); // ESC [ → CSI
-  if (next === 0x5d || next === 0x50 || next === 0x5e || next === 0x5f) {
-    // ESC ]/P/^/_ → OSC/DCS/PM/APC string sequence.
+  if (next === 0x5d || next === 0x50 || next === 0x58 || next === 0x5e || next === 0x5f) {
+    // ESC ]/P/X/^/_ → OSC/DCS/SOS/PM/APC string sequence (X = SOS, SEC-08).
     return 2 + consumeStringSequence(text, index + 2);
   }
   if (next >= 0x20 && next <= 0x2f) {
