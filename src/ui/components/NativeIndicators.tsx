@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {Box, Text, useAnimation, useIsScreenReaderEnabled} from 'ink';
 import {StatusMessage, ThemeProvider, defaultTheme, extendTheme} from '@inkjs/ui';
 import {theme, type HazeTheme} from '../theme.js';
@@ -34,7 +34,10 @@ export function ActivitySpinner({color = theme.command}: {color?: string}) {
 }
 
 export function StatusNotice({variant, children}: {variant: NoticeVariant; children: React.ReactNode}) {
-  return <ThemeProvider theme={indicatorTheme(theme)}>
+  // FE-11: build the mapped theme once per palette object (theme is swapped
+  // live by setActiveTheme, so key on its identity).
+  const mapped = useMemo(() => indicatorTheme(theme), [theme]);
+  return <ThemeProvider theme={mapped}>
     <StatusMessage variant={variant}>{children}</StatusMessage>
   </ThemeProvider>;
 }
