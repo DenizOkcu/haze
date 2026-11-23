@@ -1,5 +1,5 @@
-import React, {useEffect, useMemo, useReducer, useRef, useState} from 'react';
-import {render, Text, useApp, useWindowSize} from 'ink';
+import React, {useEffect, useReducer, useRef, useState} from 'react';
+import {render, useApp, useWindowSize} from 'ink';
 import {type ModelMessage} from 'ai';
 import type {PromptSession} from '../../llm/systemPrompt.js';
 import type {ContextFile} from '../../config/contextFiles.js';
@@ -26,20 +26,19 @@ import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS} from '../chat/TaskBar.js';
 import {createChatShutdown, runTerminalSession} from '../chat/shutdown.js';
 import {createResizeSettler, installViewportResizeGuard} from '../chat/resizeGuard.js';
-import {partitionDisplayMessages} from '../chat/transcriptPartition.js';
+import {useChatViewModel} from '../chat/chatViewModel.js';
+import {ChatHeaderSubtitle} from '../chat/ChatHeader.js';
 import {ChatScreenView, type ChatStaticItem} from '../chat/ChatScreenView.js';
 import {useLiveMessages} from '../chat/liveMessages.js';
 import {createSessionRecorder, type SessionRecorder} from '../chat/sessionRecorder.js';
 import {createSessionLifecycle} from '../chat/sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from '../chat/wizardDispatch.js';
 import {randomTipIndex, tipsEnabled} from '../chat/tips.js';
-import {busyDetailLabel, compactHomePath, statusBarMetrics, type FleetStatus} from '../chat/chatMetrics.js';
+import type {FleetStatus} from '../chat/chatMetrics.js';
 import {EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
-import {placeholderForMode, type Mode} from './chatModes.js';
+import type {Mode} from './chatModes.js';
 import {contextFileSignatureMap, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
-import {isStoredReasoning, resolveReasoningChoice, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
-import {resolveProviderReasoning} from '../../config/providerReasoning.js';
-import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
+import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
 import {useFollowUpQueue} from '../chat/followUpQueue.js';
 import {useBusyIndicator} from '../chat/busyIndicator.js';
@@ -219,7 +218,6 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // Wizard flow state (selection, drafts, model discovery) in one reducer;
   // this replaced twelve individual useState hooks.
   const [wizardState, updateWizard] = useReducer(wizardUiReducer, undefined, initialWizardUiState);
-  const {modelProviderFilter, discoveredModels, suggestedModels, selectedProviderName, providerDraft, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries} = wizardState;
 
   useEffect(() => subscribeBackgroundProcesses(() => setBackgroundCount(backgroundProcessCount())), []);
 
@@ -542,88 +540,33 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     return runSingleAgentTurnImpl(screenDeps(), value, displayValue, turnOptions, resumeExisting);
   }
 
-  // The heavy per-render work below is memoised on the identity of its inputs
-  // (FE-03): the 1 Hz busy heartbeat and every stream delta re-render the
-  // screen, but only changed messages may re-run Markdown root chunking.
-  const activeLiveMessages = useMemo(() => liveMessages.filter(message => !message.hidden), [liveMessages]);
-  // Recomputed each busy heartbeat (1 Hz) alongside the elapsed label; the
-  // streaming-rate estimate rides the already-live message text, so no extra
-  // timer or token bookkeeping is introduced.
-  const busyDetail = busy ? busyDetailLabel({messages: activeLiveMessages, fleet}) : undefined;
-  const {staticItems: staticTranscriptItems, streamingItems} = useMemo(
-    () => partitionDisplayMessages([...messages, ...liveMessages].filter(message => !message.hidden)),
-    [messages, liveMessages]);
-  const activeSelection = activeModel(settings);
-  const placeholder = placeholderForMode(mode, busy);
-  const selectedModel = currentModelSelection();
-  const activeModelName = selectedModel ? `${selectedModel.provider}:${selectedModel.model}${activeSelection ? '' : ' (unavailable)'}` : 'unconfigured';
-  const activeSelector = activeSelection ? `${activeSelection.provider.name}:${activeSelection.model}` : undefined;
-  // Synchronize session identity before rendering either the status or picker;
-  // a new/resumed/forked session must not display the previous session's map.
-  const sessionReasoning = currentPromptSession().reasoningByModel;
-  const effectiveReasoning = activeSelector
-    ? resolveReasoningChoice(sessionReasoning?.[activeSelector], isStoredReasoning(settings.reasoning) ? settings.reasoning : undefined)
-    : undefined;
-  // When a session override changes, the suffix below must re-render: bump a
-  // cheap counter from setSessionReasoning instead of threading per-turn state.
-  void reasoningOverrideCounter;
-  const reasoningSuffix = effectiveReasoning
-    ? effectiveReasoning.level === undefined
-      ? ' (no reasoning parameter)'
-      : activeSelection && resolveProviderReasoning(activeSelection.provider, activeSelection.model, effectiveReasoning.level).effective === 'disabled'
-        ? ' (provider default)'
-      : ` (${effectiveReasoning.level})`
-    : '';
-  const headerSubtitle = (
-    <Text>
-      {'A minimal coding agent for your terminal.\n\nStart with chat. Turn repeated work into Markdown skills:\n'}
-      <Text color={theme.command}>/skills</Text>
-      {'  — create, enable, disable, validate, or remove skills.\n\nType '}
-      <Text color={theme.command}>@</Text>
-      {' to browse workspace files. To grant read-only access to a file or directory outside the workspace for this turn, mention a path containing '}
-      <Text color={theme.command}>/</Text>
-      {' (for example, '}
-      <Text color={theme.command}>@../shared/file.ts</Text>
-      {' or '}
-      <Text color={theme.command}>/tmp/reference.md</Text>
-      {').\n\nImage mentions require a vision-capable model. File edits and writes stay inside the workspace.\n\nhaze runs tool calls without confirmation gates. Supervise consequential work as you would any shell session.\n\nShape haze around your workflow as you go.\n\nUse '}
-      <Text color={theme.command}>/help</Text>
-      {' for commands.'}
-    </Text>
-  );
-  const workspaceLabel = `${compactHomePath(process.cwd())}${branchName ? ` (${branchName})` : ''}`;
-  const enabledSkillCount = useMemo(
-    () => new Set(skills.filter(skill => isSkillEnabled(settings, skill.name, skill.source)).map(skill => skill.name)).size,
-    [skills, settings]);
-  const metrics = useMemo(
-    () => statusBarMetrics({messages: [...messages, ...liveMessages], tokenUsage, enabledSkillCount, backgroundProcessCount: backgroundCount}),
-    [messages, liveMessages, tokenUsage, enabledSkillCount, backgroundCount]);
-  const inputSuggestions = useMemo(
-    () => inputSuggestionsForState({mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraftName: providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning}),
-    [mode, settings, skills, sessions, selectedProviderName, modelProviderFilter, providerDraft.name, discoveredModels, suggestedModels, selectedSkillName, selectedLspName, selectedMcpName, plugins, selectedPluginName, pluginCollectionEntries, sessionReasoning]);
-  const staticItems: ChatStaticItem[] = [
-    {kind: 'header', key: 'header', subtitle: headerSubtitle},
-    ...staticTranscriptItems,
-  ];
-  const horizontalPadding = width >= 12 ? 1 : 0;
-  const contentWidth = Math.max(1, width - horizontalPadding * 2);
-  const replayContentWidth = Math.max(1, replay.width - (replay.width >= 12 ? 1 : 0) * 2);
+  // Derived render values (memoised on the identity of their inputs, FE-03)
+  // live in chat/chatViewModel.ts; only the header item is composed here.
+  const view = useChatViewModel({
+    messages, liveMessages, busy, fleet, settings, mode, tokenUsage, backgroundCount, skills, branchName, sessions,
+    wizard: wizardState,
+    selectedModel: currentModelSelection(),
+    sessionReasoning: currentPromptSession().reasoningByModel,
+    reasoningOverrideCounter, width, replayWidth: replay.width,
+  });
+  const staticItems: ChatStaticItem[] = [{kind: 'header', key: 'header', subtitle: <ChatHeaderSubtitle />}, ...view.staticTranscriptItems];
+
 
   // The pure screen render (static transcript + dynamic frame) lives in chat/ChatScreenView.tsx.
   return <ChatScreenView
     version={version} debug={debug} terminalRows={terminalRows}
-    horizontalPadding={horizontalPadding} contentWidth={contentWidth}
-    replay={{key: `${replay.tick}:${replay.width}`, contentWidth: replayContentWidth}}
-    staticItems={staticItems} streamingItems={streamingItems}
-    debugLogs={debugLogs} metrics={metrics} renderMetricsReader={renderMetricsReader}
+    horizontalPadding={view.horizontalPadding} contentWidth={view.contentWidth}
+    replay={{key: `${replay.tick}:${replay.width}`, contentWidth: view.replayContentWidth}}
+    staticItems={staticItems} streamingItems={view.streamingItems}
+    debugLogs={debugLogs} metrics={view.metrics} renderMetricsReader={renderMetricsReader}
     tokenUsage={tokenUsage} followUps={followUps} visibleTasks={visibleTasks}
     tasksExpanded={tasksExpanded} taskBarPadding={taskBarPadding}
-    busy={busy} busyLabel={busyLabel} busyElapsed={busyElapsed} busyDetail={busyDetail}
+    busy={busy} busyLabel={busyLabel} busyElapsed={busyElapsed} busyDetail={view.busyDetail}
     showingTip={showingTip} tipIndex={tipIndex} graphBuilding={graphBuilding}
-    pausedResume={pausedResume} workspaceLabel={workspaceLabel}
-    activeModelName={activeModelName} reasoningSuffix={reasoningSuffix}
-    placeholder={placeholder} mode={mode} inputHistory={inputHistory}
-    inputSuggestions={inputSuggestions}
+    pausedResume={pausedResume} workspaceLabel={view.workspaceLabel}
+    activeModelName={view.activeModelName} reasoningSuffix={view.reasoningSuffix}
+    placeholder={view.placeholder} mode={mode} inputHistory={inputHistory}
+    inputSuggestions={view.inputSuggestions}
     onSubmit={submit} onCancel={cancelThinking}
     onResumeKey={pausedResume != null && !busy ? resumePausedTask : undefined}
     onInterrupt={() => { void shutdown(); }}
