@@ -63,4 +63,26 @@ describe('openPath', () => {
     await expect(opened).resolves.toBe(false);
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({message: 'xdg-open ENOENT'}));
   });
+
+  it('refuses cmd.exe metacharacter targets on win32 without spawning (SEC-10)', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', {value: 'win32', configurable: true});
+    try {
+      const onError = vi.fn();
+      for (const target of ['https://example.com/a&b', 'C:\\path\\file.txt" & calc', 'x^|y']) {
+        await expect(openPath(target, onError)).resolves.toBe(false);
+      }
+      expect(spawnMock).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({message: expect.stringContaining('metacharacters')}));
+      // A clean URL still opens.
+      const child = fakeChild();
+      spawnMock.mockReturnValue(child);
+      const opened = openPath('https://example.com');
+      child.emit('spawn');
+      await expect(opened).resolves.toBe(true);
+      expect(spawnMock).toHaveBeenCalledWith('cmd', ['/c', 'start', '', 'https://example.com'], expect.anything());
+    } finally {
+      Object.defineProperty(process, 'platform', {value: originalPlatform, configurable: true});
+    }
+  });
 });
