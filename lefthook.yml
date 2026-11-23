@@ -1,6 +1,9 @@
 # Git hooks managed by lefthook (https://lefthook.dev) — install once with `npx lefthook install`.
 # Every pre-commit check is MANDATORY — a missing tool fails the commit with install
 # instructions; nothing is ever skipped silently.
+# CI is the authority: the `hygiene` job in .github/workflows/ci.yml runs the same
+# gates (knip, jscpd, osv-scanner, and a full-history gitleaks scan) on every push
+# and pull request. This hook is only a fast local mirror of it.
 #   lefthook, jscpd, knip  -> npm devDependencies, run from node_modules/.bin (run `npm ci`)
 #   gitleaks, osv-scanner  -> Go binaries, not published on npm, install with
 #     `brew install gitleaks osv-scanner` or download from

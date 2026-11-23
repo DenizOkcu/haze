@@ -6,7 +6,12 @@
 git clone https://github.com/DenizOkcu/haze.git
 cd haze
 npm install
+npx lefthook install # once: the pre-commit hook mirrors the CI `hygiene` job locally
 ```
+
+`npm install` does not install the git hook (`.npmrc` disables lifecycle scripts),
+so run `npx lefthook install` once per clone. The hook needs `gitleaks` and
+`osv-scanner` on `PATH`; CI runs the same gates even when it is not installed.
 
 The `allowScripts` field in `package.json` is a pnpm-specific allowlist for the
 optional native install scripts emitted by `esbuild` and `fsevents`. npm ignores
