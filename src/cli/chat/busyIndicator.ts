@@ -28,9 +28,13 @@ export function useBusyIndicator() {
   useAnimation({interval: 1000, isActive: busy && !screenReader});
 
   function setBusy(nextBusy: boolean) {
-    if (nextBusy && !busy) turnStartedAtRef.current = Date.now();
-    if (!nextBusy) turnStartedAtRef.current = undefined;
-    setBusyState(nextBusy);
+    // Functional update so two setBusy calls inside one React batch both see
+    // the current flag and the timer starts once (FE-10).
+    setBusyState(current => {
+      if (nextBusy && !current) turnStartedAtRef.current = Date.now();
+      if (!nextBusy) turnStartedAtRef.current = undefined;
+      return nextBusy;
+    });
   }
 
   return {busy, setBusy, elapsed: busyElapsedLabel(turnStartedAtRef.current)};
