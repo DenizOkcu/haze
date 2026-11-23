@@ -105,6 +105,17 @@ describe('urlGuard validateUrl', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reasonCode).toBe('blocked_address');
     });
+
+    it.each([
+      'http://[2002:7f00:1::]', // 6to4, embeds 127.0.0.1
+      'http://[2002:c0a8:1::]', // 6to4, embeds 192.168.0.1
+      'http://[2001::1]',       // Teredo
+      'http://[2001:0:5ef5:79fd::1]', // Teredo relay range
+    ])('rejects transition-technology IPv6 literal %s (SEC-05)', async url => {
+      const result = await validateUrl(url);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reasonCode).toBe('blocked_address');
+    });
   });
 
   describe('blocked_host', () => {

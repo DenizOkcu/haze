@@ -51,6 +51,8 @@ const BLOCKED_IPV6_CIDRS: ReadonlyArray<{start: bigint; mask: bigint; bits: numb
   parseIpv6Cidr('::1/128'), // loopback
   parseIpv6Cidr('::ffff:0:0/96'), // IPv4-mapped (checked via v4 ranges too, but be explicit)
   parseIpv6Cidr('64:ff9b::/96'), // NAT64
+  parseIpv6Cidr('2001::/32'), // Teredo (embeds IPv4 client/server addresses; can reach internal space)
+  parseIpv6Cidr('2002::/16'), // 6to4 (embeds an IPv4 address)
   parseIpv6Cidr('100::/64'), // discard prefix
   parseIpv6Cidr('fc00::/7'), // unique local
   parseIpv6Cidr('fe80::/10'), // link-local
