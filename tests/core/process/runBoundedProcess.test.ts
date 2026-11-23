@@ -193,4 +193,19 @@ describe('runBoundedProcess', () => {
     }
     expect(alive).toBe(false);
   });
+
+  it.runIf(process.platform !== 'win32')('settles bounded even when a descendant escapes the process group via setsid (BE-04)', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-setsid-'));
+    dirs.push(dir);
+    // setsid detaches into its own session/group, so the group kill cannot
+    // reach it; the bounded close fallback must still settle the run.
+    // (detached:true makes libuv call setsid(2) — no setsid binary needed.)
+    const script = `require('child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio: 'ignore', detached: true}).unref(); setInterval(()=>{}, 1000);`;
+    const started = Date.now();
+    const result = await runBoundedProcess({command: process.execPath, args: ['-e', script], cwd: dir, timeoutMs: 1500, killGraceMs: 50, maxStdoutBytes: 100, maxStderrBytes: 100});
+    // The detached grandchild survives the group kill, but the run must still
+    // settle within its bound instead of hanging on the retained pipes.
+    expect(result.timedOut || result.exitCode != null).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
 });
