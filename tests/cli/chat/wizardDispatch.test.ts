@@ -100,6 +100,14 @@ describe('wizardDispatch provider actions with model discovery', () => {
     mocks.discoverProviderModels.mockResolvedValue(discovered(['qwen3-coder', 'llama3.1']));
   });
 
+  it('lets the user skip provider setup with "later" and writes nothing (UX-06)', async () => {
+    const deps = makeDeps({settings: {}});
+    await createWizardDispatch(deps).dispatch('provider', 'later');
+    expect(deps.setMode).toHaveBeenCalledWith('chat');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Provider setup skipped'));
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+  });
+
   it('replaces the add-models prompt with a discovered-model picker', async () => {
     const deps = makeDeps();
     const wizard = createWizardDispatch(deps);

@@ -39,6 +39,11 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
       showMessage('Choose a provider preset, or select "custom" to enter details manually.');
       return;
     }
+    if (providerName === PROVIDER_CHOICES.later) {
+      setMode('chat');
+      showMessage('Provider setup skipped. Run /provider any time; a provider is needed before the first turn.');
+      return;
+    }
     const provider = findProvider(deps.settings, providerName);
     if (!provider) {
       showMessage(`No provider named ${providerName}. Use /provider and choose add provider.`);
@@ -48,7 +53,6 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
     setSelectedProviderName(provider.name);
     setMode('providerAction');
     // Surface canonical-endpoint divergence for ChatGPT sign-in providers up
-    // front: a hand-edited URL is silently ignored by the Codex fetch (F-14).
     const divergence = chatgptCodexUrlWarning(provider);
     showMessage(`${provider.name}: choose an action.${divergence ? `\n${divergence}` : ''}`);
   }

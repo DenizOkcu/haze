@@ -38,7 +38,7 @@ export function startupProviderInfo(settings: HazeSettings) {
       lspLine,
       mcpLine,
       '',
-      'Run /provider to choose or add a provider, then select a model.',
+      'Run /provider to choose or add a provider, then select a model (choose "later" to skip for now). Esc goes back one step; Esc at the first step exits.',
     ].join('\n');
   }
   const model = selection.model;

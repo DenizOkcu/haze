@@ -30,7 +30,8 @@ describe('providerSuggestions', () => {
   it('lists configured providers plus the add-provider entry', () => {
     const s = settings({providers: [{name: 'openrouter', url: 'https://openrouter.ai/api/v1', models: ['a', 'b']}]});
     const result = providerSuggestions(s);
-    expect(result.map(r => r.value)).toEqual(['openrouter', 'add provider']);
+    expect(result.map(r => r.value)).toEqual(['openrouter', 'add provider', 'later']);
+    expect(result[2]?.description).toContain('Skip for now');
     expect(result[0]?.description).toContain('2 models');
     expect(result[0]?.kind).toBe('provider');
   });

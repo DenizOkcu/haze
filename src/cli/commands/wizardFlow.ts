@@ -31,6 +31,8 @@ import {sessionActionSuggestions, sessionSuggestions} from './sessionPicker.js';
 export const PROVIDER_CHOICES = {
   addProvider: 'add provider',
   custom: 'custom',
+  /** Skip provider setup and start chatting (UX-06). */
+  later: 'later',
 } as const;
 
 export const PROVIDER_ACTIONS = {
@@ -213,6 +215,7 @@ export function providerSuggestions(settings: HazeSettings): TextInputSuggestion
       kind: 'provider' as const,
     })),
     {value: PROVIDER_CHOICES.addProvider, description: 'Add a new provider (presets available)', kind: 'provider' as const},
+    {value: PROVIDER_CHOICES.later, description: 'Skip for now and start chatting; run /provider any time', kind: 'provider' as const},
   ];
 }
 

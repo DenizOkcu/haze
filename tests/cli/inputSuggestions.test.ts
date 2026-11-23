@@ -28,6 +28,6 @@ describe('inputSuggestionsForState', () => {
       skills: [],
     });
 
-    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['local', 'add provider']);
+    expect(suggestions.map(suggestion => suggestion.value)).toEqual(['local', 'add provider', 'later']);
   });
 });
