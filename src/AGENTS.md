@@ -7,6 +7,7 @@ Instructions for haze source code.
 - Keep business logic in `core/`, `config/`, `llm/`, `skills/`, or `utils/` unless it is inherently UI orchestration.
 - Keep React/Ink rendering and interaction state in `cli/` and `ui/` only.
 - Keep AI SDK tool definitions and model-facing schemas in `llm/`; keep provider/settings persistence in `config/`.
+- Layer order for the lower layers: `utils` → `core` → (`config`, `skills`, `llm`). `core` never imports from `config`, `llm`, `cli` or `ui`; `config` may import `core`. Anything `core` needs that used to sit in `config` (haze data roots in `core/paths.ts`, private file writes in `core/persistence/privateStorage.ts`, shared contracts such as `ContextFile` in `core/contextFileTypes.ts`) lives in `core`, and `config` re-exports or imports it from there. These boundaries are pinned by `tests/architecture/layers.test.ts` (ARCH-01, ARCH-02).
 - Keep reusable pure logic small and exported where tests need direct coverage.
 
 ## TypeScript style

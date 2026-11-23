@@ -83,6 +83,10 @@ describe('layer boundaries', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('core never imports from config (ARCH-02: data roots, private storage and shared contracts live in core)', () => {
+    expect(importedLayers('core').filter(edge => edge.layer === 'config')).toEqual([]);
+  });
+
   it('the turn engine does not import the transcript formatters (ARCH-03)', () => {
     const engine = path.join(srcRoot, 'cli', 'commands', 'streaming');
     const offenders = sourceFiles('cli/commands/streaming')

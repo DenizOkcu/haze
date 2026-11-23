@@ -8,12 +8,9 @@ import {HAZE_DIR} from '../core/paths.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
 import {assertRealPathInsideRoot} from '../utils/path.js';
 import {escapeEnvelopeClosers} from '../core/safety/untrustedEnvelopes.js';
+import type {ContextFile} from '../core/contextFileTypes.js';
 
-export interface ContextFile {
-  path: string;
-  content: string;
-  signature?: string;
-}
+export type {ContextFile};
 
 export interface ReadContextFileOptions {
   onContextFileRead?: (path: string) => void;

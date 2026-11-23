@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import crypto from 'node:crypto';
 import type {ModelMessage} from 'ai';
-import type {ContextFile} from '../../config/contextFiles.js';
+import type {ContextFile} from '../contextFileTypes.js';
 import {imageFilePartBytes, isImageFilePart} from '../attachments/imageAttachments.js';
 
 const DEFAULT_CHARS_PER_TOKEN = 4;
