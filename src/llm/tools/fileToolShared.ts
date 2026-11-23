@@ -1,6 +1,6 @@
 import {MAX_OUTPUT_CHARS} from '../../core/limits.js';
 import {HazeToolError} from './failures.js';
-import {checkGitIgnored, isGitIgnored} from './gitIgnore.js';
+import {checkGitIgnored, isGitIgnored} from '../../core/ignore/gitIgnore.js';
 
 export {MAX_OUTPUT_CHARS};
 export const DEFAULT_READ_LINES = 300;

@@ -21,6 +21,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `toolOutput/` — shared token/char reduction metrics.
 - `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `shell`, `grep`, and LSP teardown.
 - `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
+- `ignore/` — the in-process `.gitignore`/`.git/info/exclude` classifier (`createIgnoreClassifier`, `resolveGitDirs`, fail-open reads / fail-closed mutation guards) shared by the file tools, LSP pool, `@path` completion and the code-graph builder. It depends only on Node, the `ignore` package and `utils/`; keep it free of `llm`/`cli` imports (ARCH-01).
 - `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.
 - `toolResultTypes.ts` — structured tool-result types and guards (`ToolFailureReasonCode`, `ValidationKind`, `ValidationSummary`, `ToolDiffLine`) shared by tools, formatters, the completion policy and the session store. Keep it free of `llm`/`cli` imports: it is what lets `core` consume tool-result contracts without depending on the tool layer (ARCH-01).

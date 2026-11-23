@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {walkDir} from '../../utils/fs.js';
-import {createIgnoreClassifier} from '../../llm/tools/gitIgnore.js';
+import {createIgnoreClassifier} from '../../core/ignore/gitIgnore.js';
 import {workspaceRoot} from '../../utils/path.js';
 import type {TextInputSuggestion} from '../../ui/components/TextInput.js';
 

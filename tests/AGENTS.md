@@ -19,7 +19,7 @@ Current regression priorities:
 
 - `tests/cli/**` covers slash commands, chat helpers, static/dynamic transcript partitioning, streaming helpers, formatters, wizards, the DynamicFrame/shutdown/terminal-control integration paths, and headless command behavior (including `haze report`).
 - `tests/config/**` covers settings, providers, context files, LSP/MCP/skill settings, input history, update checks, private storage permissions, and endpoint security.
-- `tests/core/**` covers agent compaction/request assembly/events/work state, reasoning policy, goal/intent policy and project preflight, bounded I/O and sparse line paging, output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
+- `tests/core/**` covers agent compaction/request assembly/events/work state, reasoning policy, goal/intent policy and project preflight, bounded I/O and sparse line paging, the in-process gitignore classifier (`tests/core/ignore/`), output reducers, safety, session store, tasks, subagents, validation parser, and the bounded subprocess primitive.
 - `tests/hazeTools/**` covers built-in tool behavior exposed from `src/llm/hazeTools.ts` and `src/llm/tools/**`.
 - `tests/llm/**` covers client/prompt/request context/LSP/MCP/web fetch/tool helper behavior.
 - `tests/skills/**` covers skill loader/registry/tool/builder, including project-over-global precedence, candidate retention, untrusted-content framing, and real-path confinement.

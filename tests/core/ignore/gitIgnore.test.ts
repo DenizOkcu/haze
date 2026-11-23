@@ -1,8 +1,8 @@
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import fs from '../fsExtra.js';
+import fs from '../../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
-import {createIgnoreClassifier, classifyGitIgnored, isGitIgnored} from '../../src/llm/tools/gitIgnore.js';
+import {createIgnoreClassifier, classifyGitIgnored, isGitIgnored} from '../../../src/core/ignore/gitIgnore.js';
 
 async function makeTmp(prefix: string) {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
@@ -189,7 +189,7 @@ describe('in-process ignore classifier', () => {
     const nonRepo = await makeTmp('haze-nogit2-');
     try {
       process.chdir(nonRepo);
-      const {checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
+      const {checkGitIgnored} = await import('../../../src/core/ignore/gitIgnore.js');
       expect(await checkGitIgnored(path.join(nonRepo, 'a.txt'))).toBe('not-ignored');
     } finally {
       process.chdir(tmp);
@@ -219,14 +219,14 @@ describe('tri-state under unreadable ignore files (F-05)', () => {
 
     // Batch: fail open (nothing reported), tri-state distinguishes.
     await expect(classifyGitIgnored(['a.txt'])).resolves.toEqual(new Set());
-    const {checkGitIgnored} = await import('../../src/llm/tools/gitIgnore.js');
+    const {checkGitIgnored} = await import('../../../src/core/ignore/gitIgnore.js');
     await expect(checkGitIgnored(path.join(tmp, 'a.txt'))).resolves.toBe('unknown');
   });
 
   it('mutation guards fail closed on unknown status unless allowIgnored is set', async () => {
     await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\n');
     await fs.chmod(path.join(tmp, '.gitignore'), 0o000);
-    const {assertNotIgnored} = await import('../../src/llm/tools/fileToolShared.js');
+    const {assertNotIgnored} = await import('../../../src/llm/tools/fileToolShared.js');
     const target = path.join(tmp, 'mutate.txt');
     await expect(assertNotIgnored(target, 'mutate.txt')).rejects.toMatchObject({reasonCode: 'ignore_check_unavailable'});
     await expect(assertNotIgnored(target, 'mutate.txt', true)).resolves.toBeUndefined();
@@ -235,7 +235,7 @@ describe('tri-state under unreadable ignore files (F-05)', () => {
   it('single-file reads fail open on unknown status (unreadable ignore files never block reads)', async () => {
     await fs.writeFile(path.join(tmp, '.gitignore'), '*.log\n');
     await fs.chmod(path.join(tmp, '.gitignore'), 0o000);
-    const {assertNotIgnored} = await import('../../src/llm/tools/fileToolShared.js');
+    const {assertNotIgnored} = await import('../../../src/llm/tools/fileToolShared.js');
     const target = path.join(tmp, 'read.txt');
     await expect(assertNotIgnored(target, 'read.txt', undefined, {operation: 'read'})).resolves.toBeUndefined();
     // Mutations keep failing closed in the same environment.

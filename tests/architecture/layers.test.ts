@@ -57,4 +57,8 @@ describe('layer boundaries', () => {
       .map(file => path.relative(srcRoot, file));
     expect(offenders).toEqual([]);
   });
+
+  it('core never imports from llm (the tool layer sits above core, never below it)', () => {
+    expect(importedLayers('core').filter(edge => edge.layer === 'llm')).toEqual([]);
+  });
 });

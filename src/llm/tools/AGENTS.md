@@ -49,7 +49,7 @@ Current behavior:
 - `fetchTool.ts` enforces URL safety through `webFetch.ts`/URL guard and caps returned content.
 - `outputCap.ts` and `storedOutputTool.ts` keep large direct outputs retrievable without bloating context.
 - `grepRunner.ts` runs ripgrep on the shared `runBoundedProcess` primitive (CR-004) and parses `--json` incrementally via its stdout interceptor, stopping at the true global match cap; do not route grep through an unbounded buffer. It prefers the bundled `@vscode/ripgrep` binary and falls back to a system `rg` on PATH when the bundled path is missing (when no system rg exists either, the spawn error still names the bundled path).
-- `gitIgnore.ts` evaluates `.gitignore` and `.git/info/exclude` rules in-process without requiring Git. It discovers parent repository boundaries and linked-worktree git directories, preserves POSIX backslash names, and caches rule files by mtime and size for one listing operation. Reads fail open when a rule source is unreadable; mutation guards report `unknown` and fail closed (F-05).
+- `core/ignore/gitIgnore.ts` (it lives in `core/`, not here, so the graph builder and other core code never import the tool layer — ARCH-01) evaluates `.gitignore` and `.git/info/exclude` rules in-process without requiring Git. It discovers parent repository boundaries and linked-worktree git directories, preserves POSIX backslash names, and caches rule files by mtime and size for one listing operation. Reads fail open when a rule source is unreadable; mutation guards report `unknown` and fail closed (F-05).
 
 ## Failure results
 

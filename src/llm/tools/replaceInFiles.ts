@@ -4,7 +4,7 @@ import path from 'node:path';
 import {walkDir} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
 import {prepareWorkspaceMutation, prepareWorkspaceRead} from './workspaceFile.js';
-import {createIgnoreClassifier} from './gitIgnore.js';
+import {createIgnoreClassifier} from '../../core/ignore/gitIgnore.js';
 import {boundedDiff, fileDiff} from './editMatch.js';
 import {readUtf8Prefix} from '../../core/io/boundedRead.js';
 import {EXACT_MUTATION_BYTES} from '../../core/limits.js';

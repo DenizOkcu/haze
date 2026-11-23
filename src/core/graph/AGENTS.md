@@ -11,8 +11,7 @@ WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/graph`
   cache compatibility.
 - `extract.ts` — pure per-file AST extraction (tree-sitter WASM; grammars
   vendored in `assets/graph-grammars/`, shipped via package `files`).
-- `buildGraph.ts` — workspace walk (gitignore + secret-path confinement via the
-  shared file-tool layers) and `resolveGraph()` cross-file resolution.
+- `buildGraph.ts` — workspace walk (in-process gitignore via `core/ignore/gitIgnore.ts` and secret-path confinement via `core/safety/secretPaths.ts`) and `resolveGraph()` cross-file resolution.
 - `store.ts` — persistence under `~/.haze/graphs/<workspace-key>/` (graph.json,
   manifest signatures, content-hash extraction cache), shrink guard.
 - `query.ts` — IDF scoring, per-term seed guarantee, hub-damped traversal,

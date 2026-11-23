@@ -15,7 +15,7 @@ import {boundedDiff, fileDiff, findEditRange, splitDiffLines, lineNumberAtOffset
 import {runDedupedTool, discoverScopedContext, withScopedContext, hazeToolContextSchema} from './toolContext.js';
 import {prepareWorkspaceMutation, prepareWorkspaceRead, prepareWorkspaceWritePath} from './workspaceFile.js';
 import {DEFAULT_READ_LINES, INLINE_DIFF_LINE_LIMIT, MAX_OUTPUT_CHARS, sourceOutlineEntries} from './fileToolShared.js';
-import {createIgnoreClassifier} from './gitIgnore.js';
+import {createIgnoreClassifier} from '../../core/ignore/gitIgnore.js';
 import {runRipgrepBounded, resolveRipgrepExecutable} from './grepRunner.js';
 import {secretSearchExcludeGlobs} from '../../core/safety/secretPaths.js';
 import {EXACT_MUTATION_BYTES} from '../../core/limits.js';

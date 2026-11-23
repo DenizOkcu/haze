@@ -5,7 +5,7 @@ import {assertRealPathInsideWorkspace, assertWritablePathInsideWorkspace, resolv
 import {isPathBlessed} from '../../core/attachments/readBlessings.js';
 import {isProtectedSecretPath} from '../../core/safety/secretPaths.js';
 import {assertNotIgnored} from './fileToolShared.js';
-import {resolveGitDirs} from './gitIgnore.js';
+import {resolveGitDirs} from '../../core/ignore/gitIgnore.js';
 import {HazeToolError} from './failures.js';
 import {discoverScopedContext, hazeContext, scopedContextMutationStop, type ToolExecutionContext} from './toolContext.js';
 

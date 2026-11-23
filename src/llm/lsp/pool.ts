@@ -3,7 +3,7 @@ import path from 'node:path';
 import type {HazeLspServer} from '../../config/lspSettings.js';
 import {workspaceRelativePath, workspaceRoot} from '../../utils/path.js';
 import {walkDir} from '../../utils/fs.js';
-import {createIgnoreClassifier} from '../tools/gitIgnore.js';
+import {createIgnoreClassifier} from '../../core/ignore/gitIgnore.js';
 import {toUri} from './protocol.js';
 import {LspError, StdioLspClient} from './client.js';
 

@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {walkDir} from '../../utils/fs.js';
 import {workspaceRoot} from '../../utils/path.js';
-import {createIgnoreClassifier} from '../../llm/tools/gitIgnore.js';
+import {createIgnoreClassifier} from '../ignore/gitIgnore.js';
 import {isProtectedSecretPath} from '../safety/secretPaths.js';
 import {contentHash, extractFile, isGraphSupportedExtension, EXTRACTOR_VERSION, MAX_SOURCE_BYTES, type FileExtraction} from './extract.js';
 import {detectCommunities} from './analyze.js';
