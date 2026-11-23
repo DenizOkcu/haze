@@ -12,11 +12,26 @@
 interface SecretPattern {
   kind: string;
   pattern: RegExp;
+  /** Replacement text; defaults to `[redacted:<kind>]`. */
+  replacement?: string;
 }
+
+// AWS secret access keys are 40 base64-ish characters, a shape shared with
+// SHA-1 digests, so they are only masked next to their access key id: either
+// directly (`key = secret`) or behind a short assignment label (`\nLABEL=secret`).
+const AWS_PAIR_SEPARATOR = String.raw`(["']?\s*[=:,]?\s*["']?|\s*[A-Za-z0-9_ -]{0,40}[=:] ?)`;
+const AWS_SECRET = String.raw`[A-Za-z0-9/+=]{40}`;
 
 const SECRET_PATTERNS: SecretPattern[] = [
   // OpenAI-style API keys (and the many gateways that copy the sk- shape).
   {kind: 'api-key', pattern: /sk-[A-Za-z0-9_-]{16,}/g},
+  // GitLab personal access tokens and npm tokens.
+  {kind: 'gitlab-token', pattern: /glpat-[A-Za-z0-9_-]{20,}/g},
+  {kind: 'npm-token', pattern: /npm_[A-Za-z0-9]{36}/g},
+  // AWS access key id + secret access key pairs, in either order. These run
+  // before the bare key-id row, which would otherwise break the adjacency.
+  {kind: 'aws-secret', pattern: new RegExp(`AKIA[0-9A-Z]{16}${AWS_PAIR_SEPARATOR}(${AWS_SECRET})(?![A-Za-z0-9/+=])`, 'g'), replacement: '[redacted:aws-key]$1[redacted:aws-secret]'},
+  {kind: 'aws-secret', pattern: new RegExp(`(?<![A-Za-z0-9/+=])(${AWS_SECRET})${AWS_PAIR_SEPARATOR}AKIA[0-9A-Z]{16}`, 'g'), replacement: '[redacted:aws-secret]$2[redacted:aws-key]'},
   // GitHub personal access / OAuth tokens.
   {kind: 'github-token', pattern: /gh[po]_[A-Za-z0-9]{20,}/g},
   // AWS access key IDs.
@@ -27,6 +42,8 @@ const SECRET_PATTERNS: SecretPattern[] = [
   // minimums cut false positives on short token-shaped strings while still
   // matching real JWTs, whose segments are far longer than this.
   {kind: 'jwt', pattern: /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g},
+  // Opaque bearer credentials; JWT bearers were already masked by the row above.
+  {kind: 'bearer-token', pattern: /Bearer [A-Za-z0-9._~+/=-]{20,}/g},
   // GitHub fine-grained / long-lived personal access tokens (github_pat_ prefix).
   {kind: 'github-token', pattern: /github_pat_[A-Za-z0-9_]{20,}/g},
   // GCP API keys (AIza prefix).
@@ -40,8 +57,8 @@ const SECRET_PATTERNS: SecretPattern[] = [
 /** Replace common secret token shapes in a string with `[redacted:<kind>]`. */
 export function redactSecrets(text: string): string {
   let result = text;
-  for (const {kind, pattern} of SECRET_PATTERNS) {
-    result = result.replace(pattern, `[redacted:${kind}]`);
+  for (const {kind, pattern, replacement} of SECRET_PATTERNS) {
+    result = result.replace(pattern, replacement ?? `[redacted:${kind}]`);
   }
   return result;
 }

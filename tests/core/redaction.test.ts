@@ -30,6 +30,19 @@ describe('redactSecrets', () => {
     expect(redactSecrets('key rk_live_' + '1234567890abcdefghijklmnop done')).toBe('key [redacted:stripe-key] done');
   });
 
+  it('masks GitLab, npm, opaque Bearer and AWS secret keys (SEC-09)', () => {
+    expect(redactSecrets('git glpat-' + 'A1b2C3d4E5f6G7h8I9j0 end')).toBe('git [redacted:gitlab-token] end');
+    expect(redactSecrets('npm_' + 'a1b2c3d4e5f60718' + '293a4b5c6d7e8f9a0123 end')).toBe('[redacted:npm-token] end');
+    expect(redactSecrets('Authorization: Bearer ' + 'Qm9ndXNTb3BhcXVlVG9rZW4xMjM0NTY')).toBe('Authorization: [redacted:bearer-token]');
+    // AWS secret access keys are only recognizable next to their access key id, in either order.
+    expect(redactSecrets('AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE AWS_SECRET_ACCESS_KEY=wJalr' + 'XUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'))
+      .toBe('AWS_ACCESS_KEY_ID=[redacted:aws-key] AWS_SECRET_ACCESS_KEY=[redacted:aws-secret]');
+    expect(redactSecrets('aws_secret_access_key = wJalr' + 'XUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY aws_access_key_id = AKIAIOSFODNN7EXAMPLE'))
+      .toBe('aws_secret_access_key = [redacted:aws-secret] aws_access_key_id = [redacted:aws-key]');
+    // A bare 40-character run (e.g. a SHA-1 digest) is not treated as a secret.
+    expect(redactSecrets('commit 35b3d8e7e3d6e5d8b5b1f0a9c8e2d1f0a9b8c7d6')).toBe('commit 35b3d8e7e3d6e5d8b5b1f0a9c8e2d1f0a9b8c7d6');
+  });
+
   it('leaves short or ordinary text untouched', () => {
     expect(redactSecrets('sk-short')).toBe('sk-short');
     expect(redactSecrets('the ski trip costs 250')).toBe('the ski trip costs 250');
