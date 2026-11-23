@@ -20,7 +20,8 @@ import {handleToolErrorPart, handleToolResultPart, type AttemptStreamPart} from 
 import {createPrepareStep, createRepairToolCall} from './prepareStep.js';
 import {type NativeToolCall, type ToolGroupRenderer} from './toolGroupRenderer.js';
 import {applyStepToolResultState, initialToolResultState, type ToolResultState} from './toolResultState.js';
-import {extractUsage, logEntry, stepCacheMetrics} from './turnRuntime.js';
+import {extractUsage, logEntry} from './turnRuntime.js';
+import {projectStepEnd} from './stepProjection.js';
 import type {AttemptSalvage, StreamStallGuard} from './stallRecovery.js';
 import type {AttemptSetup} from './attemptSetup.js';
 import type {ContextFile} from '../../../config/contextFiles.js';
@@ -364,29 +365,31 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
       // Tool-loop control must advance from this internally ordered callback.
       loopState.toolResultState = applyStepToolResultState(loopState.toolResultState, content);
       recordCompletedStep(loopState, {text, toolCalls});
-      // Remember the last valid per-step usage for usage-overflow detection
-      // (Pillar 1.2); empty usage objects (some gateways/tests) keep the
-      // previous value or stay unset.
-      const stepUsage = stepCacheMetrics(usage);
-      if (stepUsage.inputTokens != null || usage?.outputTokens != null || stepUsage.cacheReadTokens > 0 || stepUsage.cacheWriteTokens > 0) {
-        loopState.lastUsage = {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens ?? 0, cacheReadTokens: stepUsage.cacheReadTokens, cacheWriteTokens: stepUsage.cacheWriteTokens};
-      }
+      // The "what happened this epoch" projection (counters, usage fallback,
+      // step_end event, log entry) is pure and unit-tested in stepProjection.ts.
+      const projection = projectStepEnd({
+        completedSteps: loopState.completedSteps,
+        attempt: retryAttempt + 1,
+        text,
+        toolCallCount: toolCalls.length,
+        toolResultCount: toolResults.length,
+        finishReason,
+        usage,
+        responseModel: response?.modelId,
+        previousLastUsage: loopState.lastUsage,
+        stepsUsed: turnState.stepsUsed,
+        toolCallsUsed: globalBudget.started,
+      });
+      if (projection.lastUsage) loopState.lastUsage = projection.lastUsage;
       // Turn-wide counters remain shared across bounded SDK epochs, retries,
       // and recovery slices. Executions are authoritative for tool-call usage.
-      turnState.stepsUsed += 1;
-      turnState.toolCallsUsed = globalBudget.started;
-      if (toolCalls.length > 0 && text.trim().length === 0) turnState.toolOnlyStepsUsed += 1;
+      turnState.stepsUsed = projection.stepsUsed;
+      turnState.toolCallsUsed = projection.toolCallsUsed;
+      if (projection.toolOnlyStep) turnState.toolOnlyStepsUsed += 1;
       if (Array.isArray(response?.messages) && response.messages.length > 0) salvage.accumulated = response.messages as ModelMessage[];
-      const publicUsage = {
-        inputTokens: stepUsage.inputTokens ?? 0,
-        outputTokens: usage?.outputTokens ?? 0,
-        cacheReadTokens: stepUsage.cacheReadTokens,
-        cacheWriteTokens: stepUsage.cacheWriteTokens,
-        reasoningTokens: stepUsage.reasoningTokens,
-      };
-      callbacks.onEvent?.(agentEvent({type: 'step_end', attempt: retryAttempt + 1, step: loopState.completedSteps, finishReason, toolCallCount: toolCalls.length, usage: publicUsage, ...(response?.modelId ? {responseModel: response.modelId} : {})}));
-      logEntry(callbacks.log, {at: new Date().toISOString(), type: 'step', stream: 'main', step: loopState.completedSteps - 1, text, finishReason, usage: {inputTokens: stepUsage.inputTokens, outputTokens: usage?.outputTokens, cacheReadTokens: stepUsage.cacheReadTokens || undefined, cacheWriteTokens: stepUsage.cacheWriteTokens || undefined, noCacheTokens: stepUsage.noCacheTokens || undefined, reasoningTokens: stepUsage.reasoningTokens || undefined, cacheHitRatio: stepUsage.cacheHitRatio}});
-      callbacks.debugLog(`step ${loopState.completedSteps - 1} finished: ${finishReason}; text=${text.length}; toolCalls=${toolCalls.length}; toolResults=${toolResults.length}`);
+      callbacks.onEvent?.(projection.event);
+      logEntry(callbacks.log, projection.log);
+      callbacks.debugLog(projection.debugLine);
     },
     onEnd(event) {
       const providerUsage = extractUsage({usage: event.usage});
