@@ -56,6 +56,11 @@ const NON_OVERFLOW_PATTERNS: readonly RegExp[] = [
   /^(?:throttling|service unavailable)/i, // AWS Bedrock throttling/unavailable prefixes (raw ThrottlingException and formatted variants)
   /rate limit/i,
   /too many requests/i,
+  // Output-cap errors look like "too many tokens"/"token limit exceeded" but
+  // are NOT context overflow — compacting would not help (BE-05).
+  /max[_ ]?(?:output|completion)[_ ]?tokens?/i,
+  /max_tokens/i,
+  /maximum (?:output|completion) tokens?/i,
 ];
 
 /** Does an error text indicate a provider context-window overflow? */

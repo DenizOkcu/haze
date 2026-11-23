@@ -35,6 +35,15 @@ describe('overflow classification', () => {
     expect(errorIndicatesContextOverflow('429 Too many requests')).toBe(false);
   });
 
+  it('excludes output-cap errors that generic patterns would otherwise match (BE-05)', () => {
+    expect(errorIndicatesContextOverflow('max_tokens exceeded: too many tokens requested')).toBe(false);
+    expect(errorIndicatesContextOverflow('Error: max output tokens (4096) exceeded, token limit exceeded')).toBe(false);
+    expect(errorIndicatesContextOverflow('max_completion_tokens 8192 reached')).toBe(false);
+    expect(errorIndicatesContextOverflow('maximum completion tokens exceeded')).toBe(false);
+    // A genuine input overflow mentioning the window still classifies as overflow.
+    expect(errorIndicatesContextOverflow('prompt is too long: 213462 tokens > 200000 maximum')).toBe(true);
+  });
+
   it('does not match ordinary failures', () => {
     expect(errorIndicatesContextOverflow('Connection terminated')).toBe(false);
     expect(errorIndicatesContextOverflow('Invalid API key provided')).toBe(false);
