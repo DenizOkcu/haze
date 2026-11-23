@@ -199,6 +199,8 @@ describe('SECRET_FILE_RULE drift canary (R2-HZ-6)', () => {
   // surface can reach. When either list changes, change them together.
   const CATEGORY_TOKENS = [
     'SSH keys',
+    'id_*',
+    '~/.ssh/**',
     'shell history',
     '.env',
     '.pem',

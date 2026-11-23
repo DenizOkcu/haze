@@ -88,7 +88,14 @@ const PROTECTED_BASENAME_MATCHERS = PROTECTED_BASENAME_PATTERNS.map(pattern => n
   'i',
 ));
 
-/** OpenSSH private-key stems; `<stem>.pub` public keys stay readable. */
+/**
+ * OpenSSH private-key names, protected in any directory (workspace included):
+ * extension-less `id_<name>` files (`id_rsa`, `id_deploy_ed25519`) and the
+ * classic stems with any non-`.pub` suffix (`id_rsa.bak`). A different
+ * extension keeps its meaning (`id_token.ts` is source); `<name>.pub` public
+ * keys stay readable (SEC-04).
+ */
+const SSH_KEY_NAME_PATTERN = /^id_[^./]+$/;
 const SSH_KEY_STEMS = ['id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'];
 
 /** Extensions that conventionally carry private-key material. */
@@ -110,7 +117,8 @@ function isProtectedEnvName(basename: string): boolean {
 }
 
 function isProtectedSshKeyName(basename: string): boolean {
-  return SSH_KEY_STEMS.some(stem => basename === stem || (basename.startsWith(`${stem}.`) && basename !== `${stem}.pub`));
+  if (SSH_KEY_NAME_PATTERN.test(basename)) return true;
+  return SSH_KEY_STEMS.some(stem => basename.startsWith(`${stem}.`) && basename !== `${stem}.pub`);
 }
 
 /** Whether a lowercased home-relative directory path matches a `*`-wildcard pattern (one wildcard per segment). */
@@ -167,7 +175,7 @@ export function secretSearchExcludeGlobs(): string[] {
   // Negated-only globs cannot express an exception without widening traversal.
   return [...new Set([
     ...ENV_STEMS.flatMap(stem => [`!${stem}`, `!${stem}.*`]),
-    ...SSH_KEY_STEMS.map(stem => `!${stem}*`),
+    '!id_*',
     ...PROTECTED_EXTENSIONS.map(extension => `!*${extension}`),
     ...[...PROTECTED_BASENAMES].map(name => `!${name}`),
     ...PROTECTED_BASENAME_PATTERNS.map(pattern => `!${pattern}`),

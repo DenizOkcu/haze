@@ -59,6 +59,26 @@ describe('secret file protection across tools', () => {
     }
   });
 
+  it('readFile refuses extension-less id_* private keys in the workspace but reads their .pub (SEC-04)', async () => {
+    await fs.outputFile(path.join(tmp, 'deploy/id_prod_rsa'), SECRET);
+    await fs.outputFile(path.join(tmp, 'id_customname'), SECRET);
+    await fs.outputFile(path.join(tmp, 'id_customname.pub'), `ssh-ed25519 AAAA${SECRET} user@host`);
+    await fs.outputFile(path.join(tmp, 'id_utils.ts'), `export const marker = '${SECRET}';\n`);
+    for (const protectedPath of ['deploy/id_prod_rsa', 'id_customname']) {
+      const result = await run(() => hazeTools.readFile.execute({path: protectedPath}, {abortSignal: undefined}));
+      expect(result, protectedPath).toMatchObject({ok: false, reasonCode: 'secret_file_protected', recoverable: false});
+      expect(JSON.stringify(result), protectedPath).not.toContain(SECRET);
+    }
+    const edit = await run(() => hazeTools.editFile.execute({path: 'id_customname', edits: [{oldText: SECRET, newText: 'x'}]}, {abortSignal: undefined}));
+    expect(edit).toMatchObject({ok: false, reasonCode: 'secret_file_protected'});
+    expect(await fs.readFile(path.join(tmp, 'id_customname'), 'utf8')).toBe(SECRET);
+    const pub = await run(() => hazeTools.readFile.execute({path: 'id_customname.pub'}, {abortSignal: undefined}));
+    expect(pub.content).toContain('ssh-ed25519');
+    // A source file that merely starts with `id_` is not a key.
+    const source = await run(() => hazeTools.readFile.execute({path: 'id_utils.ts'}, {abortSignal: undefined}));
+    expect(source.content).toContain('export const marker');
+  });
+
   it('readFile still reads documentation variants like .env.example', async () => {
     await seedWorkspace();
     const result = await run(() => hazeTools.readFile.execute({path: '.env.example'}, {abortSignal: undefined}));
