@@ -67,7 +67,7 @@ export function runSuspendedChild(launch: {command: string; args: string[]}, std
   });
 }
 
-// Ink-side wiring lives in chat.tsx via useApp(); this module deliberately
+// Ink-side wiring lives in chat/ChatScreen.tsx via useApp(); this module deliberately
 // stays React-free. The interactive hook is defined in terminalControlHook.tsx.
 
 // --- Ink-side wiring (React, no JSX) -------------------------------------

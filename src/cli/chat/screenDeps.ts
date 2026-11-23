@@ -34,7 +34,7 @@ export type ResumeExisting =
 /**
  * The explicit dependency bundle the extracted ChatScreen function bodies
  * (`submitPipeline`, `agentTurnRunner`, `messageFinalize`) receive instead of
- * closing over component scope. Assembled once per render in `chat.tsx`;
+ * closing over component scope. Assembled once per render in `chat/ChatScreen.tsx`;
  * refs are shared objects, so call-time reads always see fresh values.
  */
 export interface ChatScreenDeps {
