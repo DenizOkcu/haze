@@ -293,6 +293,13 @@ export async function writeSettings(settings: HazeSettings): Promise<void> {
   await writePrivateJsonAtomic(SETTINGS_FILE, parsed);
 }
 
+/**
+ * Shallow merge: a patch key replaces the whole stored value (BE-07) — a
+ * patch containing `providers` replaces the entire array. To change one
+ * provider, use `upsertProvider(settings, provider)` from `providers.ts`
+ * (which the `/provider` wizard already does) instead of passing a
+ * reconstructed array.
+ */
 export async function updateSettings(patch: HazeSettings): Promise<HazeSettings> {
   const next = {...await readSettings(), ...patch};
   await writeSettings(next);

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {activeModel, activeProvider, configuredProviders, providerApiKey, providerImageCapable, resolveModelSelector} from '../../src/config/providers.js';
+import {activeModel, activeProvider, configuredProviders, providerApiKey, providerImageCapable, resolveModelSelector, upsertProvider} from '../../src/config/providers.js';
 
 describe('providers', () => {
   it('scopes a legacy key to its OpenRouter endpoint', () => {
@@ -8,6 +8,14 @@ describe('providers', () => {
     expect(providerApiKey(settings, {name: 'openrouter', url: 'https://other.example/v1', models: ['m']})).toBeUndefined();
     expect(providerApiKey(settings, {name: 'custom', url: 'https://other.example/v1', models: ['m']})).toBeUndefined();
   });
+  it('upsertProvider replaces by name and appends new providers (BE-07 helper)', () => {
+    const settings = {providers: [{name: 'a', url: 'https://a.example/v1', models: ['m1']}]};
+    const updated = upsertProvider(settings, {name: 'a', url: 'https://a2.example/v1', models: ['m2']});
+    expect(updated).toEqual([{name: 'a', url: 'https://a2.example/v1', models: ['m2']}]);
+    const added = upsertProvider(settings, {name: 'b', url: 'https://b.example/v1', models: []});
+    expect(added.map(p => p.name)).toEqual(['a', 'b']);
+  });
+
   it('turns legacy OpenRouter settings into a provider', () => {
     const providers = configuredProviders({provider: 'openrouter', apiKey: 'key', model: 'x-ai/grok-build-0.1'});
     expect(providers[0]).toMatchObject({
