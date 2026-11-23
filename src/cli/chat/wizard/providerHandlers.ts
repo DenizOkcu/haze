@@ -425,7 +425,20 @@ export function createProviderWizardHandlers(deps: WizardDispatchDeps, ctx: Wiza
     await ctx.applySettings(result.settingsPatch);
     setSelectedProviderName(undefined);
     setMode('chat');
-    showMessage(result.message);
+    // UX-05: probe /models with the fresh key so a bad one surfaces now, not
+    // at the first turn. The key stays saved either way — the probe is
+    // advisory, so a failure only annotates the notice.
+    let message = result.message;
+    if (result.provider && result.provider.kind !== 'chatgpt-codex') {
+      deps.setBusyLabel(`Probing ${result.provider.name} model list`);
+      deps.setBusy(true);
+      const probe = await discoverProviderModels({url: result.provider.url, key: result.key});
+      deps.setBusy(false);
+      message += probe.status === 'ok'
+        ? `\nKey works: ${probe.models.length} model${probe.models.length === 1 ? '' : 's'} listed on ${result.provider.name}.`
+        : `\nKey saved, but the model-list probe failed (${probe.error}). The key may be wrong — it is kept; fix it with /provider → set API key.`;
+    }
+    showMessage(message);
   }
 
   async function providerRemoveModelsMode(value: string) {

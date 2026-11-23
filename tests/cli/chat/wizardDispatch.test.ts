@@ -186,6 +186,26 @@ describe('wizardDispatch provider actions with model discovery', () => {
     expect(deps.setMode).toHaveBeenLastCalledWith('providerConfirmRemove');
   });
 
+  it('probes the model list after saving an API key and keeps the key on probe failure (UX-05)', async () => {
+    const deps = makeDeps();
+    const wizard = createWizardDispatch(deps);
+    await wizard.dispatch('provider', 'LM Studio');
+    await wizard.dispatch('providerAction', 'set API key');
+
+    mocks.discoverProviderModels.mockResolvedValue(discovered(['qwen3-coder']));
+    await wizard.dispatch('providerSetKey', 'sk-test');
+    expect(mocks.discoverProviderModels).toHaveBeenCalledWith({url: 'http://localhost:1234/v1', key: 'sk-test'});
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('Key works: 1 model listed'));
+    expect(mocks.updateSettings).toHaveBeenCalled();
+
+    mocks.discoverProviderModels.mockResolvedValue(discoveryFailed('HTTP 401'));
+    await wizard.dispatch('provider', 'LM Studio');
+    await wizard.dispatch('providerAction', 'set API key');
+    await wizard.dispatch('providerSetKey', 'sk-bad');
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('probe failed (HTTP 401)'));
+    expect(deps.showMessage).toHaveBeenLastCalledWith(expect.stringContaining('it is kept'));
+  });
+
   it('toggles the image-capable flag and returns to chat (F03)', async () => {
     const deps = makeDeps();
     const wizard = createWizardDispatch(deps);
