@@ -64,7 +64,6 @@ for (let sample = 0; sample < Number(process.argv[3] ?? 3) + 1; sample++) {
       elapsedMs: Math.round(performance.now() - start), heapDeltaBytes: process.memoryUsage().heapUsed - memoryBefore});
   } finally {
     app.cleanup(); stdin.destroy(); stdout.destroy(); stderr.destroy();
-    app = undefined;
   }
   await new Promise(resolve => setImmediate(resolve));
   globalThis.gc?.();
