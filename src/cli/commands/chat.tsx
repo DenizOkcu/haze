@@ -16,7 +16,7 @@ import {finalizeMessage as finalizeMessageImpl} from '../chat/messageFinalize.js
 import {submit as submitImpl} from '../chat/submitPipeline.js';
 import {runSingleAgentTurn as runSingleAgentTurnImpl} from '../chat/agentTurnRunner.js';
 import type {ChatScreenDeps, PausedResume, ResumeExisting} from '../chat/screenDeps.js';
-import {type Message} from './streaming.js';
+import {type Message, type TurnExecutionOptions} from './streaming.js';
 import type {TokenUsage} from './streaming/turnRuntime.js';
 import {type LlmLog, endLog as endLlmLog} from '../../core/log/llmLog.js';
 import {loadSkillRegistry} from '../../skills/SkillRegistry.js';
@@ -37,7 +37,7 @@ import {busyDetailLabel, compactHomePath, statusBarMetrics, type FleetStatus} fr
 import {EMPTY_TOKEN_USAGE, shouldClearCompletedTasks} from '../chat/turnState.js';
 import {placeholderForMode, type Mode} from './chatModes.js';
 import {contextFileSignatureMap, mergeSettingsSelection, prepareUserInput as prepareUserInputPolicy, resumeKindFor} from '../chat/userInput.js';
-import {isStoredReasoning, resolveReasoningChoice} from '../../core/agent/reasoningPolicy.js';
+import {isStoredReasoning, resolveReasoningChoice, type StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {resolveProviderReasoning} from '../../config/providerReasoning.js';
 import {inputSuggestionsForState} from '../chat/inputSuggestions.js';
 import {currentBranchName, runStartupSequence} from '../chat/startupSequence.js';
@@ -424,7 +424,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
 
   // Session per-model reasoning overrides live on the stable PromptSession
   // object; the counter only forces a re-render so the status bar updates.
-  function setSessionReasoningOverride(modelSelector: string, setting: import('../../core/agent/reasoningPolicy.js').StoredReasoningSetting | undefined) {
+  function setSessionReasoningOverride(modelSelector: string, setting: StoredReasoningSetting | undefined) {
     const session = currentPromptSession();
     if (setting === undefined) {
       if (session.reasoningByModel) delete session.reasoningByModel[modelSelector];
@@ -462,7 +462,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   // F03: attachment gating and read blessings live in the pure helper
   // (chat/userInput.ts); this wrapper only surfaces its errors as system
   // messages. Applied only to genuine user input, never synthetic control prompts.
-  async function prepareUserInput(value: string): Promise<{value: string; displayValue?: string; options: import('./streaming.js').TurnExecutionOptions} | undefined> {
+  async function prepareUserInput(value: string): Promise<{value: string; displayValue?: string; options: TurnExecutionOptions} | undefined> {
     const prepared = await prepareUserInputPolicy(value, settings);
     if (prepared?.error) {
       setMessages(m => [...m, {role: 'system', text: prepared.error!}]);
@@ -471,7 +471,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
     return prepared;
   }
 
-  async function doAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}) {
+  async function doAgentTurn(value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}) {
     if (stoppingRef.current) return;
     setDebugLogs([]);
     // When every task is already completed, start the new turn with a clean
@@ -538,7 +538,7 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   }
 
   // One physical agent turn under the goal supervisor lives in chat/agentTurnRunner.ts.
-  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: import('./streaming.js').TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
+  async function runSingleAgentTurn(value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}, resumeExisting?: ResumeExisting) {
     return runSingleAgentTurnImpl(screenDeps(), value, displayValue, turnOptions, resumeExisting);
   }
 
