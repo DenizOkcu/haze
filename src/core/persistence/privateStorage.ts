@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {HAZE_DIR} from '../core/paths.js';
+import {HAZE_DIR} from '../paths.js';
 
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;

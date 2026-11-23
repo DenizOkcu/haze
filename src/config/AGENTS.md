@@ -12,7 +12,7 @@ Runtime configuration, paths, context files, and provider/server settings.
 - `lspSettings.ts`, `mcpSettings.ts`, and `skillSettings.ts` mirror settings-file management for optional integrations. Skill overrides are keyed by name plus scope (`global` or `project`); an omitted scope is legacy-compatible and means `global`.
 - `inputHistory.ts` persists prompt history.
 - `updateCheck.ts` checks npm/latest version; keep it non-fatal.
-- `privateStorage.ts` is the single helper for `~/.haze` home-state writes: `0700` dirs, `0600` atomic/append files, and opportunistic tightening of pre-existing overly-broad modes. All settings/session/log/history/update state must go through it.
+- `core/persistence/privateStorage.ts` is the single helper for `~/.haze` home-state writes: `0700` dirs, `0600` atomic/append files, and opportunistic tightening of pre-existing overly-broad modes. All settings/session/log/history/update state must go through it. It lives in `core/` (not here) so sessions and logs never import `config` (ARCH-02).
 - `endpointSecurity.ts` validates provider/MCP endpoints: credentialed remote plaintext HTTP is rejected at configuration and runtime; loopback HTTP (`localhost`, `*.localhost`, `127/8`, `::1`) remains supported.
 
 ## Provider/model contract

@@ -9,7 +9,7 @@ import type {WorkState} from '../agent/workState.js';
 import type {ValidationKind} from '../../core/toolResultTypes.js';
 import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';
 import {decodeSnapshotMessages, encodeSnapshotMessages} from './snapshotCodec.js';
-import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../../config/privateStorage.js';
+import {appendPrivateFile, ensurePrivateDir, tightenPrivateFile, writePrivateFileAtomic} from '../persistence/privateStorage.js';
 import {JSONL_LINE_BYTES} from '../limits.js';
 import {iterateBoundedUtf8Lines} from '../io/boundedRead.js';
 

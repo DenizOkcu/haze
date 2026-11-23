@@ -75,6 +75,14 @@ describe('layer boundaries', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('private storage lives in core, so sessions and logs never reach into config for it (ARCH-02)', () => {
+    expect(fs.existsSync(path.join(srcRoot, 'core', 'persistence', 'privateStorage.ts'))).toBe(true);
+    const offenders = allSourceFiles()
+      .filter(file => fs.readFileSync(file, 'utf8').includes('config/privateStorage.js'))
+      .map(file => path.relative(srcRoot, file));
+    expect(offenders).toEqual([]);
+  });
+
   it('the turn engine does not import the transcript formatters (ARCH-03)', () => {
     const engine = path.join(srcRoot, 'cli', 'commands', 'streaming');
     const offenders = sourceFiles('cli/commands/streaming')

@@ -24,7 +24,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `paths.ts` — haze's user-data roots (`HAZE_DIR`, `GLOBAL_SKILLS_DIR`, `GLOBAL_PLUGINS_DIR`), consumed by config, skills, sessions and logs. It depends only on Node, so it sits at the bottom of the layer order and lets `core` stay free of `config` imports (ARCH-02).
 - `ignore/` — the in-process `.gitignore`/`.git/info/exclude` classifier (`createIgnoreClassifier`, `resolveGitDirs`, fail-open reads / fail-closed mutation guards) shared by the file tools, LSP pool, `@path` completion and the code-graph builder. It depends only on Node, the `ignore` package and `utils/`; keep it free of `llm`/`cli` imports (ARCH-01).
 - `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
-- `persistence/` — ordered, flushable append writers backing sessions and debug logs.
+- `persistence/` — ordered, flushable append writers backing sessions and debug logs, plus `privateStorage.ts`, the single private-permission (`0700`/`0600`) write helper for `~/.haze` state. It lives in `core/` so sessions and logs never import `config` (ARCH-02).
 - `toolResultTypes.ts` — structured tool-result types and guards (`ToolFailureReasonCode`, `ValidationKind`, `ValidationSummary`, `ToolDiffLine`) shared by tools, formatters, the completion policy and the session store. Keep it free of `llm`/`cli` imports: it is what lets `core` consume tool-result contracts without depending on the tool layer (ARCH-01).
 
 ## Contracts

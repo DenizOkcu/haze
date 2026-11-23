@@ -4,7 +4,7 @@ import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {HAZE_DIR} from '../core/paths.js';
 import {isNewer} from '../utils/version.js';
-import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
+import {tightenPrivateFile, writePrivateJsonAtomic} from '../core/persistence/privateStorage.js';
 
 const execFile = promisify(execFileCallback);
 

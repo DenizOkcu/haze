@@ -240,7 +240,7 @@ changes and respect user privacy.
 User state is private by default and crash-safe.
 
 - All `~/.haze` home-state writes (settings, sessions, logs, history, update
-  cache) MUST go through `config/privateStorage.ts`: `0700` directories and
+  cache) MUST go through `core/persistence/privateStorage.ts`: `0700` directories and
   `0600` files, atomic/append writes, and opportunistic tightening of
   pre-existing overly-broad modes.
 - Durable writers MUST preserve append invocation order (one writer per file,
