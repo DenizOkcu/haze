@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, renderToString} from 'ink';
 import {MarkdownText} from './MarkdownText.js';
 import {stripTerminalControlSequences} from '../terminalSanitize.js';
@@ -18,22 +18,53 @@ function renderMarkdownRows(content: string, width: number): string[] {
   return output.replace(/\n[\s]*$/, '').split('\n');
 }
 
+/**
+ * Streaming deltas are throttled to one offscreen render per window: the first
+ * delta of a window renders promptly, later ones are folded into its trailing
+ * render (FE-05).
+ */
+const COALESCE_MS = 16;
+
 /** The active block remains replaceable; only settled roots belong in Static. */
-export const StreamingMarkdownText = React.memo(function StreamingMarkdownText({content, width, maxVisibleLines}: {
+export const StreamingMarkdownText = React.memo(function StreamingMarkdownText({content, width, maxVisibleLines, streaming = true}: {
   content: string;
   width: number;
   maxVisibleLines?: number;
+  /** While streaming, deltas are coalesced; settled text renders without delay. */
+  streaming?: boolean;
 }) {
   const [rendered, setRendered] = useState<{content: string; width: number; rows: string[]}>({content: '', width, rows: []});
-  // Ink's synchronous offscreen renderer must run outside React's render and
-  // commit phases. The microtask also lets superseded deltas cancel their work.
+  const latest = useRef({content, width});
+  latest.current = {content, width};
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const lastRenderAt = useRef(0);
   useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) setRendered({content, width, rows: renderMarkdownRows(content, width)});
-    });
-    return () => { cancelled = true; };
-  }, [content, width]);
+    // Ink's synchronous offscreen renderer must run outside React's render and
+    // commit phases, which this effect body is. A burst of deltas inside one
+    // window costs at most two renders: the window's leading render and one
+    // trailing render that reads the latest text when the timer fires (FE-05).
+    const renderLatest = () => {
+      pendingTimer.current = undefined;
+      lastRenderAt.current = Date.now();
+      const {content, width} = latest.current;
+      setRendered({content, width, rows: renderMarkdownRows(content, width)});
+    };
+    if (!streaming) {
+      // Settled text never waits for the window.
+      clearTimeout(pendingTimer.current);
+      pendingTimer.current = undefined;
+    }
+    if (pendingTimer.current === undefined) {
+      const remaining = streaming ? COALESCE_MS - (Date.now() - lastRenderAt.current) : 0;
+      if (remaining <= 0) {
+        let cancelled = false;
+        queueMicrotask(() => { if (!cancelled) renderLatest(); });
+        return () => { cancelled = true; };
+      }
+      pendingTimer.current = setTimeout(renderLatest, remaining);
+    }
+  }, [content, width, streaming]);
+  useEffect(() => () => clearTimeout(pendingTimer.current), []);
 
   // Never replay a previous root after it enters Static, or show stale, wider
   // rows during a terminal resize. Append-only deltas can retain their preview.

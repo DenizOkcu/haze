@@ -4,6 +4,18 @@ import {render} from 'ink-testing-library';
 import stripAnsi from 'strip-ansi';
 import {StreamingMarkdownText} from '../../src/ui/components/StreamingMarkdownText.js';
 
+// Every offscreen render of the active root renders `<MarkdownText>` once; the
+// pass-through wrapper counts those renders without touching the output.
+const offscreen = vi.hoisted(() => ({renders: 0}));
+vi.mock('../../src/ui/components/MarkdownText.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../src/ui/components/MarkdownText.js')>();
+  const React = await import('react');
+  return {...actual, MarkdownText: React.memo(function CountingMarkdownText(props: {content: string; width: number}) {
+    offscreen.renders += 1;
+    return React.createElement(actual.MarkdownText, props);
+  })};
+});
+
 function frameOf(lastFrame: () => string | undefined) {
   return stripAnsi(lastFrame() ?? '');
 }
@@ -67,5 +79,27 @@ describe('StreamingMarkdownText', () => {
     expect(raw).not.toContain('\x1b]52');
     expect(raw).not.toContain('aGVsbG8=');
     expect(raw).not.toContain('\u009b');
+  });
+
+  it('coalesces a burst of deltas into at most two offscreen renders (FE-05)', async () => {
+    offscreen.renders = 0;
+    try {
+      const {lastFrame, rerender} = render(<StreamingMarkdownText content="delta 0" width={60} />);
+      // 200 deltas inside one tick, each followed by a microtask checkpoint.
+      for (let index = 1; index <= 200; index++) {
+        rerender(<StreamingMarkdownText content={`delta ${index}`} width={60} />);
+        await Promise.resolve();
+      }
+      await vi.waitFor(() => expect(frameOf(lastFrame)).toContain('delta 200'));
+      expect(offscreen.renders).toBeGreaterThan(0);
+      // The window's leading render plus one trailing render for the whole burst.
+      expect(offscreen.renders).toBeLessThanOrEqual(2);
+      // The settled text is rendered without waiting for the next window.
+      rerender(<StreamingMarkdownText content="delta 200 done" width={60} streaming={false} />);
+      await vi.waitFor(() => expect(frameOf(lastFrame)).toContain('delta 200 done'));
+      expect(offscreen.renders).toBeLessThanOrEqual(3);
+    } finally {
+      offscreen.renders = 0;
+    }
   });
 });

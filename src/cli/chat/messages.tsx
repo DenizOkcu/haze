@@ -252,7 +252,7 @@ export const MessageView = React.memo(function MessageView({message, width, show
     return <Box flexDirection="column" flexShrink={0} maxHeight={maxVisibleLines + (showHeader ? 1 : 0)} overflow="hidden">
       {showHeader && <Text color={theme.muted} wrap="truncate-end">{message.role === 'assistant' ? 'haze' : message.role === 'user' ? 'You asked' : 'Info'}</Text>}
       {message.role === 'assistant'
-        ? <StreamingMarkdownText content={message.text} width={width} maxVisibleLines={maxVisibleLines} />
+        ? <StreamingMarkdownText content={message.text} width={width} maxVisibleLines={maxVisibleLines} streaming={message.streaming} />
         : <StreamingClampedText text={message.text} width={width} maxVisibleLines={maxVisibleLines} />}
     </Box>;
   }
