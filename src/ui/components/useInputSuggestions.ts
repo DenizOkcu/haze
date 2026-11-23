@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {detectMentionAtCursor, type MentionContext} from '../../cli/chat/fileMentionSuggestions.js';
+import {detectMentionAtCursor, type MentionContext} from '../mentionDetection.js';
 import type {MentionSuggestionsProvider, TextInputSuggestion} from './TextInput.js';
 
 /**

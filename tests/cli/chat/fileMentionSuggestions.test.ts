@@ -2,7 +2,8 @@ import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import fs from '../../fsExtra.js';
 import os from 'node:os';
 import path from 'node:path';
-import {detectMentionAtCursor, fileMentionSuggestions} from '../../../src/cli/chat/fileMentionSuggestions.js';
+import {fileMentionSuggestions} from '../../../src/cli/chat/fileMentionSuggestions.js';
+import {detectMentionAtCursor} from '../../../src/ui/mentionDetection.js';
 
 describe('mention primitives (F04 AC1)', () => {
   describe('detectMentionAtCursor', () => {
