@@ -27,6 +27,15 @@ function readJson(file) {
   return JSON.parse(readFileSync(path.join(root, file), 'utf8'));
 }
 
+/** readJson that returns undefined instead of throwing (for the --version path). */
+function readJsonSafe(file) {
+  try {
+    return readJson(file);
+  } catch {
+    return undefined;
+  }
+}
+
 function readGitHead() {
   const sha = (value) => (/^[0-9a-f]{7,40}$/i.test((value ?? '').trim()) ? value.trim() : undefined);
   const readOptional = (file) => {
@@ -70,6 +79,35 @@ function readGitHead() {
 const problems = [];
 let pkg;
 let build;
+
+// Node floor (OPS-06): fail with a clear message instead of a syntax error
+// from dist on old runtimes. Checked before anything that could throw.
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 13)) {
+  process.stderr.write(`haze requires Node >= 22.13 (found ${process.versions.node}).\n`);
+  process.exit(1);
+}
+
+// `--version` (optionally `--verbose`) is answered before the staleness gate
+// (OPS-06): provenance must work even while dist is being repaired.
+const argv = process.argv.slice(2);
+if (argv.includes('--version') || argv.includes('-V')) {
+  const version = readJsonSafe('package.json')?.version ?? readJsonSafe('dist/buildInfo.json')?.version ?? '0.0.0';
+  if (argv.includes('--verbose')) {
+    const lines = [
+      `Haze ${version}`,
+      `commit: ${readJsonSafe('dist/buildInfo.json')?.commit ?? 'unknown'}`,
+      ...(readJsonSafe('dist/buildInfo.json')?.builtAt ? [`builtAt: ${readJsonSafe('dist/buildInfo.json').builtAt}`] : []),
+      `runtime: ${path.join(root, 'dist')}`,
+      `executable: ${realpathSync(process.argv[1])}`,
+      `goal supervisor: ${existsSync(path.join(root, 'dist/cli/commands/streaming/goalSupervisor.js')) ? 'enabled' : 'disabled'}`,
+    ];
+    process.stdout.write(`${lines.join('\n')}\n`);
+  } else {
+    process.stdout.write(`${version}\n`);
+  }
+  process.exit(0);
+}
 try {
   pkg = readJson('package.json');
 } catch {
@@ -99,25 +137,6 @@ if (problems.length > 0) {
   for (const problem of problems) process.stderr.write(`  - ${problem}\n`);
   process.stderr.write('Repair it with `npm run build` inside the haze checkout, then reinstall or `npm link`.\n');
   process.exit(1);
-}
-
-const argv = process.argv.slice(2);
-if (argv.includes('--version') || argv.includes('-V')) {
-  const version = pkg?.version ?? build?.version ?? '0.0.0';
-  if (argv.includes('--verbose')) {
-    const lines = [
-      `Haze ${version}`,
-      `commit: ${build?.commit ?? 'unknown'}`,
-      ...(build?.builtAt ? [`builtAt: ${build.builtAt}`] : []),
-      `runtime: ${path.join(root, 'dist')}`,
-      `executable: ${realpathSync(process.argv[1])}`,
-      `goal supervisor: ${existsSync(path.join(root, 'dist/cli/commands/streaming/goalSupervisor.js')) ? 'enabled' : 'disabled'}`,
-    ];
-    process.stdout.write(`${lines.join('\n')}\n`);
-  } else {
-    process.stdout.write(`${version}\n`);
-  }
-  process.exit(0);
 }
 
 import('../dist/cli/index.js');

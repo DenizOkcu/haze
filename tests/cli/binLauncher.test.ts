@@ -81,7 +81,7 @@ describe('bin/haze.js verifying launcher', () => {
 
   it('refuses to start when the goal-supervisor build artifact is missing', async () => {
     const root = await tempPackage({omit: ['goalSupervisor']});
-    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--help']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('refusing to start an incomplete or stale build');
     expect(result.stderr).toContain('dist/cli/commands/streaming/goalSupervisor.js is missing');
@@ -90,7 +90,7 @@ describe('bin/haze.js verifying launcher', () => {
 
   it('refuses to start when the build manifest version does not match package.json', async () => {
     const root = await tempPackage({packageVersion: '0.10.1', buildVersion: '0.10.0'});
-    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--help']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('dist/buildInfo.json says 0.10.0, but package.json is 0.10.1');
     expect(result.stderr).toContain('stale');
@@ -98,7 +98,7 @@ describe('bin/haze.js verifying launcher', () => {
 
   it('refuses to start when the version matches but the build commit is behind HEAD', async () => {
     const root = await tempPackage({buildCommit: 'a'.repeat(40), gitHead: 'b'.repeat(40)});
-    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--help']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain(`built from commit ${'a'.repeat(7)}`);
     expect(result.stderr).toContain(`checkout is at ${'b'.repeat(7)}`);
@@ -107,9 +107,16 @@ describe('bin/haze.js verifying launcher', () => {
   it('refuses to start when dist is entirely missing', async () => {
     const root = await tempPackage({buildVersion: false, omit: ['goalSupervisor']});
     await fs.remove(path.join(root, 'dist'));
-    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--help']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('dist/cli/index.js is missing');
+  });
+
+  it('still answers --version on a stale build (OPS-06: provenance works while dist is repaired)', async () => {
+    const root = await tempPackage({packageVersion: '0.10.1', buildVersion: '0.10.0'});
+    const result = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe('0.10.1');
   });
 
   it('answers --version directly and --version --verbose with full provenance on a healthy build', async () => {
@@ -146,7 +153,7 @@ describe('bin/haze.js verifying launcher', () => {
         packedRef: `# pack-refs with: peeled fully-peeled\n${head} refs/heads/feature\n`,
       },
     });
-    const stale = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--version']);
+    const stale = await runLauncher(path.join(root, 'bin', 'haze.js'), ['--help']);
     expect(stale.code).toBe(1);
     expect(stale.stderr).toContain('stale');
 
