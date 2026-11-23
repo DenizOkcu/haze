@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "$schema": "https://unpkg.com/knip@6/schema.json",
   "project": [
     "src/**/*.{ts,tsx}",
     "tests/**/*.{ts,tsx}",
@@ -7,9 +7,6 @@
   ],
   "ignoreDependencies": [
     "@ai-sdk/provider",
-    "jscpd",
-    "linkedom",
-    "turndown",
     "tree-sitter-wasms"
   ],
   "rules": {
