@@ -6,6 +6,7 @@ import type {Mode} from './chatModes.js';
 import {clearTasks} from '../../core/tasks/taskStorage.js';
 import type {StoredReasoningSetting} from '../../core/agent/reasoningPolicy.js';
 import {COMMAND_HELP_ENTRIES, formatCommandHelp} from './commandHelp.js';
+import {unknownCommandMessage} from './commandSuggest.js';
 import {handleFleetCommand} from './fleetCommand.js';
 import {handleInitCommand} from './initCommand.js';
 import {handleLogsCommand} from './logsCommand.js';
@@ -143,7 +144,7 @@ export async function handleSlashCommand(
   const modelResult = await handleModelCommand(value, ctx);
   if (modelResult) return modelResult;
   if (value.startsWith('/')) {
-    ctx.addSystemMessage(`Unknown command: ${value}. Bold start.`);
+    ctx.addSystemMessage(unknownCommandMessage(value));
     return 'handled';
   }
   return 'unhandled';

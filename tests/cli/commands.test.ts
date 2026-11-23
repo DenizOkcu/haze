@@ -319,6 +319,17 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('Unknown command'));
   });
 
+  it('points unknown commands at /help and suggests the closest command (UX-01)', async () => {
+    for (const [typed, suggestion] of [['/hlep', '/help'], ['/HELP', '/help'], ['/setttings', '/settings'], ['/skill list', '/skills']] as const) {
+      const ctx = mockContext();
+      expect(await handleSlashCommand(typed, ctx)).toBe('handled');
+      expect(ctx.addSystemMessage).toHaveBeenCalledWith(`Unknown command: ${typed}. Did you mean ${suggestion}? Run /help for the list.`);
+    }
+    const ctx = mockContext();
+    await handleSlashCommand('/unknown', ctx);
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith('Unknown command: /unknown. Run /help for the list.');
+  });
+
   it('returns unhandled for non-slash input', async () => {
     expect(await handleSlashCommand('hello', mockContext())).toBe('unhandled');
   });
