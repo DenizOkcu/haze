@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import {HAZE_DIR} from '../../config/paths.js';
+import {HAZE_DIR} from '../paths.js';
 import type {ModelMessage} from 'ai';
 import type {ContextBreakdown} from '../agent/contextBudget.js';
 import {appendPrivateFile, ensurePrivateFile, ensurePrivateDir, tightenPrivateFile} from '../../config/privateStorage.js';

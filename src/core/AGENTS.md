@@ -21,6 +21,7 @@ Core agent behavior, output reduction, safety classification, sessions, validati
 - `toolOutput/` — shared token/char reduction metrics.
 - `process/` — bounded subprocess primitive and shared process-tree signaling (byte-bounded stdout/stderr, timeout, abort, escalation, retained-pipe fallback) used by `shell`, `grep`, and LSP teardown.
 - `io/` — bounded UTF-8 stream readers (line iteration, sparse-indexed exact page reads, byte-prefix reads) that cap memory and returned text.
+- `paths.ts` — haze's user-data roots (`HAZE_DIR`, `GLOBAL_SKILLS_DIR`, `GLOBAL_PLUGINS_DIR`), consumed by config, skills, sessions and logs. It depends only on Node, so it sits at the bottom of the layer order and lets `core` stay free of `config` imports (ARCH-02).
 - `ignore/` — the in-process `.gitignore`/`.git/info/exclude` classifier (`createIgnoreClassifier`, `resolveGitDirs`, fail-open reads / fail-closed mutation guards) shared by the file tools, LSP pool, `@path` completion and the code-graph builder. It depends only on Node, the `ignore` package and `utils/`; keep it free of `llm`/`cli` imports (ARCH-01).
 - `limits.ts` — centralized byte/text budgets referenced by every collector/reader/storage module.
 - `persistence/` — ordered, flushable append writers backing sessions and debug logs.

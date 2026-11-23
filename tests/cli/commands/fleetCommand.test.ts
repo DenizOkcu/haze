@@ -77,7 +77,7 @@ describe('fleet ephemeral control text', () => {
 });
 
 const commandHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-fleet-cmd-'));
-vi.doMock('../../../src/config/paths.js', () => ({HAZE_DIR: commandHome, GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills')}));
+vi.doMock('../../../src/core/paths.js', () => ({HAZE_DIR: commandHome, GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills')}));
 const {handleSlashCommand} = await import('../../../src/cli/commands/commands.js');
 
 describe('handleSlashCommand /fleet routing', () => {

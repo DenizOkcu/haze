@@ -67,6 +67,14 @@ describe('layer boundaries', () => {
     expect(importedLayers('core').filter(edge => edge.layer === 'llm')).toEqual([]);
   });
 
+  it('haze data roots live in core, so nothing reaches into config for them (ARCH-02)', () => {
+    expect(fs.existsSync(path.join(srcRoot, 'core', 'paths.ts'))).toBe(true);
+    const offenders = [...sourceFiles('config'), ...sourceFiles('core'), ...sourceFiles('skills')]
+      .filter(file => fs.readFileSync(file, 'utf8').includes('config/paths.js'))
+      .map(file => path.relative(srcRoot, file));
+    expect(offenders).toEqual([]);
+  });
+
   it('the turn engine does not import the transcript formatters (ARCH-03)', () => {
     const engine = path.join(srcRoot, 'cli', 'commands', 'streaming');
     const offenders = sourceFiles('cli/commands/streaming')

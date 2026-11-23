@@ -5,7 +5,7 @@ import path from 'node:path';
 import type {CommandContext} from '../../src/cli/commands/commands.js';
 
 const commandHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-commands-test-'));
-vi.doMock('../../src/config/paths.js', () => ({
+vi.doMock('../../src/core/paths.js', () => ({
   HAZE_DIR: commandHome,
   GLOBAL_SKILLS_DIR: path.join(commandHome, 'skills'),
 }));

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import {Stats} from 'node:fs';
 import path from 'node:path';
 import {createHash, randomUUID} from 'node:crypto';
-import {HAZE_DIR} from '../../config/paths.js';
+import {HAZE_DIR} from '../../core/paths.js';
 import {boundedRead, canonicalRoot, inspectPlugin, localPath, object, PLUGIN_LIMITS, readJson, safePath, validatePluginName} from './package.js';
 
 interface OwnedFile {path: string; sha256: string; mode: 'package'; executable: boolean}

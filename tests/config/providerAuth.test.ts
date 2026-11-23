@@ -6,7 +6,7 @@ import path from 'node:path';
 let tmp = '';
 
 async function loadProviderAuth() {
-  vi.doMock('../../src/config/paths.js', () => ({HAZE_DIR: tmp, GLOBAL_SKILLS_DIR: path.join(tmp, 'skills')}));
+  vi.doMock('../../src/core/paths.js', () => ({HAZE_DIR: tmp, GLOBAL_SKILLS_DIR: path.join(tmp, 'skills')}));
   vi.resetModules();
   return import('../../src/config/providerAuth.js');
 }

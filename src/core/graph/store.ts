@@ -12,7 +12,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {parseCodeGraph, type CodeGraph} from './model.js';
 import {EXTRACTOR_VERSION, type FileExtraction} from './extract.js';
-import {HAZE_DIR} from '../../config/paths.js';
+import {HAZE_DIR} from '../paths.js';
 
 export interface FileSignature {
   size: number;

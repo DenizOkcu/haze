@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import {pathExists, ensureDir} from '../utils/fs.js';
 import path from 'node:path';
-import {GLOBAL_SKILLS_DIR} from '../config/paths.js';
+import {GLOBAL_SKILLS_DIR} from '../core/paths.js';
 import {loadSkill} from './SkillLoader.js';
 import type {LoadedSkill, SkillRegistry, SkillSource} from './types.js';
 import {confinedResolve} from './confinement.js';

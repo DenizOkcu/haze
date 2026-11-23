@@ -10,7 +10,7 @@ import type {Mode} from '../../../src/cli/commands/chatModes.js';
 // Plugin wizard steps reload installed plugins from the global ~/.haze; point
 // that at a temp home so tests never touch the real one.
 const pluginHome = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-wizard-home-'));
-vi.mock('../../../src/config/paths.js', () => ({
+vi.mock('../../../src/core/paths.js', () => ({
   HAZE_DIR: pluginHome,
   GLOBAL_SKILLS_DIR: path.join(pluginHome, 'skills'),
   GLOBAL_PLUGINS_DIR: path.join(pluginHome, 'plugins'),

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import {ensureDir, move, pathExists} from '../../utils/fs.js';
 import path from 'node:path';
 import YAML from 'yaml';
-import {GLOBAL_SKILLS_DIR} from '../../config/paths.js';
+import {GLOBAL_SKILLS_DIR} from '../../core/paths.js';
 import {modelWithConfig} from '../../llm/client.js';
 import {loadSkill} from '../SkillLoader.js';
 import type {SkillSource} from '../types.js';

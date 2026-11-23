@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type {ModelMessage} from 'ai';
-import {HAZE_DIR} from './paths.js';
+import {HAZE_DIR} from '../core/paths.js';
 import {readUtf8Prefix} from '../core/io/boundedRead.js';
 import {assertRealPathInsideRoot} from '../utils/path.js';
 import {escapeEnvelopeClosers} from '../core/safety/untrustedEnvelopes.js';

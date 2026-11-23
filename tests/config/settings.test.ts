@@ -8,7 +8,7 @@ let tmp = '';
 let settingsFile = '';
 
 async function loadSettings() {
-  vi.doMock('../../src/config/paths.js', () => ({
+  vi.doMock('../../src/core/paths.js', () => ({
     get HAZE_DIR() {
       return path.dirname(settingsFile);
     },

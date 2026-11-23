@@ -4,7 +4,7 @@ import type {Stats} from 'node:fs';
 import fs from 'node:fs/promises';
 import {pathExists} from '../../utils/fs.js';
 import type {ModelMessage} from 'ai';
-import {HAZE_DIR} from '../../config/paths.js';
+import {HAZE_DIR} from '../paths.js';
 import type {WorkState} from '../agent/workState.js';
 import type {ValidationKind} from '../../core/toolResultTypes.js';
 import {prepareSessionEntryForWrite, repairRestoredConversation} from './sessionSlimming.js';

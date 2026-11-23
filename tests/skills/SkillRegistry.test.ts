@@ -6,7 +6,7 @@ import path from 'node:path';
 // Point the registry at a temp directory so we exercise the real fs + loader.
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'haze-skill-registry-'));
 
-vi.mock('../../src/config/paths.js', () => ({
+vi.mock('../../src/core/paths.js', () => ({
   GLOBAL_SKILLS_DIR: tmp,
   HAZE_DIR: tmp,
   GLOBAL_PLUGINS_DIR: path.join(tmp, 'plugins'),

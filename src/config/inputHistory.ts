@@ -1,6 +1,6 @@
 import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
-import {HAZE_DIR} from './paths.js';
+import {HAZE_DIR} from '../core/paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 
 const HISTORY_DIR = path.join(HAZE_DIR, 'history');

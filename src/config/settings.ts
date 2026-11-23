@@ -1,7 +1,7 @@
 import {pathExists, readJson} from '../utils/fs.js';
 import path from 'node:path';
 import {z} from 'zod';
-import {HAZE_DIR} from './paths.js';
+import {HAZE_DIR} from '../core/paths.js';
 import {tightenPrivateFile, writePrivateJsonAtomic} from './privateStorage.js';
 import {customProfileSchema} from '../core/subagent/executionProfiles.js';
 import {REASONING_LEVELS, REASONING_PROVIDER_DEFAULT, type ReasoningLevel, type StoredReasoningSetting} from '../core/agent/reasoningPolicy.js';

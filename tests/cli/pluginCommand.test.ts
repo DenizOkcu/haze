@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {PLUGIN_SCHEMA} from '../../src/skills/plugins/package.js';
 
 const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-plugin-command-home-')));
-vi.mock('../../src/config/paths.js', () => ({HAZE_DIR: home, GLOBAL_SKILLS_DIR: path.join(home, 'skills'), GLOBAL_PLUGINS_DIR: path.join(home, 'plugins')}));
+vi.mock('../../src/core/paths.js', () => ({HAZE_DIR: home, GLOBAL_SKILLS_DIR: path.join(home, 'skills'), GLOBAL_PLUGINS_DIR: path.join(home, 'plugins')}));
 const {listInstalledPlugins, pluginCollectionEntries, pluginCommandParts, runPluginCommand} = await import('../../src/cli/commands/pluginCommand.js');
 
 const exec = promisify(execFile);

@@ -7,7 +7,7 @@ import {inspectPlugin, readPluginManifest, PLUGIN_SCHEMA, PLUGIN_LIMITS} from '.
 
 const tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-plugins-')));
 const home = path.join(tmp, 'home');
-vi.mock('../../src/config/paths.js', () => ({HAZE_DIR: home, GLOBAL_SKILLS_DIR: path.join(home, 'skills'), GLOBAL_PLUGINS_DIR: path.join(home, 'plugins')}));
+vi.mock('../../src/core/paths.js', () => ({HAZE_DIR: home, GLOBAL_SKILLS_DIR: path.join(home, 'skills'), GLOBAL_PLUGINS_DIR: path.join(home, 'plugins')}));
 const {enumeratePlugins, installPlugin, listPlugins, removePlugin} = await import('../../src/skills/plugins/installer.js');
 
 let source: string;

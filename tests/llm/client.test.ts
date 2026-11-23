@@ -8,7 +8,7 @@ let tmp = '';
 let settingsFile = '';
 
 async function loadClient(createOpenAIImpl?: (options: unknown) => unknown, createCompatibleImpl?: (options: unknown) => unknown) {
-  vi.doMock('../../src/config/paths.js', () => ({
+  vi.doMock('../../src/core/paths.js', () => ({
     HAZE_DIR: tmp,
     GLOBAL_SKILLS_DIR: path.join(tmp, 'skills'),
   }));

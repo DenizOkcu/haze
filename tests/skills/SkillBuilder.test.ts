@@ -8,7 +8,7 @@ let tmp = '';
 let skillsDir = '';
 
 async function loadSkillBuilder() {
-  vi.doMock('../../src/config/paths.js', () => ({
+  vi.doMock('../../src/core/paths.js', () => ({
     HAZE_DIR: tmp,
     GLOBAL_SKILLS_DIR: skillsDir,
   }));

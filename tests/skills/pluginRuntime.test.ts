@@ -6,7 +6,7 @@ import path from 'node:path';
 const tmp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'haze-plugin-runtime-')));
 const global = path.join(tmp, 'global-home');
 const cwd = path.join(tmp, 'workspace');
-vi.mock('../../src/config/paths.js', () => ({GLOBAL_SKILLS_DIR: path.join(global, 'skills'), HAZE_DIR: global, GLOBAL_PLUGINS_DIR: path.join(global, 'plugins')}));
+vi.mock('../../src/core/paths.js', () => ({GLOBAL_SKILLS_DIR: path.join(global, 'skills'), HAZE_DIR: global, GLOBAL_PLUGINS_DIR: path.join(global, 'plugins')}));
 const {loadSkillRegistry, resolveSkillCandidates} = await import('../../src/skills/SkillRegistry.js');
 const {installPlugin, removePlugin} = await import('../../src/skills/plugins/installer.js');
 const {PLUGIN_SCHEMA} = await import('../../src/skills/plugins/package.js');

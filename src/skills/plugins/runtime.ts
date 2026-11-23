@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import {GLOBAL_PLUGINS_DIR} from '../../config/paths.js';
+import {GLOBAL_PLUGINS_DIR} from '../../core/paths.js';
 import {loadSkill} from '../SkillLoader.js';
 import type {LoadedSkill, SkillRegistry} from '../types.js';
 import {enumeratePlugins} from './installer.js';

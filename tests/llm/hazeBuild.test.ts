@@ -14,7 +14,7 @@ import {providerImageCapable} from '../../src/config/providers.js';
 import {createHazeBuildModel} from '../../src/llm/hazeBuild.js';
 import {runSubagent} from '../../src/llm/subagentRunner.js';
 import {fallbackProviderCapabilities} from '../../src/core/subagent/contracts.js';
-vi.mock('../../src/config/paths.js', () => ({HAZE_DIR: `/tmp/haze-native-test-home-${process.pid}`, GLOBAL_SKILLS_DIR: `/tmp/haze-native-test-home-${process.pid}/skills`}));
+vi.mock('../../src/core/paths.js', () => ({HAZE_DIR: `/tmp/haze-native-test-home-${process.pid}`, GLOBAL_SKILLS_DIR: `/tmp/haze-native-test-home-${process.pid}/skills`}));
 
 const descriptor = {schemaVersion: 1, provider: 'haze.build', model: HAZE_BUILD_MODEL,
   modelRepository: 'cyankiwi/Ornith-1.5-35B-A3B-AWQ-INT4', modelRevision: '8afa232234a67f5bce4567982541a99688ac5137',
