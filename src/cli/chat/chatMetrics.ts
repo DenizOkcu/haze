@@ -101,7 +101,7 @@ export function busyDetailLabel(input: {messages: Message[]; fleet?: FleetStatus
   }
   const fleet = input.fleet;
   if (fleet && (fleet.running > 0 || fleet.queued > 0)) {
-    parts.push(`workers ${fleet.running} running${fleet.queued > 0 ? `, ${fleet.queued} queued` : ''}`);
+    parts.push(`subagents ${fleet.running} running${fleet.queued > 0 ? `, ${fleet.queued} queued` : ''}`); // UX-21: one noun — "subagent" — for the fleet's parallel agents
   }
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }

@@ -98,8 +98,8 @@ describe('busy detail label', () => {
 
   it('appends fleet depth and omits the label when idle', () => {
     const now = 10_000;
-    expect(busyDetailLabel({now, messages: [], fleet: {running: 2, queued: 3}})).toBe('workers 2 running, 3 queued');
-    expect(busyDetailLabel({now, messages: [], fleet: {running: 1, queued: 0}})).toBe('workers 1 running');
+    expect(busyDetailLabel({now, messages: [], fleet: {running: 2, queued: 3}})).toBe('subagents 2 running, 3 queued');
+    expect(busyDetailLabel({now, messages: [], fleet: {running: 1, queued: 0}})).toBe('subagents 1 running');
     expect(busyDetailLabel({now, messages: [], fleet: {running: 0, queued: 0}})).toBeUndefined();
   });
 });
