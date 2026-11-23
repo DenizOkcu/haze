@@ -25,7 +25,7 @@ import {listSessions, type HazeSession, type SessionSummary} from '../../core/se
 import type {WorkState} from '../../core/agent/workState.js';
 import {MAX_VISIBLE_TASKS} from '../chat/TaskBar.js';
 import {createChatShutdown, runTerminalSession} from '../chat/shutdown.js';
-import {installViewportResizeGuard} from '../chat/resizeGuard.js';
+import {createResizeSettler, installViewportResizeGuard} from '../chat/resizeGuard.js';
 import {partitionDisplayMessages} from '../chat/transcriptPartition.js';
 import {ChatScreenView, type ChatStaticItem} from '../chat/ChatScreenView.js';
 import {useLiveMessages} from '../chat/liveMessages.js';
@@ -71,6 +71,19 @@ function thinkingLabelForSettings(settings: HazeSettings) {
 function ChatScreen({debug = false, version, build, continueSession = false, resumeSessionId, noSession = false, onShutdownReady}: ChatOptions & {onShutdownReady?: (shutdown: () => Promise<void>) => void}) {
   const {exit} = useApp();
   const {columns: width, rows: terminalRows} = useWindowSize();
+  // The viewport clears on every width change, but the Static replay that
+  // re-parses the whole transcript waits for the resize to settle (FE-04).
+  // `tick` forces a replay even when the width returns to its settled value,
+  // because the clear already removed the history from the viewport.
+  const [replay, setReplay] = useState({tick: 0, width});
+  const previousWidth = useRef(width);
+  useEffect(() => {
+    if (width === previousWidth.current) return;
+    previousWidth.current = width;
+    const settler = createResizeSettler(settled => setReplay(current => ({tick: current.tick + 1, width: settled})));
+    settler.next(width);
+    return () => settler.cancel();
+  }, [width]);
   const stoppingRef = useRef(false);
   const sealedRef = useRef(false);
   const activeGoalRef = useRef<Promise<unknown> | undefined>(undefined);
@@ -594,11 +607,13 @@ function ChatScreen({debug = false, version, build, continueSession = false, res
   ];
   const horizontalPadding = width >= 12 ? 1 : 0;
   const contentWidth = Math.max(1, width - horizontalPadding * 2);
+  const replayContentWidth = Math.max(1, replay.width - (replay.width >= 12 ? 1 : 0) * 2);
 
   // The pure screen render (static transcript + dynamic frame) lives in chat/ChatScreenView.tsx.
   return <ChatScreenView
-    version={version} debug={debug} width={width} terminalRows={terminalRows}
+    version={version} debug={debug} terminalRows={terminalRows}
     horizontalPadding={horizontalPadding} contentWidth={contentWidth}
+    replay={{key: `${replay.tick}:${replay.width}`, contentWidth: replayContentWidth}}
     staticItems={staticItems} streamingItems={streamingItems}
     debugLogs={debugLogs} metrics={metrics} renderMetricsReader={renderMetricsReader}
     tokenUsage={tokenUsage} followUps={followUps} visibleTasks={visibleTasks}

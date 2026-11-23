@@ -1,8 +1,8 @@
 import React, {createRef} from 'react';
 import {Box, measureElement, render, Static, Text, useWindowSize, type DOMElement} from 'ink';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {DynamicFrame} from '../../../src/cli/chat/DynamicFrame.js';
-import {installViewportResizeGuard} from '../../../src/cli/chat/resizeGuard.js';
+import {createResizeSettler, installViewportResizeGuard, RESIZE_SETTLE_MS} from '../../../src/cli/chat/resizeGuard.js';
 import {TextInput} from '../../../src/ui/components/TextInput.js';
 import {MarkdownText} from '../../../src/ui/components/MarkdownText.js';
 import {FixtureInput, FixtureOutput, inkHarness} from '../../inkHarness.js';
@@ -85,6 +85,36 @@ describe('viewport resize guard', () => {
     stream.resize(40, 24);
     repaint();
     expect(written).toEqual([]);
+  });
+});
+
+describe('createResizeSettler (FE-04)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('applies the final width once after a burst of width changes', () => {
+    vi.useFakeTimers();
+    const applied: number[] = [];
+    const settler = createResizeSettler(columns => applied.push(columns));
+    // A drag-resize: 30 width events inside 60 ms.
+    for (let index = 0; index < 30; index++) {
+      settler.next(80 - index);
+      vi.advanceTimersByTime(2);
+    }
+    // Nothing is replayed while the resize is still in progress ...
+    expect(applied).toEqual([]);
+    // ... and the whole burst settles into one replay at the final width.
+    vi.advanceTimersByTime(RESIZE_SETTLE_MS);
+    expect(applied).toEqual([51]);
+  });
+
+  it('never applies a pending width after cancel', () => {
+    vi.useFakeTimers();
+    const applied: number[] = [];
+    const settler = createResizeSettler(columns => applied.push(columns));
+    settler.next(60);
+    settler.cancel();
+    vi.advanceTimersByTime(RESIZE_SETTLE_MS * 2);
+    expect(applied).toEqual([]);
   });
 });
 

@@ -30,10 +30,11 @@ export type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.React
 export function ChatScreenView(props: {
   version: string | undefined;
   debug: boolean;
-  width: number;
   terminalRows: number;
   horizontalPadding: number;
   contentWidth: number;
+  /** Settled-width identity for the transcript replay: the Static key and the width its Markdown is laid out at. */
+  replay: {key: string; contentWidth: number};
   staticItems: ChatStaticItem[];
   streamingItems: ReturnType<typeof partitionDisplayMessages>['streamingItems'];
   debugLogs: string[];
@@ -68,7 +69,7 @@ export function ChatScreenView(props: {
   onToggleTasks: () => void;
 }) {
   const {
-    version, debug, width, terminalRows, horizontalPadding, contentWidth, staticItems, streamingItems,
+    version, debug, terminalRows, horizontalPadding, contentWidth, replay, staticItems, streamingItems,
     debugLogs, metrics, renderMetricsReader, tokenUsage, followUps, visibleTasks, tasksExpanded,
     taskBarPadding, busy, busyLabel, busyElapsed, busyDetail,
     showingTip, tipIndex, graphBuilding, pausedResume, workspaceLabel, activeModelName, reasoningSuffix,
@@ -78,12 +79,12 @@ export function ChatScreenView(props: {
   return <Box flexDirection="column" paddingX={horizontalPadding}>
     {/* Replay settled history with fresh Markdown layout after the resize clear.
         Only Static remounts: input drafts and active turns keep their state. */}
-    <Static key={width} items={staticItems}>
+    <Static key={replay.key} items={staticItems}>
       {item => item.kind === 'header'
         ? <Header key={item.key} subtitle={item.subtitle} version={version} />
         : item.kind === 'assistant-markdown'
-          ? <AssistantMarkdownChunkView key={item.key} message={item.message} content={item.content} width={contentWidth} first={item.first} final={item.final} />
-          : <MessageView key={item.key} message={item.message} width={contentWidth} />}
+          ? <AssistantMarkdownChunkView key={item.key} message={item.message} content={item.content} width={replay.contentWidth} first={item.first} final={item.final} />
+          : <MessageView key={item.key} message={item.message} width={replay.contentWidth} />}
     </Static>
     <DynamicFrame rows={terminalRows} columns={contentWidth} sections={{
       live: streamingItems.length > 0 ? rows => {

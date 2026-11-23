@@ -33,3 +33,29 @@ export function installViewportResizeGuard(stream: ResizeGuardStream = process.s
   stream.on('resize', onResize);
   return () => { stream.off('resize', onResize); };
 }
+
+/** Width replays wait this long for a drag-resize to settle (FE-04). */
+export const RESIZE_SETTLE_MS = 120;
+
+/**
+ * Coalesce a burst of width changes into one `<Static>` replay. The viewport
+ * still clears on every change (the guard above); only the replay, which
+ * re-parses the whole settled transcript, waits for the resize to settle.
+ */
+export function createResizeSettler(apply: (columns: number) => void, delayMs = RESIZE_SETTLE_MS): {next: (columns: number) => void; cancel: () => void} {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+  return {
+    next(columns) {
+      cancel();
+      timer = setTimeout(() => {
+        timer = undefined;
+        apply(columns);
+      }, delayMs);
+    },
+    cancel,
+  };
+}
