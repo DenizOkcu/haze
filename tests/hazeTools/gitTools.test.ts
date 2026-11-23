@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {hazeTools} from '../../src/llm/hazeTools.js';
-import {GIT_LOG_DEFAULT_LIMIT, GIT_DIFF_DEFAULT_LINES} from '../../src/llm/tools/gitTools.js';
+import {GIT_LOG_DEFAULT_LIMIT, GIT_DIFF_DEFAULT_LINES, classifyPullFailure} from '../../src/llm/tools/gitTools.js';
 
 // Git tools resolve the repo from process.cwd(); run each call inside a temp
 // git repo (or a non-git dir for the refusal cases) and restore cwd after.
@@ -36,6 +36,17 @@ describe('git tools', () => {
       return await tool.execute(input, state ? {context: state} : {});
     } finally {
       process.chdir(originalCwd);
+    }
+  }
+
+  async function withLocale<T>(locale: string, run: () => Promise<T>): Promise<T> {
+    const previous = process.env.LC_ALL;
+    process.env.LC_ALL = locale;
+    try {
+      return await run();
+    } finally {
+      if (previous === undefined) delete process.env.LC_ALL;
+      else process.env.LC_ALL = previous;
     }
   }
 
@@ -202,10 +213,32 @@ describe('git tools', () => {
     execFileSync('git', ['add', 'remote.txt'], {cwd: writer});
     execFileSync('git', ['commit', '-qm', 'remote'], {cwd: writer});
     execFileSync('git', ['push', '-q'], {cwd: writer});
-    const failed = await call('gitPull', {}, state);
+    // Git translates its diagnostics (de_DE: "Vorspulen nicht möglich"); the reported
+    // reason must not depend on the user's language.
+    const failed = await withLocale('de_DE.UTF-8', () => call('gitPull', {}, state));
     expect(failed.ok).toBe(false);
     expect(failed.error).toContain('cannot be fast-forwarded');
     expect(await fs.pathExists(path.join(tmp, 'remote.txt'))).toBe(false);
+  });
+
+  it('classifies git pull failures from old and new git diagnostics', () => {
+    const fastForward = 'The branch cannot be fast-forwarded.';
+    for (const output of [
+      'fatal: Not possible to fast-forward, aborting.',
+      "hint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nfatal: Not possible to fast-forward, aborting.",
+      'hint: You have divergent branches and need to specify how to reconcile them.\nfatal: Need to specify how to reconcile divergent branches.',
+      ' ! [rejected]      main -> main (fetch first)',
+    ]) {
+      expect(classifyPullFailure(output)).toBe(fastForward);
+    }
+    for (const output of [
+      'Auto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nAutomatic merge failed; fix conflicts and then commit the result.',
+      'error: could not apply a1b2c3... subject\nhint: Resolve all conflicts manually, mark them as resolved with "git add/rm <conflicted_files>",\nCONFLICT (content): Merge conflict in a.txt',
+    ]) {
+      expect(classifyPullFailure(output)).toBe('Pull stopped with conflicts.');
+    }
+    expect(classifyPullFailure('fatal: unable to access \'https://example.invalid/\': Could not resolve host')).toBeUndefined();
+    expect(classifyPullFailure('')).toBeUndefined();
   });
 
   it('clones into the workspace and refuses escaping or credential-bearing destinations', async () => {

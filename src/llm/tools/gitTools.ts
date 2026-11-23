@@ -135,7 +135,8 @@ async function runNetworkGit(cwd: string, args: string[], signal?: AbortSignal) 
   const result = await runBoundedProcess({
     command: 'git', args: ['-c', 'credential.interactive=never', '-c', 'protocol.ext.allow=never', ...args], cwd,
     timeoutMs: 120_000, signal, maxStdoutBytes: 8192, maxStderrBytes: 8192,
-    env: {...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_MERGE_AUTOEDIT: 'no', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes'},
+    // LC_ALL pins git's diagnostics to English so failure classification does not depend on the user's language.
+    env: {...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_MERGE_AUTOEDIT: 'no', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes', LC_ALL: 'C'},
   });
   return result;
 }
@@ -144,6 +145,17 @@ function networkFailure(toolName: string, timedOut: boolean) {
   return {ok: false as const, toolName, reasonCode: 'git_error' as const, recoverable: true,
     error: timedOut ? 'Git network operation timed out.' : 'Git network operation failed.',
     suggestedNextStep: 'Check the remote, network, credentials, and repository state; authentication must be non-interactive.'};
+}
+
+/** Reasons for a failed `git pull`, in precedence order, matched against C-locale git diagnostics (see `runNetworkGit`). */
+const PULL_FAILURE_REASONS: ReadonlyArray<readonly [pattern: RegExp, reason: string]> = [
+  [/not possible to fast-forward|ca(?:not|n't) (?:be )?fast-forward(?:ed)?|divergent branches|fetch first/i, 'The branch cannot be fast-forwarded.'],
+  [/CONFLICT|merge conflict/i, 'Pull stopped with conflicts.'],
+];
+
+/** Classify combined `git pull` stdout + stderr into a user-facing reason, or `undefined` when unrecognized. */
+export function classifyPullFailure(output: string): string | undefined {
+  return PULL_FAILURE_REASONS.find(([pattern]) => pattern.test(output))?.[1];
 }
 
 function validCloneUrl(value: string) {
@@ -333,9 +345,7 @@ export const gitTools: ToolSet = {
         const run = await runNetworkGit(root, ['pull', flag, '--no-recurse-submodules', ...(input.remote ? ['--', input.remote] : [])], context.abortSignal);
         if (run.aborted) return abortedResult('gitPull');
         if (run.code !== 0) {
-          const output = `${run.stdout.text}\n${run.stderr.text}`;
-          const reason = /not possible to fast-forward|cannot fast-forward/i.test(output) ? 'The branch cannot be fast-forwarded.'
-            : /CONFLICT|merge conflict/i.test(output) ? 'Pull stopped with conflicts.' : undefined;
+          const reason = classifyPullFailure(`${run.stdout.text}\n${run.stderr.text}`);
           return {...networkFailure('gitPull', run.timedOut), ...(reason && !run.timedOut ? {error: reason} : {}), suggestedNextStep: 'Inspect repository status and upstream; resolve any conflicts or choose an appropriate integration policy before retrying.'};
         }
         return {ok: true, toolName: 'gitPull', summary: `Pulled using ${mode}.`};
