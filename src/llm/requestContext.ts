@@ -1,5 +1,5 @@
 import type {ToolSet} from 'ai';
-import {createToolGroupLoader, groupsForRequest, toolGroup, type ToolGroup} from './toolGroups.js';
+import {createToolGroupLoader, GRAPH_REQUEST_PATTERN, groupsForRequest, LSP_REQUEST_PATTERN, toolGroup, type ToolGroup} from './toolGroups.js';
 import {hazeTools} from './hazeTools.js';
 import {buildLspTools, createPostMutationDiagnostics} from './lspTools.js';
 import {LspPool} from './lsp/pool.js';
@@ -53,16 +53,16 @@ function selectToolsForRequest(tools: ToolSet, request?: string, groups: Readonl
   const includeSubagent = /\b(subagents?|agents?|fleet|parallel|delegate|orchestrat\w*|multi-agent|review|audit|compare)\b/.test(lower);
   // Semantic-navigation tool groups only pay off for orientation/refactor requests;
   // grep/readFile remain available for everything else.
-  const includeLsp = /\b(rename|refactor|move|symbols?|definitions?|references|usages?|impact|blast radius|navigate|navigation|semantic|callers?)\b/.test(lower);
-  const includeGraph = /\b(architecture|structure|where|how (?:does|do)|relationships?|dependenc\w*|affected|explore|understand|map|overview|graph|codebase|unfamiliar|orient\w*|large)\b/.test(lower);
+  const includeLsp = LSP_REQUEST_PATTERN.test(lower);
+  const includeGraph = GRAPH_REQUEST_PATTERN.test(lower);
   const isConditionalBuiltin = (name: string) => ['fetch', 'process', 'subagent'].includes(name) || toolGroup(name) != null;
   return Object.fromEntries(Object.entries(tools).filter(([name]) =>
     ALWAYS_AVAILABLE_TOOLS.has(name)
     || (name === 'fetch' && includeFetch)
     || (name === 'process' && includeProcess)
     || (name === 'subagent' && includeSubagent)
-    || (name.startsWith('lsp') && includeLsp)
-    || (name.startsWith('graph') && includeGraph)
+    || (toolGroup(name) === 'lsp' && includeLsp)
+    || (toolGroup(name) === 'graph' && includeGraph)
     || (toolGroup(name) != null && groups.has(toolGroup(name)!))
     // Configured MCP tools are explicit user capabilities and remain available.
     || !isConditionalBuiltin(name),

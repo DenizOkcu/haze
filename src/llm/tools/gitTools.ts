@@ -33,7 +33,7 @@ async function resolveRepoRoot(): Promise<string> {
   const cwd = workspaceRoot();
   const result = await runBoundedProcess({
     command: 'git', args: ['rev-parse', '--show-toplevel'], cwd,
-    timeoutMs: 10_000, maxStdoutBytes: 64 * 1024, maxStderrBytes: 64 * 1024,
+    timeoutMs: 10_000, maxStdoutBytes: 64 * 1024, maxStderrBytes: 64 * 1024, env: gitEnv(),
   });
   const root = result.stdout.text.trim();
   if (result.code !== 0 || !root) {
@@ -90,16 +90,33 @@ interface GitRun {
   aborted: boolean;
 }
 
+/**
+ * Git's environment: the caller's, minus the variables that would redirect git
+ * to another repository (haze may itself run from a git hook), and never
+ * interactive. Hooks that open an editor or prompt find no terminal either way
+ * (stdin is ignored); these settings make git itself give up at once.
+ */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {...process.env, GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', LC_ALL: 'C'};
+  for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']) delete env[key];
+  return env;
+}
+
 async function runGit(repoRoot: string, args: string[], abortSignal?: AbortSignal): Promise<GitRun> {
   const result = await runBoundedProcess({
     command: 'git', args, cwd: repoRoot, timeoutMs: GIT_TIMEOUT_MS, signal: abortSignal,
-    maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES,
+    maxStdoutBytes: SHELL_STREAM_BYTES, maxStderrBytes: SHELL_STREAM_BYTES, env: gitEnv(),
   });
   return {code: result.code, stdout: result.stdout.text, stderr: result.stderr.text, timedOut: result.timedOut, aborted: result.aborted};
 }
 
 function gitError(toolName: string, run: GitRun, nextStep: string): GitFailure {
-  const detail = run.stderr.trim().split('\n')[0] ?? `git exited with code ${run.code ?? 'null'}`;
+  // A stopped process has no exit code and empty diagnostics; name the timeout,
+  // and that the operation may have stopped halfway (rebase, reset, clone).
+  const timedOut = run.timedOut;
+  const detail = timedOut
+    ? `git did not finish within ${GIT_TIMEOUT_MS / 1000} s and was stopped; the repository may be left mid-operation.`
+    : run.stderr.trim().split('\n')[0] ?? `git exited with code ${run.code ?? 'null'}`;
   return {
     ok: false,
     toolName,
@@ -107,7 +124,7 @@ function gitError(toolName: string, run: GitRun, nextStep: string): GitFailure {
     error: detail,
     reasonCode: 'git_error' as const,
     recoverable: true,
-    suggestedNextStep: nextStep,
+    suggestedNextStep: timedOut ? 'Check the repository state with gitStatus before retrying; a stopped rebase or reset may need to be completed or aborted via shell.' : nextStep,
     recoveryTool: undefined,
     recoveryInput: undefined,
   };
@@ -153,8 +170,7 @@ async function runNetworkGit(cwd: string, args: string[], signal?: AbortSignal) 
   const result = await runBoundedProcess({
     command: 'git', args: ['-c', 'credential.interactive=never', '-c', 'protocol.ext.allow=never', ...args], cwd,
     timeoutMs: 120_000, signal, maxStdoutBytes: 8192, maxStderrBytes: 8192,
-    // LC_ALL pins git's diagnostics to English so failure classification does not depend on the user's language.
-    env: {...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_MERGE_AUTOEDIT: 'no', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes', LC_ALL: 'C'},
+    env: {...gitEnv(), GCM_INTERACTIVE: 'Never', GIT_MERGE_AUTOEDIT: 'no', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? 'ssh -oBatchMode=yes'},
   });
   return result;
 }

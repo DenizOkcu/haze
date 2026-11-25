@@ -4,15 +4,25 @@ import {z} from 'zod';
 const TOOL_GROUPS = ['git-read', 'git-write', 'git-network', 'graph', 'lsp'] as const;
 export type ToolGroup = typeof TOOL_GROUPS[number];
 
-const gitGroups: Record<string, ToolGroup> = {
+// Membership is by exact tool name, never by prefix: an MCP server may expose
+// `lspLint` or `graphQL`, and those are user-configured capabilities, not
+// members of the built-in groups.
+const GROUPED_TOOLS: Record<string, ToolGroup> = {
   gitStatus: 'git-read', gitLog: 'git-read', gitDiff: 'git-read', gitBranch: 'git-read',
   gitStage: 'git-write', gitCommit: 'git-write', gitBranchManage: 'git-write', gitRebase: 'git-write', gitReset: 'git-write',
   gitFetch: 'git-network', gitPull: 'git-network', gitClone: 'git-network',
+  graphQuery: 'graph', graphExplain: 'graph', graphPath: 'graph', graphAffected: 'graph', graphRebuild: 'graph',
+  lspWorkspaceSymbols: 'lsp', lspSymbols: 'lsp', lspFindSymbol: 'lsp', lspDefinition: 'lsp', lspTypeDefinition: 'lsp',
+  lspImplementation: 'lsp', lspReferences: 'lsp', lspRenameSymbol: 'lsp', lspSafeDeleteSymbol: 'lsp', lspDiagnostics: 'lsp', lspDiagnosticsForSymbol: 'lsp',
 };
 
 export function toolGroup(name: string): ToolGroup | undefined {
-  return gitGroups[name] ?? (name.startsWith('graph') ? 'graph' : name.startsWith('lsp') ? 'lsp' : undefined);
+  return Object.hasOwn(GROUPED_TOOLS, name) ? GROUPED_TOOLS[name] : undefined;
 }
+
+/** Semantic-navigation and orientation requests (shared by request seeding and tool selection). */
+export const LSP_REQUEST_PATTERN = /\b(rename|refactor|move|symbols?|definitions?|references|usages?|impact|blast radius|navigate|navigation|semantic|callers?)\b/;
+export const GRAPH_REQUEST_PATTERN = /\b(architecture|structure|how (?:does|do)|relationships?|dependenc\w*|affected|explore|understand|overview|graph|codebase|unfamiliar|orient\w*|large)\b/;
 
 /** Seed groups for clear requests; ambiguous needs can use loadToolGroup. */
 export function groupsForRequest(request: string): Set<ToolGroup> {
@@ -21,8 +31,8 @@ export function groupsForRequest(request: string): Set<ToolGroup> {
   if (/\b(git|repository status|repo status|working tree|staged|unstaged|commits?|branches|branch|diff|review (?:my |the )?changes|changed files)\b/.test(text)) groups.add('git-read');
   if (/\b(commit|stage|unstage|checkout|switch branch|create branch|delete branch|rename branch|rebase|reset)\b/.test(text)) groups.add('git-write');
   if (/\b(git\s+(?:fetch|pull|clone)|fetch (?:the |from )?(?:git|remote|repository|repo)|pull (?:the |from )?(?:git|remote|repository|repo|latest)|clone\b)/.test(text)) groups.add('git-network');
-  if (/\b(architecture|structure|where|how (?:does|do)|relationships?|dependenc\w*|affected|explore|understand|map|overview|graph|codebase|unfamiliar|orient\w*|large)\b/.test(text)) groups.add('graph');
-  if (/\b(rename|refactor|move|symbols?|definitions?|references|usages?|impact|blast radius|navigate|navigation|semantic|callers?)\b/.test(text)) groups.add('lsp');
+  if (GRAPH_REQUEST_PATTERN.test(text)) groups.add('graph');
+  if (LSP_REQUEST_PATTERN.test(text)) groups.add('lsp');
   return groups;
 }
 
