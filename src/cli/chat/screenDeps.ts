@@ -96,6 +96,8 @@ export interface ChatScreenDeps {
   skillInvocation: (value: string) => {skill: import('../../skills/types.js').LoadedSkill; args: string} | undefined;
   prepareUserInput: (value: string) => Promise<{value: string; displayValue?: string; options: TurnExecutionOptions} | undefined>;
   doAgentTurn: (value: string, displayValue?: string, turnOptions?: TurnExecutionOptions) => Promise<void>;
+  /** Run one user command (`! <command>`) and hand its output to the model. */
+  runUserCommand: (command: string) => Promise<void>;
   openSessionPicker: () => Promise<void>;
   openPluginPicker: () => Promise<void>;
   refreshSkills: () => Promise<import('../../skills/types.js').LoadedSkill[]>;

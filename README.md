@@ -244,6 +244,8 @@ for official sources, layouts, support limits and cross-agent setup.
 
 ```txt
 /help
+! <command>        # run a shell command directly, then have the model react to its output
+\! <text>           # send a message that starts with ! as a prompt
 /provider
 /model
 /model <name-or-provider:name>

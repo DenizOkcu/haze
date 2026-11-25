@@ -20,7 +20,8 @@ function literalWords(usage: string): string {
 describe('README command reference (UX-07)', () => {
   it('lists every slash command and literal subcommand that /help documents', () => {
     const documented = new Set(documentedCommands().map(literalWords));
-    const expected = new Set(COMMAND_HELP_ENTRIES.map(entry => literalWords(entry.usage)));
+    // Non-slash shortcuts (`! <command>`) have no slash form to list.
+    const expected = new Set(COMMAND_HELP_ENTRIES.filter(entry => entry.usage.startsWith('/')).map(entry => literalWords(entry.usage)));
     expect(expected.size).toBeGreaterThan(10);
     for (const form of expected) expect(documented.has(form), form).toBe(true);
   });

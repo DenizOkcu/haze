@@ -5,6 +5,8 @@ export type CommandHelpEntry = {
 
 export const COMMAND_HELP_ENTRIES: CommandHelpEntry[] = [
   {usage: '/help', description: 'Show all available slash commands and what they do.'},
+  {usage: '! <command>', description: 'Run a shell command directly (no model turn) and show its output; the result stays in the conversation for the model. 60s limit, Esc cancels.'},
+  {usage: '\\! <text>', description: 'Send a message that starts with ! as a normal prompt (the backslash is removed).'},
   {usage: '/provider', description: 'Choose a provider, then use it, add/remove models, set API key, toggle image input, or remove it.'},
   {usage: '/model', description: 'Choose a model, or add models from a provider\'s models endpoint.'},
   {usage: '/model <name-or-provider:name>', description: 'Set a configured model, or register a new one explicitly as provider:model (a bare unknown name is rejected). Selecting a model also sets its provider.'},

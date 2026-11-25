@@ -8,6 +8,7 @@ import {projectPreflight} from '../../../core/agent/projectPreflight.js';
 import {formatGoalStatus, type SessionGoal} from '../../../core/agent/goalPolicy.js';
 import {calculateRequestTokenBudget, estimateConversationTokens, type ContextUsageAnchor} from '../../../core/agent/contextBudget.js';
 import {stripSyntheticControls, withSyntheticControl, withoutSystemMessages} from '../../../core/agent/requestAssembly.js';
+import {foldUserCommandRecords} from '../../../core/agent/userCommands.js';
 import {compactModelMessages} from '../../../core/agent/compaction.js';
 import {withToolDeadline} from '../../../core/deadline.js';
 import {isMutatingCapability, isValidationCapable} from '../../../core/agent/toolCapabilities.js';
@@ -173,10 +174,12 @@ export async function prepareAttempt(deps: AttemptSetupDeps): Promise<AttemptSet
   // to rewrite older successful calls/results here, invalidating provider
   // prompt-cache prefixes before the context budget required compaction.
   // Durable session snapshots preserve this history; only model-aware
-  // compaction or an explicit provider transition may rewrite it.
+  // compaction or an explicit provider transition may rewrite it. Records of
+  // commands the user ran with `!` fold into the new user turn (one user
+  // message per turn for providers that require alternation).
   const durableRequestMessages = retryingExistingRequest
     ? stripSyntheticControls(callbacks.getConversation())
-    : [...stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? [])];
+    : foldUserCommandRecords(stripSyntheticControls(callbacks.getConversation()), userTurnMessage(value, turnOptions.attachments ?? []));
   // Model-aware request budget (RH-005): message allowance is the context
   // window minus system prompt, tool schemas, output reserve, and a safety
   // margin — not a fixed 40K constant. Small contexts get a safe budget; the

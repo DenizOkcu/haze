@@ -48,6 +48,7 @@ import {useLiveTheme} from './liveTheme.js';
 import {useWizardNavigation} from './wizardTrail.js';
 import {usePromptSession} from './promptSessionState.js';
 import {type Message, type TurnExecutionOptions} from '../commands/streaming.js';
+import {runUserCommandLine} from './userCommandFlow.js';
 
 export interface ChatOptions {
   debug?: boolean;
@@ -207,7 +208,6 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   // Live theme switching (/themes) lives in chat/liveTheme.ts.
   const settingsThemeLoadedRef = useRef(false);
   useLiveTheme(settings, stoppingRef, settingsThemeLoadedRef);
-
 
   useEffect(() => {
     void runStartupSequence({
@@ -396,6 +396,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
       currentModelSelection, currentPromptSession, withDisplayOrder, finalizeMessage,
       addStreaming, patchLiveMessage, drainLiveMessages, clearLiveMessages,
       debugLog, showPersistenceWarning, skillInvocation, prepareUserInput, doAgentTurn,
+      runUserCommand: command => runUserCommandLine(screenDeps(), command),
       openSessionPicker, openPluginPicker, refreshSkills, setSessionReasoningOverride,
       shutdown, followUps, wizard, sessionLifecycle, terminalControl, noSession,
     };

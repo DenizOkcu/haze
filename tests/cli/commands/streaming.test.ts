@@ -644,6 +644,26 @@ describe('runAgentTurn: setup', () => {
     expect(JSON.stringify(cb.conversationSets)).not.toContain('PRIVATE FLEET CONTROL');
     expect(JSON.stringify(cb.events)).not.toContain('PRIVATE FLEET CONTROL');
     expect(JSON.stringify(cb.events)).toContain('/fleet audit');
+    expect(JSON.stringify(cb.events)).toContain('/fleet audit');
+  });
+
+  it('folds user-command records into the next user turn as one user message', async () => {
+    const {runAgentTurn} = await loadStreaming({
+      modelHandle: {model: {modelId: 'test'}, config: {providerName: 'test', baseURL: 'http://x', modelName: 'm', cacheKey: 'k', capabilities: {}}},
+      streamParts: [{type: 'finish', finishReason: 'stop'}], responseMessages: [{role: 'assistant', content: 'done'}],
+    });
+    const cb = makeCallbacks();
+    const record = {role: 'user', content: '<haze_user_command>\ncommand: ls -la\n</haze_user_command>'};
+    cb.conversationSets.push([{role: 'assistant', content: 'earlier'}, record]);
+    await runAgentTurn('what files are here?', undefined, [], cb, 0, false, false, undefined, undefined);
+    const userMessages = mocks.streamedMessages.at(-1)!.filter(message => message.role === 'user');
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]!.content).toContain('command: ls -la');
+    expect(userMessages[0]!.content).toContain('what files are here?');
+    // The stored conversation keeps one user turn (records + text), not two user messages.
+    const storedUsers = (cb.conversationSets.at(-1) as Array<{role: string; content: unknown}>).filter(message => message.role === 'user');
+    expect(storedUsers).toHaveLength(1);
+    expect(String(storedUsers[0]!.content)).toContain('command: ls -la');
   });
 
   it('forwards modelOverride (and cwd) to modelWithConfig for both the session and no-session branches', async () => {

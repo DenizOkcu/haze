@@ -10,6 +10,7 @@ import type {ChatScreenDeps, ResumeExisting} from './screenDeps.js';
 import {clearTasks as clearTasksFromStore} from '../../core/tasks/taskStorage.js';
 import {shouldClearCompletedTasks} from './turnState.js';
 import {resumeKindFor} from './userInput.js';
+import {routeQueuedLine} from './userCommandFlow.js';
 
 /** A user submission: one turn, then every follow-up queued while it ran (ARCH-05). */
 export async function runAgentTurnWithFollowUps(deps: ChatScreenDeps, value: string, displayValue?: string, turnOptions: TurnExecutionOptions = {}) {
@@ -26,11 +27,15 @@ export async function runAgentTurnWithFollowUps(deps: ChatScreenDeps, value: str
   }
   await runSingleAgentTurn(deps, value, displayValue, turnOptions);
   for (let next = deps.followUps.takeNext(); !deps.stoppingRef.current && next !== undefined; next = deps.followUps.takeNext()) {
-    const preparedFollowUp = await deps.prepareUserInput(next);
+    // A queued `!` line is a user command, not a prompt.
+    const routed = await routeQueuedLine(deps, next);
+    if (routed.handled) continue;
+    const preparedFollowUp = await deps.prepareUserInput(routed.value);
     if (!preparedFollowUp) continue;
     await runSingleAgentTurn(deps, preparedFollowUp.value, preparedFollowUp.displayValue, preparedFollowUp.options);
   }
 }
+
 
 /**
  * Explicitly resume a genuinely paused goal (automatic continuation already

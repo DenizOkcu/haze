@@ -37,6 +37,8 @@ export const MAX_OUTPUT_CHARS = 50_000;
 export const COMPACT_COMMAND_CHARS = 12_000;
 /** Compact cap for passing-validation summaries. */
 export const SHORT_VALIDATION_CHARS = 2_000;
+/** Max characters of a user-run (`!`) command echoed back in its transcript row and record. */
+export const USER_COMMAND_ECHO_CHARS = 2_000;
 /** Total rendered size cap for grep match output. */
 export const GREP_MAX_OUTPUT_CHARS = 30_000;
 /** Model-visible cap for one MCP tool result; larger results move behind a readToolOutput handle. */

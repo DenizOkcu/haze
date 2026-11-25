@@ -6,6 +6,8 @@ import {handleSlashCommand, type CommandContext} from '../commands/commands.js';
 import {isPausedGoalRecoveryCommand, contextFileSignatureMap} from './userInput.js';
 import {buildContextReport} from './contextReport.js';
 import type {ChatScreenDeps} from './screenDeps.js';
+import {parseUserInputLine} from '../../core/agent/userCommands.js';
+import {NO_USER_COMMAND_MESSAGE} from './userCommandFlow.js';
 
 /**
  * The chat input submit pipeline: exit shortcut, settings repair, busy
@@ -51,6 +53,17 @@ export async function submit(deps: ChatScreenDeps, value: string) {
   if (pausedResume && !isRecoveryCommand) setPausedResume(undefined);
 
   if (await wizard.dispatch(mode, value)) return;
+
+  // `! <command>` runs directly, with no model turn; `\!` escapes the prefix.
+  if (mode === 'chat') {
+    const parsed = parseUserInputLine(value);
+    if (parsed.kind === 'command') {
+      if (parsed.command) await deps.runUserCommand(parsed.command);
+      else setMessages(m => [...m, {role: 'system', text: NO_USER_COMMAND_MESSAGE}]);
+      return;
+    }
+    if (parsed.kind === 'escaped') value = parsed.value;
+  }
 
   const invokedSkill = skillInvocation(value);
   if (invokedSkill) {

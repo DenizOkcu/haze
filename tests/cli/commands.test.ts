@@ -48,6 +48,8 @@ describe('handleSlashCommand', () => {
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/provider'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/skills'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/logs'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('! <command>'));
+    expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('\\! <text>'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/lsp'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/context'));
     expect(ctx.addSystemMessage).toHaveBeenCalledWith(expect.stringContaining('/model list'));
