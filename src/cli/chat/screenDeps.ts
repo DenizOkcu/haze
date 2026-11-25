@@ -72,6 +72,8 @@ export interface ChatScreenDeps {
   setBusy: ReturnType<typeof useBusyIndicator>['setBusy'];
   setBusyLabel: React.Dispatch<React.SetStateAction<string>>;
   setTokenUsage: React.Dispatch<React.SetStateAction<import('../commands/streaming/turnRuntime.js').TokenUsage>>;
+  /** Optional so lifecycle-only harnesses need not wire it; the screen always provides it. */
+  setContextUsage?: React.Dispatch<React.SetStateAction<import('./turnState.js').ContextUsage>>;
   setFleet: React.Dispatch<React.SetStateAction<import('./chatMetrics.js').FleetStatus | undefined>>;
   setVisibleTasks: React.Dispatch<React.SetStateAction<Task[]>>;
   setTaskBarPadding: React.Dispatch<React.SetStateAction<number>>;

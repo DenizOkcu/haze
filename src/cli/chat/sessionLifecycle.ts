@@ -17,7 +17,7 @@ import type {Message} from '../commands/streaming.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 import type {SessionRecorder} from './sessionRecorder.js';
 import {displayMessagesFromConversation, estimateConversationTokens} from './chatMetrics.js';
-import {EMPTY_TOKEN_USAGE} from './turnState.js';
+import {EMPTY_CONTEXT_USAGE, EMPTY_TOKEN_USAGE, type ContextUsage} from './turnState.js';
 
 /** Bounded wall-clock budget for one manual LLM compaction summary (SU-03). */
 const COMPACT_SUMMARY_TIMEOUT_MS = 120_000;
@@ -53,6 +53,7 @@ export interface SessionLifecycleDeps {
   /** Drop the live tail (clear/new-session). */
   clearLiveMessages: () => void;
   setTokenUsage: (usage: TokenUsage) => void;
+  setContextUsage?: (usage: ContextUsage) => void;
   /** Manual /compact mode: model-written summary (default) or heuristic excerpt. */
   manualCompaction?: () => 'llm-summary' | 'heuristic';
   /** Opt-in session-write secret redaction (HZ-9 `redactSessionSecrets` setting). */
@@ -104,6 +105,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     const selection = deps.modelSelection?.();
     if (selection) deps.sessionRecorder()?.recordModelSelection(selection);
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
+    deps.setContextUsage?.({...EMPTY_CONTEXT_USAGE});
     await startNewLog();
     const status = `${message}\nSession: ${session.file}`;
     deps.setMessages(messages => {
@@ -132,6 +134,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
     deps.clearLiveMessages();
     const restoredMessages = displayMessagesFromConversation(restoredConversation);
     deps.setTokenUsage({...EMPTY_TOKEN_USAGE, messages: estimateConversationTokens(restoredMessages).input, outputEstimate: estimateConversationTokens(restoredMessages).output});
+    deps.setContextUsage?.({...EMPTY_CONTEXT_USAGE, usedTokens: estimateConversationTokens(restoredMessages).input, estimated: true});
     deps.workStateRef.current = workState;
     for (const error of parseErrors) {
       deps.debugLog(`Session parse error: ${error}`);
@@ -252,6 +255,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDeps): SessionLifec
       deps.conversationRef.current = [];
       deps.lastAssistantTextRef.current = '';
       deps.setTokenUsage({...EMPTY_TOKEN_USAGE});
+      deps.setContextUsage?.({...EMPTY_CONTEXT_USAGE});
       deps.workStateRef.current = undefined;
       deps.clearLiveMessages();
       deps.setMessages(() => [{role: 'system', text: 'Cleared. The void is productive.'}]);

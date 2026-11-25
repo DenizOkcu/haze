@@ -3,6 +3,16 @@ import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 
 export const EMPTY_TOKEN_USAGE: TokenUsage = {inputTokens: undefined, outputTokens: undefined, systemPrompt: 0, messages: 0, toolSchemas: 0, outputEstimate: 0, cacheReadTokens: 0, cacheWriteTokens: 0, noCacheTokens: 0, reasoningTokens: 0, logicalInputEstimate: 0, effectiveNonCachedInput: undefined};
 
+/** What the status bar knows about context: the model's window and the last provider-measured request size. */
+export interface ContextUsage {
+  windowTokens: number | undefined;
+  usedTokens: number | undefined;
+  /** `usedTokens` is a chars/4 estimate because no provider usage exists yet. */
+  estimated: boolean;
+}
+
+export const EMPTY_CONTEXT_USAGE: ContextUsage = {windowTokens: undefined, usedTokens: undefined, estimated: false};
+
 export function shouldClearCompletedTasks(tasks: Task[]): boolean {
   return tasks.length > 0 && tasks.every(task => task.status === 'completed');
 }

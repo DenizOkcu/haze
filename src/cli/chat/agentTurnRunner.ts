@@ -59,7 +59,7 @@ async function runSingleAgentTurn(deps: ChatScreenDeps, value: string, displayVa
     stoppingRef, sealedRef, quarantineRef, activeGoalRef, conversationRef, settingsRef,
     sessionRecorderRef, contextFiles, settings, withDisplayOrder, addStreaming, patchLiveMessage,
     drainLiveMessages, finalizeMessage, setMessages, setBusy, setBusyLabel, debugLog,
-    lastAssistantTextRef, abortControllerRef, workStateRef, setTokenUsage, setFleet,
+    lastAssistantTextRef, abortControllerRef, workStateRef, setTokenUsage, setContextUsage, setFleet,
     setVisibleTasks, setTaskBarPadding, contextFileSignaturesRef, llmLogRef,
     showPersistenceWarning, setPausedResume, currentModelSelection, currentPromptSession,
   } = deps;
@@ -123,9 +123,11 @@ async function runSingleAgentTurn(deps: ChatScreenDeps, value: string, displayVa
     recordTokenUsage: (usage: Parameters<typeof accumulateTokenUsage>[1]) => {
       setTokenUsage(current => accumulateTokenUsage(current, usage));
     },
+    recordContextUsage: (tokens: number) => setContextUsage?.(current => ({windowTokens: current.windowTokens, usedTokens: tokens, estimated: false})),
     onEvent: (event: import('../../core/agent/events.js').AgentEvent) => {
       sessionRecorder.recordEvent(event);
-      if (event.type === 'subagent_state') setFleet(current => nextFleetStatus(current, event));
+      if (event.type === 'context_budget') setContextUsage?.(current => ({...current, windowTokens: event.contextWindowTokens}));
+      else if (event.type === 'subagent_state') setFleet(current => nextFleetStatus(current, event));
       else if (event.type === 'goal_end') setFleet(undefined);
     },
     onTasksChanged: () => { loadTasksFromStore().then(t => {

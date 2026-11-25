@@ -31,7 +31,7 @@ import {createSessionLifecycle} from './sessionLifecycle.js';
 import {createWizardDispatch, initialWizardUiState, wizardUiReducer} from './wizardDispatch.js';
 import {randomTipIndex, tipsEnabled} from './tips.js';
 import type {FleetStatus} from './chatMetrics.js';
-import {EMPTY_TOKEN_USAGE} from './turnState.js';
+import {EMPTY_CONTEXT_USAGE, EMPTY_TOKEN_USAGE, type ContextUsage} from './turnState.js';
 import type {Mode} from '../commands/chatModes.js';
 import {contextFileSignatureMap, prepareUserInput as prepareUserInputPolicy} from './userInput.js';
 import {currentBranchName, runStartupSequence} from './startupSequence.js';
@@ -142,7 +142,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
   const [visibleTasks, setVisibleTasks] = useState<Task[]>([]);
   const [tasksExpanded, setTasksExpanded] = useState(false);
   const [taskBarPadding, setTaskBarPadding] = useState(0);
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE});
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage>({...EMPTY_TOKEN_USAGE}), [contextUsage, setContextUsage] = useState<ContextUsage>({...EMPTY_CONTEXT_USAGE});
   // A genuinely paused goal (no measurable progress, deadline, or a stalled
   // model stream) — automatic continuation has already been attempted by the
   // goal supervisor. Carries what a one-key resume needs; any new submission
@@ -294,7 +294,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     contextFileSignaturesRef,
     setMessages,
     clearLiveMessages,
-    setTokenUsage,
+    setTokenUsage, setContextUsage,
     manualCompaction: () => settings.manualCompaction ?? 'llm-summary',
     redactSessionSecrets: () => settings.redactSessionSecrets === true,
     // P1 resume path: an unterminated goal frontier detected on resume becomes
@@ -391,7 +391,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
       abortControllerRef, llmLogRef, contextFileSignaturesRef,
       settings, settingsError, contextFiles, mode, busy, pausedResume, visibleTasks,
       setMessages, setSettings, setSettingsError, setMode, setContextFiles,
-      setBusy: setBusyWithHeartbeat, setBusyLabel, setTokenUsage, setFleet,
+      setBusy: setBusyWithHeartbeat, setBusyLabel, setTokenUsage, setContextUsage, setFleet,
       setVisibleTasks, setTaskBarPadding, setTasksExpanded, setPausedResume, setDebugLogs, updateWizard,
       currentModelSelection, currentPromptSession, withDisplayOrder, finalizeMessage,
       addStreaming, patchLiveMessage, drainLiveMessages, clearLiveMessages,
@@ -420,7 +420,7 @@ export function ChatScreen({debug = false, version, build, continueSession = fal
     replay={{key: `${replay.tick}:${replay.width}`, contentWidth: view.replayContentWidth}}
     staticItems={staticItems} streamingItems={view.streamingItems}
     debugLogs={debugLogs} metrics={view.metrics} renderMetricsReader={readRenderMetrics}
-    tokenUsage={tokenUsage} followUps={followUps} visibleTasks={visibleTasks}
+    tokenUsage={tokenUsage} contextUsage={contextUsage} followUps={followUps} visibleTasks={visibleTasks}
     tasksExpanded={tasksExpanded} taskBarPadding={taskBarPadding}
     busy={busy} busyLabel={busyLabel} busyElapsed={busyElapsed} busyDetail={view.busyDetail}
     showingTip={showingTip} tipIndex={tipIndex} graphBuilding={graphBuilding}

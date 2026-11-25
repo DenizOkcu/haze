@@ -11,7 +11,7 @@ import {DynamicFrame} from './DynamicFrame.js';
 import {AssistantMarkdownChunkView, MessageView} from './messages.js';
 import {partitionDisplayMessages, type TranscriptStaticItem} from './transcriptPartition.js';
 import {LiveTail} from './LiveTail.js';
-import {statusBarMetrics} from './chatMetrics.js';
+import {contextLeftLabel, statusBarMetrics} from './chatMetrics.js';
 import {inputSuggestionsForState} from './inputSuggestions.js';
 import {fileMentionSuggestions} from './fileMentionSuggestions.js';
 import {TIPS} from './tips.js';
@@ -20,6 +20,7 @@ import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
 import type {useFollowUpQueue} from './followUpQueue.js';
 import {formatTokenCount} from '../../utils/format.js';
 import type {PausedResume} from './screenDeps.js';
+import type {ContextUsage} from './turnState.js';
 
 export type ChatStaticItem = {kind: 'header'; key: string; subtitle: React.ReactNode} | TranscriptStaticItem;
 
@@ -42,6 +43,7 @@ export function ChatScreenView(props: {
   metrics: ReturnType<typeof statusBarMetrics>;
   renderMetricsReader: (() => {at: number; renderTime: number} | undefined) | undefined;
   tokenUsage: TokenUsage;
+  contextUsage: ContextUsage;
   followUps: ReturnType<typeof useFollowUpQueue>;
   visibleTasks: Task[];
   tasksExpanded: boolean;
@@ -71,12 +73,13 @@ export function ChatScreenView(props: {
 }) {
   const {
     version, debug, terminalRows, horizontalPadding, contentWidth, replay, staticItems, streamingItems,
-    debugLogs, metrics, renderMetricsReader, tokenUsage, followUps, visibleTasks, tasksExpanded,
+    debugLogs, metrics, renderMetricsReader, tokenUsage, contextUsage, followUps, visibleTasks, tasksExpanded,
     taskBarPadding, busy, busyLabel, busyElapsed, busyDetail,
     showingTip, tipIndex, graphBuilding, pausedResume, workspaceLabel, activeModelName, reasoningSuffix,
     placeholder, mode, inputHistory, inputSuggestions, onSubmit, onCancel, onResumeKey, onInterrupt,
     onEscape, onHistoryAdd, onToggleTasks,
   } = props;
+  const contextLabel = contextLeftLabel(contextUsage, metrics.effectiveInput);
   return <Box flexDirection="column" paddingX={horizontalPadding}>
     {/* Replay settled history with fresh Markdown layout after the resize clear.
         Only Static remounts: input drafts and active turns keep their state. */}
@@ -114,7 +117,10 @@ export function ChatScreenView(props: {
           <Text color={theme.muted} wrap="truncate-end">{workspaceLabel}</Text>
           <Text color={theme.muted} wrap="truncate-start">{activeModelName}{reasoningSuffix}</Text>
         </Box>
-        <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
+        <Box width="100%" flexDirection="row" justifyContent="space-between" flexShrink={0}>
+          <Text color={theme.muted} wrap="truncate-end">{metrics.statusDetailLabel}</Text>
+          {contextLabel && <Text color={theme.muted} wrap="truncate-start">{contextLabel}</Text>}
+        </Box>
       </>,
     }} input={({width: inputWidth, inputRows, suggestionRows, onRowsChange}) => <TextInput
       placeholder={placeholder}

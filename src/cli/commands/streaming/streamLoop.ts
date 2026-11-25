@@ -394,6 +394,8 @@ async function runAgentEpoch(deps: AttemptStreamDeps, requestMessages: ModelMess
     onEnd(event) {
       const providerUsage = extractUsage({usage: event.usage});
       epochUsage = {inputTokens: providerUsage.inputTokens, outputTokens: providerUsage.outputTokens, cacheReadTokens: providerUsage.cacheReadTokens, cacheWriteTokens: providerUsage.cacheWriteTokens};
+      const contextTokens = contextTokensFromUsage(epochUsage ?? {});
+      if (contextTokens !== undefined) callbacks.recordContextUsage?.(contextTokens);
       callbacks.recordTokenUsage?.({
         inputTokens: providerUsage.inputTokens,
         outputTokens: providerUsage.outputTokens,

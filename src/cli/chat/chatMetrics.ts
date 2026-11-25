@@ -4,6 +4,7 @@ import {modelMessageText} from '../../core/agent/compaction.js';
 import {estimateValueTokens} from '../../core/agent/contextBudget.js';
 import type {Message} from '../commands/streaming.js';
 import type {TokenUsage} from '../commands/streaming/turnRuntime.js';
+import type {ContextUsage} from './turnState.js';
 import {formatTokenCount} from '../../utils/format.js';
 
 export function toolCallCount(messages: Message[]) {
@@ -64,6 +65,20 @@ export function statusBarMetrics(input: {messages: Message[]; tokenUsage: TokenU
   const statusDetailLabel = `${assistantMessages} message${assistantMessages === 1 ? '' : 's'} / ${toolsUsed} tool calls / LLM ${inputEstimated ? '~' : ''}↑${formatTokenCount(effectiveInput)} ${outputEstimated ? '~' : ''}↓${formatTokenCount(effectiveOutput)} / ${enabledSkillCount} skill${enabledSkillCount === 1 ? '' : 's'}${backgroundLabel}`;
   const hasTokenBreakdown = tokenUsage.systemPrompt > 0 || tokenUsage.messages > 0 || tokenUsage.toolSchemas > 0 || effectiveInput > 0 || effectiveOutput > 0;
   return {assistantMessages, toolsUsed, effectiveInput, effectiveOutput, inputEstimated, outputEstimated, statusDetailLabel, hasTokenBreakdown};
+}
+
+/**
+ * `NN% context left` for the status bar. Uses the provider-measured request size
+ * once a step has reported; before that falls back to the transcript estimate
+ * (`fallbackUsedTokens`), marked `~` when it is a nonzero guess.
+ */
+export function contextLeftLabel(usage: ContextUsage, fallbackUsedTokens: number): string | undefined {
+  const windowTokens = usage.windowTokens;
+  if (!windowTokens || windowTokens <= 0) return undefined;
+  const measured = usage.usedTokens != null;
+  const usedTokens = Math.max(0, Math.min(windowTokens, usage.usedTokens ?? fallbackUsedTokens));
+  const left = Math.round((1 - usedTokens / windowTokens) * 100);
+  return `${!measured && usedTokens > 0 ? '~' : ''}${left}% context left`;
 }
 
 export interface FleetStatus {

@@ -92,6 +92,7 @@ export function createQuarantinableCallbacks(callbacks: StreamCallbacks): Quaran
     compactConversation: callbacks.compactConversation && whileLiveBoolean(callbacks.compactConversation),
     recordCompaction: callbacks.recordCompaction && whileLive(callbacks.recordCompaction),
     recordTokenUsage: callbacks.recordTokenUsage && whileLive(callbacks.recordTokenUsage),
+    recordContextUsage: callbacks.recordContextUsage && whileLive(callbacks.recordContextUsage),
     setWorkState: callbacks.setWorkState && whileLive(callbacks.setWorkState),
     onTasksChanged: callbacks.onTasksChanged && whileLive(callbacks.onTasksChanged),
     get log() {

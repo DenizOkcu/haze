@@ -108,6 +108,8 @@ export interface StreamCallbacks {
   /** Durable compaction audit hook (Pillar 1.7): fired for every automatic compaction that rewrites the conversation, mirroring the session `compact` entry shape. */
   recordCompaction?: (entry: {method: 'heuristic' | 'llm'; olderCount: number; keptCount: number; instructions?: string; summary: string}) => void;
   recordTokenUsage?: (usage: TokenUsage) => void;
+  /** Provider-measured size (input + output) of the last completed model step, i.e. the next request's context. */
+  recordContextUsage?: (tokens: number) => void;
   setWorkState?: (state: WorkState) => void;
   onTasksChanged?: () => void;
   log?: LlmLog;
