@@ -31,6 +31,8 @@ describe('model catalog', () => {
     ['deepseek-flash', 1_000_000, 393_216],
     ['qwen/qwen3.8-max-prime', 262_144, 131_072],
     ['moonshotai/kimi-k3', 1_048_576, 131_072],
+    ['glm-5.4', 1_000_000, 131_072],
+    ['z-ai/glm-5.4', 1_000_000, 131_072],
     ['z-ai/glm-5.3-prime', 1_000_000, 131_072],
     ['z-ai/glm-5.2', 262_144, 131_072],
   ])('resolves refreshed limits for %s', (model, contextWindowTokens, maxOutputTokens) => {

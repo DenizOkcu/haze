@@ -116,7 +116,7 @@ const PRESET_DEFINITIONS: readonly ProviderPresetDefinition[] = [
     'glm-5.3', 'glm-5.3-flash',
   ]},
   {id: 'z-ai-coding', name: 'Z.ai (Coding Plan)', baseUrl: 'https://api.z.ai/api/coding/paas/v4/', apiKeyEnvVar: 'ZAI_API_KEY', category: 'cloud', models: [
-    'glm-5.3', 'glm-5.2-highspeed',
+    'glm-5.4', 'glm-5.3', 'glm-5.2-highspeed',
   ]},
   {id: 'moonshot', name: 'Moonshot AI (Kimi API)', baseUrl: 'https://api.moonshot.ai/v1', apiKeyEnvVar: 'MOONSHOT_API_KEY', category: 'cloud', models: [
     'kimi-k3.1-pro', 'kimi-k3',

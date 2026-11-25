@@ -6,6 +6,8 @@
 
 - On-demand Git, code graph, and LSP tool groups: clear requests load relevant groups automatically, and the agent can load additional groups during a goal.
 - Dedicated Git tools for repository inspection and local mutations, plus non-interactive fetch, pull, and workspace-confined clone. Pull defaults to fast-forward only.
+- Curated Z.ai GLM-5.4 (1M context, 128K output): Coding Plan preset entry plus endpoint and model-catalog limits, so request budgeting no longer falls back to 128K.
+- Documented GLM-5.4 reasoning effort on Z.ai endpoints (`low`/`high`/`max`): `/reasoning` and the built-in default now apply instead of the provider's `max` default, and subagent workers run at `low`.
 
 ## 1.7.12 - 2026-11-20
 

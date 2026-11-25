@@ -55,6 +55,7 @@ const ENDPOINT_MODEL_LIMITS: Record<string, Record<string, readonly [number, num
     'glm-5.3-flash': [1_000_000, 131_072],
   },
   'https://api.z.ai/api/coding/paas/v4': {
+    'glm-5.4': [1_000_000, 131_072],
     'glm-5.3': [1_000_000, 131_072],
     'glm-5.2-highspeed': [1_000_000, 131_072],
   },
@@ -116,6 +117,8 @@ function documentedReasoningLevels(url: string, model: string): readonly Reasoni
     if (model.toLowerCase() === 'qwen/qwen3.8-27b') return ['none', 'low', 'medium', 'high'];
   }
   if ((host === 'api.x.ai' || host.endsWith('.api.x.ai')) && /^grok-4\.[67]$/i.test(model)) return ['low', 'medium', 'high', 'xhigh'];
+  // GLM-5.4 always thinks (disabled maps to low) and defaults to max when the parameter is omitted.
+  if (host === 'api.z.ai' && /^glm-5\.4$/i.test(model)) return ['low', 'high', 'max'];
   // The coding subscription and direct API have always-thinking K3 variants;
   // use the shared subset instead of sending unsupported none to workers.
   if ((host === 'api.moonshot.ai' && /^kimi-k3(?:\.1-pro)?$/i.test(model))
@@ -221,6 +224,7 @@ const MODEL_CATALOG: readonly CatalogEntry[] = [
   {match: 'qwen', contextWindowTokens: 131_072, maxOutputTokens: 8_192},
   {match: 'kimi-k3', contextWindowTokens: 1_048_576, maxOutputTokens: 131_072, note: 'smaller gateway output cap'},
   {match: 'kimi-k2', contextWindowTokens: 131_072, maxOutputTokens: 32_768, note: 'input-safe half of the 256K total'},
+  {match: 'glm-5.4', contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
   {match: 'glm-5.3', contextWindowTokens: 1_000_000, maxOutputTokens: 131_072},
   {match: 'glm-5.2', contextWindowTokens: 262_144, maxOutputTokens: 131_072, note: 'smaller Hugging Face window'},
   {match: 'glm-5.1', contextWindowTokens: 200_000, maxOutputTokens: 131_072},

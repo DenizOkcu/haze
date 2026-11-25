@@ -61,6 +61,24 @@ describe('reasoning profiles', () => {
     expect(body.reasoning_effort).toBe('high');
   });
 
+  it('sends documented GLM-5.4 effort on Z.ai and keeps other hosts and models unknown', async () => {
+    const url = 'https://api.z.ai/api/coding/paas/v4';
+    expect(providerReasoningLevels(url, 'glm-5.4')).toEqual(['low', 'high', 'max']);
+    expect(providerReasoningLevels('https://api.z.ai/api/paas/v4/', 'glm-5.4')).toEqual(['low', 'high', 'max']);
+    expect(providerReasoningLevels(url, 'glm-4.6')).toBeUndefined();
+    expect(providerReasoningLevels('https://gateway.example/v1', 'glm-5.4')).toBeUndefined();
+    let body: Record<string, unknown> = {};
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: RequestInit) => {
+      body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return Response.json({id: 'test', object: 'chat.completion', created: 1, model: 'glm-5.4', choices: [{index: 0, message: {role: 'assistant', content: 'done'}, finish_reason: 'stop'}], usage: {prompt_tokens: 1, completion_tokens: 1, total_tokens: 2}});
+    }));
+    const zai = provider(url, {models: ['glm-5.4']});
+    const runtime = (await modelWithConfig(undefined, {providers: [zai], provider: zai.name, model: 'glm-5.4'}))!;
+    expect(runtime.config.capabilities.workerReasoningEffort).toBe('low');
+    await runtime.model.doGenerate({prompt: [{role: 'user', content: [{type: 'text', text: 'hello'}]}], ...providerRequestSettings(runtime.config)});
+    expect(body.reasoning_effort).toBe('low');
+  });
+
   it('rechecks a discovered local context and falls back safely when the probe fails', async () => {
     const custom = provider('http://localhost:11434/v1', {models: ['m'], discoveredModelLimits: {m: {contextWindowTokens: 131_072}}});
     const fetchMock = vi.fn(async (url: unknown) => String(url).endsWith('/api/ps')

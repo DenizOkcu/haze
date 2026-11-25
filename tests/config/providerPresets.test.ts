@@ -107,6 +107,7 @@ describe('preset model limits', () => {
     ['openrouter', 'deepseek/deepseek-v4.1-flash', 1_048_576, 393_216],
     ['google-gemini', 'gemini-3.8-flash', 1_048_576, 65_536],
     ['z-ai-api', 'glm-5.3-flash', 1_000_000, 131_072],
+    ['z-ai-coding', 'glm-5.4', 1_000_000, 131_072],
     ['xai', 'grok-4.7', 500_000, 500_000],
     ['groq', 'openai/gpt-oss-120b', 131_072, 65_536],
   ])('includes provider-specific limits for %s:%s', (presetId, model, contextWindowTokens, maxOutputTokens) => {
@@ -150,6 +151,8 @@ describe('preset model limits', () => {
     expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://chatgpt.com/backend-api/codex'}, ['gpt-6.1-sol'])).toEqual({'gpt-6.1-sol': {contextWindowTokens: 500_000, maxOutputTokens: 128_000}});
     expect(presetModelLimitsForModels({name: 'OpenAI Subscription', url: 'https://unknown.example/v1'}, ['gpt-6.1-sol'])).toEqual({});
     expect(presetModelLimitsForModels({url: 'https://api.mistral.ai/v1'}, ['mistral-large-4'])).toEqual({'mistral-large-4': {contextWindowTokens: 1_048_576, maxOutputTokens: 262_144}});
+    // A custom-named provider on the coding endpoint still resolves GLM-5.4 by URL.
+    expect(presetModelLimitsForModels({name: 'Z.ai Coding Subscription', url: 'https://api.z.ai/api/coding/paas/v4'}, ['glm-5.4'])).toEqual({'glm-5.4': {contextWindowTokens: 1_000_000, maxOutputTokens: 131_072}});
     expect(presetModelLimitsForModels({url: 'http://localhost:8080/v1'}, ['qwen3-coder'])).toEqual({});
   });
 });
