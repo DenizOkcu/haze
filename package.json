@@ -51,13 +51,13 @@
     "eval:native": "node scripts/run-native-evals.mjs"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.104",
-    "@ai-sdk/openai": "4.0.123",
-    "@ai-sdk/openai-compatible": "3.0.94",
+    "@ai-sdk/mcp": "^2.0.105",
+    "@ai-sdk/openai": "4.0.124",
+    "@ai-sdk/openai-compatible": "3.0.95",
     "@inkjs/ui": "2.0.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@vscode/ripgrep": "1.18.0",
-    "ai": "7.0.181",
+    "ai": "7.0.182",
     "commander": "15.1.0",
     "defuddle": "^0.19.13",
     "highlight.js": "^11.12.0",
