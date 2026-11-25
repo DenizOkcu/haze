@@ -28,9 +28,13 @@ describe('LiveTail (FE-06)', () => {
     const {lastFrame} = renderLive(liveItems(10), 12);
     const rows = rowsOf(lastFrame);
     expect(rows).toContain('+5 more');
-    expect(rows.join('\n')).toContain('live item 5');
-    expect(rows.join('\n')).not.toContain('live item 6');
-    // Five two-row items plus the indicator stay inside the twelve-row budget.
+    // The newest five two-row items (6-10) plus the indicator stay inside the
+    // twelve-row budget; the oldest are the ones counted, never the active tail.
+    expect(rows).toContain('+5 more');
+    expect(rows.join('\n')).toContain('live item 10');
+    expect(rows.join('\n')).toContain('live item 6');
+    expect(rows.join('\n')).not.toContain('live item 5 ');
+
     expect(rows.length).toBeLessThanOrEqual(12);
   });
 

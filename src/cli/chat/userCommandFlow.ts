@@ -9,7 +9,9 @@ export const NO_USER_COMMAND_MESSAGE = 'No command given after "!".';
  * Run one user command (`! <command>`) end to end: busy label, cancel wiring,
  * transcript row, durable conversation record, one model turn over the output
  * (skipped when the user cancelled), then the follow-up queue drain (the
- * existing drain only runs after agent turns).
+ * existing drain only runs after agent turns). The screen stays busy from the
+ * run through the record flush until the model turn owns it, so a submit in
+ * that window queues instead of starting a concurrent turn.
  */
 export async function runUserCommandLine(deps: ChatScreenDeps, command: string) {
   if (deps.stoppingRef.current) return;
@@ -19,22 +21,27 @@ export async function runUserCommandLine(deps: ChatScreenDeps, command: string) 
   deps.abortControllerRef.current = controller;
   deps.setBusyLabel(`! ${userCommandHead(command)}`);
   deps.setBusy(true);
-  let run;
   try {
-    run = await runUserCommand({command, signal: controller.signal});
+    let run;
+    try {
+      run = await runUserCommand({command, signal: controller.signal});
+    } finally {
+      deps.abortControllerRef.current = null;
+    }
+    if (deps.sealedRef.current) return;
+    deps.finalizeMessage({role: 'tool', text: userCommandTranscriptText(run), startedAt, finishedAt: Date.now()});
+
+    deps.conversationRef.current = [...deps.conversationRef.current, {role: 'user', content: formatUserCommandRecord(run)} satisfies ModelMessage];
+    deps.sessionRecorderRef.current?.recordConversation(deps.conversationRef.current);
+    await deps.sessionRecorderRef.current?.flush().catch(deps.showPersistenceWarning);
+    if (run.status !== 'cancelled' && !deps.stoppingRef.current && !deps.sealedRef.current) {
+      await deps.doAgentTurn(USER_COMMAND_RESPONSE_REQUEST, `! ${userCommandHead(command)}`);
+    }
   } finally {
-    deps.abortControllerRef.current = null;
+    // The turn clears its own busy state; this covers the skipped and failed paths.
     deps.setBusy(false);
   }
-  if (deps.sealedRef.current) return;
-  deps.finalizeMessage({role: 'tool', text: userCommandTranscriptText(run), startedAt, finishedAt: Date.now()});
 
-  deps.conversationRef.current = [...deps.conversationRef.current, {role: 'user', content: formatUserCommandRecord(run)} satisfies ModelMessage];
-  deps.sessionRecorderRef.current?.recordConversation(deps.conversationRef.current);
-  await deps.sessionRecorderRef.current?.flush().catch(deps.showPersistenceWarning);
-  if (run.status !== 'cancelled' && !deps.stoppingRef.current && !deps.sealedRef.current) {
-    await deps.doAgentTurn(USER_COMMAND_RESPONSE_REQUEST, `! ${userCommandHead(command)}`);
-  }
   for (let next = deps.followUps.takeNext(); !deps.stoppingRef.current && next !== undefined; next = deps.followUps.takeNext()) {
     const routed = await routeQueuedLine(deps, next);
     if (routed.handled) continue;

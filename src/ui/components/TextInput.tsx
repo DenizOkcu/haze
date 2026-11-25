@@ -408,19 +408,23 @@ export function TextInput({
     if (effective('w', '\u0017') || effective('u', '\u0015') || effective('k', '\u000b') || effective('a', '\u0001') || effective('e', '\u0005')) {
       const valueNow = inputRef.current.value;
       const cursorNow = inputRef.current.cursor;
+      // Line-scoped, like readline: the lines around the cursor bound each edit.
+      const lineStart = valueNow.lastIndexOf('\n', cursorNow - 1) + 1;
+      const nextBreak = valueNow.indexOf('\n', cursorNow);
+      const lineEnd = nextBreak === -1 ? valueNow.length : nextBreak;
       if (effective('w', '\u0017')) {
-        const start = previousWordBoundary(valueNow, cursorNow);
+        const start = Math.max(lineStart, previousWordBoundary(valueNow, cursorNow));
         if (start < cursorNow) replaceInput(start, cursorNow, '');
       } else if (effective('u', '\u0015')) {
-        if (cursorNow > 0) replaceInput(0, cursorNow, '');
+        if (cursorNow > lineStart) replaceInput(lineStart, cursorNow, '');
       } else if (effective('k', '\u000b')) {
-        if (cursorNow < valueNow.length) replaceInput(cursorNow, valueNow.length, '');
+        if (cursorNow < lineEnd) replaceInput(cursorNow, lineEnd, '');
       } else if (effective('a', '\u0001')) {
         preferredColumn.current = null;
-        moveValueCursor(0);
+        moveValueCursor(lineStart);
       } else if (effective('e', '\u0005')) {
         preferredColumn.current = null;
-        moveValueCursor(valueNow.length);
+        moveValueCursor(lineEnd);
       }
       if (rawControls.length > 0) {
         const printable = [...input].filter(ch => !isRawControl(ch)).join('');

@@ -30,7 +30,14 @@ describe('redactSecrets', () => {
     expect(redactSecrets('key rk_live_' + '1234567890abcdefghijklmnop done')).toBe('key [redacted:stripe-key] done');
   });
 
+  it('masks Stripe secret keys, more GitHub token kinds, and lowercase bearer credentials', () => {
+    expect(redactSecrets('key sk_live_' + 'abcdefghijklmnop1234 done')).toBe('key [redacted:stripe-key] done');
+    expect(redactSecrets('token ghs_' + 'abcdefghijklmnopqrst done')).toBe('token [redacted:github-token] done');
+    expect(redactSecrets('Authorization: bearer ' + 'Qm9ndXNTb3BhcXVlVG9rZW4xMjM0NTY')).toBe('Authorization: [redacted:bearer-token]');
+  });
+
   it('masks GitLab, npm, opaque Bearer and AWS secret keys (SEC-09)', () => {
+
     expect(redactSecrets('git glpat-' + 'A1b2C3d4E5f6G7h8I9j0 end')).toBe('git [redacted:gitlab-token] end');
     expect(redactSecrets('npm_' + 'a1b2c3d4e5f60718' + '293a4b5c6d7e8f9a0123 end')).toBe('[redacted:npm-token] end');
     expect(redactSecrets('Authorization: Bearer ' + 'Qm9ndXNTb3BhcXVlVG9rZW4xMjM0NTY')).toBe('Authorization: [redacted:bearer-token]');
@@ -48,6 +55,7 @@ describe('redactSecrets', () => {
     expect(redactSecrets('the ski trip costs 250')).toBe('the ski trip costs 250');
     expect(redactSecrets('AKIA123')).toBe('AKIA123');
     expect(redactSecrets('')).toBe('');
+    expect(redactSecrets('the task list moved')).toBe('the task list moved');
   });
 });
 

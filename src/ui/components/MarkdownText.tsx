@@ -155,6 +155,12 @@ function MarkdownBlock({token, width, source, textOverride, compactAfter}: {
         {lines.map((line, index) => <TableLine key={index} line={line} />)}
       </Box>;
     }
+    case 'html': {
+      // Block-level HTML gets the same treatment as inline HTML: markup is
+      // dropped and its text kept, never the raw tags.
+      const text = String(token.raw).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      return text ? <InlineMarkdown text={text} /> : null;
+    }
     default:
       return <Text>{'raw' in token ? String(token.raw) : ''}</Text>;
   }

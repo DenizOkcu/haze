@@ -1,6 +1,9 @@
 import {describe, expect, it} from 'vitest';
+import {createElement} from 'react';
+import {render} from 'ink-testing-library';
+import stripAnsi from 'strip-ansi';
 import {marked, type Tokens} from 'marked';
-import {markdownRootChunks, renderMarkdownTable, tokenizeInline} from '../../src/ui/components/MarkdownText.js';
+import {MarkdownText, markdownRootChunks, renderMarkdownTable, tokenizeInline} from '../../src/ui/components/MarkdownText.js';
 
 describe('streaming Markdown root chunks', () => {
   it('keeps the active root block live and commits earlier blocks exactly', () => {
@@ -81,6 +84,16 @@ describe('MarkdownText table rendering', () => {
 
 describe('Markdown inline tokens come from marked (FE-08/FE-19)', () => {
   const plain = (source: string) => tokenizeInline(source).map(part => part.text).join('');
+  const rendered = (source: string) => {
+    const {lastFrame} = render(createElement(MarkdownText, {content: source, width: 80}));
+    return stripAnsi(lastFrame() ?? '');
+  };
+
+  it('drops block-level HTML markup but keeps its text', () => {
+    expect(rendered('<div align="center">\nhello **world**\n</div>')).toContain('hello world');
+    expect(rendered('<div align="center">\nhello **world**\n</div>')).not.toContain('<div');
+    expect(rendered('<br>').trim()).toBe('');
+  });
 
   it.each([
     ['**a *b* c**', [['strong', 'a '], ['strongem', 'b'], ['strong', ' c']]],
@@ -95,7 +108,6 @@ describe('Markdown inline tokens come from marked (FE-08/FE-19)', () => {
 
   it('drops inline HTML markup but keeps its text', () => {
     expect(plain('\\*not emph\\*')).toBe('*not emph*');
-    expect(plain('x <b>raw</b> y')).toBe('x raw y');
-    expect(plain('see [**docs**](https://d.example)')).toBe('see docs (https://d.example)');
+    expect(plain('x <b>raw</b> y')).toBe('x raw y');    expect(plain('see [**docs**](https://d.example)')).toBe('see docs (https://d.example)');
   });
 });

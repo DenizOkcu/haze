@@ -32,8 +32,8 @@ const SECRET_PATTERNS: SecretPattern[] = [
   // before the bare key-id row, which would otherwise break the adjacency.
   {kind: 'aws-secret', pattern: new RegExp(`AKIA[0-9A-Z]{16}${AWS_PAIR_SEPARATOR}(${AWS_SECRET})(?![A-Za-z0-9/+=])`, 'g'), replacement: '[redacted:aws-key]$1[redacted:aws-secret]'},
   {kind: 'aws-secret', pattern: new RegExp(`(?<![A-Za-z0-9/+=])(${AWS_SECRET})${AWS_PAIR_SEPARATOR}AKIA[0-9A-Z]{16}`, 'g'), replacement: '[redacted:aws-secret]$2[redacted:aws-key]'},
-  // GitHub personal access / OAuth tokens.
-  {kind: 'github-token', pattern: /gh[po]_[A-Za-z0-9]{20,}/g},
+  // GitHub personal, OAuth, user-to-server, server-to-server, and refresh tokens.
+  {kind: 'github-token', pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g},
   // AWS access key IDs.
   {kind: 'aws-key', pattern: /AKIA[0-9A-Z]{16}/g},
   // Slack tokens (bot, app, refresh, user tokens).
@@ -43,14 +43,15 @@ const SECRET_PATTERNS: SecretPattern[] = [
   // matching real JWTs, whose segments are far longer than this.
   {kind: 'jwt', pattern: /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g},
   // Opaque bearer credentials; JWT bearers were already masked by the row above.
-  {kind: 'bearer-token', pattern: /Bearer [A-Za-z0-9._~+/=-]{20,}/g},
+  {kind: 'bearer-token', pattern: /Bearer [A-Za-z0-9._~+/=-]{20,}/gi},
   // GitHub fine-grained / long-lived personal access tokens (github_pat_ prefix).
   {kind: 'github-token', pattern: /github_pat_[A-Za-z0-9_]{20,}/g},
   // GCP API keys (AIza prefix).
   {kind: 'gcp-api-key', pattern: /AIza[0-9A-Za-z_-]{30,}/g},
   // Google OAuth client secrets (GOCSPX prefix).
   {kind: 'oauth-client-secret', pattern: /GOCSPX-[A-Za-z0-9_-]{20,}/g},
-  // Stripe restricted keys (rk_live_ / rk_test_ prefix).
+  // Stripe secret keys (sk_live_ / sk_test_) and restricted keys (rk_live_ / rk_test_).
+  {kind: 'stripe-key', pattern: /sk_(?:live|test)_[A-Za-z0-9]{16,}/g},
   {kind: 'stripe-key', pattern: /rk_(live|test)_[A-Za-z0-9]{20,}/g},
 ];
 

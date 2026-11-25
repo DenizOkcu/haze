@@ -20,10 +20,11 @@ export function LiveTail({items, width, rows}: {items: TranscriptStreamingItem[]
     while (count > 0 && Math.floor(available / count) < 2) count -= 1;
   }
   const itemRows = count > 0 ? Math.floor((rows - (hidden > 0 ? 1 : 0)) / count) : 0;
+  // Keep the newest items: the last one is the active message being streamed.
   return <Box flexDirection="column">
-    {items.slice(0, count).map(item => <Box key={item.key} maxHeight={itemRows} flexShrink={0} overflow="hidden">
+    {hidden > 0 ? <Text color={theme.muted} wrap="truncate-end">{`+${items.length - count} more`}</Text> : null}
+    {items.slice(items.length - count).map(item => <Box key={item.key} maxHeight={itemRows} flexShrink={0} overflow="hidden">
       <MessageView message={item.message} width={width} showHeader={item.showHeader} maxVisibleLines={itemRows - 1} />
     </Box>)}
-    {hidden > 0 ? <Text color={theme.muted} wrap="truncate-end">{`+${items.length - count} more`}</Text> : null}
   </Box>;
 }
