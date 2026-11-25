@@ -634,12 +634,63 @@ describe('&& compound validation recording (R2-08)', () => {
     ]);
   });
 
-  it('; and || compounds keep the opaque compound scope', () => {
+  it('a red ; chain records each recognized stage; a green bare run clears only its own kind (2026-11-20 speckit goal)', () => {
     const state = createWorkState('goal', 'implement', []);
-    observeWorkToolEvent(state, shell('npm test; npm run lint', 'test', 'failed'));
-    observeWorkToolEvent(state, shell('npm test', 'test', 'passed'));
-    // The ; compound is its own check identity; the green bare run cannot clear it.
-    expect(unresolvedFailedCheckIds(state).length).toBe(1);
+    observeWorkToolEvent(state, shell('npm run typecheck 2>&1 | tail -3; npm run lint 2>&1 | tail -3', 'typecheck', 'failed'));
+    expect(unresolvedFailedCheckIds(state).length).toBe(2);
+    observeWorkToolEvent(state, shell('npm run typecheck', 'typecheck', 'passed'));
+    expect(unresolvedFailedCheckIds(state).map(id => id.split(':')[1])).toEqual(['lint']);
+    observeWorkToolEvent(state, shell('npm run lint', 'lint', 'passed'));
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('; chain shell scaffolding is never recorded as evidence', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('npm test > /tmp/t.log 2>&1; sed "s/x/y/" /tmp/t.log | grep -E "Tests "', 'test', 'failed'));
+    expect(state.validations.map(entry => entry.command)).toEqual(['npm test > /tmp/t.log 2>&1']);
+    expect(state.validations[0]?.kind).toBe('test');
+    expect(unresolvedFailedCheckIds(state)[0]).not.toContain('compound@');
+    expect(deriveValidationOutcome(state)).toBe('failed');
+  });
+
+  it('a cd-wrapped single-invocation stage keeps its package scope, not an opaque compound (2026-11-20)', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('cd /repo && npm run typecheck 2>&1 | tail -3 && npm run lint 2>&1 | tail -3', 'typecheck', 'failed'));
+    expect(unresolvedFailedCheckIds(state).every(id => !id.includes('compound@'))).toBe(true);
+    observeWorkToolEvent(state, shell('cd /repo && npm run typecheck', 'typecheck', 'passed'));
+    observeWorkToolEvent(state, shell('cd /repo && npm run lint', 'lint', 'passed'));
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+  });
+
+  it('|| chains keep the opaque compound scope', () => {
+    const state = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(state, shell('npm test || npm run lint', 'test', 'failed'));
     expect(unresolvedFailedCheckIds(state)[0]).toContain('compound@');
+  });
+
+  it('a same-kind confirmed pass satisfies a carried failure whichever validation ran last (2026-11-23 glm goal)', () => {
+    const seed = () => {
+      const state = createWorkState('goal', 'implement', []);
+      seedCarriedGoalEvidence(state, {mutationCount: 5, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: [unresolvedFailedCheckIds(redState)[0]!]});
+      return state;
+    };
+    const redState = createWorkState('goal', 'implement', []);
+    observeWorkToolEvent(redState, shell('npm test', 'test', 'failed'));
+    const state = seed();
+    observeWorkToolEvent(state, shell('npm test -- tests/config', 'test', 'passed'));
+    observeWorkToolEvent(state, shell('npm run typecheck', 'typecheck', 'passed'));
+    observeWorkToolEvent(state, shell('npm run lint', 'lint', 'passed'));
+    observeWorkToolEvent(state, {...shell('node check.mjs', 'generic', 'passed'), output: {...shell('node check.mjs', 'generic', 'passed').output, validationSummary: genericPassedSummary()}});
+    expect(unresolvedFailedCheckIds(state)).toEqual([]);
+    expect(deriveValidationOutcome(state)).toBe('passed');
+  });
+
+  it('a generic pass of another kind still cannot clear a carried confirmed failure', () => {
+    const state = createWorkState('goal', 'implement', []);
+    seedCarriedGoalEvidence(state, {mutationCount: 5, validationOutcome: 'failed', validationKind: 'test', failedCheckIds: ['npm@/repo:test:abc']});
+    observeWorkToolEvent(state, shell('npm run lint', 'lint', 'passed'));
+    expect(deriveValidationOutcome(state)).toBe('failed');
+    expect(unresolvedFailedCheckIds(state)).toEqual(['npm@/repo:test:abc']);
   });
 });

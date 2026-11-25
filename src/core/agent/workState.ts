@@ -71,35 +71,46 @@ export function validationCommandKey(command: string): string {
 }
 
 /**
- * Split an `&&`-chained command into per-stage validation identities, or
- * undefined when the command must stay whole (R2-08). `&&` means every stage
- * ran to success or the chain stopped at its first failure — so a green `&&`
- * chain is green evidence for every stage, and each stage is separately
- * clearable by kind+scope. Not split:
+ * Split an `&&`- or `;`-chained command into per-stage validation identities,
+ * or undefined when the command must stay whole (R2-08). `&&` means every stage
+ * ran to success or the chain stopped at its first failure; `;` runs every
+ * stage regardless. Either way a green chain is green evidence for every
+ * recognized stage, and each stage is separately clearable by kind+scope.
+ * Observed 2026-11-20/23: a red `npm run typecheck | tail; npm run lint | tail`
+ * kept one opaque `compound@` identity that only a byte-identical rerun could
+ * clear, so clean bare reruns of typecheck/lint/test left the goal `failed`
+ * with every task complete. Not split:
  *  - `cd pkg && npm x` — a single path-scoped invocation already normalized by
  *    `validationCommandKey`;
- *  - `;`/`||` chains — their stages' exit statuses are independent, so the
- *    whole chain keeps one opaque compound identity.
+ *  - `||` chains and mixed `&&`/`;` chains — the whole chain keeps one opaque
+ *    compound identity;
+ *  - a `;` chain with no recognized validation stage (shell scaffolding such
+ *    as `do`/`done`/`echo` is never recorded as evidence).
  * A leading `cd DIR` stage is composed into each later stage so
  * `cd web && npm test && npm run lint` keeps web-scoped check identities.
  */
 function validationStages(command: string): string[] | undefined {
   if (validationCommandKey(command).startsWith('npm@')) return undefined;
   const unquoted = stripQuotedSpans(command);
-  if (!unquoted.includes('&&') || /;|\|\|/.test(unquoted)) return undefined;
+  const semicolons = unquoted.includes(';') && !unquoted.includes('&&');
+  if ((!semicolons && !unquoted.includes('&&')) || /\|\|/.test(unquoted)) return undefined;
   // stripQuotedSpans blanked quoted text, so split on it and slice the original
-  // by part lengths — quoted `&&` stays inside its stage.
-  const parts = unquoted.split('&&');
+  // by part lengths — quoted separators stay inside their stage.
+  const parts = semicolons ? unquoted.split(/;+/) : unquoted.split('&&');
   const stages: string[] = [];
   let index = 0;
   for (const part of parts) {
     const stage = command.slice(index, index + part.length).trim();
     if (stage) stages.push(stage);
-    index += part.length + 2;
+    index += part.length + (semicolons ? 1 : 2);
   }
   if (stages.length < 2) return undefined;
   const cd = /^cd ([A-Za-z0-9_./-]+)$/.exec(stages[0]!);
-  return cd ? stages.slice(1).map(stage => `${cd[0]} && ${stage}`) : stages;
+  const scoped = cd ? stages.slice(1).map(stage => `${cd[0]} && ${stage}`) : stages;
+  if (!semicolons) return scoped;
+  // Every `;` stage runs, so shell scaffolding around a check is not evidence.
+  const recognized = scoped.filter(stage => inferValidationKind(stage) !== 'generic');
+  return recognized.length >= 1 ? recognized : undefined;
 }
 
 /**
@@ -118,19 +129,26 @@ function failedCheckScope(command: string): string {
   const normalized = validationCommandKey(command);
   const scoped = /^npm@(\S+) /.exec(normalized);
   if (scoped) return `npm@${scoped[1]}`;
+  // A per-stage identity composed with its `cd DIR &&` wrapper (validationStages)
+  // is one invocation once the wrapper is removed: keep the directory as its
+  // scope instead of hashing the whole stage into an unclearable `compound@`
+  // (observed 2026-11-20: `cd repo && npm run typecheck | tail && …` left eight
+  // such ids open while bare typecheck and lint were green).
+  const wrapped = /^cd ([A-Za-z0-9_./-]+) && (.+)$/.exec(normalized);
+  if (wrapped && !/;|&&|\|\|/.test(wrapped[2]!)) return invocationScope(wrapped[2]!, wrapped[1]!);
   // `&&` compounds are recorded per stage (see validationStages), so a stage reaching
-  // this function is a single invocation; `;`/`||` chains are a different
-  // check than their stages: a red `npm test; npm run lint` must not be cleared
-  // by a green bare `npm test`. The compound gets its own hashed (non-reversible)
-  // scope.
-  if (/;|\|\|/.test(normalized)) return `compound@${validationCheckId(normalized)}`;
-  if (normalized.includes('&&')) return `compound@${validationCheckId(normalized)}`;
-  const manager = /^(?:npm|npx|pnpm|yarn|bun|bunx|deno)\b/.test(normalized) ? 'npm' : 'direct';
-  if (manager === 'npm') return `npm@${workspacePathKey('.')}`;
+  // this function is a single invocation; `||` and mixed chains are a different
+  // check than their stages and get their own hashed (non-reversible) scope.
+  if (/;|\|\|/.test(normalized) || normalized.includes('&&')) return `compound@${validationCheckId(normalized)}`;
+  return invocationScope(normalized, '.');
+}
+
+/** Scope of one package-manager or direct invocation run from `dir`. */
+function invocationScope(invocation: string, dir: string): string {
+  if (/^(?:npm|npx|pnpm|yarn|bun|bunx|deno)\b/.test(invocation)) return `npm@${workspacePathKey(dir)}`;
   // Direct commands pair only within the same executable: `cargo test` red
   // pairs with `cargo test` green, never with `pytest`.
-  const executable = normalized.split(' ')[0] ?? '';
-  return `direct@${workspacePathKey('.')}:${executable}`;
+  return `direct@${workspacePathKey(dir)}:${invocation.split(' ')[0] ?? ''}`;
 }
 
 /** Stable, non-reversible identity safe to carry in a goal checkpoint. */
@@ -568,8 +586,16 @@ export function deriveValidationOutcome(state: WorkState): ValidationOutcome {
   // (found by the honest-impossibility eval — a model ran `npm test` red, then
   // passed an unrelated self-written script and claimed completion). A failed
   // validation carried from a goal checkpoint counts as confirmed too.
+  // A carried confirmed failure is satisfied by a same-kind confirmed pass this
+  // turn (its open ids were already cleared above): the outcome must not depend
+  // on which validation happened to run last (observed 2026-11-23: carried red
+  // `npm test`, then green test + typecheck + lint and a generic script last —
+  // the goal stayed `failed` and paused as no-progress with 4/4 tasks done).
+  const carried = state.carriedValidation;
+  const clearedBySameKind = !!carried?.kind
+    && state.validations.some(entry => entry.status === 'passed' && entry.kind === carried.kind);
   const confirmedFailed = state.validations.some(entry => entry.kind !== 'generic' && entry.status === 'failed')
-    || (latest.kind === 'generic' && !state.carriedFailedCheckIds && state.carriedValidation?.status === 'failed' && state.carriedValidation.kind !== 'generic');
+    || (latest.kind === 'generic' && !state.carriedFailedCheckIds && carried?.status === 'failed' && carried.kind !== 'generic' && !clearedBySameKind);
   if (confirmedFailed) return 'failed';
   return 'passed';
 }
@@ -579,6 +605,12 @@ export function unresolvedFailedCheckIds(state: WorkState): string[] {
   // Completion evidence must keep every open identity across turn boundaries.
   // Bound only the model-facing preview, not the authoritative check set.
   return [...new Set([...(state.carriedFailedCheckIds ?? []), ...local])];
+}
+
+/** Bounded distinct commands of this turn's confirmed failed checks, most recent first, for continuation prompts. */
+export function openFailedCheckCommands(state: WorkState): string[] {
+  const commands = state.validations.filter(entry => entry.kind !== 'generic' && entry.status === 'failed').map(entry => entry.command);
+  return [...new Set(commands)].reverse().slice(0, 3).map(command => command.slice(0, 160));
 }
 
 /** Distinct confirmed check kinds behind open ids, for bounded human-readable notices. */

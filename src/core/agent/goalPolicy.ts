@@ -164,8 +164,14 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
   const taskLine = taskCounts
     ? ` The task list currently shows ${taskCounts.pending + taskCounts.inProgress} open item${taskCounts.pending + taskCounts.inProgress === 1 ? '' : 's'} of ${taskCounts.total}; update writeTasks as you complete them.`
     : '';
-  const validationLine = reason.includes('validation')
+  const unresolved = reason.includes('failed and remains unresolved');
+  const validationLine = reason.includes('validation') && !unresolved
     ? ' No recognized post-edit validation was recorded. Run one standard test/build command, directly execute the changed artifact as one unchained command, or call shell with purpose=validation for a custom assertion check.'
+    : '';
+  // Observed 2026-11: a bare "validation failed" notice let models re-answer
+  // with prose (or rerun other kinds) while the actual red check stayed open.
+  const unresolvedLine = unresolved
+    ? ` Checks did run and one still fails: rerun the failed check${detail ? 's named below' : ' from this goal\'s earlier run (its command is in the conversation above)'} until it exits green; a passing check of another kind does not close it.`
     : '';
   const ledgerLine = reason.includes('outcome list')
     ? ' First call writeTasks with the concrete user-visible outcomes and their checks; keep the list until each outcome is complete.'
@@ -174,5 +180,5 @@ export function goalContinuationPrompt(reason: string, taskCounts?: {total: numb
     ? ' Rerun the same validation command that failed before the edit and resolve it; a different check does not close the captured red evidence.'
     : '';
   const detailLine = detail ? ` ${detail}` : '';
-  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${ledgerLine}${redLine}${detailLine} The user's original request defines the scope in any language. A task list cannot authorize work beyond that request; revise out-of-scope tasks rather than carrying them out. Resume the next authorized unfinished task.${taskLine} Update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
+  return `Continue the active goal: haze rejected stopping because structured evidence shows this turn is not complete (${reason}).${validationLine}${unresolvedLine}${ledgerLine}${redLine}${detailLine} The user's original request defines the scope in any language. A task list cannot authorize work beyond that request; revise out-of-scope tasks rather than carrying them out. Resume the next authorized unfinished task.${taskLine} Update writeTasks at each meaningful phase change and at completion. After any further edits, run the smallest relevant validation and report its real outcome. Report a blocker only when it is a concrete external tool, permission, dependency, or environment failure; unfinished work is not a blocker.`;
 }

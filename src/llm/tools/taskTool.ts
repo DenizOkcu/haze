@@ -43,13 +43,16 @@ export const writeTasksTool: Tool = tool({
       in_progress: tasks.filter(t => t.status === 'in_progress').length,
       completed: tasks.filter(t => t.status === 'completed').length,
     };
+    // Open titles let a continuation see which item blocks completion: a bare
+    // "1 in progress" count was re-asserted for cycles (observed 2026-11-23).
+    const openTitles = tasks.filter(t => t.status !== 'completed').slice(0, 3).map(t => `"${t.title.slice(0, 80)}"`);
     return {
       ok: true,
       taskCount: tasks.length,
       ...(tasks.length > 0 ? {counts} : {}),
       summary: tasks.length === 0
         ? 'Task list cleared.'
-        : `Tasks: ${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed.`,
+        : `Tasks: ${counts.pending} pending, ${counts.in_progress} in progress, ${counts.completed} completed.${openTitles.length ? ` Open: ${openTitles.join(', ')}.` : ''}`,
     };
   },
 });
