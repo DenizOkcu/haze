@@ -58,6 +58,9 @@ jobs:
       - run: npm run lint
       - run: npm run release:verify
       - run: npm run build
+      # The buildInfo leak check inside release:verify only has something to
+      # inspect once dist/ exists, so verify again after the build.
+      - run: npm run release:verify
       # Post-build artifact suite (MR-02): the real-checkout launcher test only
       # runs against a current dist; executing it after the build guarantees the
       # packaged launcher/dist pair is always exercised in CI.

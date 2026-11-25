@@ -36,6 +36,15 @@ function readJsonSafe(file) {
   }
 }
 
+/** realpathSync that falls back to the given path, so --verbose never throws (OPS-06). */
+function safeRealpath(file) {
+  try {
+    return realpathSync(file);
+  } catch {
+    return file ?? 'unknown';
+  }
+}
+
 function readGitHead() {
   const sha = (value) => (/^[0-9a-f]{7,40}$/i.test((value ?? '').trim()) ? value.trim() : undefined);
   const readOptional = (file) => {
@@ -99,7 +108,7 @@ if (argv.includes('--version') || argv.includes('-V')) {
       `commit: ${readJsonSafe('dist/buildInfo.json')?.commit ?? 'unknown'}`,
       ...(readJsonSafe('dist/buildInfo.json')?.builtAt ? [`builtAt: ${readJsonSafe('dist/buildInfo.json').builtAt}`] : []),
       `runtime: ${path.join(root, 'dist')}`,
-      `executable: ${realpathSync(process.argv[1])}`,
+      `executable: ${safeRealpath(process.argv[1])}`,
       `goal supervisor: ${existsSync(path.join(root, 'dist/cli/commands/streaming/goalSupervisor.js')) ? 'enabled' : 'disabled'}`,
     ];
     process.stdout.write(`${lines.join('\n')}\n`);
