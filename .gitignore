@@ -20,3 +20,6 @@ security-review/
 
 # Astro generated state
 .astro/
+
+# Generated review reports; never published
+review/
