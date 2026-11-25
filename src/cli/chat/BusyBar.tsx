@@ -1,4 +1,3 @@
-import React from 'react';
 import {Box, Text} from 'ink';
 import {ActivitySpinner} from '../../ui/components/NativeIndicators.js';
 import {theme} from '../../ui/theme.js';

@@ -1,4 +1,3 @@
-import React from 'react';
 import {Select, ThemeProvider, defaultTheme, extendTheme} from '@inkjs/ui';
 import {theme, type HazeTheme} from '../theme.js';
 import {safeInputDisplay} from '../textGeometry.js';

@@ -1,4 +1,3 @@
-import React from 'react';
 import {Box, Text} from 'ink';
 import type {Task, TaskStatus} from '../../core/tasks/taskStorage.js';
 import {theme} from '../../ui/theme.js';

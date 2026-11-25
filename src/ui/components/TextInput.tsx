@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, useCursor, useInput, useIsScreenReaderEnabled, usePaste, type DOMElement} from 'ink';
 import {cellWidth, graphemes, nextBoundary, offsetAtColumn, previousBoundary, previousWordBoundary, safeInputDisplay} from '../textGeometry.js';
 import {theme} from '../theme.js';

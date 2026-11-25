@@ -1,4 +1,3 @@
-import React from 'react';
 import {Box, Text} from 'ink';
 import {MessageView} from './messages.js';
 import type {TranscriptStreamingItem} from './transcriptPartition.js';

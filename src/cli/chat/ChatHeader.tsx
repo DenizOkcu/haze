@@ -1,4 +1,3 @@
-import React from 'react';
 import {Text} from 'ink';
 import {theme} from '../../ui/theme.js';
 
