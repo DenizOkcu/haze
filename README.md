@@ -525,7 +525,7 @@ The npm package ships `bin`, `dist`, README, SECURITY.md, license, and changelog
 
 ## Release
 
-The documentation site is committed as static HTML under `docs/`; there is no in-repository generator. Before a release, update the version stamps in every `docs/*.html` page and manually reconcile `index.html`, `quickstart.html`, `commands.html`, and `tools.html` with the README and changelog.
+The public site's source is the Astro project under `website/`; the built pages are committed as static HTML under `docs/`. Update the version stamps in `website/src` (`layouts/SiteLayout.astro`, `pages/index.astro`, `pages/quickstart.astro`), run `npm run sync --prefix website`, and commit the regenerated `docs/` files. `npm run check --prefix website` detects drift.
 
 ```bash
 npm ci
@@ -533,17 +533,21 @@ npm run typecheck
 npm test
 npm run lint
 npm run build
-npm audit
+npm run release:verify
 npm pack --dry-run
 git tag vX.Y.Z
-git push origin main --tags
-npm publish --access public --provenance
+git push origin main --tags   # the Release workflow publishes to npm with provenance
 ```
+
+## What's new in 1.8.0
+
+`! <command>` runs a shell command from the chat and lets the model react to its output; dedicated Git tools and on-demand Git, code graph, and LSP tool groups; a context-left percentage in the status bar; readline-style `Ctrl+W`/`U`/`K`/`A`/`E` line editing; a provider wizard where `Esc` steps back instead of quitting. Haze now requires Node.js 22.13 or newer.
 
 <details>
 <summary>Previous release highlights</summary>
 
-## What's new in 1.7.12
+### Changes in 1.7.12
+
 
 A deterministic workspace code graph (tree-sitter WASM) powers the new `graph*` tools and `/graph` command, with bounded reverse-dependency advisories after file edits; LSP/graph tools are now gated on request intent to cut context, plus several reliability fixes.
 

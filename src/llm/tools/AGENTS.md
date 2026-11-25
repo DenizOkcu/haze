@@ -30,6 +30,10 @@ Implementation helpers for haze built-in tools.
 
 Do not persist this state; it is valid only for one agent turn. If scoped context behavior changes, keep `config/contextFiles.ts`, `streaming.ts`, and tool-result tests aligned.
 
+## Git tools
+
+- `gitTools.ts` runs the dedicated Git tools (read, write, network) through `runBoundedProcess` at the repository root: leading-dash revisions and `.git` paths are refused before anything is spawned, the `GIT_*` environment is scrubbed of repository redirects and made non-interactive, network operations are capped at 120 s and everything else at 30 s, and a stopped command reports the timeout with a mid-operation warning. `tests/hazeTools/gitTools.test.ts` covers them.
+
 ## Editing helpers
 
 - `editMatch.ts` implements unique exact replacements with tolerances for readFile line prefixes and trailing-whitespace-only differences when still unique.

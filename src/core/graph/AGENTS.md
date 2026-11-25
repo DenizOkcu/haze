@@ -37,9 +37,10 @@ WASM, queried by the `graph*` tools (`src/llm/tools/graphTools.ts`) and `/graph`
 - Staleness must be visible: results annotate `graph.stale`, and the manifest
   signature check (`computeStaleness`) is the source of truth.
 - No daemons: builds are explicit (`graphRebuild`, `/graph`) plus one non-blocking `ensureGraphInBackground()` at chat startup that creates or incrementally refreshes the graph on every start; queries are lazy.
-- web-tree-sitter must stay on the 0.23.x line — the vendored grammar builds
-  (tree-sitter-wasms 0.1.13, emscripten side-modules) do not load on newer
-  runtimes. See `assets/graph-grammars/NOTICE.md` for refresh instructions.
+- web-tree-sitter runs on the 0.27.x line; the vendored grammar builds
+  (tree-sitter-wasms 0.1.13, emscripten side-modules) are rebuilt against
+  0.27.x, whose ABI is incompatible with the 0.23.x runtime. See
+  `assets/graph-grammars/NOTICE.md` for refresh instructions.
 - Tests live in `tests/core/graph/` (pure units + temp-dir store tests); the
   store is injectable via its `GraphStore` paths, so tests never touch
   `~/.haze`.

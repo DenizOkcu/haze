@@ -32,6 +32,7 @@ const toc = [
             <table class="cmd-table" aria-label="Agent and session commands">
               <tbody>
                 <tr><td class="cmd-c"><code>/help</code></td><td class="cmd-d">Show all slash commands.</td></tr>
+                <tr><td class="cmd-c"><code>! &lt;command&gt;</code></td><td class="cmd-d">Run a shell command directly from the chat, then have the model react to its output in one turn. Prefix with <code>\</code> to send a message that starts with <code>!</code> as a prompt.</td></tr>
                 <tr><td class="cmd-c"><code>/exit</code>, <code>/quit</code></td><td class="cmd-d">Exit haze. Registered background processes stop.</td></tr>
                 <tr><td class="cmd-c"><code>/clear</code></td><td class="cmd-d">Clear conversation history and the task list.</td></tr>
                 <tr><td class="cmd-c"><code>/new</code></td><td class="cmd-d">Start a fresh durable session for this workspace.</td></tr>

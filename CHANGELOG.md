@@ -1,13 +1,42 @@
 # Changelog
 
-## Unreleased
+## 1.8.0 - 2026-11-25
 
 ### Added
 
+- `! <command>` runs a shell command directly in the chat and hands its output to the model, which then reacts in one turn. `\!` sends text that starts with `!` as a prompt.
 - On-demand Git, code graph, and LSP tool groups: clear requests load relevant groups automatically, and the agent can load additional groups during a goal.
 - Dedicated Git tools for repository inspection and local mutations, plus non-interactive fetch, pull, and workspace-confined clone. Pull defaults to fast-forward only.
+- The status bar shows how much context is left (`NN% context left`; `~` when estimated).
+- Readline-style line editing in the prompt: `Ctrl+W` deletes the word before the cursor, `Ctrl+U` and `Ctrl+K` clear to the start and end of the line, `Ctrl+A` and `Ctrl+E` jump to the line start and end.
+- Provider wizard: `Esc` goes back one step instead of abandoning the flow, `later` skips model selection for now, and saving an API key probes the model list.
+- `--print` as an alias of `--prompt`.
 - Curated Z.ai GLM-5.4 (1M context, 128K output): Coding Plan preset entry plus endpoint and model-catalog limits, so request budgeting no longer falls back to 128K.
 - Documented GLM-5.4 reasoning effort on Z.ai endpoints (`low`/`high`/`max`): `/reasoning` and the built-in default now apply instead of the provider's `max` default, and subagent workers run at `low`.
+
+### Changed
+
+- Haze requires Node.js 22.13 or newer; `bin/haze.js` reports a clear message on older runtimes.
+- `haze --version` is answered before the build-staleness check.
+- The live tail counts the streaming items that do not fit in one `+N more` row and keeps the newest visible.
+- Theme text colors meet a 3:1 contrast ratio against their backgrounds.
+- Terminal colours are adopted (OSC 10/11) only when the terminal reports colour capability, and the terminal title is restored on fatal exits.
+- Git tools run with a scrubbed `GIT_*` environment, never prompt, and report a timeout by name.
+- Redaction also covers Stripe secret keys, more GitHub token kinds, and lowercase `bearer` credentials.
+- Dependency updates (AI SDK, marked, ESLint tooling); CI uploads one tarball per run, runs the supply-chain gates in a hygiene job, and has Dependabot configured.
+
+### Fixed
+
+- MCP tools whose names start with `graph` or `lsp` (for example `lspLint`) were deferred behind the built-in tool groups and could go missing.
+- The URL guard now also blocks 6to4 and Teredo IPv6 literals.
+- Terminal control sequences: `DEL`, `U+FEFF`, bidirectional controls and `ESC X` are stripped from transcript output.
+- `openPath` refuses `cmd.exe` metacharacter targets on Windows.
+- Output-cap errors are no longer classified as context overflow.
+- Markdown inline spans follow GFM rules (nested emphasis, strike-through, autolinks); block-level HTML no longer prints raw tags.
+- A submit arriving between a `!` command and its model turn no longer starts a concurrent turn.
+- `/model` rejects a bare unknown model; only `provider:model` registers.
+- `setBusy` uses a functional state update, so batched calls see the current busy state.
+
 
 ## 1.7.12 - 2026-11-20
 
